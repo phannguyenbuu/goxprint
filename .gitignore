@@ -1,0 +1,17 @@
+# printagent_v2 ignores
+printagent_v2/__pycache__/
+printagent_v2/*.pyc
+printagent_v2/*.pyo
+printagent_v2/build/
+printagent_v2/dist/
+printagent_v2/storage/
+printagent_v2/.env
+printagent_v2/*.log
+printagent_v2/.build-venv/
+printagent_v2/agent_core.zip
+
+# general ignores
+.env
+*.log
+__pycache__/
+.claude/
