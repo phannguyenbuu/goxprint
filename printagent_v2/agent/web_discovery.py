@@ -306,123 +306,26 @@ def _scan_devices_payload(
     filter_mode: str = "all",
     force_refresh: bool = False,
 ) -> list[dict[str, Any]]:
-    def dedupe_key(item: dict[str, Any]) -> str:
-        ip_val = str(item.get("ip", "") or "").strip()
-        if ip_val:
-            return f"ip:{ip_val}"
-        name_val = str(item.get("name", "") or "").strip().lower()
-        port_val = str(item.get("port_name", "") or "").strip().lower()
-        return f"name:{name_val}|port:{port_val}"
-
-    valid_only = str(filter_mode or "").strip().lower() == "valid_only"
-    api_devices = _load_printers(api_client)
-    
-    scan_results: dict[str, bool] = {}
-    if force_refresh:
-        try:
-            scanner = SubnetScanner(max_workers=100)
-            results = scanner.scan_subnet()
-            scan_results = {r["ip"]: r["is_printer"] for r in results}
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Quick subnet scan failed: %s", exc)
-
-    neighbor_mac_map = _load_neighbor_mac_map()
-    machine_id_map = _resolve_device_machine_ids(ricoh_service, api_devices, neighbor_mac_map)
-
-    api_payload = [
-        {
-            "id": p.id,
-            "name": _clean_printer_display_name(p.name, p.ip),
-            "ip": p.ip,
-            "mac_id": machine_id_map.get(p.ip) or neighbor_mac_map.get(p.ip, ""),
-            "type": p.printer_type or "unknown",
-            "status": p.status or ("online" if p.ip in neighbor_mac_map else "offline"),
-            "user": p.user,
-            "password": p.password,
-            "port_name": "",
-            "port_monitor": "",
-            "connection_type": "ip" if p.ip else "unknown",
-            "source": "api",
-        }
-        for p in api_devices
-        if p.ip
-        and (
-            not valid_only
-            or (_supports_collection_vendor(p.printer_type) and not _should_ignore_device(p.name, ignored_prefixes))
-        )
-    ]
-
     payload: list[dict[str, Any]] = []
-    existing_keys: set[str] = set()
-
-    # Keep API rows first and unique (prefer API over local for same IP/name).
-    for row in api_payload:
-        key = dedupe_key(row)
-        if key in existing_keys:
-            continue
-        payload.append(row)
-        existing_keys.add(key)
-
-    # 3) Add network-discovered devices (only those identified as Ricoh photostatic machines)
-    for ip, mac in neighbor_mac_map.items():
-        if not ip or ip == "127.0.0.1":
-             continue
-        key = f"ip:{ip}"
-        if key in existing_keys:
-            continue
-        
-        # Signal identification:
-        is_ricoh_result = scan_results.get(ip)
-        is_ricoh_mac = SubnetScanner.is_ricoh_mac(mac)
-        is_known_ricoh = ip in machine_id_map
-
-        # If Show All is OFF, strictly filter for Ricoh devices.
-        if valid_only and not (is_ricoh_result or is_ricoh_mac or is_known_ricoh):
-             continue
-
-        # D) Remote MAC fetch if ARP failed (useful for cross-VLAN discovery)
-        if not mac:
-            LOGGER.info("MAC missing for Ricoh device %s, attempting remote fetch via CGI...", ip)
-            mac = ricoh_service.fetch_mac_address_direct(ip)
-             
-        is_ricoh = bool(is_ricoh_result or is_ricoh_mac or is_known_ricoh)
-        
-        display_name = "unknown"
-        if is_ricoh:
-            try:
-                # Create a temporary printer object for name discovery
-                temp_p = Printer(name="Discovery", ip=ip, user="", password="", printer_type="ricoh")
-                dev_info = ricoh_service.process_device_info(temp_p, should_post=False)
-                info_dict = dev_info.get("device_info", {})
-                # Try common Ricoh keys for model name
-                model_name = (
-                    info_dict.get("Model Name")
-                    or info_dict.get("Machine Name")
-                    or info_dict.get("Device Name")
-                    or info_dict.get("Product Name")
-                    or info_dict.get("model_name")
-                )
-                if model_name:
-                    display_name = model_name
-            except Exception as e:
-                LOGGER.debug("Failed to discover model name for %s: %s", ip, e)
-        display_name = _clean_printer_display_name(display_name, ip)
-        row = {
-            "id": 0,
-            "name": display_name,
-            "ip": ip,
-            "mac_id": mac,
-            "type": "ricoh" if is_ricoh else "unknown",
-            "status": "online",
-            "user": "",
-            "port_name": "",
-            "port_monitor": "",
-            "connection_type": "ip",
-            "source": "network",
-        }
-        payload.append(row)
-        existing_keys.add(key)
-
+    try:
+        scanner = SubnetScanner(max_workers=100)
+        results = scanner.scan_subnet()
+        for r in results:
+            payload.append({
+                "id": 0,
+                "name": "Discovered Device",
+                "ip": r["ip"],
+                "mac_id": "",
+                "type": "printer" if r["is_printer"] else "unknown",
+                "status": "online",
+                "user": "",
+                "port_name": "",
+                "port_monitor": "",
+                "connection_type": "ip",
+                "source": "network",
+            })
+    except Exception as exc:
+        LOGGER.warning("Quick subnet scan failed: %s", exc)
     return payload
 
 
