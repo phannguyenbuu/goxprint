@@ -26,6 +26,16 @@ DEFAULT_IGNORE_PREFIXES = ["RustDesk", "RuskDesk", "Microsoft", "Fax", "AnyDesk"
 
 def _load_printers(api_client: APIClient) -> list[Printer]:
     try:
+        from flask import current_app
+        if current_app:
+            bridge = current_app.config.get("POLLING_BRIDGE")
+            if bridge and getattr(bridge, "_last_discovered_printers", None):
+                LOGGER.info("Loading printers from local PollingBridge cache (count=%d)", len(bridge._last_discovered_printers))
+                return list(bridge._last_discovered_printers)
+    except Exception as exc:
+        LOGGER.debug("Failed to load printers from local PollingBridge cache: %s", exc)
+
+    try:
         return api_client.get_printers()
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("Failed to fetch printers from API: %s", exc)
