@@ -49,11 +49,7 @@ def register_scan_address_routes(app):
             try:
                 import time as _time
                 _adrs_start = _time.time()
-                effective_user = user or "admin"
-                effective_password = password or ""
-                target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
-                target.user = effective_user
-                target.password = effective_password
+                target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
                 session = ricoh_service.create_http_client_auth_form_only(target)
                 html = ricoh_service.authenticate_and_get(session, target, "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL")
                 if ("Address List" not in html and "adrsList" not in html) or "login.cgi" in html:
@@ -163,11 +159,7 @@ def register_scan_address_routes(app):
         try:
             # Force login-first flow for address list: if caller does not provide credentials,
             # default to admin/admin before fetching address list.
-            effective_user = user or "admin"
-            effective_password = password or "admin"
-            target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
-            target.user = effective_user
-            target.password = effective_password
+            target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
             LOGGER.info(
                 "Scan address list single attempt: trace_id=%s ip=%s printer_name=%s effective_user=%s has_password=%s",
                 trace_id,
@@ -247,8 +239,6 @@ def register_scan_address_routes(app):
         try:
             # Address-create flow is FTP-first by design.
             selected_protocol = "FTP"
-            effective_user = user or "admin"
-            effective_password = password or "admin"
             LOGGER.info(
                 "Scan address create request: trace_id=%s ip=%s name=%s email_set=%s folder_set=%s user_code_set=%s fields_count=%s auth_mode=%s",
                 trace_id,
@@ -258,11 +248,9 @@ def register_scan_address_routes(app):
                 bool(folder),
                 bool(user_code),
                 len(fields) if isinstance(fields, dict) else 0,
-                "default_admin" if not user and not password else "provided_or_partial",
+                "database_or_provided",
             )
-            target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
-            target.user = effective_user
-            target.password = effective_password
+            target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
             ftp_payload: dict[str, Any] | None = None
             folder_final = folder
             if selected_protocol == "FTP":
@@ -356,19 +344,15 @@ def register_scan_address_routes(app):
             LOGGER.warning("Scan address delete rejected: trace_id=%s ip=%s reason=missing_registration_no", trace_id, ip)
             return jsonify({"ok": False, "error": "Missing registration_no or entry_id"}), 400
         try:
-            effective_user = user or "admin"
-            effective_password = password or "admin"
             LOGGER.info(
                 "Scan address delete request: trace_id=%s ip=%s registration_no=%s entry_id=%s auth_mode=%s",
                 trace_id,
                 ip,
                 registration_no,
                 entry_id,
-                "default_admin" if not user and not password else "provided_or_partial",
+                "database_or_provided",
             )
-            target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
-            target.user = effective_user
-            target.password = effective_password
+            target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
             payload = ricoh_service.delete_address_entries(
                 target,
                 [registration_no],
@@ -410,8 +394,6 @@ def register_scan_address_routes(app):
             LOGGER.warning("Scan address modify rejected: trace_id=%s ip=%s reason=invalid_fields_type", trace_id, ip)
             return jsonify({"ok": False, "error": "fields must be object"}), 400
         try:
-            effective_user = user or "admin"
-            effective_password = password or "admin"
             LOGGER.info(
                 "Scan address modify request: trace_id=%s ip=%s registration_no=%s name_set=%s email_set=%s folder_set=%s user_code_set=%s fields_count=%s auth_mode=%s",
                 trace_id,
@@ -422,11 +404,9 @@ def register_scan_address_routes(app):
                 bool(folder),
                 bool(user_code),
                 len(fields) if isinstance(fields, dict) else 0,
-                "default_admin" if not user and not password else "provided_or_partial",
+                "database_or_provided",
             )
-            target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
-            target.user = effective_user
-            target.password = effective_password
+            target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
             LOGGER.info(
                 "Scan address modify (recreate) request: trace_id=%s ip=%s registration_no=%s entry_id=%s",
                 trace_id,
