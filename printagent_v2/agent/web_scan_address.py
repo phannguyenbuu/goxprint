@@ -47,9 +47,10 @@ def register_scan_address_routes(app):
         )
         if mode == "adrslistall":
             try:
-                # Popup Scan tab uses fixed credential as requested.
-                effective_user = "admin"
-                effective_password = "admin"
+                import time as _time
+                _adrs_start = _time.time()
+                effective_user = user or "admin"
+                effective_password = password or ""
                 target = resolve_target_printer(config, api_client, ip=ip, user=effective_user, password=effective_password)
                 target.user = effective_user
                 target.password = effective_password
@@ -124,8 +125,6 @@ def register_scan_address_routes(app):
                 payload = {
                     "printer_name": target.name,
                     "ip": target.ip,
-                    "html": html,
-                    "easysecurity_html": "",
                     "address_list": [
                         {
                             "type": item.type,
@@ -147,7 +146,7 @@ def register_scan_address_routes(app):
                         "ajax_len": len(ajax_raw),
                         "ajax_entries": len(ajax_entries),
                     },
-                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "elapsed_seconds": round(_time.time() - _adrs_start, 2),
                 }
                 return jsonify({"ok": True, "payload": payload})
             except Exception as exc:  # noqa: BLE001

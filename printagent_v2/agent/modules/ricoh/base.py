@@ -88,213 +88,110 @@ class RicohServiceBase:
 
     def _login(self, session: requests.Session, printer: Printer, credential_candidates: list[tuple[str, str]] | None = None) -> tuple[str, str]:
         """
-        Unified login logic that tries multiple credential pairs.
-        Cycles through candidates: (user, password).
+        Form-based login to Ricoh copier.
         Returns successfully used (user, password) tuple.
         """
         base_url = f"http://{printer.ip}"
-        LOGGER.info("[RicohLogin] Starting login process for copier %s (IP: %s)", printer.name, printer.ip)
+        LOGGER.info("[RicohLogin] Starting login for copier %s (IP: %s)", printer.name, printer.ip)
         
-        # 1. First, always reset/logout to ensure we aren't in a broken state.
-        try:
-            LOGGER.info("[RicohLogin] Clearing session cookies...")
-            session.cookies.clear()
-        except Exception as exc:
-            LOGGER.debug("[RicohLogin] Cookies clear failed (non-critical): %s", exc)
-        
-        LOGGER.info("[RicohLogin] Resetting pre-existing web session on copier...")
-        self._reset_web_session(session, printer)
-        
-        # 2. Build candidate list.
+        # Build candidate list
         candidates = []
         if credential_candidates:
             candidates.extend(credential_candidates)
-        
         if printer.user or printer.password:
             candidates.append((printer.user or "", printer.password or ""))
+        candidates.extend([("admin", ""), ("admin", "admin")])
         
-        candidates.extend([
-            ("admin", ""),
-            ("admin", "admin"),
-        ])
-        
-        # Deduplicate candidates while preserving order.
-        seen = set()
-        final_candidates = []
+        seen: set[tuple[str, str]] = set()
+        final_candidates: list[tuple[str, str]] = []
         for u, p in candidates:
             if (u, p) not in seen:
                 seen.add((u, p))
                 final_candidates.append((u, p))
- 
-        LOGGER.info("[RicohLogin] Dedicated list of credentials to attempt: %s", [(u, "***" if p else "") for u, p in final_candidates])
- 
+
+        LOGGER.info("[RicohLogin] Credentials to attempt: %s", [(u, "***" if p else "") for u, p in final_candidates])
+
         last_exception = None
         for attempt, (user, password) in enumerate(final_candidates):
-            LOGGER.info("[RicohLogin] Attempt %d/%d: user=%s, password=%s", attempt + 1, len(final_candidates), user, "***" if password else "<empty>")
-            
-            # Reset session for this specific candidate to prevent cookie contamination
+            LOGGER.info("[RicohLogin] Attempt %d/%d: user=%s", attempt + 1, len(final_candidates), user)
+
             try:
                 session.cookies.clear()
-            except Exception:
-                pass
-                
-            try:
-                # A. Dynamic token extraction before POST login (like in the standalone script)
-                get_urls = [
+                session.auth = None
+                session.cookies.set("cookieOnOffChecker", "on")
+
+                # GET login form to obtain wimToken (single pass)
+                form_urls = [
                     "/web/entry/en/websys/webArch/authForm.cgi",
                     "/web/guest/en/websys/webArch/authForm.cgi",
                 ]
-                
                 wim_token = ""
-                fetched_url = ""
-                hidden_inputs = {}
-                
-                for get_path in get_urls:
-                    url = urljoin(base_url, get_path)
-                    # Try up to 2 times to handle cookieOnOffChecker setting/refresh logic
-                    for pass_num in (1, 2):
-                        try:
-                            LOGGER.info("[RicohLogin] Fetching login form to extract wimToken: GET %s (pass %d)...", get_path, pass_num)
-                            get_resp = session.get(url, timeout=15)
-                            if get_resp.status_code == 200:
-                                fetched_url = get_resp.url
-                                hidden_inputs = self._extract_hidden_inputs(get_resp.text)
-                                wim_token = hidden_inputs.get("wimToken", "")
-                                
-                                # Fallback direct regex check if not found in hidden inputs
-                                if not wim_token:
-                                    match = re.search(r'wimToken\s*=\s*["\']([^"\']+)["\']', get_resp.text)
-                                    if match:
-                                        wim_token = match.group(1)
-                                    else:
-                                        match2 = re.search(r'wimToken["\']\s*[^>]*value=["\']([^"\']+)["\']', get_resp.text, re.IGNORECASE)
-                                        if not match2:
-                                            match2 = re.search(r'value=["\']([^"\']+)["\']\s*[^>]*wimToken', get_resp.text, re.IGNORECASE)
-                                        if match2:
-                                            wim_token = match2.group(1)
-                                
-                                if wim_token:
-                                    LOGGER.info("[RicohLogin] wimToken DETECTED: %s", wim_token)
-                                    break
-                                else:
-                                    LOGGER.info("[RicohLogin] wimToken NOT DETECTED (pass %d, cookies: %s)", pass_num, session.cookies.get_dict())
-                        except Exception as e:
-                            LOGGER.debug("[RicohLogin] Failed to fetch GET page %s (pass %d): %s", get_path, pass_num, e)
-                    if wim_token:
-                        break
-                
-                # B. Perform authenticating POST requests ONLY to entry endpoints (Method A)
-                post_paths = [
+                referer_url = ""
+
+                for form_path in form_urls:
+                    try:
+                        url = urljoin(base_url, form_path)
+                        LOGGER.info("[RicohLogin] GET %s", form_path)
+                        resp = session.get(url, timeout=8)
+                        if resp.status_code == 200:
+                            wim_token = self._extract_wim_token(resp.text)
+                            if not wim_token:
+                                wim_token = self._extract_hidden_inputs(resp.text).get("wimToken", "")
+                            referer_url = resp.url
+                            LOGGER.info("[RicohLogin] Form OK, wimToken=%s", bool(wim_token))
+                            break
+                    except Exception as e:
+                        LOGGER.debug("[RicohLogin] GET %s failed: %s", form_path, e)
+                        continue
+
+                if not referer_url:
+                    LOGGER.warning("[RicohLogin] Could not load login form for %s", printer.ip)
+                    continue
+
+                # POST login
+                login_paths = [
                     "/web/entry/en/websys/webArch/login.cgi",
-                    "/web/entry/en/websys/webArch/authForm.cgi",
+                    "/web/guest/en/websys/webArch/login.cgi",
                 ]
-                
-                success = False
-                for path in post_paths:
-                    post_url = urljoin(base_url, path)
-                    LOGGER.info("[RicohLogin] Sending standard credentials (Method A): POST %s...", path)
-                    
-                    data = {}
-                    if hidden_inputs:
-                        data.update(hidden_inputs)
-                        
-                    data.update({
+                for login_path in login_paths:
+                    post_url = urljoin(base_url, login_path)
+                    data = {
+                        "userid": user,
                         "username": user,
                         "password": password,
-                    })
+                    }
                     if wim_token:
                         data["wimToken"] = wim_token
-                    
-                    headers = {}
-                    if fetched_url:
-                        headers["Referer"] = fetched_url
-                        
+
+                    LOGGER.info("[RicohLogin] POST %s", login_path)
                     try:
-                        resp = session.post(
-                            post_url,
-                            data=data,
-                            headers=headers,
-                            timeout=15
-                        )
-                        
-                        LOGGER.info("[RicohLogin] Cookies after login attempt: %s", session.cookies.get_dict())
-                        
-                        is_login_page = any(indicator in resp.text for indicator in ["Login User Name", "Login Password"])
-                        is_still_login_form = 'name="username"' in resp.text or 'name=\'username\'' in resp.text
-                        wim_session = session.cookies.get("wimsesid", "")
-                        real_session = bool(wim_session) and wim_session != "--"
-                        
-                        if resp.status_code == 200 and not is_login_page and not is_still_login_form and real_session:
-                            if self._verify_session_state(session, printer, user):
-                                LOGGER.info("[RicohLogin] Success! Logged in as '%s' via Method A (%s)", user, path)
-                                success = True
-                                break
-                            else:
-                                LOGGER.warning("[RicohLogin] Method A login completed but protected page check failed.")
-                        else:
-                            LOGGER.info("[RicohLogin] Failed Method A POST %s: Status %d, Login page indicator=%s, Real Session=%s", 
-                                        path, resp.status_code, is_login_page or is_still_login_form, real_session)
-                    except Exception as req_exc:
-                        LOGGER.warning("[RicohLogin] Request to Method A POST %s failed: %s", path, req_exc)
+                        resp = session.post(post_url, data=data, headers={"Referer": referer_url}, timeout=8)
+                    except Exception as post_exc:
+                        LOGGER.debug("[RicohLogin] POST %s failed: %s", login_path, post_exc)
                         continue
-                
-                if success:
-                    printer.user = user
-                    printer.password = password
-                    return (user, password)
-                
-                # C. Method B: Base64-encoded credentials (required for some models like MP 6503 with empty password)
-                LOGGER.info("[RicohLogin] Method A standard login failed. Trying Base64 fallback (Method B) for user %s...", user)
-                try:
-                    import base64
-                    auth_form_url = urljoin(base_url, "/web/guest/en/websys/webArch/authForm.cgi?open=websys/webArch/authForm.cgi")
-                    auth_resp = session.get(auth_form_url, timeout=15)
-                    if auth_resp.status_code == 200:
-                        token = self._extract_wim_token(auth_resp.text)
-                        action_match = re.search(r'<form[^>]+action=["\']([^"\']+)["\']', auth_resp.text, re.IGNORECASE)
-                        action = action_match.group(1) if action_match else "login.cgi"
-                        
-                        encoded_user = base64.b64encode(user.encode()).decode()
-                        encoded_pass = base64.b64encode(password.encode()).decode()
-                        
-                        login_post_url = urljoin(auth_resp.url, action)
-                        payload = {
-                            "userid": encoded_user,
-                            "password": encoded_pass,
-                            "wimToken": token,
-                            "open": "websys/webArch/authForm.cgi"
-                        }
-                        
-                        LOGGER.info("[RicohLogin] Sending base64 credentials (Method B) to %s...", login_post_url)
-                        resp = session.post(login_post_url, data=payload, headers={"Referer": auth_resp.url}, timeout=15)
-                        LOGGER.info("[RicohLogin] Cookies after base64 login attempt: %s", session.cookies.get_dict())
-                        
-                        is_login_page = any(indicator in resp.text for indicator in ["Login User Name", "Login Password"])
-                        wim_session = session.cookies.get("wimsesid", "")
-                        real_session = bool(wim_session) and wim_session != "--"
-                        
-                        if resp.status_code == 200 and not is_login_page and real_session:
-                            if self._verify_session_state(session, printer, user):
-                                LOGGER.info("[RicohLogin] Success! Logged in as '%s' via Method B", user)
-                                printer.user = user
-                                printer.password = password
-                                return (user, password)
-                            else:
-                                LOGGER.warning("[RicohLogin] Method B login completed but protected page check failed.")
+
+                    wim_session = session.cookies.get("wimsesid", "")
+                    real_session = bool(wim_session) and wim_session != "--"
+                    LOGGER.info("[RicohLogin] POST result: status=%d wimsesid=%s", resp.status_code, "valid" if real_session else wim_session or "NONE")
+
+                    is_login_page = any(ind in resp.text for ind in ["Login User Name", "Login Password"])
+                    is_still_form = "authForm.cgi" in resp.text and ('name="userid"' in resp.text or 'name="username"' in resp.text)
+
+                    if resp.status_code == 200 and not is_login_page and not is_still_form and real_session:
+                        if self._verify_session_state(session, printer, user):
+                            LOGGER.info("[RicohLogin] Success! Logged in as '%s' via %s", user, login_path)
+                            printer.user = user
+                            printer.password = password
+                            return (user, password)
                         else:
-                            LOGGER.info("[RicohLogin] Failed Method B: Status %d, Login page indicator=%s, Real Session=%s", 
-                                        resp.status_code, is_login_page, real_session)
-                except Exception as e:
-                    LOGGER.error("[RicohLogin] Failed in Base64 fallback (Method B) for user %s: %s", user, e)
-                
+                            LOGGER.info("[RicohLogin] POST OK but verify failed")
+
             except Exception as exc:
-                LOGGER.exception("[RicohLogin] Exception during credential trial: %s", exc)
+                LOGGER.warning("[RicohLogin] Exception: %s", exc)
                 last_exception = exc
-                
+
             if attempt < len(final_candidates) - 1:
-                LOGGER.info("[RicohLogin] Waiting 1 second before trying next credential candidate...")
-                time.sleep(1)
-                continue
+                time.sleep(0.5)
 
         if last_exception:
             raise last_exception
@@ -306,31 +203,16 @@ class RicohServiceBase:
 
     def _reset_web_session(self, session: requests.Session, printer: Printer) -> None:
         base_url = f"http://{printer.ip}"
-        # Best-effort logout/cleanup
-        urls = [
-            "/web/entry/en/websys/webArch/logout.cgi",
-            "/web/guest/en/websys/webArch/logout.cgi",
-            "/web/entry/en/websys/webArch/mainFrame.cgi",
-            "/web/guest/en/websys/webArch/mainFrame.cgi",
-        ]
-        LOGGER.info("[RicohSessionReset] Cleaning up pre-existing sessions for %s. Sending 4 GET requests (timeout=10s each)...", printer.ip)
-        for target in urls:
-            url = urljoin(base_url, target)
-            start_time = time.time()
+        # Quick logout - fire and forget
+        for path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
             try:
-                LOGGER.info("[RicohSessionReset] GET %s ...", target)
-                resp = session.get(url, timeout=10)
-                elapsed = time.time() - start_time
-                LOGGER.info("[RicohSessionReset] GET %s -> Status %d (%.2fs)", target, resp.status_code, elapsed)
-            except Exception as exc:  # noqa: BLE001
-                elapsed = time.time() - start_time
-                LOGGER.info("[RicohSessionReset] GET %s failed/timed out after %.2fs: %s", target, elapsed, exc)
+                session.get(urljoin(base_url, path), timeout=3)
+            except Exception:
                 continue
         try:
-            LOGGER.info("[RicohSessionReset] Clearing session cookies...")
             session.cookies.clear()
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.debug("[RicohSessionReset] Clear cookies error: %s", exc)
+        except Exception:
+            pass
             return
 
     def reset_web_session(self, printer: Printer) -> None:
