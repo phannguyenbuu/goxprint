@@ -2,11 +2,15 @@ import paramiko
 import os
 from pathlib import Path
 
+print("Initializing SSH client...")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+print("Connecting to VPS at 31.97.76.62...")
 ssh.connect('31.97.76.62', username='root', key_filename=r'C:\Users\nguyenbuu.DESKTOP-TOEFTR1\.ssh\id_ed25519')
 
+print("Opening SFTP session...")
 sftp = ssh.open_sftp()
+print("SFTP session opened successfully.")
 
 local_backend = Path(r"d:\Dropbox\_Documents\Goxprint\printagent_v2\backend")
 remote_backend = "/opt/printagent"

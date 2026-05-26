@@ -134,9 +134,21 @@ class RicohServiceBase:
                         LOGGER.info("[RicohLogin] GET %s", form_path)
                         resp = session.get(url, timeout=8)
                         if resp.status_code == 200:
-                            wim_token = self._extract_wim_token(resp.text)
+                            html_content = resp.text
+                            # Handle JS intermediate redirect if present (same as test_login_226.py)
+                            if "document.form1.submit()" in html_content or "name='form1'" in html_content or 'name="form1"' in html_content:
+                                LOGGER.info("[RicohLogin] Intermediate redirect form detected. Following POST redirect...")
+                                hidden = self._extract_hidden_inputs(html_content)
+                                action_match = re.search(r'action\s*=\s*["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+                                if action_match:
+                                    redirect_url = urljoin(resp.url, action_match.group(1))
+                                    LOGGER.info("[RicohLogin] POST Redirect %s", action_match.group(1))
+                                    resp = session.post(redirect_url, data=hidden, timeout=8)
+                                    html_content = resp.text
+
+                            wim_token = self._extract_wim_token(html_content)
                             if not wim_token:
-                                wim_token = self._extract_hidden_inputs(resp.text).get("wimToken", "")
+                                wim_token = self._extract_hidden_inputs(html_content).get("wimToken", "")
                             referer_url = resp.url
                             LOGGER.info("[RicohLogin] Form OK, wimToken=%s", bool(wim_token))
                             break
@@ -148,38 +160,58 @@ class RicohServiceBase:
                     LOGGER.warning("[RicohLogin] Could not load login form for %s", printer.ip)
                     continue
 
-                # POST login
-                login_paths = [
-                    "/web/entry/en/websys/webArch/login.cgi",
-                    "/web/guest/en/websys/webArch/login.cgi",
-                ]
-                for login_path in login_paths:
-                    post_url = urljoin(base_url, login_path)
-                    data = {
-                        "userid": user,
-                        "username": user,
-                        "password": password,
+                # POST login (Sequential strategies including Base64 support for new Ricoh models)
+                import base64
+                encoded_user = base64.b64encode(user.encode()).decode()
+                encoded_pass = base64.b64encode(password.encode()).decode()
+
+                strategies = [
+                    # Strategy A: Plain Text to standard cgi (đối với các dòng máy Ricoh đời cũ)
+                    {
+                        "name": "Plain Text (entry)",
+                        "path": "/web/entry/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": user,
+                            "username": user,
+                            "password": password,
+                        }
+                    },
+                    # Strategy B: Base64 to guest cgi (đối với dòng Ricoh đời mới bảo mật cao)
+                    {
+                        "name": "Base64 (guest)",
+                        "path": "/web/guest/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": encoded_user,
+                            "username": encoded_user,
+                            "password": encoded_pass,
+                            "open": "websys/webArch/authForm.cgi"
+                        }
                     }
+                ]
+
+                for strategy in strategies:
+                    post_url = urljoin(base_url, strategy["path"])
+                    data = dict(strategy["data"])
                     if wim_token:
                         data["wimToken"] = wim_token
 
-                    LOGGER.info("[RicohLogin] POST %s", login_path)
+                    LOGGER.info("[RicohLogin] POST %s using %s Strategy", strategy["path"], strategy["name"])
                     try:
                         resp = session.post(post_url, data=data, headers={"Referer": referer_url}, timeout=8)
                     except Exception as post_exc:
-                        LOGGER.debug("[RicohLogin] POST %s failed: %s", login_path, post_exc)
+                        LOGGER.debug("[RicohLogin] POST %s failed: %s", strategy["path"], post_exc)
                         continue
 
                     wim_session = session.cookies.get("wimsesid", "")
                     real_session = bool(wim_session) and wim_session != "--"
-                    LOGGER.info("[RicohLogin] POST result: status=%d wimsesid=%s", resp.status_code, "valid" if real_session else wim_session or "NONE")
+                    LOGGER.info("[RicohLogin] POST result using %s: status=%d wimsesid=%s", strategy["name"], resp.status_code, "valid" if real_session else wim_session or "NONE")
 
                     is_login_page = any(ind in resp.text for ind in ["Login User Name", "Login Password"])
                     is_still_form = "authForm.cgi" in resp.text and ('name="userid"' in resp.text or 'name="username"' in resp.text)
 
                     if resp.status_code == 200 and not is_login_page and not is_still_form and real_session:
                         if self._verify_session_state(session, printer, user):
-                            LOGGER.info("[RicohLogin] Success! Logged in as '%s' via %s", user, login_path)
+                            LOGGER.info("[RicohLogin] Success! Logged in as '%s' via %s (%s)", user, strategy["path"], strategy["name"])
                             printer.user = user
                             printer.password = password
                             return (user, password)

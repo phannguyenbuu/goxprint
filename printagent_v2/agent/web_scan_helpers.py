@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agent.config import AppConfig
@@ -10,6 +11,8 @@ from agent.services.scan_drop import build_drop_folder_metadata
 from agent.web_collect import _resolve_printer
 from agent.web_discovery import _load_printers, _normalize_ipv4
 from agent.web_scan_support import _register_scan_root, _sanitize_ftp_name
+
+LOGGER = logging.getLogger(__name__)
 
 
 def resolve_target_printer(
@@ -22,6 +25,14 @@ def resolve_target_printer(
 ) -> Printer:
     devices = _load_printers(api_client)
     target = _resolve_printer(ip, devices)
+    if not target:
+        try:
+            LOGGER.info("[ResolvePrinter] Target %s not in cache, fetching directly from VPS...", ip)
+            vps_devices = api_client.get_printers()
+            target = _resolve_printer(ip, vps_devices)
+        except Exception as exc:
+            LOGGER.warning("[ResolvePrinter] Direct VPS query failed: %s", exc)
+
     if not target:
         target = Printer(
             name="Local Printer",
