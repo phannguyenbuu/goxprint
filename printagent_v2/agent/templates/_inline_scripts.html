@@ -603,7 +603,7 @@
     if (out) out.textContent = "";
     appendScanLog(`Loading address list`, { ip });
     await ensureScanIsolationForModal();
-    const payload = await fetchScanAddressListForIp(ip, true);
+    const payload = await fetchScanAddressListForIp(ip, false);
     const entries = payload.address_list || [];
     appendScanLog("Address list loaded", {
       ip,
