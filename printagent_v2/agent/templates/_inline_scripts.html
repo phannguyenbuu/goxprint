@@ -626,15 +626,12 @@
     await loadResultModalScanProtocol();
   }
 
-  async function fetchScanAddressListForIp(ip, forceRefreshDevices = true) {
+  async function fetchScanAddressListForIp(ip, forceRefreshDevices = false) {
     const targetIp = String(ip || "").trim();
     if (!targetIp) {
       throw new Error("Missing printer IP");
     }
-    if (forceRefreshDevices) {
-      appendScanLog("Refreshing devices before loading address list", { ip: targetIp });
-      await jsonFetch("/api/devices/refresh", { method: "POST" });
-    }
+    // Skip subnet scan - IP is already known, no need to refresh all devices
     const query = new URLSearchParams({ ip: targetIp, mode: "adrsListAll" }).toString();
     appendScanLog("Calling address-list API", { query: `/api/scan/address-list?${query}` });
     const data = await jsonFetch(`/api/scan/address-list?${query}`);
@@ -2318,7 +2315,7 @@
 
   async function loadScanAddressList() {
     const out = document.getElementById("scan-output");
-    await refreshScanDevices(true);
+    await refreshScanDevices(false);  // Use cached devices, no subnet scan
     const target = getScanTarget();
     if (!target.ip) throw new Error("Missing printer IP");
     const query = new URLSearchParams(target).toString();
