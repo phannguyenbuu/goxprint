@@ -120,6 +120,13 @@ class RicohServiceBase:
                 session.auth = None
                 session.cookies.set("cookieOnOffChecker", "on")
 
+                # On first attempt only, release any stale session on the copier
+                if attempt == 0:
+                    try:
+                        session.get(urljoin(base_url, "/web/entry/en/websys/webArch/logout.cgi"), timeout=3)
+                    except Exception:
+                        pass
+
                 # GET login form to obtain wimToken (single pass)
                 form_urls = [
                     "/web/entry/en/websys/webArch/authForm.cgi",
@@ -166,9 +173,9 @@ class RicohServiceBase:
                 encoded_pass = base64.b64encode(password.encode()).decode()
 
                 strategies = [
-                    # Strategy A: Plain Text to standard cgi (đối với các dòng máy Ricoh đời cũ)
+                    # Strategy A: Plain Text to entry cgi
                     {
-                        "name": "Plain Text (entry)",
+                        "name": "Plain (entry)",
                         "path": "/web/entry/en/websys/webArch/login.cgi",
                         "data": {
                             "userid": user,
@@ -176,7 +183,17 @@ class RicohServiceBase:
                             "password": password,
                         }
                     },
-                    # Strategy B: Base64 to guest cgi (đối với dòng Ricoh đời mới bảo mật cao)
+                    # Strategy B: Plain Text to guest cgi
+                    {
+                        "name": "Plain (guest)",
+                        "path": "/web/guest/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": user,
+                            "username": user,
+                            "password": password,
+                        }
+                    },
+                    # Strategy C: Base64 to guest cgi (newer Ricoh models)
                     {
                         "name": "Base64 (guest)",
                         "path": "/web/guest/en/websys/webArch/login.cgi",
@@ -186,7 +203,7 @@ class RicohServiceBase:
                             "password": encoded_pass,
                             "open": "websys/webArch/authForm.cgi"
                         }
-                    }
+                    },
                 ]
 
                 for strategy in strategies:
