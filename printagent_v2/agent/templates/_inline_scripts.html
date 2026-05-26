@@ -1918,9 +1918,10 @@
           viewBtn.addEventListener("click", async () => {
             const user = (userInput ? userInput.value : "").trim();
             const password = (passInput ? passInput.value : "").trim();
+            const startTime = performance.now();
 
             if (statusCell) {
-              statusCell.textContent = "⌛ Connecting and reading address book... (5-15s)";
+              statusCell.textContent = "⌛ Connecting and reading address book...";
               statusCell.style.color = "#f1c40f";
             }
             viewBtn.disabled = true;
@@ -1928,17 +1929,20 @@
             try {
               const query = new URLSearchParams({ ip, user, password, mode: "adrslistall" }).toString();
               const data = await jsonFetch(`/api/scan/address-list?${query}`);
+              const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
               if (!data?.ok) {
                 throw new Error(data?.error || "Failed to fetch address book");
               }
               if (statusCell) {
-                statusCell.textContent = "✔ OK";
+                statusCell.textContent = `✔ OK (${elapsed}s)`;
                 statusCell.style.color = "#2ecc71";
               }
+              if (data.payload) data.payload._elapsed_seconds = elapsed;
               openCopierAddressBookModal(data.payload || {});
             } catch (err) {
+              const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
               if (statusCell) {
-                statusCell.textContent = `❌ Error: ${err.message}`;
+                statusCell.textContent = `❌ Error (${elapsed}s): ${err.message}`;
                 statusCell.style.color = "#e74c3c";
               }
             } finally {
@@ -1969,7 +1973,7 @@
     const rawTextarea = document.getElementById("address-book-raw");
     if (!modal || !body) return;
     
-    subtitle.textContent = `IP: ${payload.ip || ""} (Fetched: ${payload.timestamp ? new Date(payload.timestamp).toLocaleString("vi-VN") : "—"})`;
+    subtitle.textContent = `IP: ${payload.ip || ""} | Loaded in ${payload.elapsed_seconds || payload._elapsed_seconds || "?"}s`;
     body.innerHTML = "";
     
     const list = payload.address_list || [];
@@ -2174,10 +2178,13 @@
     }
 
     bindCopierFtpModals();
-    refreshFtpPrinters(false).catch(() => {});
 
-    await loadFtpPcs();
-    await loadFtpSites();
+    // Load FTP sites and copier list in parallel (separate threads)
+    await Promise.all([
+      loadFtpPcs(),
+      loadFtpSites(),
+      refreshFtpPrinters(false),
+    ]);
   }
 
   function getScanTarget() {

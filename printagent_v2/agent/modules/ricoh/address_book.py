@@ -511,7 +511,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
             "printer_name": printer.name,
             "ip": printer.ip,
             "address_list": [asdict(item) for item in entries],
-            "timestamp": self._timestamp(),
+            "elapsed_seconds": round(elapsed, 2),
         }
 
     def setup_scan_destination(
