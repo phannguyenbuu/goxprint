@@ -1919,6 +1919,7 @@
             const user = (userInput ? userInput.value : "").trim();
             const password = (passInput ? passInput.value : "").trim();
             const startTime = performance.now();
+            const startClock = new Date();
 
             if (statusCell) {
               statusCell.textContent = "⌛ Connecting and reading address book...";
@@ -1930,6 +1931,7 @@
               const query = new URLSearchParams({ ip, user, password, mode: "adrslistall" }).toString();
               const data = await jsonFetch(`/api/scan/address-list?${query}`);
               const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+              const endClock = new Date();
               if (!data?.ok) {
                 throw new Error(data?.error || "Failed to fetch address book");
               }
@@ -1937,7 +1939,10 @@
                 statusCell.textContent = `✔ OK (${elapsed}s)`;
                 statusCell.style.color = "#2ecc71";
               }
-              if (data.payload) data.payload._elapsed_seconds = elapsed;
+              if (data.payload) {
+                data.payload._elapsed_seconds = elapsed;
+                data.payload._time_range = `${startClock.toLocaleTimeString("vi-VN")} → ${endClock.toLocaleTimeString("vi-VN")}`;
+              }
               openCopierAddressBookModal(data.payload || {});
             } catch (err) {
               const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
@@ -1973,7 +1978,9 @@
     const rawTextarea = document.getElementById("address-book-raw");
     if (!modal || !body) return;
     
-    subtitle.textContent = `IP: ${payload.ip || ""} | Loaded in ${payload.elapsed_seconds || payload._elapsed_seconds || "?"}s`;
+    if (subtitle) {
+      subtitle.textContent = `IP: ${payload.ip || ""} | ${payload._time_range || ""} (${payload.elapsed_seconds || payload._elapsed_seconds || "?"}s)`;
+    }
     body.innerHTML = "";
     
     const list = payload.address_list || [];
