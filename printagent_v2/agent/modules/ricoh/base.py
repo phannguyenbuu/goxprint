@@ -68,22 +68,16 @@ class RicohServiceBase:
 
     def _verify_session_state(self, session: requests.Session, printer: Printer, username: str) -> bool:
         """
-        Loads a protected page to confirm whether we are fully logged in
-        with a valid administrative session.
+        Loads a protected page to confirm whether we are fully logged in.
         """
-        test_paths = [
-            "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL",
-            "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL"
-        ]
-        for test_path in test_paths:
-            test_url = urljoin(f"http://{printer.ip}", test_path)
-            try:
-                test_resp = session.get(test_url, timeout=10)
-                is_login_page = any(indicator in test_resp.text for indicator in ["authForm.cgi", "login.cgi", "Login User Name"])
-                if test_resp.status_code == 200 and not is_login_page:
-                    return True
-            except Exception:
-                continue
+        test_url = urljoin(f"http://{printer.ip}", "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL")
+        try:
+            test_resp = session.get(test_url, timeout=5)
+            is_login_page = any(indicator in test_resp.text for indicator in ["authForm.cgi", "login.cgi", "Login User Name"])
+            if test_resp.status_code == 200 and not is_login_page:
+                return True
+        except Exception:
+            pass
         return False
 
     def _login(self, session: requests.Session, printer: Printer, credential_candidates: list[tuple[str, str]] | None = None) -> tuple[str, str]:

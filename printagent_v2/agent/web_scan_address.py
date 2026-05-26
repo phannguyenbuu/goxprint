@@ -51,16 +51,22 @@ def register_scan_address_routes(app):
                 _adrs_start = _time.time()
                 target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
                 session = ricoh_service.create_http_client_auth_form_only(target)
-                html = ricoh_service.authenticate_and_get(session, target, "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL")
-                if ("Address List" not in html and "adrsList" not in html) or "login.cgi" in html:
-                    html = ricoh_service.authenticate_and_get(session, target, "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL")
-                entries = ricoh_service.parse_address_list(html)
                 
-                # Extract wimToken from html if present
-                wim_token = ricoh_service._extract_hidden_inputs(html).get("wimToken", "")
-                if not wim_token:
-                    wim_token = ricoh_service._extract_wim_token(html)
+                # After login, session is verified against adrsList.cgi already.
+                # Fetch address list directly (login already confirmed session works)
+                html = ""
+                for path in ["/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL", "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL"]:
+                    try:
+                        html = ricoh_service.authenticate_and_get(session, target, path)
+                        if html and ("Address List" in html or "adrsList" in html) and "login.cgi" not in html:
+                            break
+                    except Exception:
+                        continue
                 
+                entries = ricoh_service.parse_address_list(html) if html else []
+                
+                # Extract wimToken and try AJAX for richer data
+                wim_token = ricoh_service._extract_wim_token(html) if html else ""
                 ajax_raw = ""
                 ajax_entries = []
                 try:
