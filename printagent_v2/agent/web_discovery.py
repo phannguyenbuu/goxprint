@@ -298,6 +298,78 @@ def _should_ignore_device(name: str, ignored_prefixes: list[str]) -> bool:
     return False
 
 
+
+def _load_vps_db_printers() -> list[dict[str, Any]]:
+    ssh_key = r"C:\Users\Kythuat-02\.ssh\id_ed25519_20260422_155451"
+    vps_host = "31.97.76.62"
+
+    python_vps_code = """
+import psycopg2
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+import json
+
+env_path = Path("/opt/printagent/.env")
+if env_path.exists():
+    load_dotenv(env_path)
+db_url = os.getenv("DATABASE_URL", "postgresql://postgres:myPass@localhost:5432/GoPrinx")
+if db_url.startswith("postgresql+psycopg2://"):
+    db_url = db_url.replace("postgresql+psycopg2://", "postgresql://")
+
+try:
+    conn = psycopg2.connect(db_url)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, printer_name, ip, mac_address, agent_uid, lan_uid, is_online, updated_at FROM "Printer" ORDER BY printer_name ASC')
+    rows = cursor.fetchall()
+    print(json.dumps({"ok": True, "rows": rows}, default=str))
+    conn.close()
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+"""
+
+    devices = []
+    try:
+        import paramiko
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(vps_host, username='root', key_filename=ssh_key, timeout=10)
+        
+        sftp = ssh.open_sftp()
+        remote_path = "/tmp/list_printers_web_discovery.py"
+        with sftp.file(remote_path, "w") as f:
+            f.write(python_vps_code)
+        sftp.close()
+        
+        stdin, stdout, stderr = ssh.exec_command(f"/opt/printagent/venv/bin/python3 {remote_path}")
+        output_str = stdout.read().decode('utf-8', errors='replace').strip()
+        
+        ssh.exec_command(f"rm -f {remote_path}")
+        ssh.close()
+        
+        if output_str:
+            db_data = json.loads(output_str)
+            if db_data.get("ok"):
+                for r in db_data.get("rows", []):
+                    pid, name, ip_addr, mac, agent_uid, lan_uid, online, updated = r
+                    devices.append({
+                        "id": pid,
+                        "name": name or "VPS Copier",
+                        "ip": ip_addr,
+                        "mac_id": mac or "",
+                        "type": "ricoh",
+                        "status": "online" if online else "offline",
+                        "user": "",
+                        "port_name": "",
+                        "port_monitor": "",
+                        "connection_type": "ip",
+                        "source": "api",
+                    })
+    except Exception as exc:
+        LOGGER.warning("Failed to load printers from VPS DB: %s", exc)
+    return devices
+
+
 def _scan_devices_payload(
     config: AppConfig,
     api_client: APIClient,
@@ -326,6 +398,9 @@ def _scan_devices_payload(
             })
     except Exception as exc:
         LOGGER.warning("Quick subnet scan failed: %s", exc)
+
+    # Re-integrate list_all_copiers.py VPS database registered printers
+    vps_devices = _load_vps_db_printers()
+    payload.extend(vps_devices)
+
     return payload
-
-
