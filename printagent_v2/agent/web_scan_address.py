@@ -24,108 +24,20 @@ from agent.web_scan_support import (
 LOGGER = logging.getLogger(__name__)
 
 
-def _extract_wim_token_quick(html: str) -> str:
-    """Fast wimToken extraction."""
-    match = re.search(r'wimToken\s*[:=]\s*["\']?([^"\'\s;>]+)["\']?', html, re.I)
-    if match:
-        return match.group(1)
-    match = re.search(r'name\s*=\s*["\']?wimToken["\']?\s+value\s*=\s*["\']?([^"\'\s>]+)["\']?', html, re.I)
-    return match.group(1) if match else ""
-
-
-def _create_address_direct_wizard(session, ip: str, wim_token: str, name: str, email: str, folder_url: str) -> dict[str, Any]:
-    """
-    Create address book entry using the proven wizard flow.
-    Key: preserves wimsesid cookie around adrsGetUserWizard.cgi call.
-    """
-    import requests as _requests
-    base_url = f"http://{ip}"
-    list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
-    wizard_set_url = f"{base_url}/web/entry/en/address/adrsSetUserWizard.cgi"
-
-    def _post_step(data_str: str) -> str:
-        headers = {
-            "Referer": f"{base_url}/web/entry/en/address/adrsGetUserWizard.cgi",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        resp = session.post(wizard_set_url, data=data_str, headers=headers, timeout=10)
-        return resp.text
-
-    # 1. Load address list page (establishes server context)
-    LOGGER.info("[DirectWizard] Loading address list page for %s", ip)
-    resp = session.get(list_url, timeout=10)
-    page_token = _extract_wim_token_quick(resp.text)
-    if page_token:
-        wim_token = page_token
-
-    # 2. Open wizard (preserving wimsesid)
-    LOGGER.info("[DirectWizard] Opening wizard for %s", ip)
-    saved_wimsesid = session.cookies.get("wimsesid", "")
+def _get_ricoh_web():
+    """Lazy import ricoh_web - works both in dev (workspace root) and deployed (scripts folder)."""
     try:
-        open_url = f"{base_url}/web/entry/en/address/adrsGetUserWizard.cgi"
-        resp = session.post(
-            open_url,
-            data=f"mode=ADDUSER&outputSpecifyModeIn=DEFAULT&wimToken={wim_token}",
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": list_url},
-            timeout=10,
-        )
-        new_token = _extract_wim_token_quick(resp.text)
-        if new_token:
-            wim_token = new_token
-    except Exception as exc:
-        LOGGER.warning("[DirectWizard] Wizard open failed: %s", exc)
-    # Restore wimsesid if reset to "--"
-    current = session.cookies.get("wimsesid", "")
-    if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
-        session.cookies.set("wimsesid", saved_wimsesid)
-
-    # 3. Find next registration number
-    reg_numbers = re.findall(r'<nobr>(\d{5})</nobr>', resp.text)
-    # Also check from address list page
-    if not reg_numbers:
-        resp2 = session.get(list_url, timeout=8)
-        reg_numbers = re.findall(r'<nobr>(\d{5})</nobr>', resp2.text)
-    highest = max((int(r) for r in reg_numbers), default=0)
-    reg_no = f"{highest + 1:05d}"
-    LOGGER.info("[DirectWizard] Next registration no: %s", reg_no)
-
-    # 4. Parse FTP folder URL
-    from urllib.parse import urlparse
-    parsed = urlparse(folder_url if "://" in folder_url else f"ftp://{folder_url}")
-    ftp_host = parsed.hostname or ""
-    ftp_port = str(parsed.port or 21)
-    ftp_path = parsed.path or "/"
-
-    # 5. Wizard steps (URL-encoded POST)
-    LOGGER.info("[DirectWizard] BASE step: name=%s reg=%s", name, reg_no)
-    html = _post_step(f"mode=ADDUSER&step=BASE&wimToken={wim_token}&entryIndexIn={reg_no}&entryNameIn={name}&entryDisplayNameIn={name}&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTypeIn=1")
-    wim_token = _extract_wim_token_quick(html) or wim_token
-
-    LOGGER.info("[DirectWizard] MAIL step: email=%s", email)
-    html = _post_step(f"mode=ADDUSER&step=MAIL&wimToken={wim_token}&mailAddressIn={email}")
-    wim_token = _extract_wim_token_quick(html) or wim_token
-
-    LOGGER.info("[DirectWizard] FOLDER step: ftp://%s:%s%s", ftp_host, ftp_port, ftp_path)
-    html = _post_step(f"mode=ADDUSER&step=FOLDER&wimToken={wim_token}&folderProtocolIn=FTP_O&folderPortNoIn={ftp_port}&folderServerNameIn={ftp_host}&folderPathNameIn={ftp_path}&folderAuthUserNameIn=&folderPasswordIn=&wk_folderPasswordIn=&folderPasswordConfirmIn=&wk_folderPasswordConfirmIn=")
-    wim_token = _extract_wim_token_quick(html) or wim_token
-
-    LOGGER.info("[DirectWizard] CONFIRM step")
-    html = _post_step(f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
-
-    # Check for errors
-    if "Session timed out" in html:
-        raise RuntimeError("Session timed out during wizard CONFIRM step")
-
-    LOGGER.info("[DirectWizard] Wizard completed for %s on %s", name, ip)
-    return {
-        "ok": True,
-        "created_registration_no": reg_no,
-        "entry_name": name,
-        "email": email,
-        "folder": folder_url,
-        "ip": ip,
-    }
+        import ricoh_web
+        return ricoh_web
+    except ImportError:
+        import sys
+        import os
+        # Try workspace root
+        workspace = str(Path(__file__).resolve().parents[2])
+        if workspace not in sys.path:
+            sys.path.insert(0, workspace)
+        import ricoh_web
+        return ricoh_web
 
 
 def register_scan_address_routes(app):
@@ -411,15 +323,18 @@ def register_scan_address_routes(app):
             merged_fields: dict[str, Any] = {"entryTypeIn": "1"}
             if isinstance(fields, dict):
                 merged_fields.update(fields)
-            # Use the proven direct wizard flow (preserves wimsesid, URL-encoded POST)
+            # Use ricoh_web proven wizard flow
+            rw = _get_ricoh_web()
             session = ricoh_service.create_http_client(target, authenticated=True)
-            payload = _create_address_direct_wizard(
-                session,
-                ip=ip,
-                wim_token="",  # Will be fetched from address list page
-                name=name,
-                email=email,
-                folder_url=folder_final,
+            from urllib.parse import urlparse
+            parsed = urlparse(folder_final if "://" in folder_final else f"ftp://{folder_final}")
+            ftp_host = parsed.hostname or ""
+            ftp_port_val = int(parsed.port or 21)
+            ftp_path = parsed.path or "/"
+            payload = rw.add_address_entry(
+                session, ip=ip, wim_token="",
+                name=name, email=email,
+                ftp_host=ftp_host, ftp_port=ftp_port_val, ftp_path=ftp_path,
             )
             try:
                 session.close()
@@ -472,12 +387,17 @@ def register_scan_address_routes(app):
                 "database_or_provided",
             )
             target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
-            payload = ricoh_service.delete_address_entries(
-                target,
-                [registration_no],
-                entry_ids=[entry_id] if entry_id else None,
-                verify=not confirm,
+            # Use ricoh_web proven delete flow
+            rw = _get_ricoh_web()
+            session = ricoh_service.create_http_client(target, authenticated=True)
+            payload = rw.delete_address_entry(
+                session, ip=ip,
+                entry_ref=entry_id or registration_no,
             )
+            try:
+                session.close()
+            except Exception:
+                pass
             LOGGER.info(
                 "Scan address delete success: trace_id=%s ip=%s deleted_count=%s",
                 trace_id,
