@@ -182,20 +182,19 @@ def add_address_entry(
         }, timeout=10)
         return resp.text
 
-    # Load address list (context + wimToken)
-    if verbose:
-        _log("Loading address list...")
-    resp = session.get(list_url, timeout=10)
-    page_token = extract_wim_token(resp.text)
-    if page_token:
-        wim_token = page_token
+    # Load address list (context + wimToken) only if not already provided
+    if not wim_token:
+        if verbose:
+            _log("wim_token not provided. Loading address list to fetch token...")
+        resp = session.get(list_url, timeout=10)
+        page_token = extract_wim_token(resp.text)
+        if page_token:
+            wim_token = page_token
 
-    # Find next registration number
-    reg_numbers = re.findall(r'<nobr>(\d{5})</nobr>', resp.text)
-    highest = max((int(r) for r in reg_numbers), default=0)
-    reg_no = f"{highest + 1:05d}"
+    # Find next registration number (use current HHMMSS timestamp to prevent duplicates)
+    reg_no = time.strftime("%H%M%S")
     if verbose:
-        _log(f"Next registration no: {reg_no}")
+        _log(f"Next registration no (timestamp): {reg_no}")
 
     # Open wizard (preserve wimsesid - copier resets it to "--")
     if verbose:
