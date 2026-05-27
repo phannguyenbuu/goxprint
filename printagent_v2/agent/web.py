@@ -115,13 +115,7 @@ def create_app(
     register_scan_ftp_routes(app)
     register_device_routes(app)
 
-    # Register dynamic routes from compiled scripts (skip if already registered by source)
-    try:
-        import scan_ricoh
-        if hasattr(scan_ricoh, "register_scan_routes") and "api_scan_address_list" not in app.view_functions:
-            scan_ricoh.register_scan_routes(app)
-    except ImportError:
-        pass
+
 
     return app
 

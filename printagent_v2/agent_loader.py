@@ -177,20 +177,7 @@ def main():
     except Exception:
         pass
 
-    # Download scripts
-    scripts_to_download = ["scan_ricoh.py", "ricoh_address_book.py", "ricoh_wizard.py", "ricoh_web_scan.py"]
-    for script_name in scripts_to_download:
-        script_url = f"{base_url}/static/releases/{script_name}"
-        print(f"Downloading dynamic script: {script_name} from {script_url}...")
-        try:
-            resp = requests.get(script_url, headers={"X-Lead-Token": config["token"]}, timeout=15)
-            if resp.status_code == 200:
-                (scripts_dir / script_name).write_bytes(resp.content)
-                print(f"Successfully downloaded {script_name}")
-            else:
-                print(f"Failed to download {script_name}: Status {resp.status_code}")
-        except Exception as exc:
-            print(f"Error downloading {script_name}: {exc}")
+
 
     # 1. Try to load bundled agent_core.zip
     import sys

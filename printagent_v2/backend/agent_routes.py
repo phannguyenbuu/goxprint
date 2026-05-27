@@ -52,7 +52,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         script_release_date = ""
         try:
             from utils import UI_TZ
-            script_names = ["get_address_book.py", "scan_ricoh.py", "ricoh_address_book.py", "ricoh_wizard.py", "ricoh_web_scan.py"]
+            script_names = ["get_address_book.py"]
             mtimes = []
             for name in script_names:
                 script_path = os.path.join(os.path.dirname(__file__), "static", "releases", name)

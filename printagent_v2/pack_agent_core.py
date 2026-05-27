@@ -75,12 +75,7 @@ def main():
     shutil.copy2(zip_path, static_releases_dir / "agent_core.zip")
     print(f"Copied agent_core.zip to static releases path: {static_releases_dir / 'agent_core.zip'}")
     
-    scripts_to_copy = ["scan_ricoh.py", "ricoh_address_book.py", "ricoh_wizard.py", "ricoh_web_scan.py"]
-    for script_name in scripts_to_copy:
-        script_file = root / script_name
-        if script_file.exists():
-            shutil.copy2(script_file, static_releases_dir / script_name)
-            print(f"Copied {script_name} to static releases path: {static_releases_dir / script_name}")
+
 
 if __name__ == "__main__":
     main()

@@ -37,10 +37,6 @@ if local_exe.exists():
     shutil.copy2(str(local_exe), str(dest_exe))
 
 files_to_copy = [
-    (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\static\releases\scan_ricoh.py', '/opt/printagent/static/releases/scan_ricoh.py'),
-    (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\static\releases\ricoh_address_book.py', '/opt/printagent/static/releases/ricoh_address_book.py'),
-    (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\static\releases\ricoh_wizard.py', '/opt/printagent/static/releases/ricoh_wizard.py'),
-    (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\static\releases\ricoh_web_scan.py', '/opt/printagent/static/releases/ricoh_web_scan.py'),
     (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\storage\releases\agent_release.json', '/opt/printagent/storage/releases/agent_release.json'),
     (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\storage\releases\agent_core_release.json', '/opt/printagent/storage/releases/agent_core_release.json'),
     (r'd:\Dropbox\_Documents\Goxprint\printagent_v2\backend\static\releases\agent_core.zip', '/opt/printagent/static/releases/agent_core.zip'),
