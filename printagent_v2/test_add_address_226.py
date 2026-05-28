@@ -7,16 +7,15 @@ from ricoh_web import login_ricoh, add_address_entry, get_best_local_ip, _log
 
 ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.226"
 email = sys.argv[2] if len(sys.argv) > 2 else "buunphan@gmail.com"
-ftp_port = int(sys.argv[3]) if len(sys.argv) > 3 else 2122
-user = sys.argv[4] if len(sys.argv) > 4 else "admin"
-pw = sys.argv[5] if len(sys.argv) > 5 else ""
+ftp_port = None  # Use auto-port detection and auto-creation
+user = sys.argv[3] if len(sys.argv) > 3 else "admin"
+pw = sys.argv[4] if len(sys.argv) > 4 else ""
 
 ftp_host = get_best_local_ip(ip)
-# name = email.split("@")[0]
 name = email
 
 print("=" * 60)
-_log(f"ADD: {email} -> {ip} (FTP {ftp_host}:{ftp_port})")
+_log(f"ADD: {email} -> {ip} (FTP {ftp_host}:auto-port)")
 print("=" * 60)
 
 t0 = time.perf_counter()
@@ -29,7 +28,7 @@ try:
     result = add_address_entry(session, ip, token, name, "", ftp_host, ftp_port, verbose=True)
     elapsed = time.perf_counter() - t0
     print("=" * 60)
-    print(f"SUCCESS ({elapsed:.1f}s) - reg #{result['created_registration_no']}")
+    print(f"SUCCESS ({elapsed:.1f}s) - reg #{result['created_registration_no']} on FTP Port: {result['ftp_port']}")
 except Exception as e:
     print(f"FAILED: {e}")
 finally:

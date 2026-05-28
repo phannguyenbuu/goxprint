@@ -151,6 +151,37 @@ def login_ricoh(ip: str, user: str, password: str, *, verbose: bool = False) -> 
     return None, ""
 
 
+def create_local_ftp(name: str, port: int, verbose: bool = False) -> dict[str, Any]:
+    """Create local FTP site via ShareManager."""
+    import os
+    import sys
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    try:
+        from agent.utils.shares import ShareManager
+        from agent.services.runtime import default_ftp_root
+        
+        manager = ShareManager()
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "", name.strip().replace(" ", "_"))[:48] or "scan"
+        ftp_name = f"ftp_{safe_name}"
+        ftp_root_path = default_ftp_root(ftp_name)
+        
+        if verbose:
+            _log(f"Creating local FTP site '{ftp_name}' on port {port}...")
+        
+        res = manager.create_ftp_site(
+            site_name=ftp_name,
+            local_path=ftp_root_path,
+            port=port,
+        )
+        return res
+    except Exception as e:
+        if verbose:
+            _log(f"Failed to create FTP site: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 # ─── Add Address Entry ───────────────────────────────────────────────────────
 
 def add_address_entry(
@@ -160,7 +191,7 @@ def add_address_entry(
     name: str,
     email: str,
     ftp_host: str,
-    ftp_port: int,
+    ftp_port: int | None = None,
     ftp_path: str = "/",
     *,
     verbose: bool = False,
@@ -173,6 +204,29 @@ def add_address_entry(
     list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
     wizard_set_url = f"{base_url}/web/entry/en/address/adrsSetUserWizard.cgi"
     wizard_get_url = f"{base_url}/web/entry/en/address/adrsGetUserWizard.cgi"
+
+    # Automatically detect first vacant local TCP port starting from 2121
+    if ftp_port is None:
+        port = 2121
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('0.0.0.0', port))
+                    ftp_port = port
+                    break
+            except OSError:
+                port += 1
+        if verbose:
+            _log(f"Auto-detected free local TCP port: {ftp_port}")
+
+    # Create/update local FTP site
+    ftp_res = create_local_ftp(name, ftp_port, verbose=verbose)
+    if not ftp_res.get("ok"):
+        if verbose:
+            _log(f"WARNING: FTP site creation returned: {ftp_res.get('error')}")
+    else:
+        site_name = ftp_res.get("site_name") or ftp_res.get("name") or f"ftp_{name}"
+        _log(f"Created new local FTP site '{site_name}' on port {ftp_port}")
 
     def _post_step(data_str: str) -> str:
         resp = session.post(wizard_set_url, data=data_str, headers={
@@ -238,6 +292,15 @@ def add_address_entry(
 
     if "Session timed out" in html:
         raise RuntimeError("Session timed out during wizard CONFIRM")
+
+    # Reload address book on copier to force synchronization
+    try:
+        if verbose:
+            _log("Reloading address book/list on copier to force sync...")
+        session.get(list_url, timeout=10)
+    except Exception as e:
+        if verbose:
+            _log(f"Failed to reload address book: {e}")
 
     return {
         "ok": True,
@@ -326,7 +389,8 @@ if __name__ == "__main__":
     def usage():
         print("Usage:")
         print("  python ricoh_web.py login  <IP> <USER> <PASS>")
-        print("  python ricoh_web.py add    <IP> <EMAIL> <FTP_PORT> <USER> <PASS>")
+        print("  python ricoh_web.py add    <IP> <EMAIL> [<USER> [<PASS>]]")
+        print("  python ricoh_web.py add    <IP> <EMAIL> <FTP_PORT> <USER> <PASS> (legacy)")
         print("  python ricoh_web.py delete <IP> <REG_NO_OR_ID> <USER> <PASS>")
         sys.exit(1)
 
@@ -353,12 +417,23 @@ if __name__ == "__main__":
     elif cmd == "add":
         ip = sys.argv[2] if len(sys.argv) > 2 else "192.168.1.226"
         email = sys.argv[3] if len(sys.argv) > 3 else "test@example.com"
-        ftp_port = int(sys.argv[4]) if len(sys.argv) > 4 else 2121
-        user = sys.argv[5] if len(sys.argv) > 5 else "admin"
-        pw = sys.argv[6] if len(sys.argv) > 6 else ""
+        
+        ftp_port = None
+        user = "admin"
+        pw = ""
+        if len(sys.argv) > 4:
+            if sys.argv[4].isdigit():
+                ftp_port = int(sys.argv[4])
+                user = sys.argv[5] if len(sys.argv) > 5 else "admin"
+                pw = sys.argv[6] if len(sys.argv) > 6 else ""
+            else:
+                user = sys.argv[4]
+                pw = sys.argv[5] if len(sys.argv) > 5 else ""
+                
         ftp_host = get_best_local_ip(ip)
         print("=" * 60)
-        _log(f"ADD: {email} -> {ip} (FTP {ftp_host}:{ftp_port})")
+        port_desc = f"port {ftp_port}" if ftp_port is not None else "auto-port"
+        _log(f"ADD: {email} -> {ip} (FTP {ftp_host}:{port_desc})")
         print("=" * 60)
         t0 = time.perf_counter()
         session, token = login_ricoh(ip, user, pw, verbose=True)
