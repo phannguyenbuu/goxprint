@@ -441,11 +441,11 @@ if __name__ == "__main__":
             print("LOGIN FAILED")
             sys.exit(1)
         try:
-            name = email.split("@")[0]
-            result = add_address_entry(session, ip, token, name, email, ftp_host, ftp_port, verbose=True)
+            name = email
+            result = add_address_entry(session, ip, token, name, "", ftp_host, ftp_port, verbose=True)
             elapsed = time.perf_counter() - t0
             print("=" * 60)
-            print(f"SUCCESS ({elapsed:.1f}s) - reg #{result['created_registration_no']}")
+            print(f"SUCCESS ({elapsed:.1f}s) - reg #{result['created_registration_no']} on FTP Port: {result['ftp_port']}")
         except Exception as e:
             print(f"FAILED: {e}")
         finally:
