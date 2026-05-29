@@ -95,7 +95,9 @@ def main():
     # 2. CREATE
     log("Step 2: Creating a new address entry (and local FTP site)...")
     test_username = "CRUD_Test_User"
-    # Dynamically find next vacant local TCP port starting from 2121 to prevent any conflicts
+    test_email = "crud_test@example.com"
+    
+    # A. Dynamically find vacant local FTP port
     ftp_port = 2121
     import socket
     from agent.services.ftp_store import load_config, find_site_by_port
@@ -111,28 +113,116 @@ def main():
         ftp_port += 1
     log(f"Auto-detected vacant local TCP port for test: {ftp_port}")
 
+    # B. Set up local FTP site configuration using ShareManager so the local FTP is up and running
+    log("Setting up local FTP site configuration...")
+    from agent.utils.shares import ShareManager
+    from agent.modules.ricoh.address_book import default_ftp_root
+    share_manager = ShareManager()
+    ftp_name = f"ftp_{test_username}"
+    ftp_res = share_manager.create_ftp_site(
+        site_name=ftp_name,
+        local_path=default_ftp_root(ftp_name),
+        port=ftp_port,
+    )
+    if not ftp_res.get("ok"):
+        log(f"Failed to create local FTP site: {ftp_res.get('warning')}")
+        sys.exit(1)
+        
+    ftp_port_used = ftp_res.get("port") or ftp_port
+    
+    # C. Perform WIM address creation using proven test_add_user logic
+    log("Running proven wizard flow using URL-encoded POST from test_add_user...")
+    from test_add_user import login_ricoh, get_best_local_ip, extract_wim_token
+    
     try:
-        # Perform add entry via official setup_scan_destination of RicohService
-        result = service.setup_scan_destination(
-            printer=printer,
-            username=test_username,
-            ftp_port=ftp_port
-        )
-        if not result.get("ok") or not result.get("printer_setup_ok"):
-            raise RuntimeError(f"Scan destination setup failed: {result.get('warning') or result.get('printer_error')}")
+        session, wim_token = login_ricoh(ip, user, pw)
+        if not session or not wim_token:
+            raise RuntimeError("Could not log in. Aborting wizard execution.")
             
-        wizard_payload = result.get("printer", {})
-        raw_reg = wizard_payload.get("created_registration_no")
-        # Ricoh indices strictly use 5 digits
-        reg_no = raw_reg[-5:] if raw_reg else None
-        ftp_port_used = result.get("ftp_port") or 2121
-        log(f"[SUCCESS] Entry created with Reg No: {reg_no} (raw: {raw_reg}) on FTP Port: {ftp_port_used}")
+        local_ip = get_best_local_ip(ip)
+        list_url = f"http://{ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+        wizard_get_url = f"http://{ip}/web/entry/en/address/adrsGetUserWizard.cgi"
+        wizard_set_url = f"http://{ip}/web/entry/en/address/adrsSetUserWizard.cgi"
+
+        def _post_step(sess, data_str):
+            resp = sess.post(wizard_set_url, data=data_str, headers={
+                "Referer": wizard_get_url,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Requested-With": "XMLHttpRequest",
+            }, timeout=10)
+            return resp.text
+
+        # Load address list to establish context
+        resp = session.get(list_url, timeout=10)
+        page_token = extract_wim_token(resp.text)
+        if page_token:
+            wim_token = page_token
+
+        # Find next registration no
+        import random
+        timestamp_digits = list(time.strftime("%H%M%S"))
+        random.shuffle(timestamp_digits)
+        reg_no = "".join(timestamp_digits)[:5]
+        log(f"Generated Registration no: {reg_no}")
+
+        # Open wizard
+        saved_wimsesid = session.cookies.get("wimsesid", "")
+        try:
+            resp = session.post(wizard_get_url,
+                                data=f"mode=ADDUSER&outputSpecifyModeIn=DEFAULT&wimToken={wim_token}",
+                                headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": list_url},
+                                timeout=10)
+            new_token = extract_wim_token(resp.text)
+            if new_token:
+                wim_token = new_token
+        except Exception as e:
+            log(f"  Wizard open failed: {e}")
+        
+        current_wimsesid = session.cookies.get("wimsesid", "")
+        if (not current_wimsesid or current_wimsesid == "--") and saved_wimsesid and saved_wimsesid != "--":
+            session.cookies.set("wimsesid", saved_wimsesid)
+            log("  Restored wimsesid")
+
+        # BASE
+        log(f"BASE step: name={test_username}, reg={reg_no}")
+        html = _post_step(session, f"mode=ADDUSER&step=BASE&wimToken={wim_token}&entryIndexIn={reg_no}&entryNameIn={test_username}&entryDisplayNameIn={test_username}&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTypeIn=1")
+        wim_token = extract_wim_token(html) or wim_token
+
+        # MAIL
+        log(f"MAIL step: email={test_email}")
+        html = _post_step(session, f"mode=ADDUSER&step=MAIL&wimToken={wim_token}&mailAddressIn={test_email}")
+        wim_token = extract_wim_token(html) or wim_token
+
+        # FOLDER
+        log(f"FOLDER step: ftp://{local_ip}:{ftp_port_used}/")
+        html = _post_step(session, f"mode=ADDUSER&step=FOLDER&wimToken={wim_token}&folderProtocolIn=FTP_O&folderPortNoIn={ftp_port_used}&folderServerNameIn={local_ip}&folderPathNameIn=/&folderAuthUserNameIn=&folderPasswordIn=&wk_folderPasswordIn=&folderPasswordConfirmIn=&wk_folderPasswordConfirmIn=")
+        wim_token = extract_wim_token(html) or wim_token
+
+        # CONFIRM
+        log("CONFIRM step...")
+        html = _post_step(session, f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
+
+        if "Session timed out" in html:
+            raise RuntimeError("Session timed out during CONFIRM")
+
+        # Verify
+        time.sleep(0.5)
+        log("Verifying creation...")
+        resp = session.get(list_url, timeout=10)
+        found = test_username.lower() in resp.text.lower() or reg_no in resp.text
+        if not found:
+            raise RuntimeError(f"Entry created (#{reg_no}) but verification failed")
+            
+        log(f"[SUCCESS] Entry created with Reg No: {reg_no} on FTP Port: {ftp_port_used}")
     except Exception as e:
         log(f"Create entry failed: {e}")
         sys.exit(1)
     finally:
-        # Force release session lock from wizard session
-        service.reset_web_session(printer)
+        try:
+            session.get(f"http://{ip}/web/entry/en/websys/webArch/logout.cgi", timeout=2)
+            session.close()
+        except Exception:
+            pass
 
     time.sleep(1.5)
 
