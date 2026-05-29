@@ -196,12 +196,31 @@ Get-NetIPAddress -AddressFamily IPv4 |
         entry_ids: list[str] | None = None,
         verify: bool = True,
     ) -> dict[str, Any]:
+        session = self.create_http_client(printer)
+        try:
+            return self._delete_address_entries_internal(
+                session, printer, registration_numbers, entry_ids, verify
+            )
+        finally:
+            try:
+                self._reset_web_session(session, printer)
+                session.close()
+                LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
+            except Exception as close_exc:
+                LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
+
+    def _delete_address_entries_internal(
+        self,
+        session: requests.Session,
+        printer: Printer,
+        registration_numbers: list[str],
+        entry_ids: list[str] | None = None,
+        verify: bool = True,
+    ) -> dict[str, Any]:
         regs = [str(x or "").strip() for x in registration_numbers if str(x or "").strip()]
         ids = [str(x or "").strip() for x in (entry_ids or []) if str(x or "").strip()]
         if not regs and not ids:
             raise ValueError("registration_numbers is empty")
-
-        session = self.create_http_client(printer)
         list_url = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
         delete_url = "/web/entry/en/address/adrsDeleteEntries.cgi"
         html = self.authenticate_and_get(session, printer, list_url)
@@ -502,8 +521,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
         
         # Clean up session (highly critical for Ricoh copiers to release session lock)
         try:
+            self._reset_web_session(session, printer)
             session.close()
-            LOGGER.info("[RicohAddressBook] Request session closed successfully.")
+            LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
         except Exception as close_exc:
             LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
             

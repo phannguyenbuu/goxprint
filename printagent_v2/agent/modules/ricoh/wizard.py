@@ -217,11 +217,35 @@ class RicohAddressWizardMixin(RicohServiceBase):
         desired_registration_no: str | None = None,
         allow_auto_update: bool = True,
     ) -> dict[str, Any]:
+        session = self.create_http_client_auth_form_only(printer)
+        try:
+            return self._create_address_user_wizard_internal(
+                session, printer, name, email, folder, user_code, fields, desired_registration_no, allow_auto_update
+            )
+        finally:
+            try:
+                self._reset_web_session(session, printer)
+                session.close()
+                LOGGER.info("[RicohWizard] Request session logged out and closed successfully.")
+            except Exception as close_exc:
+                LOGGER.debug("[RicohWizard] Failed to close session: %s", close_exc)
+
+    def _create_address_user_wizard_internal(
+        self,
+        session: requests.Session,
+        printer: Printer,
+        name: str,
+        email: str = "",
+        folder: str = "",
+        user_code: str = "",
+        fields: dict[str, Any] | None = None,
+        desired_registration_no: str | None = None,
+        allow_auto_update: bool = True,
+    ) -> dict[str, Any]:
         LOGGER.info(
             "[RicohWizard] === START create_address_user_wizard: printer=%s (IP=%s), name=%s, email=%s, folder=%s, desired_registration_no=%s ===",
             printer.name, printer.ip, name, email, folder, desired_registration_no
         )
-        session = self.create_http_client_auth_form_only(printer)
         fields = dict(fields or {})
 
         wim_token, wim_source = self._fetch_wim_token(session, printer)
