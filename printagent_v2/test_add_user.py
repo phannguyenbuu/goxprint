@@ -125,11 +125,12 @@ def login_ricoh(ip, user, password):
     return None, ""
 
 
-def parse_existing_entries(html):
+def parse_existing_entries(html_content):
     """Helper to parse existing (reg_no, name) from the address book list HTML."""
+    import html as html_module
     entries = []
-    tbody_match = re.search(r'<tbody id="ReportListArea_TableBody">(.*?)</tbody>', html, re.S)
-    tbody_html = tbody_match.group(1) if tbody_match else html
+    tbody_match = re.search(r'<tbody id="ReportListArea_TableBody">(.*?)</tbody>', html_content, re.S)
+    tbody_html = tbody_match.group(1) if tbody_match else html_content
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tbody_html, re.S)
     for row in rows:
         if "reportListDummyRow" in row:
@@ -138,12 +139,16 @@ def parse_existing_entries(html):
         if len(cells) >= 8:
             def strip_html(val):
                 val = re.sub(r'<[^>]*>', '', val)
+                val = html_module.unescape(val)
                 val = re.sub(r'\s+', ' ', val)
                 return val.strip()
-            reg_no = strip_html(cells[2])
+            raw_reg = strip_html(cells[2])
             name = strip_html(cells[3])
-            if reg_no.isdigit():
+            # Strip all non-digits to be extremely robust against entities/spaces
+            reg_no = re.sub(r'\D', '', raw_reg)
+            if reg_no:
                 entries.append((reg_no, name))
+    log(f"  [DEBUG] Parsed {len(entries)} existing address entries from copier.")
     return entries
 
 
@@ -156,12 +161,25 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     wizard_get_url = f"http://{ip}/web/entry/en/address/adrsGetUserWizard.cgi"
     wizard_set_url = f"http://{ip}/web/entry/en/address/adrsSetUserWizard.cgi"
 
-    def _post_step(data_str):
+    def _post_step(step_name, data_str):
+        log(f"Submitting {step_name} step...")
         resp = session.post(wizard_set_url, data=data_str, headers={
             "Referer": wizard_get_url,
             "Content-Type": "application/x-www-form-urlencoded",
             "X-Requested-With": "XMLHttpRequest",
         }, timeout=10)
+        
+        preview = resp.text.strip()[:300].replace('\n', ' ')
+        log(f"  Response {step_name}: HTTP {resp.status_code}, Length: {len(resp.text)} bytes")
+        log(f"  Preview: {preview}")
+        
+        if resp.status_code != 200:
+            log(f"  ❌ ERROR: Step '{step_name}' failed with status code {resp.status_code}")
+        if "Session timed out" in resp.text:
+            log(f"  ❌ ERROR: Step '{step_name}' returned 'Session timed out'")
+        if "already registered" in resp.text.lower() or "duplicate" in resp.text.lower():
+            log(f"  ❌ ERROR: Step '{step_name}' returned duplicate name/details error")
+            
         return resp.text
 
     log(f"FTP destination: ftp://{local_ip}:{ftp_port}/")
@@ -169,9 +187,11 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     # Load address list (establishes context + wimToken)
     log("Loading address list page...")
     resp = session.get(list_url, timeout=10)
+    log(f"  Address List GET Response: HTTP {resp.status_code}, Length: {len(resp.text)} bytes")
     page_token = extract_wim_token(resp.text)
     if page_token:
         wim_token = page_token
+        log(f"  Updated wimToken from list page: {wim_token}")
 
     # 1. Parse existing entries to check for duplicate names and find vacant registration number
     existing_entries = parse_existing_entries(resp.text)
@@ -201,32 +221,38 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
                             data=f"mode=ADDUSER&outputSpecifyModeIn=DEFAULT&wimToken={wim_token}",
                             headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": list_url},
                             timeout=10)
+        log(f"  Wizard Open Response: HTTP {resp.status_code}, Length: {len(resp.text)} bytes")
+        log(f"  Preview: {resp.text.strip()[:300].replace('\n', ' ')}")
+        if resp.status_code != 200:
+            log(f"  ❌ ERROR: Wizard open returned HTTP status {resp.status_code}!")
         new_token = extract_wim_token(resp.text)
         if new_token:
             wim_token = new_token
+            log(f"  Extracted new wimToken: {wim_token}")
     except Exception as e:
-        log(f"  Wizard open failed: {e}")
+        log(f"  ❌ Wizard open exception: {e}")
+        
     # Restore wimsesid if reset to "--"
     current = session.cookies.get("wimsesid", "")
     if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
         session.cookies.set("wimsesid", saved_wimsesid)
-        log(f"  Restored wimsesid")
+        log("  Restored wimsesid")
 
     # Wizard steps (URL-encoded POST)
     log(f"BASE: name={username}, reg={reg_no}")
-    html = _post_step(f"mode=ADDUSER&step=BASE&wimToken={wim_token}&entryIndexIn={reg_no}&entryNameIn={username}&entryDisplayNameIn={username}&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTypeIn=1")
+    html = _post_step("BASE", f"mode=ADDUSER&step=BASE&wimToken={wim_token}&entryIndexIn={reg_no}&entryNameIn={username}&entryDisplayNameIn={username}&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTypeIn=1")
     wim_token = extract_wim_token(html) or wim_token
 
     log(f"MAIL: email={email}")
-    html = _post_step(f"mode=ADDUSER&step=MAIL&wimToken={wim_token}&mailAddressIn={email}")
+    html = _post_step("MAIL", f"mode=ADDUSER&step=MAIL&wimToken={wim_token}&mailAddressIn={email}")
     wim_token = extract_wim_token(html) or wim_token
 
     log(f"FOLDER: ftp://{local_ip}:{ftp_port}/")
-    html = _post_step(f"mode=ADDUSER&step=FOLDER&wimToken={wim_token}&folderProtocolIn=FTP_O&folderPortNoIn={ftp_port}&folderServerNameIn={local_ip}&folderPathNameIn=/&folderAuthUserNameIn=&folderPasswordIn=&wk_folderPasswordIn=&folderPasswordConfirmIn=&wk_folderPasswordConfirmIn=")
+    html = _post_step("FOLDER", f"mode=ADDUSER&step=FOLDER&wimToken={wim_token}&folderProtocolIn=FTP_O&folderPortNoIn={ftp_port}&folderServerNameIn={local_ip}&folderPathNameIn=/&folderAuthUserNameIn=&folderPasswordIn=&wk_folderPasswordIn=&folderPasswordConfirmIn=&wk_folderPasswordConfirmIn=")
     wim_token = extract_wim_token(html) or wim_token
 
     log("CONFIRM...")
-    html = _post_step(f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
+    html = _post_step("CONFIRM", f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
 
     if "Session timed out" in html:
         log("FAILED: Session timed out during CONFIRM")
@@ -236,12 +262,22 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     time.sleep(0.5)
     log("Verifying...")
     resp = session.get(list_url, timeout=10)
+    log(f"  Address List GET Response (Verify): HTTP {resp.status_code}, Length: {len(resp.text)} bytes")
+    
     found = username.lower() in resp.text.lower() or reg_no in resp.text
     if found:
         log(f"SUCCESS! '{username}' ({email}) added as #{reg_no}")
         return True, reg_no
     else:
-        log(f"WARNING: Entry created (#{reg_no}) but could not verify")
+        log(f"❌ VERIFICATION FAILED!")
+        log(f"  Could not find username '{username}' or reg_no '{reg_no}' in the address list HTML.")
+        try:
+            current_entries = parse_existing_entries(resp.text)
+            log(f"  Current Address Book Entries ({len(current_entries)}):")
+            for r, n in current_entries:
+                log(f"    - #{r}: {n}")
+        except Exception as parse_err:
+            log(f"  Failed to parse current address book: {parse_err}")
         return False, reg_no
 
 
