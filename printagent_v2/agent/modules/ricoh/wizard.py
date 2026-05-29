@@ -68,7 +68,6 @@ class RicohAddressWizardMixin(RicohServiceBase):
         url = f"http://{printer.ip}{self._WIZARD_GET}"
         last_error: Exception | None = None
         attempts = [
-            ("GET", None),
             (
                 "POST",
                 self._multipart(
@@ -78,6 +77,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     ]
                 ),
             ),
+            ("GET", None),
         ]
         for method, payload in attempts:
             LOGGER.info("[RicohWizard] Attempting wizard open with method: %s, URL: %s", method, url)
