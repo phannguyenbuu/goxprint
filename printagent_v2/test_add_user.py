@@ -127,12 +127,21 @@ def login_ricoh(ip, user, password):
 
 def add_user_wizard(session, ip, wim_token, email, ftp_port):
     """Add address book entry using proven wizard flow."""
+    # Find next registration number using shuffled HHMMSS timestamp (same as agent logic)
+    import random
+    timestamp_digits = list(time.strftime("%H%M%S"))
+    random.shuffle(timestamp_digits)
+    reg_no = "".join(timestamp_digits)[:5]
+    
     username = email.split("@")[0]
+    if username == "crud_test":
+        username = f"crud_{reg_no}"
+        
     local_ip = get_best_local_ip(ip)
     base_url = f"http://{ip}"
     list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
-    wizard_get_url = f"{base_url}/web/entry/en/address/adrsGetUserWizard.cgi"
-    wizard_set_url = f"{base_url}/web/entry/en/address/adrsSetUserWizard.cgi"
+    wizard_get_url = f"http://{ip}/web/entry/en/address/adrsGetUserWizard.cgi"
+    wizard_set_url = f"http://{ip}/web/entry/en/address/adrsSetUserWizard.cgi"
 
     def _post_step(data_str):
         resp = session.post(wizard_set_url, data=data_str, headers={
@@ -151,11 +160,6 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     if page_token:
         wim_token = page_token
 
-    # Find next registration number using shuffled HHMMSS timestamp (same as agent logic)
-    import random
-    timestamp_digits = list(time.strftime("%H%M%S"))
-    random.shuffle(timestamp_digits)
-    reg_no = "".join(timestamp_digits)[:5]
     log(f"Registration no (timestamp-based): {reg_no}")
 
     # Open wizard (preserve wimsesid - copier resets it to "--")

@@ -180,8 +180,8 @@ def main():
     # The official modify route in web_scan_address.py deletes and recreates the entry.
     # We split these into explicit, well-spaced steps with session resets in between.
     log(f"Step 4: Updating entry with Reg No {reg_no}...")
-    updated_name = "Scan to CRUD_Test_Updated"
-    updated_email = "crud_updated@example.com"
+    updated_name = f"crud_upd_{reg_no}"
+    updated_email = f"crud_upd_{reg_no}@example.com"
     # Resolve the FTP host candidate automatically
     ftp_host_info = service.resolve_ftp_host_ip(ip)
     ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
