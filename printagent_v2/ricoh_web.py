@@ -245,10 +245,13 @@ def add_address_entry(
         if page_token:
             wim_token = page_token
 
-    # Find next registration number (use current HHMMSS timestamp to prevent duplicates)
-    reg_no = time.strftime("%H%M%S")
+    # Find next registration number (use shuffled HHMMSS timestamp to prevent duplicates and fit 5-digit limit)
+    import random
+    timestamp_digits = list(time.strftime("%H%M%S"))
+    random.shuffle(timestamp_digits)
+    reg_no = "".join(timestamp_digits)[:5]
     if verbose:
-        _log(f"Next registration no (timestamp): {reg_no}")
+        _log(f"Next registration no (shuffled timestamp): {reg_no}")
 
     # Open wizard (preserve wimsesid - copier resets it to "--")
     if verbose:

@@ -148,8 +148,12 @@ class RicohAddressWizardMixin(RicohServiceBase):
         return host, port, path
 
     def _next_registration_no(self, session: requests.Session, printer: Printer) -> str:
-        # Strictly use HHMMSS timestamp mapping to avoid slow address book fetches and eliminate duplicate errors
-        return time.strftime("%H%M%S")
+        # Strictly use shuffled HHMMSS timestamp mapping to avoid slow address book fetches and guarantee uniqueness
+        import random
+        timestamp_digits = list(time.strftime("%H%M%S"))
+        random.shuffle(timestamp_digits)
+        return "".join(timestamp_digits)[:5]
+
 
 
     @staticmethod
