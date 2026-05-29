@@ -125,18 +125,31 @@ def login_ricoh(ip, user, password):
     return None, ""
 
 
+def parse_existing_entries(html):
+    """Helper to parse existing (reg_no, name) from the address book list HTML."""
+    entries = []
+    tbody_match = re.search(r'<tbody id="ReportListArea_TableBody">(.*?)</tbody>', html, re.S)
+    tbody_html = tbody_match.group(1) if tbody_match else html
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tbody_html, re.S)
+    for row in rows:
+        if "reportListDummyRow" in row:
+            continue
+        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
+        if len(cells) >= 8:
+            def strip_html(val):
+                val = re.sub(r'<[^>]*>', '', val)
+                val = re.sub(r'\s+', ' ', val)
+                return val.strip()
+            reg_no = strip_html(cells[2])
+            name = strip_html(cells[3])
+            if reg_no.isdigit():
+                entries.append((reg_no, name))
+    return entries
+
+
 def add_user_wizard(session, ip, wim_token, email, ftp_port):
     """Add address book entry using proven wizard flow."""
-    # Find next registration number using shuffled HHMMSS timestamp (same as agent logic)
-    import random
-    timestamp_digits = list(time.strftime("%H%M%S"))
-    random.shuffle(timestamp_digits)
-    reg_no = "".join(timestamp_digits)[:5]
-    
     username = email.split("@")[0]
-    if username == "crud_test":
-        username = f"crud_{reg_no}"
-        
     local_ip = get_best_local_ip(ip)
     base_url = f"http://{ip}"
     list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
@@ -160,7 +173,25 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     if page_token:
         wim_token = page_token
 
-    log(f"Registration no (timestamp-based): {reg_no}")
+    # 1. Parse existing entries to check for duplicate names and find vacant registration number
+    existing_entries = parse_existing_entries(resp.text)
+    
+    # Check for duplicate name
+    for reg, name in existing_entries:
+        if name.lower() == username.lower():
+            log("=" * 80)
+            log(f"⚠️  [WARNING/DUPLICATE] The name '{username}' is ALREADY registered in the address book!")
+            log(f"  Conflict details: Registration No: {reg}, Name: {name}")
+            log("=" * 80)
+            break
+
+    # Find the first vacant registration number from 00001 to 99999
+    registered_regs = {int(reg) for reg, _ in existing_entries}
+    reg_no_int = 1
+    while reg_no_int in registered_regs:
+        reg_no_int += 1
+    reg_no = str(reg_no_int).zfill(5)
+    log(f"Auto-detected next vacant Registration No: {reg_no}")
 
     # Open wizard (preserve wimsesid - copier resets it to "--")
     log("Opening wizard...")
