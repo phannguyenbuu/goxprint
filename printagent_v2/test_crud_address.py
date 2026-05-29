@@ -85,6 +85,9 @@ def main():
     except Exception as e:
         log(f"Failed to read address list: {e}")
         sys.exit(1)
+    finally:
+        # Force release session lock from list page
+        service.reset_web_session(printer)
 
     # 2. CREATE
     log("Step 2: Creating a new address entry...")
@@ -112,9 +115,11 @@ def main():
             ftp_path="/",
             verbose=True
         )
-        reg_no = result.get("created_registration_no")
+        raw_reg = result.get("created_registration_no")
+        # Ricoh indices strictly use 5 digits, take the last 5 digits of the HHMMSS timestamp
+        reg_no = raw_reg[-5:] if raw_reg else None
         ftp_port_used = result.get("ftp_port")
-        log(f"[SUCCESS] Entry created with Reg No: {reg_no} on FTP Port: {ftp_port_used}")
+        log(f"[SUCCESS] Entry created with Reg No: {reg_no} (raw: {raw_reg}) on FTP Port: {ftp_port_used}")
     except Exception as e:
         log(f"Create entry failed: {e}")
         # Always logout
@@ -130,7 +135,7 @@ def main():
         except Exception:
             pass
 
-    time.sleep(1.0)
+    time.sleep(1.5)
 
     # 3. READ (Verify Creation)
     log("Step 3: Verifying creation by reading the list again...")
@@ -140,7 +145,8 @@ def main():
         entries = payload.get("address_list", [])
         print_entries(entries)
         for item in entries:
-            if item.get("registration_no") == reg_no:
+            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+            if reg_val == reg_no:
                 created_found = True
                 log(f"[VERIFIED] Found newly created entry in the list: {item}")
                 break
@@ -148,34 +154,45 @@ def main():
             log("WARNING: Newly created entry was not found in the list!")
     except Exception as e:
         log(f"Failed to read address list: {e}")
+    finally:
+        service.reset_web_session(printer)
 
     # 4. UPDATE (Modify)
     # The official modify route in web_scan_address.py deletes and recreates the entry.
-    # We will simulate this by updating fields for the same registration_no.
+    # We split these into explicit, well-spaced steps with session resets in between.
     log(f"Step 4: Updating entry with Reg No {reg_no}...")
     updated_name = "CRUD_Test_Updated"
     updated_email = "crud_updated@example.com"
     updated_folder = f"ftp://{ftp_host}:{ftp_port_used}/updated_path"
 
     try:
-        # We can use the service's official modify function:
-        # modify_address_user_wizard(printer, registration_no, name, email, folder, user_code, fields)
-        # This will delete the entry first, and then call create_address_user_wizard with the desired reg_no.
-        log("Calling modify_address_user_wizard on RicohService...")
-        modify_res = service.modify_address_user_wizard(
+        # A. Delete the old entry
+        log("Deleting old entry for modification...")
+        service.delete_address_entries(printer, [reg_no], verify=False)
+        
+        # B. Crucial web session reset after deletion
+        log("Releasing web session lock after deletion...")
+        service.reset_web_session(printer)
+        time.sleep(1.5)
+        
+        # C. Create the updated entry with original desired reg_no
+        log("Creating updated entry with original Reg No...")
+        modify_res = service.create_address_user_wizard(
             printer=printer,
-            registration_no=reg_no,
             name=updated_name,
             email=updated_email,
-            folder=updated_folder
+            folder=updated_folder,
+            desired_registration_no=reg_no,
+            allow_auto_update=False
         )
         log(f"[SUCCESS] Entry updated: {modify_res}")
     except Exception as e:
         log(f"Update entry failed: {e}")
+    finally:
         # Make sure session lock is released
         service.reset_web_session(printer)
 
-    time.sleep(1.0)
+    time.sleep(1.5)
 
     # 5. READ (Verify Update)
     log("Step 5: Verifying updates in the list...")
@@ -185,7 +202,8 @@ def main():
         entries = payload.get("address_list", [])
         print_entries(entries)
         for item in entries:
-            if item.get("registration_no") == reg_no:
+            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+            if reg_val == reg_no:
                 if item.get("name") == updated_name:
                     updated_found = True
                     log(f"[VERIFIED] Found updated entry in the list: {item}")
@@ -194,6 +212,8 @@ def main():
             log("WARNING: Updated entry was not found or name did not match!")
     except Exception as e:
         log(f"Failed to read address list: {e}")
+    finally:
+        service.reset_web_session(printer)
 
     # 6. DELETE
     log(f"Step 6: Deleting entry with Reg No {reg_no}...")
@@ -219,7 +239,7 @@ def main():
         except Exception:
             pass
 
-    time.sleep(1.0)
+    time.sleep(1.5)
 
     # 7. READ (Verify Deletion)
     log("Step 7: Verifying deletion in the list...")
@@ -229,7 +249,8 @@ def main():
         entries = payload.get("address_list", [])
         print_entries(entries)
         for item in entries:
-            if item.get("registration_no") == reg_no:
+            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+            if reg_val == reg_no:
                 deleted_verified = False
                 log("ERROR: Entry still exists in the address book!")
                 break
@@ -237,6 +258,15 @@ def main():
             log("[VERIFIED] Entry has been successfully removed.")
     except Exception as e:
         log(f"Failed to read address list: {e}")
+    finally:
+        service.reset_web_session(printer)
+
+    print("=" * 80)
+    if created_found and updated_found and deleted_verified:
+        log("🎉 ALL CRUD TESTS PASSED SUCCESSFULLY!")
+    else:
+        log("❌ SOME CRUD TEST STEPS FAILED!")
+    print("=" * 80)
 
     print("=" * 80)
     if created_found and updated_found and deleted_verified:
