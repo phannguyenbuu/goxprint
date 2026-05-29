@@ -148,37 +148,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
         return host, port, path
 
     def _next_registration_no(self, session: requests.Session, printer: Printer) -> str:
-        highest = 0
-        try:
-            raw = self.get_address_list_ajax_with_client(session, printer)
-            entries = self.parse_ajax_address_list(raw)
-            for entry in entries:
-                try:
-                    current = int(self._normalize_registration_no(entry.registration_no) or "0")
-                except Exception:  # noqa: BLE001
-                    current = 0
-                highest = max(highest, current)
-        except Exception:  # noqa: BLE001
-            pass
+        # Strictly use HHMMSS timestamp mapping to avoid slow address book fetches and eliminate duplicate errors
+        return time.strftime("%H%M%S")
 
-        if highest <= 0:
-            try:
-                raw = self.read_address_list_with_client(session, printer)
-                entries = self.parse_address_list(raw)
-                for entry in entries:
-                    try:
-                        current = int(self._normalize_registration_no(entry.registration_no) or "0")
-                    except Exception:  # noqa: BLE001
-                        current = 0
-                    highest = max(highest, current)
-            except Exception:  # noqa: BLE001
-                pass
-
-        hint = int(self._address_index_hint_by_ip.get(printer.ip, 0) or 0)
-        highest = max(highest, hint)
-        if highest <= 0:
-            highest = 1
-        return f"{highest + 1:05d}"
 
     @staticmethod
     def _extract_created_registration_no(html: str) -> str:
