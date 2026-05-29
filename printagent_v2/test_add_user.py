@@ -195,7 +195,7 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
 
     if "Session timed out" in html:
         log("FAILED: Session timed out during CONFIRM")
-        return False
+        return False, reg_no
 
     # Verify
     time.sleep(0.5)
@@ -204,10 +204,10 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
     found = username.lower() in resp.text.lower() or reg_no in resp.text
     if found:
         log(f"SUCCESS! '{username}' ({email}) added as #{reg_no}")
-        return True
+        return True, reg_no
     else:
         log(f"WARNING: Entry created (#{reg_no}) but could not verify")
-        return False
+        return False, reg_no
 
 
 def find_vacant_ftp_port(start: int = 2121) -> int:
