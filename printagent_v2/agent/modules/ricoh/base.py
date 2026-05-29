@@ -68,16 +68,34 @@ class RicohServiceBase:
 
     def _verify_session_state(self, session: requests.Session, printer: Printer, username: str) -> bool:
         """
-        Loads a protected page to confirm whether we are fully logged in.
+        Loads a protected administrator-only page to confirm whether we are fully logged in as ADMIN.
+        We check two different endpoints to ensure maximum compatibility across firmware versions.
         """
-        test_url = urljoin(f"http://{printer.ip}", "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL")
+        base_url = f"http://{printer.ip}"
+        
+        # Endpoint A: Easy Security config (strictly administrator-only)
         try:
-            test_resp = session.get(test_url, timeout=5)
-            is_login_page = any(indicator in test_resp.text for indicator in ["authForm.cgi", "login.cgi", "Login User Name"])
-            if test_resp.status_code == 200 and not is_login_page:
+            url_a = urljoin(base_url, "/web/entry/en/websys/easySecurity/getEasySecurity.cgi")
+            resp_a = session.get(url_a, timeout=5)
+            is_login_a = any(ind in resp_a.text for ind in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            if resp_a.status_code == 200 and not is_login_a:
+                LOGGER.info("[RicohLogin] Admin session verified via EasySecurity")
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("[RicohLogin] EasySecurity verification check failed: %s", exc)
+
+        # Endpoint B: Address user wizard GET (requires write/admin privileges)
+        try:
+            url_b = urljoin(base_url, "/web/entry/en/address/adrsGetUserWizard.cgi")
+            resp_b = session.get(url_b, timeout=5)
+            is_login_b = any(ind in resp_b.text for ind in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            if resp_b.status_code == 200 and not is_login_b:
+                LOGGER.info("[RicohLogin] Admin session verified via adrsGetUserWizard")
+                return True
+        except Exception as exc:
+            LOGGER.debug("[RicohLogin] adrsGetUserWizard verification check failed: %s", exc)
+
+        LOGGER.warning("[RicohLogin] Admin session verification failed for %s - session is either guest or unauthenticated", printer.ip)
         return False
 
     def _login(self, session: requests.Session, printer: Printer, credential_candidates: list[tuple[str, str]] | None = None) -> tuple[str, str]:
