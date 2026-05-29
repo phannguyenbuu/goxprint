@@ -73,6 +73,11 @@ def main():
     service = RicohService(api_client=None)
     printer = Printer(id=1, name="TestPrinter", ip=ip, user=user, password=pw)
 
+    # Force clear any stale session locks on the copier before running the test
+    log("Force releasing any stale copier sessions...")
+    service.reset_web_session(printer)
+    time.sleep(2)
+
     # 1. READ (Initial List)
     log("Step 1: Reading initial address book list...")
     try:

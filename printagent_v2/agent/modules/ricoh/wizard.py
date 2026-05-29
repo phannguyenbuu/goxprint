@@ -77,6 +77,13 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     ]
                 ),
             ),
+            (
+                "POST_URLENCODED",
+                {
+                    "mode": "ADDUSER",
+                    "outputSpecifyModeIn": "DEFAULT",
+                }
+            ),
             ("GET", None),
         ]
         for method, payload in attempts:
@@ -88,10 +95,17 @@ class RicohAddressWizardMixin(RicohServiceBase):
                         headers={"Referer": f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"},
                         timeout=20,
                     )
-                else:
+                elif method == "POST":
                     resp = session.post(
                         url,
                         files=payload,
+                        headers={"Referer": f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"},
+                        timeout=20,
+                    )
+                else: # POST_URLENCODED
+                    resp = session.post(
+                        url,
+                        data=payload,
                         headers={"Referer": f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"},
                         timeout=20,
                     )
