@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-29T18:00:42.366321+00:00",
+  "sites": [
+    {
+      "name": "ftp_CRUD_Test_User",
+      "path": "C:\\Users\\Kythuat-02\\AppData\\Local\\Temp\\GoPrinxAgent\\ftp\\ftp_CRUD_Test_User",
+      "port": 2121,
+      "ftp_user": "ftp_ftp_CRUD_Test_User",
+      "ftp_password": "",
+      "enabled": true
+    }
+  ]
+}

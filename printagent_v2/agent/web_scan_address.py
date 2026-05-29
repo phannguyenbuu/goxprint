@@ -232,112 +232,166 @@ def register_scan_address_routes(app):
         body = request.get_json(silent=True) or {}
         trace_id = f"scan-create-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         ip = str(body.get("ip", "")).strip()
-        user = str(body.get("user", "")).strip()
+        user = str(body.get("user", "")).strip() or "admin"
         password = str(body.get("password", "")).strip()
-        name = str(body.get("name", "")).strip()
         email = str(body.get("email", "")).strip()
-        folder = str(body.get("folder", "")).strip()
-        user_code = str(body.get("user_code", "")).strip()
-        fields = body.get("fields", {})
         if not ip:
-            LOGGER.warning("Scan address create rejected: trace_id=%s reason=missing_ip", trace_id)
             return jsonify({"ok": False, "error": "Missing ip"}), 400
-        if not name:
-            LOGGER.warning("Scan address create rejected: trace_id=%s ip=%s reason=missing_name", trace_id, ip)
-            return jsonify({"ok": False, "error": "Missing name"}), 400
-        if fields is not None and not isinstance(fields, dict):
-            LOGGER.warning("Scan address create rejected: trace_id=%s ip=%s reason=invalid_fields_type", trace_id, ip)
-            return jsonify({"ok": False, "error": "fields must be object"}), 400
+        if not email:
+            return jsonify({"ok": False, "error": "Missing email"}), 400
+
+        name = email.split("@")[0]
+        LOGGER.info("Scan address create: trace_id=%s ip=%s email=%s", trace_id, ip, email)
+
         try:
-            # Address-create flow is FTP-first by design.
-            selected_protocol = "FTP"
-            LOGGER.info(
-                "Scan address create request: trace_id=%s ip=%s name=%s email_set=%s folder_set=%s user_code_set=%s fields_count=%s auth_mode=%s",
-                trace_id,
-                ip,
-                name,
-                bool(email),
-                bool(folder),
-                bool(user_code),
-                len(fields) if isinstance(fields, dict) else 0,
-                "database_or_provided",
-            )
-            target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
-            ftp_payload: dict[str, Any] | None = None
-            folder_final = folder
-            if selected_protocol == "FTP":
-                ftp_payload = create_local_ftp_for_address(config, ricoh_service, name, printer_ip=ip)
-                LOGGER.info(
-                    "Scan address create FTP step: trace_id=%s ip=%s ftp_name=%s ftp_url=%s ftp_ok=%s",
-                    trace_id,
-                    ip,
-                    str(ftp_payload.get("ftp_name", "")).strip(),
-                    str(ftp_payload.get("upload_url", "") or ftp_payload.get("ftp_url", "")).strip(),
-                    bool(ftp_payload.get("ok", False)),
-                )
-                if not bool(ftp_payload.get("ok", False)):
-                    LOGGER.warning(
-                        "Scan address create FTP setup failed: trace_id=%s ip=%s name=%s error=%s",
-                        trace_id,
-                        ip,
-                        name,
-                        str((ftp_payload.get("result") or {}).get("error", "")).strip(),
-                    )
-                    return jsonify(
-                        {
-                            "ok": False,
-                            "error": "FTP setup failed before address creation",
-                            "trace_id": trace_id,
-                            "protocol": selected_protocol,
-                            "ftp": ftp_payload,
-                        }
-                    ), 500
-                folder_final = str(ftp_payload.get("upload_url", "") or ftp_payload.get("ftp_url", "")).strip() or folder_final
-                LOGGER.info(
-                    "Scan address create folder overridden by FTP: trace_id=%s ip=%s folder=%s",
-                    trace_id,
-                    ip,
-                    folder_final,
-                )
-                ftp_warning = str(ftp_payload.get("warning", "") or "").strip()
-                if ftp_warning:
-                    LOGGER.warning(
-                        "Scan address create FTP warning: trace_id=%s ip=%s warning=%s",
-                        trace_id,
-                        ip,
-                        ftp_warning,
-                    )
-            merged_fields: dict[str, Any] = {"entryTypeIn": "1"}
-            if isinstance(fields, dict):
-                merged_fields.update(fields)
-            
-            # Call unified create_address_user_wizard from RicohService directly
-            payload = ricoh_service.create_address_user_wizard(
-                target,
-                name=name,
-                email=email,
-                folder=folder_final,
-                user_code=user_code,
-                fields=merged_fields,
-            )
-            
-            LOGGER.info(
-                "Scan address create success: trace_id=%s ip=%s http_status=%s verified=%s",
-                trace_id,
-                ip,
-                payload.get("http_status") if isinstance(payload, dict) else "-",
-                payload.get("verified") if isinstance(payload, dict) else "-",
-            )
-            return jsonify(
-                {
-                    "ok": True,
-                    "payload": payload,
-                    "trace_id": trace_id,
-                    "protocol": selected_protocol,
-                    "folder_used": folder_final,
-                    "ftp": ftp_payload,
-                }
-            )
+            import random as _random
+            import base64 as _base64
+            import requests as _requests
+            from urllib.parse import urljoin as _urljoin
+
+            # ── 1. Create local FTP site (auto port) ──────────────────────────
+            ftp_payload = create_local_ftp_for_address(config, ricoh_service, name, printer_ip=ip)
+            if not ftp_payload.get("ok"):
+                return jsonify({"ok": False, "error": "FTP setup failed", "ftp": ftp_payload, "trace_id": trace_id}), 500
+
+            ftp_url = str(ftp_payload.get("upload_url") or ftp_payload.get("ftp_url") or "")
+            from urllib.parse import urlparse as _urlparse
+            _parsed = _urlparse(ftp_url if "://" in ftp_url else f"ftp://{ftp_url}")
+            ftp_host = _parsed.hostname or ""
+            ftp_port = int(_parsed.port or 21)
+            ftp_path = _parsed.path or "/"
+            LOGGER.info("Scan address create FTP: trace_id=%s ftp_url=%s", trace_id, ftp_url)
+
+            # ── 2. Login to copier ────────────────────────────────────────────
+            base_url = f"http://{ip}"
+            session = _requests.Session()
+            session.headers.update({"User-Agent": "printer-agent/0.1"})
+            session.cookies.set("cookieOnOffChecker", "on")
+
+            for _path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
+                try:
+                    session.get(_urljoin(base_url, _path), timeout=3)
+                except Exception:
+                    pass
+            session.cookies.clear()
+            session.cookies.set("cookieOnOffChecker", "on")
+
+            def _extract_tok(html: str) -> str:
+                m = re.search(r'wimToken\s*[:=]\s*["\']?([^"\'\s;>]+)["\']?', html, re.I)
+                return m.group(1) if m else ""
+
+            def _extract_hidden(html: str) -> dict:
+                fields: dict = {}
+                for m in re.finditer(r'<input\s+[^>]*?type\s*=\s*["\']?hidden["\']?[^>]*?>', html, re.I | re.S):
+                    tag = m.group(0)
+                    nm = re.search(r'name\s*=\s*["\']?([^"\'\s>]+)["\']?', tag, re.I)
+                    vm = re.search(r'value\s*=\s*["\']?([^"\'\s>]*)["\']?', tag, re.I)
+                    if nm:
+                        fields[nm.group(1)] = vm.group(1) if vm else ""
+                return fields
+
+            resp = session.get(_urljoin(base_url, "/web/entry/en/websys/webArch/authForm.cgi"), timeout=8)
+            html = resp.text
+            if "document.form1.submit()" in html or 'name="form1"' in html:
+                hidden = _extract_hidden(html)
+                am = re.search(r'action\s*=\s*["\']([^"\']+)["\']', html, re.I)
+                if am:
+                    resp = session.post(_urljoin(resp.url, am.group(1)), data=hidden, timeout=5)
+                    html = resp.text
+            wim_token = _extract_tok(html)
+            referer = resp.url
+
+            enc_u = _base64.b64encode(user.encode()).decode()
+            enc_p = _base64.b64encode(password.encode()).decode()
+            logged_in = False
+            for _lpath, _ldata in [
+                ("/web/guest/en/websys/webArch/login.cgi", {"userid": enc_u, "username": enc_u, "password": enc_p, "wimToken": wim_token, "open": "websys/webArch/authForm.cgi"}),
+                ("/web/entry/en/websys/webArch/login.cgi", {"userid": user, "username": user, "password": password, "wimToken": wim_token}),
+                ("/web/guest/en/websys/webArch/login.cgi", {"userid": user, "username": user, "password": password, "wimToken": wim_token, "open": "websys/webArch/authForm.cgi"}),
+            ]:
+                try:
+                    r = session.post(_urljoin(base_url, _lpath), data=_ldata, headers={"Referer": referer}, timeout=8)
+                    ws = session.cookies.get("wimsesid", "")
+                    if ws and ws != "--" and "Login User Name" not in r.text:
+                        logged_in = True
+                        break
+                except Exception:
+                    continue
+
+            if not logged_in:
+                raise RuntimeError(f"Login failed for {ip}")
+
+            # ── 3. Wizard: load list → open wizard (preserve wimsesid) → steps ─
+            list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+            wizard_get_url = f"{base_url}/web/entry/en/address/adrsGetUserWizard.cgi"
+            wizard_set_url = f"{base_url}/web/entry/en/address/adrsSetUserWizard.cgi"
+
+            resp = session.get(list_url, timeout=10)
+            pt = _extract_tok(resp.text)
+            if pt:
+                wim_token = pt
+
+            # Timestamp-based reg number (same as agent _next_registration_no)
+            _ts = list(time.strftime("%H%M%S"))
+            _random.shuffle(_ts)
+            reg_no = "".join(_ts)[:5]
+
+            saved_ws = session.cookies.get("wimsesid", "")
+            try:
+                resp = session.post(wizard_get_url,
+                                    data=f"mode=ADDUSER&outputSpecifyModeIn=DEFAULT&wimToken={wim_token}",
+                                    headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": list_url},
+                                    timeout=10)
+                nt = _extract_tok(resp.text)
+                if nt:
+                    wim_token = nt
+            except Exception:
+                pass
+            cur_ws = session.cookies.get("wimsesid", "")
+            if (not cur_ws or cur_ws == "--") and saved_ws and saved_ws != "--":
+                session.cookies.set("wimsesid", saved_ws)
+
+            def _step(data_str: str) -> str:
+                r = session.post(wizard_set_url, data=data_str, headers={
+                    "Referer": wizard_get_url,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Requested-With": "XMLHttpRequest",
+                }, timeout=10)
+                return r.text
+
+            html = _step(f"mode=ADDUSER&step=BASE&wimToken={wim_token}&entryIndexIn={reg_no}&entryNameIn={name}&entryDisplayNameIn={name}&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTagInfoIn=1&entryTypeIn=1")
+            wim_token = _extract_tok(html) or wim_token
+
+            html = _step(f"mode=ADDUSER&step=MAIL&wimToken={wim_token}&mailAddressIn={email}")
+            wim_token = _extract_tok(html) or wim_token
+
+            html = _step(f"mode=ADDUSER&step=FOLDER&wimToken={wim_token}&folderProtocolIn=FTP_O&folderPortNoIn={ftp_port}&folderServerNameIn={ftp_host}&folderPathNameIn={ftp_path}&folderAuthUserNameIn=&folderPasswordIn=&wk_folderPasswordIn=&folderPasswordConfirmIn=&wk_folderPasswordConfirmIn=")
+            wim_token = _extract_tok(html) or wim_token
+
+            html = _step(f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
+
+            try:
+                session.get(_urljoin(base_url, "/web/entry/en/websys/webArch/logout.cgi"), timeout=3)
+            except Exception:
+                pass
+
+            if "Session timed out" in html:
+                raise RuntimeError("Session timed out during wizard CONFIRM")
+
+            LOGGER.info("Scan address create success: trace_id=%s ip=%s reg_no=%s ftp_url=%s", trace_id, ip, reg_no, ftp_url)
+            return jsonify({
+                "ok": True,
+                "trace_id": trace_id,
+                "created_registration_no": reg_no,
+                "entry_name": name,
+                "email": email,
+                "ftp_url": ftp_url,
+                "ftp": ftp_payload,
+            })
+
+        except Exception as exc:
+            LOGGER.exception("Scan address create failed: trace_id=%s ip=%s", trace_id, ip)
+            return jsonify({"ok": False, "error": str(exc), "trace_id": trace_id}), 500
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("Scan address create failed: trace_id=%s ip=%s", trace_id, ip)
             return jsonify({"ok": False, "error": str(exc), "trace_id": trace_id}), 500

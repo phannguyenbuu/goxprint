@@ -185,7 +185,18 @@ class RicohServiceBase:
                 encoded_pass = base64.b64encode(password.encode()).decode()
 
                 strategies = [
-                    # Strategy A: Plain Text to entry cgi
+                    # Strategy A: Base64 to guest cgi (priority - works on most models)
+                    {
+                        "name": "Base64 (guest)",
+                        "path": "/web/guest/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": encoded_user,
+                            "username": encoded_user,
+                            "password": encoded_pass,
+                            "open": "websys/webArch/authForm.cgi"
+                        }
+                    },
+                    # Strategy B: Plain Text to entry cgi
                     {
                         "name": "Plain (entry)",
                         "path": "/web/entry/en/websys/webArch/login.cgi",
@@ -195,7 +206,7 @@ class RicohServiceBase:
                             "password": password,
                         }
                     },
-                    # Strategy B: Plain Text to guest cgi
+                    # Strategy C: Plain Text to guest cgi
                     {
                         "name": "Plain (guest)",
                         "path": "/web/guest/en/websys/webArch/login.cgi",
@@ -203,17 +214,6 @@ class RicohServiceBase:
                             "userid": user,
                             "username": user,
                             "password": password,
-                        }
-                    },
-                    # Strategy C: Base64 to guest cgi (newer Ricoh models)
-                    {
-                        "name": "Base64 (guest)",
-                        "path": "/web/guest/en/websys/webArch/login.cgi",
-                        "data": {
-                            "userid": encoded_user,
-                            "username": encoded_user,
-                            "password": encoded_pass,
-                            "open": "websys/webArch/authForm.cgi"
                         }
                     },
                 ]
