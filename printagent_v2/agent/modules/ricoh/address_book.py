@@ -528,10 +528,37 @@ Get-NetIPAddress -AddressFamily IPv4 |
         safe_username = re.sub(r"[^A-Za-z0-9_-]", "", str(username or "").strip().replace(" ", "_"))[:48] or "scan"
         ftp_name = self._sanitize_ftp_site_name(ftp_site_name or f"ftp_{safe_username}") or f"ftp_{safe_username}"
         ftp_root_path = Path(ftp_root) if ftp_root is not None else default_ftp_root(ftp_name)
+
+        # Dynamic port selection to prevent conflict in multi-site setup
+        import socket
+        from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
+        
+        actual_port = int(ftp_port or 2121)
+        while True:
+            config_data = load_config()
+            existing_by_port = find_site_by_port(config_data, actual_port)
+            is_assigned_elsewhere = False
+            if existing_by_port:
+                # If it's assigned to another site, it's a conflict!
+                if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                    is_assigned_elsewhere = True
+            
+            is_physically_bound = False
+            if not is_assigned_elsewhere:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.bind(('0.0.0.0', actual_port))
+                except Exception:
+                    is_physically_bound = True
+            
+            if not is_assigned_elsewhere and not is_physically_bound:
+                break
+            actual_port += 1
+
         ftp_res = self.share_manager.create_ftp_site(
             site_name=ftp_name,
             local_path=ftp_root_path,
-            port=int(ftp_port or 2121),
+            port=actual_port,
             ftp_user=ftp_user,
             ftp_password=ftp_password,
         )

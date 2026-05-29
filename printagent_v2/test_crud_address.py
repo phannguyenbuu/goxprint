@@ -90,14 +90,28 @@ def main():
     # 2. CREATE
     log("Step 2: Creating a new address entry (and local FTP site)...")
     test_username = "CRUD_Test_User"
-    reg_no = None
+    # Dynamically find next vacant local TCP port starting from 2121 to prevent any conflicts
+    ftp_port = 2121
+    import socket
+    from agent.services.ftp_store import load_config, find_site_by_port
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', ftp_port))
+                config_data = load_config()
+                if not find_site_by_port(config_data, ftp_port):
+                    break
+        except Exception:
+            pass
+        ftp_port += 1
+    log(f"Auto-detected vacant local TCP port for test: {ftp_port}")
 
     try:
         # Perform add entry via official setup_scan_destination of RicohService
         result = service.setup_scan_destination(
             printer=printer,
             username=test_username,
-            ftp_port=2121
+            ftp_port=ftp_port
         )
         if not result.get("ok") or not result.get("printer_setup_ok"):
             raise RuntimeError(f"Scan destination setup failed: {result.get('warning') or result.get('printer_error')}")
