@@ -24,20 +24,7 @@ from agent.web_scan_support import (
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_ricoh_web():
-    """Lazy import ricoh_web - works both in dev (workspace root) and deployed (scripts folder)."""
-    try:
-        import ricoh_web
-        return ricoh_web
-    except ImportError:
-        import sys
-        import os
-        # Try workspace root
-        workspace = str(Path(__file__).resolve().parents[2])
-        if workspace not in sys.path:
-            sys.path.insert(0, workspace)
-        import ricoh_web
-        return ricoh_web
+
 
 
 def register_scan_address_routes(app):
@@ -323,29 +310,23 @@ def register_scan_address_routes(app):
             merged_fields: dict[str, Any] = {"entryTypeIn": "1"}
             if isinstance(fields, dict):
                 merged_fields.update(fields)
-            # Use ricoh_web proven wizard flow
-            rw = _get_ricoh_web()
-            session = ricoh_service.create_http_client(target, authenticated=True)
-            from urllib.parse import urlparse
-            parsed = urlparse(folder_final if "://" in folder_final else f"ftp://{folder_final}")
-            ftp_host = parsed.hostname or ""
-            ftp_port_val = int(parsed.port or 21)
-            ftp_path = parsed.path or "/"
-            payload = rw.add_address_entry(
-                session, ip=ip, wim_token="",
-                name=name, email=email,
-                ftp_host=ftp_host, ftp_port=ftp_port_val, ftp_path=ftp_path,
+            
+            # Call unified create_address_user_wizard from RicohService directly
+            payload = ricoh_service.create_address_user_wizard(
+                target,
+                name=name,
+                email=email,
+                folder=folder_final,
+                user_code=user_code,
+                fields=merged_fields,
             )
-            try:
-                session.close()
-            except Exception:
-                pass
+            
             LOGGER.info(
-                "Scan address create success: trace_id=%s ip=%s http_status=%s verify_count=%s",
+                "Scan address create success: trace_id=%s ip=%s http_status=%s verified=%s",
                 trace_id,
                 ip,
                 payload.get("http_status") if isinstance(payload, dict) else "-",
-                payload.get("verify_count") if isinstance(payload, dict) else "-",
+                payload.get("verified") if isinstance(payload, dict) else "-",
             )
             return jsonify(
                 {
@@ -387,17 +368,12 @@ def register_scan_address_routes(app):
                 "database_or_provided",
             )
             target = resolve_target_printer(config, api_client, ip=ip, user=user, password=password)
-            # Use ricoh_web proven delete flow
-            rw = _get_ricoh_web()
-            session = ricoh_service.create_http_client(target, authenticated=True)
-            payload = rw.delete_address_entry(
-                session, ip=ip,
-                entry_ref=entry_id or registration_no,
-            )
-            try:
-                session.close()
-            except Exception:
-                pass
+            # Call unified delete_address_entries from RicohService directly
+            if entry_id:
+                payload = ricoh_service.delete_address_entries(target, [], entry_ids=[entry_id])
+            else:
+                payload = ricoh_service.delete_address_entries(target, [registration_no])
+            
             LOGGER.info(
                 "Scan address delete success: trace_id=%s ip=%s deleted_count=%s",
                 trace_id,

@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Test CRUD operations for Ricoh Address Book.
+Test CRUD operations for Ricoh Address Book using strictly the /agent Core.
 Performs the following lifecycle:
 1. Read/List existing address book entries.
-2. Create a new address entry (Name, Email, local FTP destination).
+2. Create a new address entry (Name, Email, local FTP destination via setup_scan_destination).
 3. Read/List to verify the creation.
 4. Update/Modify the created entry (Recreate with updated fields, preserving Registration No).
 5. Read/List to verify the updates.
@@ -25,7 +25,6 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from ricoh_web import login_ricoh, add_address_entry, delete_address_entry, get_best_local_ip
 from agent.services.api_client import Printer
 from agent.modules.ricoh.service import RicohService
 
@@ -64,7 +63,7 @@ def main():
     pw = sys.argv[3] if len(sys.argv) > 3 else ""
 
     print("=" * 80)
-    print("           RICOH ADDRESS BOOK CRUD TEST SYSTEM            ")
+    print("      RICOH ADDRESS BOOK CRUD TEST SYSTEM (AGENT CORE)      ")
     print("=" * 80)
     log(f"Target Printer IP  : {ip}")
     log(f"Login Credentials  : user={user}, pass={'***' if pw else '<empty>'}")
@@ -73,7 +72,6 @@ def main():
     # Initialize components
     service = RicohService(api_client=None)
     printer = Printer(id=1, name="TestPrinter", ip=ip, user=user, password=pw)
-    ftp_host = get_best_local_ip(ip)
 
     # 1. READ (Initial List)
     log("Step 1: Reading initial address book list...")
@@ -90,50 +88,32 @@ def main():
         service.reset_web_session(printer)
 
     # 2. CREATE
-    log("Step 2: Creating a new address entry...")
-    test_name = "CRUD_Test_User"
-    test_email = "crud_test@example.com"
+    log("Step 2: Creating a new address entry (and local FTP site)...")
+    test_username = "CRUD_Test_User"
     reg_no = None
-    ftp_port = None  # auto-detect and create local FTP
-
-    # Login to get a session
-    session, token = login_ricoh(ip, user, pw, verbose=True)
-    if not session:
-        log("ERROR: Login failed.")
-        sys.exit(1)
 
     try:
-        # Perform add entry
-        result = add_address_entry(
-            session=session,
-            ip=ip,
-            wim_token=token,
-            name=test_name,
-            email=test_email,
-            ftp_host=ftp_host,
-            ftp_port=ftp_port,
-            ftp_path="/",
-            verbose=True
+        # Perform add entry via official setup_scan_destination of RicohService
+        result = service.setup_scan_destination(
+            printer=printer,
+            username=test_username,
+            ftp_port=2121
         )
-        raw_reg = result.get("created_registration_no")
-        # Ricoh indices strictly use 5 digits, take the last 5 digits of the HHMMSS timestamp
+        if not result.get("ok") or not result.get("printer_setup_ok"):
+            raise RuntimeError(f"Scan destination setup failed: {result.get('warning') or result.get('printer_error')}")
+            
+        wizard_payload = result.get("printer", {})
+        raw_reg = wizard_payload.get("created_registration_no")
+        # Ricoh indices strictly use 5 digits
         reg_no = raw_reg[-5:] if raw_reg else None
-        ftp_port_used = result.get("ftp_port")
+        ftp_port_used = result.get("ftp_port") or 2121
         log(f"[SUCCESS] Entry created with Reg No: {reg_no} (raw: {raw_reg}) on FTP Port: {ftp_port_used}")
     except Exception as e:
         log(f"Create entry failed: {e}")
-        # Always logout
-        try:
-            session.get(f"http://{ip}/web/entry/en/websys/webArch/logout.cgi", timeout=3)
-        except Exception:
-            pass
         sys.exit(1)
     finally:
-        # Logout session to release copier session lock
-        try:
-            session.get(f"http://{ip}/web/entry/en/websys/webArch/logout.cgi", timeout=3)
-        except Exception:
-            pass
+        # Force release session lock from wizard session
+        service.reset_web_session(printer)
 
     time.sleep(1.5)
 
@@ -161,8 +141,11 @@ def main():
     # The official modify route in web_scan_address.py deletes and recreates the entry.
     # We split these into explicit, well-spaced steps with session resets in between.
     log(f"Step 4: Updating entry with Reg No {reg_no}...")
-    updated_name = "CRUD_Test_Updated"
+    updated_name = "Scan to CRUD_Test_Updated"
     updated_email = "crud_updated@example.com"
+    # Resolve the FTP host candidate automatically
+    ftp_host_info = service.resolve_ftp_host_ip(ip)
+    ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
     updated_folder = f"ftp://{ftp_host}:{ftp_port_used}/updated_path"
 
     try:
@@ -217,27 +200,17 @@ def main():
 
     # 6. DELETE
     log(f"Step 6: Deleting entry with Reg No {reg_no}...")
-    session, token = login_ricoh(ip, user, pw, verbose=True)
-    if not session:
-        log("ERROR: Login for delete failed.")
-        sys.exit(1)
-
     try:
-        delete_res = delete_address_entry(
-            session=session,
-            ip=ip,
-            entry_ref=reg_no,
-            verbose=True
+        delete_res = service.delete_address_entries(
+            printer=printer,
+            registration_numbers=[reg_no],
+            verify=True
         )
         log(f"[SUCCESS] Entry deleted: {delete_res}")
     except Exception as e:
         log(f"Delete entry failed: {e}")
     finally:
-        # Always logout
-        try:
-            session.get(f"http://{ip}/web/entry/en/websys/webArch/logout.cgi", timeout=3)
-        except Exception:
-            pass
+        service.reset_web_session(printer)
 
     time.sleep(1.5)
 
@@ -260,13 +233,6 @@ def main():
         log(f"Failed to read address list: {e}")
     finally:
         service.reset_web_session(printer)
-
-    print("=" * 80)
-    if created_found and updated_found and deleted_verified:
-        log("🎉 ALL CRUD TESTS PASSED SUCCESSFULLY!")
-    else:
-        log("❌ SOME CRUD TEST STEPS FAILED!")
-    print("=" * 80)
 
     print("=" * 80)
     if created_found and updated_found and deleted_verified:
