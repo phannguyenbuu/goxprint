@@ -123,6 +123,13 @@ def main():
     from agent.modules.ricoh.address_book import default_ftp_root
     share_manager = ShareManager()
     ftp_name = f"ftp_{test_username}"
+    
+    # Delete the old FTP site configuration if it exists to force creation on the newly detected vacant port
+    try:
+        share_manager.delete_ftp_site(ftp_name)
+    except Exception:
+        pass
+        
     ftp_res = share_manager.create_ftp_site(
         site_name=ftp_name,
         local_path=default_ftp_root(ftp_name),
