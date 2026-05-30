@@ -19,6 +19,10 @@ Example:
 import sys
 import os
 import time
+import logging
+
+# Configure logging at INFO level to expose the agent's internal HTTP client logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # Append project root to sys.path to ensure absolute imports work correctly
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -130,29 +134,27 @@ def main():
         
     ftp_port_used = ftp_res.get("port") or ftp_port
     
-    # C. Perform WIM address creation by importing and calling test_add_user functions directly
-    log("Running proven wizard flow by importing test_add_user...")
-    from test_add_user import login_ricoh, add_user_wizard
+    # C. Perform WIM address creation using the unified service
+    log("Creating address entry via unified RicohService...")
+    ftp_host_info = service.resolve_ftp_host_ip(ip)
+    ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
+    created_folder = f"ftp://{ftp_host}:{ftp_port_used}/"
     
     try:
-        session, wim_token = login_ricoh(ip, user, pw)
-        if not session or not wim_token:
-            raise RuntimeError("Could not log in. Aborting wizard execution.")
-            
-        success, reg_no = add_user_wizard(session, ip, wim_token, test_email, ftp_port_used)
-        if not success:
-            raise RuntimeError("add_user_wizard failed to create or verify the entry.")
-            
+        create_res = service.create_address_user_wizard(
+            printer=printer,
+            name=test_username,
+            email=test_email,
+            folder=created_folder,
+            allow_auto_update=True
+        )
+        if not create_res.get("ok"):
+            raise RuntimeError(f"create_address_user_wizard failed: {create_res}")
+        reg_no = create_res.get("created_registration_no")
         log(f"[SUCCESS] Entry created with Reg No: {reg_no} on FTP Port: {ftp_port_used}")
     except Exception as e:
         log(f"Create entry failed: {e}")
         sys.exit(1)
-    finally:
-        try:
-            session.get(f"http://{ip}/web/entry/en/websys/webArch/logout.cgi", timeout=2)
-            session.close()
-        except Exception:
-            pass
 
     time.sleep(1.5)
 

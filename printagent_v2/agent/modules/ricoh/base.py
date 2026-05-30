@@ -319,20 +319,21 @@ class RicohServiceBase:
         response.raise_for_status()
         html = response.text
 
-        # If we hit a login page and we are NOT on a guest page, re-authenticate.
-        # Also check for "Unable to access authenticated control page" signals
-        is_login_page = any(m in html for m in ["authForm.cgi", "login.cgi", "Login User Name"])
-        if is_login_page:
-            if "/web/guest/" not in url or "Login User Name" in html:
-                LOGGER.info("[RicohHTTP] Session expired or auth screen encountered, re-authenticating IP %s...", printer.ip)
-                self._login(session, printer)
-                LOGGER.info("[RicohHTTP] Re-auth complete. Retrying GET %s...", target_url)
-                start_time = time.time()
-                response = session.get(url, timeout=15)
-                elapsed = time.time() - start_time
-                LOGGER.info("[RicohHTTP] Retry GET %s -> Status %d (%.2fs, length=%d)", target_url, response.status_code, elapsed, len(response.text))
-                response.raise_for_status()
-                html = response.text
+        # Check if we hit a login page or if our session expired/redirected to guest view
+        is_login_page = any(m in html for m in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+        is_admin_page = "/web/entry/" in url
+        has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries"])
+        
+        if is_login_page or (is_admin_page and not has_admin_content):
+            LOGGER.info("[RicohHTTP] Session expired, guest view, or auth screen encountered for admin URL %s, re-authenticating IP %s...", url, printer.ip)
+            self._login(session, printer)
+            LOGGER.info("[RicohHTTP] Re-auth complete. Retrying GET %s...", target_url)
+            start_time = time.time()
+            response = session.get(url, timeout=15)
+            elapsed = time.time() - start_time
+            LOGGER.info("[RicohHTTP] Retry GET %s -> Status %d (%.2fs, length=%d)", target_url, response.status_code, elapsed, len(response.text))
+            response.raise_for_status()
+            html = response.text
 
         return html
 
