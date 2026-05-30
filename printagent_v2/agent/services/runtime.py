@@ -187,15 +187,29 @@ def acquire_single_instance(name: str) -> tuple[SingleInstanceLock | None, bool]
 
 
 def startup_command_for_current_exe(mode: str = "web", host: str = "127.0.0.1", port: int = 9173) -> str:
-    target = Path(sys.executable if is_frozen() else sys.argv[0]).resolve()
-    if mode is None:
-        mode = "web"
-    safe_mode = str(mode).strip()
-    if safe_mode == "web":
-        return f'"{target}" --mode web --host {host} --port {int(port)}'
-    if safe_mode == "":
-        return f'"{target}" --mode ""'
-    return f'"{target}" --mode {safe_mode}'
+    if is_frozen():
+        target = Path(sys.executable).resolve()
+        safe_mode = str(mode).strip()
+        if safe_mode == "web":
+            return f'"{target}" --mode web --host {host} --port {int(port)}'
+        if safe_mode == "":
+            return f'"{target}" --mode ""'
+        return f'"{target}" --mode {safe_mode}'
+    else:
+        argv_target = Path(sys.argv[0]).resolve()
+        if argv_target.name == "main.py":
+            target = argv_target
+        else:
+            target = Path(__file__).resolve().parent.parent / "main.py"
+            if not target.exists():
+                target = argv_target
+                
+        safe_mode = str(mode).strip()
+        if safe_mode == "web":
+            return f'"{sys.executable}" "{target}" --mode web --host {host} --port {int(port)}'
+        if safe_mode == "":
+            return f'"{sys.executable}" "{target}" --mode ""'
+        return f'"{sys.executable}" "{target}" --mode {safe_mode}'
 
 
 def get_machine_agent_uid(preferred: str = "") -> str:

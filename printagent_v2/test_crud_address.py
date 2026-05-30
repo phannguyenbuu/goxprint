@@ -62,6 +62,12 @@ def print_entries(entries: list) -> None:
 
 
 def main():
+    # Safeguard: Exit immediately if worker-specific arguments are passed.
+    # This prevents any recursive background loop or startup hijacking.
+    if any(arg in sys.argv for arg in ["--mode", "--host", "--port"]):
+        print("[!] Safeguard: Exiting test_crud_address.py immediately because background mode arguments are present.")
+        sys.exit(0)
+
     ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.226"
     user = sys.argv[2] if len(sys.argv) > 2 else "admin"
     pw = sys.argv[3] if len(sys.argv) > 3 else ""
