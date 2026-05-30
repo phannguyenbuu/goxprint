@@ -272,6 +272,18 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 ids = resolved_ids
 
         # Construct delete form fields precisely like test_add_user.py to avoid triggers
+        # Re-fetch the list page to get a FRESH wimToken (the AJAX call above consumed the old one)
+        try:
+            fresh_resp = session.get(f"http://{printer.ip}{list_url}", timeout=15)
+            fresh_token = self._extract_wim_token(fresh_resp.text)
+            if not fresh_token:
+                fresh_token = self._extract_hidden_inputs(fresh_resp.text).get("wimToken", "")
+            if fresh_token:
+                token = fresh_token
+                LOGGER.info("[RicohAddressBook] Refreshed wimToken for delete POST: %s", token)
+        except Exception as e:
+            LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken, using original: %s", e)
+
         form = {
             "wimToken": token,
         }
