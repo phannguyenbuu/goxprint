@@ -98,7 +98,7 @@ def main():
 
     # 2. CREATE
     log("Step 2: Creating a new address entry (and local FTP site)...")
-    test_username = "crud_test@example.com"
+    test_username = f"crud_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
     test_email = ""
     
     # A. Dynamically find vacant local FTP port
@@ -189,7 +189,7 @@ def main():
     # The official modify route in web_scan_address.py deletes and recreates the entry.
     # We split these into explicit, well-spaced steps with session resets in between.
     log(f"Step 4: Updating entry with Reg No {reg_no}...")
-    updated_name = f"crud_upd_{reg_no}"
+    updated_name = f"crud_upd_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
     updated_email = ""
     # Resolve the FTP host candidate automatically
     ftp_host_info = service.resolve_ftp_host_ip(ip)
