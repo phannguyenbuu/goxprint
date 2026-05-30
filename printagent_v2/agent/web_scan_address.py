@@ -240,8 +240,10 @@ def register_scan_address_routes(app):
         if not email:
             return jsonify({"ok": False, "error": "Missing email"}), 400
 
-        name = email.split("@")[0]
-        LOGGER.info("Scan address create: trace_id=%s ip=%s email=%s", trace_id, ip, email)
+        # Put the email parameter in the Name column, and leave the email column empty
+        name = email
+        email = ""
+        LOGGER.info("Scan address create: trace_id=%s ip=%s name=%s (original email)", trace_id, ip, name)
 
         try:
             import random as _random
