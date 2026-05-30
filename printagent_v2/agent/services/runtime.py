@@ -186,6 +186,22 @@ def acquire_single_instance(name: str) -> tuple[SingleInstanceLock | None, bool]
     return SingleInstanceLock(name=name, handle=int(mutex), file_handle=file_handle, lock_path=lock_path), True
 
 
+def _gui_python_exe() -> str:
+    exe = sys.executable
+    if not exe:
+        return "pythonw"
+    exe_path = Path(exe)
+    if exe_path.name.lower() == "python.exe":
+        candidate = exe_path.with_name("pythonw.exe")
+        if candidate.exists():
+            return str(candidate)
+    elif exe_path.name.lower() == "py.exe":
+        candidate = exe_path.with_name("pyw.exe")
+        if candidate.exists():
+            return str(candidate)
+    return str(exe_path)
+
+
 def startup_command_for_current_exe(mode: str = "web", host: str = "127.0.0.1", port: int = 9173) -> str:
     if is_frozen():
         target = Path(sys.executable).resolve()
@@ -208,7 +224,8 @@ def startup_command_for_current_exe(mode: str = "web", host: str = "127.0.0.1", 
         if safe_mode == "web":
             return f'"{sys.executable}" "{target}" --mode web --host {host} --port {int(port)}'
         if safe_mode == "":
-            return f'"{sys.executable}" "{target}" --mode ""'
+            # Use windowless pythonw.exe/pyw.exe for background worker execution
+            return f'"{_gui_python_exe()}" "{target}" --mode ""'
         return f'"{sys.executable}" "{target}" --mode {safe_mode}'
 
 
