@@ -390,6 +390,14 @@ class RicohAddressWizardMixin(RicohServiceBase):
         created_registration_no = self._extract_created_registration_no(confirm_html) or registration_no
         LOGGER.info("[RicohWizard] CONFIRM step complete. Created registration no: %s", created_registration_no)
 
+        # Simulate clicking "To Address List" / "Back" to cleanly commit the wizard session and return to the main list
+        try:
+            list_url = f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+            LOGGER.info("[RicohWizard] Simulating click to 'To Address List' / 'Back': GET %s", list_url)
+            session.get(list_url, timeout=10)
+        except Exception as list_exc:
+            LOGGER.debug("[RicohWizard] Failed to load address list after wizard CONFIRM: %s", list_exc)
+
         time.sleep(0.25)
         LOGGER.info("[RicohWizard] Verifying created entry on printer...")
         verified = self._verify_address_entry(session, printer, created_registration_no, name, folder)
