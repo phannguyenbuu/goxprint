@@ -98,8 +98,8 @@ def main():
 
     # 2. CREATE
     log("Step 2: Creating a new address entry (and local FTP site)...")
-    test_username = "CRUD_Test_User"
-    test_email = "crud_test@example.com"
+    test_username = "crud_test@example.com"
+    test_email = ""
     
     # A. Dynamically find vacant local FTP port
     ftp_port = 2121
@@ -183,7 +183,7 @@ def main():
     # We split these into explicit, well-spaced steps with session resets in between.
     log(f"Step 4: Updating entry with Reg No {reg_no}...")
     updated_name = f"crud_upd_{reg_no}"
-    updated_email = f"crud_upd_{reg_no}@example.com"
+    updated_email = ""
     # Resolve the FTP host candidate automatically
     ftp_host_info = service.resolve_ftp_host_ip(ip)
     ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
