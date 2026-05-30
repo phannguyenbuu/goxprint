@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import socket
+import time
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -223,12 +224,15 @@ Get-NetIPAddress -AddressFamily IPv4 |
             raise ValueError("registration_numbers is empty")
         list_url = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
         delete_url = "/web/entry/en/address/adrsDeleteEntries.cgi"
-        html = self.authenticate_and_get(session, printer, list_url)
-        defaults = self._extract_hidden_inputs(html)
-        token = defaults.get("wimToken", "")
+        resp = session.get(f"http://{printer.ip}{list_url}", timeout=15)
+        resp.raise_for_status()
+        html = resp.text
+        token = self._extract_wim_token(html)
         if not token:
-            token = self._extract_wim_token(html)
-        defaults["wimToken"] = token
+            defaults = self._extract_hidden_inputs(html)
+            token = defaults.get("wimToken", "")
+        if not token:
+            raise RuntimeError("Could not retrieve wimToken for deletion")
 
         # Resolve entry_ids if not provided but registration_numbers are provided
         if regs and not ids:
@@ -252,9 +256,10 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 return digits[-5:].zfill(5) if digits else ""
                 
             for entry in ajax_entries + html_entries:
-                r_norm = norm(entry.registration_no)
-                if r_norm and entry.entry_id:
-                    reg_to_id[r_norm] = entry.entry_id
+                if getattr(entry, "registration_no", None):
+                    r_norm = norm(entry.registration_no)
+                    if r_norm and entry.entry_id:
+                        reg_to_id[r_norm] = entry.entry_id
                     
             resolved_ids = []
             for reg in regs:
@@ -266,28 +271,28 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.info("[RicohAddressBook] Resolved registration numbers %s to entry IDs: %s", regs, resolved_ids)
                 ids = resolved_ids
 
-        form: list[tuple[str, str]] = [(k, str(v)) for k, v in defaults.items()]
+        # Construct delete form fields precisely like test_add_user.py to avoid triggers
+        form = {
+            "wimToken": token,
+        }
         if ids:
             joined = ",".join(ids)
             if joined and not joined.endswith(","):
                 joined = f"{joined},"
-            form.append(("entryIndex", joined))
-            form.append(("entryIndexIn", joined))
-            for key in ("regiNoListIn", "selectedRegiNoIn", "deleteListIn", "deleteEntriesIn"):
-                form.append((key, joined))
-                for entry_id in ids:
-                    form.append((key, entry_id))
+            form["entryIndex"] = joined
+            form["entryIndexIn"] = joined
+            form["regiNoListIn"] = ",".join(ids)
+            form["selectedRegiNoIn"] = ",".join(ids)
+            form["deleteListIn"] = ",".join(ids)
         else:
             joined = ",".join(regs)
-            for key in (
-                "regiNoListIn", "registrationNoListIn", "entryNoListIn",
-                "selectedRegiNoIn", "selectedEntryNoIn", "deleteListIn",
-                "deleteEntriesIn", "entryIndex", "entryIndexIn"
-            ):
-                form.append((key, joined))
-                for reg in regs:
-                    form.append((key, reg))
-            form.append(("open", ""))
+            if joined and not joined.endswith(","):
+                joined = f"{joined},"
+            form["entryIndex"] = joined
+            form["entryIndexIn"] = joined
+            form["regiNoListIn"] = ",".join(regs)
+            form["selectedRegiNoIn"] = ",".join(regs)
+            form["deleteListIn"] = ",".join(regs)
 
         resp = session.post(
             f"http://{printer.ip}{delete_url}",
@@ -300,6 +305,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
         )
         resp.raise_for_status()
 
+        # Let the copier process the deletion
+        time.sleep(1.0)
+
         if verify:
             verify_entries = []
             try:
@@ -311,8 +319,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 
             if not verify_entries:
                 try:
-                    html_data = self.authenticate_and_get(session, printer, list_url)
-                    verify_entries = self.parse_address_list(html_data)
+                    verify_resp = session.get(f"http://{printer.ip}{list_url}", timeout=15)
+                    if verify_resp.status_code == 200:
+                        verify_entries = self.parse_address_list(verify_resp.text)
                 except Exception:
                     pass
 
@@ -320,7 +329,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries if getattr(e, "entry_id", "")}
                 failed = [eid for eid in ids if eid in remain]
             else:
-                remain = {str(e.registration_no or "").strip() for e in verify_entries if e.registration_no}
+                remain = {str(getattr(e, "registration_no", "") or "").strip() for e in verify_entries if getattr(e, "registration_no", "")}
                 failed = [reg for reg in regs if reg in remain]
             if failed:
                 label = "entry_id" if ids else "registration_no"
@@ -387,60 +396,48 @@ Get-NetIPAddress -AddressFamily IPv4 |
         return entries
 
     def get_address_list_ajax_with_client(self, session: requests.Session, printer: Printer, wim_token: str = "") -> str:
-        html_targets = [
-            "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL",
-            "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL",
-        ]
-        
+        base_url = f"http://{printer.ip}"
         adrs_wim_token = wim_token
-        
+
         # 1. Fetch list page to get token if not already provided
         if not adrs_wim_token:
-            for path in html_targets:
-                try:
-                    LOGGER.info("[RicohAddressBook] Fetching list page to get token: GET %s", path)
-                    html_data = self.authenticate_and_get(session, printer, path)
-                    if html_data.strip():
-                        adrs_wim_token = self._extract_hidden_inputs(html_data).get("wimToken", "")
-                        if not adrs_wim_token:
-                            adrs_wim_token = self._extract_wim_token(html_data)
-                        if adrs_wim_token:
-                            break
-                except Exception as e:
-                    LOGGER.debug("[RicohAddressBook] Failed to fetch list page %s for token: %s", path, e)
+            list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+            try:
+                LOGGER.info("[RicohAddressBook] Fetching list page to get token: GET %s", list_url)
+                resp = session.get(list_url, timeout=10)
+                if resp.status_code == 200 and resp.text.strip():
+                    adrs_wim_token = self._extract_wim_token(resp.text)
+                    if not adrs_wim_token:
+                        adrs_wim_token = self._extract_hidden_inputs(resp.text).get("wimToken", "")
+                    if adrs_wim_token:
+                        LOGGER.info("[RicohAddressBook] wimToken from list page: %s", adrs_wim_token)
+            except Exception as e:
+                LOGGER.debug("[RicohAddressBook] Failed to fetch list page for token: %s", e)
 
-        # 2. Attempt AJAX targets directly with getCountIn=1 & listCountIn=200/50
-        ajax_targets = [
-            "/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1",
-            "/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=50&getCountIn=1",
-            "/web/guest/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1",
-        ]
-        
-        LOGGER.info("[RicohAddressBook] Starting AJAX fetch: IP=%s (wimToken: %s)", printer.ip, adrs_wim_token or "<none>")
-        
-        last_raw = ""
-        for base_path in ajax_targets:
-            sub_paths = []
-            if adrs_wim_token:
-                sub_paths.append(f"{base_path}&wimToken={adrs_wim_token}")
+        if not adrs_wim_token:
+            LOGGER.warning("[RicohAddressBook] No wimToken available for AJAX fetch")
+            return ""
+
+        LOGGER.info("[RicohAddressBook] Starting AJAX fetch: IP=%s (wimToken: %s)", printer.ip, adrs_wim_token)
+
+        # 2. Fetch AJAX with direct session.get (matching test_list_address.py pattern)
+        ajax_url = f"{base_url}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={adrs_wim_token}"
+        try:
+            LOGGER.info("[RicohAddressBook] Fetching AJAX endpoint: GET %s", ajax_url)
+            ajax_resp = session.get(ajax_url, timeout=8)
+            LOGGER.info("[RicohAddressBook] AJAX response: status=%d, length=%d", ajax_resp.status_code, len(ajax_resp.text))
+            if ajax_resp.status_code == 200 and "[" in ajax_resp.text and "authForm" not in ajax_resp.text and "login" not in ajax_resp.text.lower():
+                entries = self.parse_ajax_address_list(ajax_resp.text)
+                if entries:
+                    LOGGER.info("[RicohAddressBook] Success! Retrieved and parsed %d entries from AJAX", len(entries))
+                    return ajax_resp.text
             else:
-                sub_paths.append(base_path)
-            
-            for sub_path in sub_paths:
-                try:
-                    LOGGER.info("[RicohAddressBook] Fetching AJAX endpoint: GET %s", sub_path)
-                    raw = self.authenticate_and_get(session, printer, sub_path)
-                    last_raw = raw
-                    if "[" in raw and "]" in raw and "login.cgi" not in raw:
-                        entries = self.parse_ajax_address_list(raw)
-                        if entries:
-                            LOGGER.info("[RicohAddressBook] Success! Retrieved and parsed %d entries from AJAX (%s)!", len(entries), sub_path)
-                            return raw
-                except Exception as exc:
-                    LOGGER.warning("[RicohAddressBook] Error fetching from AJAX endpoint %s: %s", sub_path, exc)
-                    
-        LOGGER.warning("[RicohAddressBook] Could not find a valid AJAX address list in targets. Returning last raw length: %d", len(last_raw))
-        return last_raw
+                LOGGER.warning("[RicohAddressBook] AJAX response looks invalid (possible login page or no array data)")
+        except Exception as exc:
+            LOGGER.warning("[RicohAddressBook] Error fetching AJAX endpoint: %s", exc)
+
+        LOGGER.warning("[RicohAddressBook] AJAX fetch returned no valid entries")
+        return ""
 
     @staticmethod
     def parse_javascript_array_fields(data: str) -> list[str]:
@@ -515,60 +512,73 @@ Get-NetIPAddress -AddressFamily IPv4 |
         return entries
 
     def process_address_list(self, printer: Printer, trace_id: str = "") -> dict[str, Any]:
-        import time
         LOGGER.info("[RicohAddressBook] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
         start_time = time.time()
         
         # 1. Create authenticated session
         LOGGER.info("[RicohAddressBook] Creating authenticated HTTP client...")
         session = self.create_http_client(printer, authenticated=True)
+        base_url = f"http://{printer.ip}"
         
-        # 2. Fetch HTML address list page once to establish session and get the wimToken
-        html_targets = [
-            "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL",
-            "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL",
-        ]
-        
+        # 2. Fetch HTML address list page to get wimToken (direct session.get, matching test_list_address.py)
+        list_url = f"{base_url}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
         html = ""
         wim_token = ""
-        for path in html_targets:
-            try:
-                LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", path)
-                html_data = self.authenticate_and_get(session, printer, path)
-                if html_data.strip():
-                    html = html_data
-                    wim_token = self._extract_hidden_inputs(html_data).get("wimToken", "")
-                    if not wim_token:
-                        wim_token = self._extract_wim_token(html_data)
-                    if wim_token:
-                        LOGGER.info("[RicohAddressBook] wimToken DETECTED: %s", wim_token)
-                        break
-            except Exception as e:
-                LOGGER.debug("[RicohAddressBook] Failed to fetch %s for token: %s", path, e)
-                
-        # 3. Attempt AJAX targets directly (highly optimized, fast)
         entries: list[AddressEntry] = []
-        ajax_raw = ""
-        try:
-            LOGGER.info("[RicohAddressBook] Attempting to fetch address book via AJAX...")
-            ajax_raw = self.get_address_list_ajax_with_client(session, printer, wim_token=wim_token)
-            if ajax_raw:
-                entries = self.parse_ajax_address_list(ajax_raw)
-                if entries:
-                    LOGGER.info("[RicohAddressBook] Success! Retrieved %d entries from AJAX", len(entries))
-                    
-                    # Merge summary header if we have the HTML page
-                    if html:
-                        try:
-                            html_entries = self.parse_address_list(html)
-                            summary_header = html_entries[0] if html_entries else None
-                            if summary_header and summary_header.type == "Summary":
-                                entries = [summary_header, *entries]
-                                LOGGER.info("[RicohAddressBook] Merged AJAX entries with HTML summary header")
-                        except Exception as parse_exc:
-                            LOGGER.debug("[RicohAddressBook] Failed to parse HTML summary header (non-critical): %s", parse_exc)
-        except Exception as ajax_exc:
-            LOGGER.warning("[RicohAddressBook] AJAX fetch failed, will try fallback: %s", ajax_exc)
+
+        for attempt in range(2):
+            if attempt > 0:
+                # Retry: reset session, re-login, re-fetch list page
+                LOGGER.info("[RicohAddressBook] AJAX failed on attempt %d, resetting session and retrying...", attempt)
+                try:
+                    self._reset_web_session(session, printer)
+                    session.close()
+                except Exception:
+                    pass
+                time.sleep(1.5)
+                session = self.create_http_client(printer, authenticated=True)
+
+            try:
+                LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", list_url)
+                resp = session.get(list_url, timeout=10)
+                html = resp.text
+                wim_token = self._extract_wim_token(html)
+                if not wim_token:
+                    wim_token = self._extract_hidden_inputs(html).get("wimToken", "")
+                if wim_token:
+                    LOGGER.info("[RicohAddressBook] wimToken DETECTED: %s", wim_token)
+            except Exception as e:
+                LOGGER.warning("[RicohAddressBook] Failed to fetch list page: %s", e)
+                continue
+
+            # 3. Fetch entries via AJAX (direct session.get, matching test_list_address.py)
+            if not wim_token:
+                continue
+            ajax_url = f"{base_url}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={wim_token}"
+            try:
+                LOGGER.info("[RicohAddressBook] Fetching entries via AJAX: GET %s", ajax_url)
+                ajax_resp = session.get(ajax_url, timeout=8)
+                LOGGER.info("[RicohAddressBook] AJAX response: status=%d, length=%d", ajax_resp.status_code, len(ajax_resp.text))
+                if ajax_resp.status_code == 200 and "[" in ajax_resp.text and "authForm" not in ajax_resp.text and "login" not in ajax_resp.text.lower():
+                    entries = self.parse_ajax_address_list(ajax_resp.text)
+                    if entries:
+                        LOGGER.info("[RicohAddressBook] Success! Retrieved %d entries from AJAX", len(entries))
+
+                        # Merge summary header if we have the HTML page
+                        if html:
+                            try:
+                                html_entries = self.parse_address_list(html)
+                                summary_header = html_entries[0] if html_entries else None
+                                if summary_header and summary_header.type == "Summary":
+                                    entries = [summary_header, *entries]
+                                    LOGGER.info("[RicohAddressBook] Merged AJAX entries with HTML summary header")
+                            except Exception as parse_exc:
+                                LOGGER.debug("[RicohAddressBook] Failed to parse HTML summary header (non-critical): %s", parse_exc)
+                        break  # Success, stop retrying
+                else:
+                    LOGGER.warning("[RicohAddressBook] AJAX response looks invalid (attempt %d, possible login page or no array data)", attempt + 1)
+            except Exception as ajax_exc:
+                LOGGER.warning("[RicohAddressBook] AJAX fetch failed (attempt %d): %s", attempt + 1, ajax_exc)
             
         # 4. Fallback to HTML table parsing if AJAX yields no entries
         if not entries and html:
@@ -578,6 +588,62 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.info("[RicohAddressBook] Fallback success! Retrieved %d entries from HTML", len(entries))
             except Exception as html_exc:
                 LOGGER.error("[RicohAddressBook] Fallback HTML parsing failed: %s", html_exc)
+
+        # 5. Fetch detailed user configuration for each entry (excluding Summary header) to get email/FTP path info
+        detail_url = "/web/entry/en/address/adrsGetUser.cgi"
+        list_url_ref = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+        LOGGER.info("[RicohAddressBook] Fetching detailed configuration for %d entries...", len(entries))
+        for entry in entries:
+            if getattr(entry, "type", "") == "Summary":
+                continue
+            reg_no = getattr(entry, "registration_no", "")
+            if not reg_no or reg_no == "-":
+                continue
+            try:
+                detail_resp = session.post(
+                    f"http://{printer.ip}{detail_url}",
+                    data={
+                        "wimToken": wim_token,
+                        "mode": "MODUSER",
+                        "outputSpecifyModeIn": "PROGRAMMED",
+                        "entryIndexIn": reg_no,
+                    },
+                    headers={
+                        "Referer": f"http://{printer.ip}{list_url_ref}",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    timeout=8
+                )
+                html_detail = detail_resp.text
+                
+                # Extract email
+                email_m = re.search(r'name=["\']?mailAddressIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
+                if not email_m:
+                    email_m = re.search(r'Email Address.*?<input[^>]*value=["\']([^"\']*)["\']', html_detail, re.I | re.S)
+                entry.email_address = email_m.group(1).strip() if email_m else ""
+
+                # Extract FTP folder info
+                server_m = re.search(r'name=["\']?folderServerNameIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
+                port_m = re.search(r'name=["\']?folderPortNoIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
+                path_m = re.search(r'name=["\']?folderPathNameIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
+
+                server = server_m.group(1).strip() if server_m else ""
+                port = port_m.group(1).strip() if port_m else ""
+                path = path_m.group(1).strip() if path_m else ""
+
+                if server:
+                    entry.folder = f"ftp://{server}:{port}{path}" if port else f"ftp://{server}{path}"
+                else:
+                    # Try SMB folder
+                    smb_m = re.search(r'name=["\']?folderPathNameIn["\']?[^>]*value=["\']([^"\']+)["\']', html_detail, re.I)
+                    entry.folder = smb_m.group(1).strip() if smb_m else ""
+
+                # Update wimToken for next request
+                new_token = self._extract_wim_token(html_detail)
+                if new_token:
+                    wim_token = new_token
+            except Exception as e:
+                LOGGER.warning("[RicohAddressBook] Detail fetch failed for reg_no %s: %s", reg_no, e)
                 
         elapsed = time.time() - start_time
         LOGGER.info("[RicohAddressBook] === FINISH process_address_list: IP: %s, Total Entries: %d, Elapsed: %.2fs ===", 

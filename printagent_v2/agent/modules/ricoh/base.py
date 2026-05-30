@@ -133,11 +133,16 @@ class RicohServiceBase:
                 session.cookies.set("cookieOnOffChecker", "on")
 
                 # On first attempt only, release any stale session on the copier
+                # Must logout from BOTH /entry/ and /guest/ paths, then clear cookies
+                # (matches proven logic in test_add_user.py login_ricoh)
                 if attempt == 0:
-                    try:
-                        session.get(urljoin(base_url, "/web/entry/en/websys/webArch/logout.cgi"), timeout=3)
-                    except Exception:
-                        pass
+                    for logout_path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
+                        try:
+                            session.get(urljoin(base_url, logout_path), timeout=3)
+                        except Exception:
+                            pass
+                    session.cookies.clear()
+                    session.cookies.set("cookieOnOffChecker", "on")
 
                 # GET login form to obtain wimToken (single pass)
                 form_urls = [
