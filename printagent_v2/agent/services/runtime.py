@@ -111,7 +111,14 @@ def user_temp_root(app_name: str = APP_RUNTIME_DIR_NAME) -> Path:
 def default_ftp_root(site_name: str = "") -> Path:
     root = user_temp_root() / "ftp"
     root.mkdir(parents=True, exist_ok=True)
-    safe_site_name = _safe_runtime_segment(site_name, "ftp_site")
+    
+    folder_name = site_name
+    if folder_name.lower().startswith("ftp_"):
+        folder_name = folder_name[4:]
+    elif folder_name.lower().startswith("ftp-"):
+        folder_name = folder_name[4:]
+        
+    safe_site_name = _safe_runtime_segment(folder_name, "site")
     return root / safe_site_name if site_name else root
 
 
