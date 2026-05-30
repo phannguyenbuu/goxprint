@@ -322,7 +322,15 @@ class RicohServiceBase:
         # Check if we hit a login page or if our session expired/redirected to guest view
         is_login_page = any(m in html for m in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
         is_admin_page = "/web/entry/" in url
-        has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries"])
+        
+        # AJAX/JSON responses (starting with '[' or '{') do not contain HTML admin body markers
+        cleaned_html = html.strip()
+        is_json_js = cleaned_html.startswith("[") or cleaned_html.startswith("{")
+        
+        if is_json_js:
+            has_admin_content = True
+        else:
+            has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries"])
         
         if is_login_page or (is_admin_page and not has_admin_content):
             LOGGER.info("[RicohHTTP] Session expired, guest view, or auth screen encountered for admin URL %s, re-authenticating IP %s...", url, printer.ip)
