@@ -230,6 +230,42 @@ Get-NetIPAddress -AddressFamily IPv4 |
             token = self._extract_wim_token(html)
         defaults["wimToken"] = token
 
+        # Resolve entry_ids if not provided but registration_numbers are provided
+        if regs and not ids:
+            ajax_entries = []
+            try:
+                ajax_raw = self.get_address_list_ajax_with_client(session, printer, wim_token=token)
+                if ajax_raw:
+                    ajax_entries = self.parse_ajax_address_list(ajax_raw)
+            except Exception:
+                pass
+            
+            html_entries = []
+            try:
+                html_entries = self.parse_address_list(html)
+            except Exception:
+                pass
+                
+            reg_to_id = {}
+            def norm(r):
+                digits = re.sub(r"\D", "", str(r or ""))
+                return digits[-5:].zfill(5) if digits else ""
+                
+            for entry in ajax_entries + html_entries:
+                r_norm = norm(entry.registration_no)
+                if r_norm and entry.entry_id:
+                    reg_to_id[r_norm] = entry.entry_id
+                    
+            resolved_ids = []
+            for reg in regs:
+                n_reg = norm(reg)
+                if n_reg in reg_to_id:
+                    resolved_ids.append(reg_to_id[n_reg])
+                    
+            if resolved_ids:
+                LOGGER.info("[RicohAddressBook] Resolved registration numbers %s to entry IDs: %s", regs, resolved_ids)
+                ids = resolved_ids
+
         form: list[tuple[str, str]] = [(k, str(v)) for k, v in defaults.items()]
         if ids:
             joined = ",".join(ids)
@@ -237,6 +273,10 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 joined = f"{joined},"
             form.append(("entryIndex", joined))
             form.append(("entryIndexIn", joined))
+            for key in ("regiNoListIn", "selectedRegiNoIn", "deleteListIn", "deleteEntriesIn"):
+                form.append((key, joined))
+                for entry_id in ids:
+                    form.append((key, entry_id))
         else:
             joined = ",".join(regs)
             for key in (
@@ -249,23 +289,38 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     form.append((key, reg))
             form.append(("open", ""))
 
-        multipart = [(k, (None, str(v))) for k, v in form]
         resp = session.post(
             f"http://{printer.ip}{delete_url}",
-            files=multipart,
-            headers={"Referer": f"http://{printer.ip}{list_url}"},
+            data=form,
+            headers={
+                "Referer": f"http://{printer.ip}{list_url}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
             timeout=15,
         )
         resp.raise_for_status()
 
         if verify:
-            verify_raw = self.get_address_list_ajax_with_client(session, printer)
-            verify_entries = self.parse_ajax_address_list(verify_raw)
+            verify_entries = []
+            try:
+                verify_raw = self.get_address_list_ajax_with_client(session, printer)
+                if verify_raw:
+                    verify_entries = self.parse_ajax_address_list(verify_raw)
+            except Exception:
+                pass
+                
+            if not verify_entries:
+                try:
+                    html_data = self.authenticate_and_get(session, printer, list_url)
+                    verify_entries = self.parse_address_list(html_data)
+                except Exception:
+                    pass
+
             if ids:
-                remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries}
-                failed = [reg for reg in ids if reg in remain]
+                remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries if getattr(e, "entry_id", "")}
+                failed = [eid for eid in ids if eid in remain]
             else:
-                remain = {str(e.registration_no or "").strip() for e in verify_entries}
+                remain = {str(e.registration_no or "").strip() for e in verify_entries if e.registration_no}
                 failed = [reg for reg in regs if reg in remain]
             if failed:
                 label = "entry_id" if ids else "registration_no"
@@ -309,6 +364,14 @@ Get-NetIPAddress -AddressFamily IPv4 |
             cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
             if len(cells) < 8:
                 continue
+            
+            entry_id = ""
+            id_match = re.search(r'name=["\']entryIndex["\'][^>]*value=["\'](\d+)["\']', row, re.I)
+            if not id_match:
+                id_match = re.search(r'value=["\'](\d+)["\'][^>]*name=["\']entryIndex["\']', row, re.I)
+            if id_match:
+                entry_id = id_match.group(1)
+
             entry = AddressEntry(
                 type=self._strip_html(cells[1]),
                 registration_no=self._strip_html(cells[2]),
@@ -317,6 +380,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 date_last_used=self._strip_html(cells[5]),
                 email_address=self._strip_html(cells[6]),
                 folder=self._strip_html(cells[7]),
+                entry_id=entry_id,
             )
             if entry.name and entry.name != "-" and entry.registration_no:
                 entries.append(entry)

@@ -190,7 +190,7 @@ def main():
     try:
         # A. Delete the old entry
         log("Deleting old entry for modification...")
-        service.delete_address_entries(printer, [reg_no], verify=False)
+        service.delete_address_entries(printer, [reg_no], verify=True)
         
         # B. Crucial web session reset after deletion
         log("Releasing web session lock after deletion...")

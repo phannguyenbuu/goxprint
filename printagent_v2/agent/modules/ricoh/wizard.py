@@ -67,30 +67,29 @@ class RicohAddressWizardMixin(RicohServiceBase):
             LOGGER.error("[RicohWizard] Step post failed for %s: %s", printer.ip, exc)
             raise
 
-    def _open_wizard(self, session: requests.Session, printer: Printer) -> str:
-        LOGGER.info("[RicohWizard] Starting _open_wizard for IP: %s", printer.ip)
+    def _open_wizard(self, session: requests.Session, printer: Printer, wim_token: str = "") -> str:
+        LOGGER.info("[RicohWizard] Starting _open_wizard for IP: %s (wimToken: %s)", printer.ip, wim_token)
         url = f"http://{printer.ip}{self._WIZARD_GET}"
         
         # Save wimsesid cookie before request
         saved_wimsesid = session.cookies.get("wimsesid", "")
         
+        post_data = {
+            "mode": "ADDUSER",
+            "outputSpecifyModeIn": "DEFAULT",
+        }
+        if wim_token:
+            post_data["wimToken"] = wim_token
+
         last_error: Exception | None = None
         attempts = [
             (
                 "POST_URLENCODED",
-                {
-                    "mode": "ADDUSER",
-                    "outputSpecifyModeIn": "DEFAULT",
-                }
+                post_data
             ),
             (
                 "POST",
-                self._multipart(
-                    [
-                        ("mode", "ADDUSER"),
-                        ("outputSpecifyModeIn", "DEFAULT"),
-                    ]
-                ),
+                self._multipart(list(post_data.items())),
             ),
             ("GET", None),
         ]
@@ -143,20 +142,25 @@ class RicohAddressWizardMixin(RicohServiceBase):
 
     def _fetch_wim_token(self, session: requests.Session, printer: Printer) -> tuple[str, str]:
         LOGGER.info("[RicohWizard] Fetching WIM token for IP: %s", printer.ip)
+        
+        # 1. Fetch address list page first to retrieve initial wimToken
+        wim_token = ""
+        try:
+            list_html = self.read_address_list_with_client(session, printer)
+            if list_html.strip():
+                wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+                LOGGER.info("[RicohWizard] Initial wimToken from address list page: %s", bool(wim_token))
+        except Exception as exc:
+            LOGGER.warning("[RicohWizard] Failed to get initial token from address list: %s", exc)
+
+        # 2. Try to open the wizard using the fetched token
         candidates: list[tuple[str, str]] = []
         try:
-            initial_html = self._open_wizard(session, printer)
+            initial_html = self._open_wizard(session, printer, wim_token=wim_token)
             if initial_html.strip():
                 candidates.append(("wizard", initial_html))
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("[RicohWizard] _open_wizard exception in _fetch_wim_token for %s: %s", printer.ip, exc)
-
-        try:
-            list_html = self.read_address_list_with_client(session, printer)
-            if list_html.strip():
-                candidates.append(("address_list", list_html))
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("[RicohWizard] read_address_list_with_client fallback exception in _fetch_wim_token for %s: %s", printer.ip, exc)
 
         LOGGER.info("[RicohWizard] Found %d candidate HTMLs for token extraction", len(candidates))
         for source, html in candidates:
@@ -164,6 +168,11 @@ class RicohAddressWizardMixin(RicohServiceBase):
             LOGGER.info("[RicohWizard] Extraction from source '%s': token found='%s'", source, bool(token))
             if token:
                 return token, source
+
+        if wim_token:
+            LOGGER.info("[RicohWizard] Falling back to initial wimToken from address list page")
+            return wim_token, "address_list"
+
         LOGGER.warning("[RicohWizard] No token could be extracted from candidates for %s", printer.ip)
         return "", ""
 
@@ -232,7 +241,13 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 continue
             seen_ids.add(key)
             if target_reg and reg == target_reg:
-                return True
+                if normalized_name:
+                    if self._clean_text(entry.name).lower() == normalized_name:
+                        return True
+                    else:
+                        LOGGER.warning("[RicohWizard] Reg no matches %s, but name '%s' does not match expected '%s'", reg, entry.name, name)
+                else:
+                    return True
             if normalized_name and self._clean_text(entry.name).lower() == normalized_name:
                 if not normalized_folder or normalized_folder == self._clean_text(entry.folder).lower():
                     return True
