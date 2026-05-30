@@ -242,15 +242,18 @@ class RicohAddressWizardMixin(RicohServiceBase):
             seen_ids.add(key)
             if target_reg and reg == target_reg:
                 if normalized_name:
-                    if self._clean_text(entry.name).lower() == normalized_name:
+                    actual_name = self._clean_text(entry.name).lower()
+                    if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
                         return True
                     else:
                         LOGGER.warning("[RicohWizard] Reg no matches %s, but name '%s' does not match expected '%s'", reg, entry.name, name)
                 else:
                     return True
-            if normalized_name and self._clean_text(entry.name).lower() == normalized_name:
-                if not normalized_folder or normalized_folder == self._clean_text(entry.folder).lower():
-                    return True
+            if normalized_name:
+                actual_name = self._clean_text(entry.name).lower()
+                if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
+                    if not normalized_folder or normalized_folder == self._clean_text(entry.folder).lower():
+                        return True
         return False
 
     def create_address_user_wizard(

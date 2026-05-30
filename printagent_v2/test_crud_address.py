@@ -241,7 +241,8 @@ def main():
         for item in entries:
             reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
             if reg_val == reg_no:
-                if item.get("name") == updated_name:
+                actual_name = str(item.get("name", ""))
+                if actual_name == updated_name or (len(actual_name) >= 20 and updated_name.startswith(actual_name)):
                     updated_found = True
                     log(f"[VERIFIED] Found updated entry in the list: {item}")
                     break
