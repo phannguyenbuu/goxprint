@@ -125,30 +125,59 @@ def login_ricoh(ip, user, password):
     return None, ""
 
 
-def parse_existing_entries(html_content):
-    """Helper to parse existing (reg_no, name) from the address book list HTML."""
-    import html as html_module
-    entries = []
-    tbody_match = re.search(r'<tbody id="ReportListArea_TableBody">(.*?)</tbody>', html_content, re.S)
-    tbody_html = tbody_match.group(1) if tbody_match else html_content
-    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tbody_html, re.S)
-    for row in rows:
-        if "reportListDummyRow" in row:
+def parse_javascript_array_fields(data):
+    fields = []
+    current = []
+    in_quotes = False
+    quote_char = ""
+    escaped = False
+    for char in data:
+        if escaped:
+            current.append(char)
+            escaped = False
             continue
-        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
-        if len(cells) >= 8:
-            def strip_html(val):
-                val = re.sub(r'<[^>]*>', '', val)
-                val = html_module.unescape(val)
-                val = re.sub(r'\s+', ' ', val)
-                return val.strip()
-            raw_reg = strip_html(cells[2])
-            name = strip_html(cells[3])
-            # Strip all non-digits to be extremely robust against entities/spaces
-            reg_no = re.sub(r'\D', '', raw_reg)
-            if reg_no:
-                entries.append((reg_no, name))
-    log(f"  [DEBUG] Parsed {len(entries)} existing address entries from copier.")
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+        if char in {"'", '"'}:
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+            elif char == quote_char:
+                in_quotes = False
+            else:
+                current.append(char)
+            continue
+        if char == "," and not in_quotes:
+            fields.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if current:
+        fields.append("".join(current).strip())
+    return fields
+
+
+def parse_ajax_entries(raw):
+    """Parses JSON-like JS array returned by WIM adrsListLoadEntry.cgi AJAX endpoint."""
+    entries = []
+    if not raw:
+        return entries
+    first = raw.find("[")
+    last = raw.rfind("]")
+    if first < 0 or last <= first:
+        return entries
+    data = raw[first : last + 1]
+    raw_entries = re.findall(r"\[([^\]]+)\]", data)
+    for raw_row in raw_entries:
+        fields = parse_javascript_array_fields(raw_row)
+        if len(fields) >= 8:
+            reg_no = fields[2].strip("'\"")
+            name = fields[3].strip("'\"")
+            reg_clean = re.sub(r'\D', '', reg_no)
+            if reg_clean:
+                entries.append((reg_clean, name))
     return entries
 
 
@@ -193,9 +222,25 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
         wim_token = page_token
         log(f"  Updated wimToken from list page: {wim_token}")
 
-    # 1. Parse existing entries to check for duplicate names and find vacant registration number
-    existing_entries = parse_existing_entries(resp.text)
-    
+    # Load the actual entries via WIM AJAX endpoint (just like the agent does) to bypass skeleton page caching issues
+    existing_entries = []
+    ajax_targets = [
+        "/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1",
+        "/web/guest/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1",
+    ]
+    for target in ajax_targets:
+        try:
+            url = f"{base_url}{target}&wimToken={wim_token}"
+            log(f"Loading actual entries via WIM AJAX: GET {target}...")
+            resp = session.get(url, timeout=10)
+            if resp.status_code == 200 and "[" in resp.text:
+                existing_entries = parse_ajax_entries(resp.text)
+                if existing_entries:
+                    log(f"  [DEBUG] Successfully parsed {len(existing_entries)} address book entries from WIM AJAX.")
+                    break
+        except Exception as e:
+            log(f"  WIM AJAX fetch failed for {target}: {e}")
+
     # Check for duplicate name
     for reg, name in existing_entries:
         if name.lower() == username.lower():
@@ -259,25 +304,36 @@ def add_user_wizard(session, ip, wim_token, email, ftp_port):
         return False, reg_no
 
     # Verify
-    time.sleep(0.5)
-    log("Verifying...")
-    resp = session.get(list_url, timeout=10)
-    log(f"  Address List GET Response (Verify): HTTP {resp.status_code}, Length: {len(resp.text)} bytes")
+    time.sleep(0.8)
+    log("Verifying creation via WIM AJAX...")
     
-    found = username.lower() in resp.text.lower() or reg_no in resp.text
-    if found:
-        log(f"SUCCESS! '{username}' ({email}) added as #{reg_no}")
-        return True, reg_no
-    else:
-        log(f"❌ VERIFICATION FAILED!")
-        log(f"  Could not find username '{username}' or reg_no '{reg_no}' in the address list HTML.")
+    verified_entries = []
+    for target in ajax_targets:
         try:
-            current_entries = parse_existing_entries(resp.text)
-            log(f"  Current Address Book Entries ({len(current_entries)}):")
-            for r, n in current_entries:
-                log(f"    - #{r}: {n}")
-        except Exception as parse_err:
-            log(f"  Failed to parse current address book: {parse_err}")
+            url = f"{base_url}{target}&wimToken={wim_token}"
+            resp = session.get(url, timeout=10)
+            if resp.status_code == 200 and "[" in resp.text:
+                verified_entries = parse_ajax_entries(resp.text)
+                if verified_entries:
+                    break
+        except Exception:
+            pass
+            
+    log(f"  Parsed {len(verified_entries)} entries for verification.")
+    
+    found = False
+    for r, n in verified_entries:
+        if r == reg_no or n.lower() == username.lower():
+            found = True
+            log(f"SUCCESS! '{username}' ({email}) added as #{reg_no}")
+            return True, reg_no
+            
+    if not found:
+        log(f"❌ VERIFICATION FAILED!")
+        log(f"  Could not find username '{username}' or reg_no '{reg_no}' in the parsed address book entries.")
+        log(f"  Current Address Book Entries ({len(verified_entries)}):")
+        for r, n in verified_entries:
+            log(f"    - #{r}: {n}")
         return False, reg_no
 
 
