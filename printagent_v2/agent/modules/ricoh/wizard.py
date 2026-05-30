@@ -51,11 +51,15 @@ class RicohAddressWizardMixin(RicohServiceBase):
         referer: str = "",
     ) -> str:
         url = f"http://{printer.ip}{self._WIZARD_SET}"
-        headers = {"Referer": referer or f"http://{printer.ip}{self._WIZARD_GET}"}
+        headers = {
+            "Referer": referer or f"http://{printer.ip}{self._WIZARD_GET}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+        }
         logged_items = [(k, "[FILTERED]" if "Password" in k or "pw" in k.lower() else v) for k, v in items]
-        LOGGER.info("[RicohWizard] Posting step to wizard: URL=%s, items=%s", url, logged_items)
+        LOGGER.info("[RicohWizard] Posting step to wizard (URL-encoded): URL=%s, items=%s", url, logged_items)
         try:
-            resp = session.post(url, files=self._multipart(items), headers=headers, timeout=20)
+            resp = session.post(url, data=items, headers=headers, timeout=20)
             resp.raise_for_status()
             LOGGER.info("[RicohWizard] Step post success. HTTP Status: %d, response length: %d", resp.status_code, len(resp.text or ""))
             return resp.text
@@ -66,8 +70,19 @@ class RicohAddressWizardMixin(RicohServiceBase):
     def _open_wizard(self, session: requests.Session, printer: Printer) -> str:
         LOGGER.info("[RicohWizard] Starting _open_wizard for IP: %s", printer.ip)
         url = f"http://{printer.ip}{self._WIZARD_GET}"
+        
+        # Save wimsesid cookie before request
+        saved_wimsesid = session.cookies.get("wimsesid", "")
+        
         last_error: Exception | None = None
         attempts = [
+            (
+                "POST_URLENCODED",
+                {
+                    "mode": "ADDUSER",
+                    "outputSpecifyModeIn": "DEFAULT",
+                }
+            ),
             (
                 "POST",
                 self._multipart(
@@ -76,13 +91,6 @@ class RicohAddressWizardMixin(RicohServiceBase):
                         ("outputSpecifyModeIn", "DEFAULT"),
                     ]
                 ),
-            ),
-            (
-                "POST_URLENCODED",
-                {
-                    "mode": "ADDUSER",
-                    "outputSpecifyModeIn": "DEFAULT",
-                }
             ),
             ("GET", None),
         ]
@@ -106,10 +114,20 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     resp = session.post(
                         url,
                         data=payload,
-                        headers={"Referer": f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"},
+                        headers={
+                            "Referer": f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL",
+                            "Content-Type": "application/x-www-form-urlencoded",
+                        },
                         timeout=20,
                     )
                 resp.raise_for_status()
+                
+                # Restore wimsesid if reset to "--" or empty
+                current = session.cookies.get("wimsesid", "")
+                if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
+                    session.cookies.set("wimsesid", saved_wimsesid)
+                    LOGGER.info("[RicohWizard] Restored wimsesid cookie to preserve session")
+                    
                 text_len = len(resp.text or "")
                 LOGGER.info("[RicohWizard] Wizard open response received. Length: %d, HTTP Status: %d", text_len, resp.status_code)
                 if resp.text.strip():
