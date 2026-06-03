@@ -253,8 +253,9 @@ class TrayController:
             from agent.config import AppConfig
             config = AppConfig.load()
 
+            version_text = f"Version (v{self.app_version})" if self.app_version else "Version"
             user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show")
-            user32.AppendMenuW(menu, MF_STRING, ID_VERSION, "Version")
+            user32.AppendMenuW(menu, MF_STRING, ID_VERSION, version_text)
             user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
 
             # Polling Settings
