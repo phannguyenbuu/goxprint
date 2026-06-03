@@ -19,7 +19,12 @@ hiddenimports = [
     'urllib.request',
     'urllib.parse',
     'uuid',
-    'unicodedata'
+    'unicodedata',
+    'tkinter',
+    'tkinter.ttk',
+    'tkinter.messagebox',
+    'tkinter.filedialog',
+    'tkinter.simpledialog'
 ]
 
 a = Analysis(
@@ -50,7 +55,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

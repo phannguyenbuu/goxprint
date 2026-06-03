@@ -99,6 +99,7 @@ class PollingBridge:
         self._is_master = False
         self._emails = []
         self._last_discovered_printers = []
+        self._printer_online_states: dict[str, bool] = {}
         self._load_scan_upload_state()
         self._recent_commands = []
         self._recent_commands_lock = threading.Lock()
@@ -2493,7 +2494,9 @@ if ($node) {{ $node }}
                         ack.get("skipped_counter", "?"),
                         ack.get("skipped_status", "?"),
                     )
+                    self._printer_online_states[printer.ip] = True
                 except Exception as exc:  # noqa: BLE001
+                    self._printer_online_states[printer.ip] = False
                     with cycle_lock:
                         self._last_cycle_failed += 1
                         self._last_error = str(exc)
@@ -2555,6 +2558,31 @@ if ($node) {{ $node }}
             if printers:
                 with ThreadPoolExecutor(max_workers=min(16, len(printers))) as executor:
                     executor.map(_process_single_printer, printers)
+            
+            # Save printer online states to local file for GUI
+            try:
+                status_list = []
+                for printer in printers:
+                    ip = str(printer.ip or "").strip()
+                    if not ip:
+                        continue
+                    is_online = self._printer_online_states.get(ip, False)
+                    status_list.append({
+                        "name": printer.name,
+                        "ip": printer.ip,
+                        "mac_address": printer.mac_address,
+                        "printer_type": printer.printer_type,
+                        "status": "online" if is_online else "offline",
+                        "is_online": is_online
+                    })
+                
+                status_file = Path("storage/data/printers_status.json")
+                status_file.parent.mkdir(parents=True, exist_ok=True)
+                with status_file.open("w", encoding="utf-8") as f:
+                    json.dump(status_list, f, indent=2, ensure_ascii=False)
+            except Exception as write_err:
+                LOGGER.warning("Failed to write printers_status.json: %s", write_err)
+
             LOGGER.info(
                 "Polling cycle done: total=%s ricoh=%s sent=%s failed=%s",
                 self._last_cycle_total_printers,

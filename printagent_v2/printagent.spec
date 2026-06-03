@@ -5,6 +5,7 @@ hiddenimports = ['agent.services.tray']
 hiddenimports += collect_submodules('agent.modules')
 hiddenimports += collect_submodules('agent.services')
 hiddenimports += collect_submodules('agent.utils')
+hiddenimports += ['tkinter', 'tkinter.ttk', 'tkinter.messagebox', 'tkinter.filedialog', 'tkinter.simpledialog']
 
 
 a = Analysis(

@@ -148,12 +148,15 @@ class TrayController:
             LOGGER.warning("Failed to clear update notice: %s", exc)
 
     def _show(self) -> None:
-        target = self.url.strip()
-        if not target:
-            LOGGER.warning("Tray show requested but URL is empty")
-            return
-        LOGGER.info("Tray show requested: %s", target)
-        webbrowser.open_new_tab(target)
+        LOGGER.info("Tray show requested (opening GUI window)")
+        try:
+            from agent.services.gui import show_gui_window
+            show_gui_window(self.app_version)
+        except Exception as exc:
+            LOGGER.exception("Failed to launch GUI: %s", exc)
+            target = self.url.strip()
+            if target:
+                webbrowser.open_new_tab(target)
 
     def _close(self) -> None:
         if self._closed:
