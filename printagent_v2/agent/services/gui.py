@@ -1209,11 +1209,36 @@ class PrintAgentGui:
                 from agent.modules.ricoh.service import RicohService
                 api_client = APIClient(self.config)
                 ricoh_service = RicohService(api_client, config=self.config)
+                setup_res = ricoh_service.setup_scan_destination(
+                    printer=None,
+                    username=username
+                )
+                
+                ftp_upload_url = ""
+                ftp_user = ""
+                ftp_password = ""
+                if setup_res.get("ok"):
+                    ftp_upload_url = setup_res.get("ftp_upload_url", "")
+                    ftp_info = setup_res.get("ftp", {})
+                    ftp_user = ftp_info.get("ftp_user", "")
+                    ftp_password = ftp_info.get("ftp_password", "")
+                
+                fields = {}
+                if ftp_user:
+                    fields["folderAuthUserNameIn"] = ftp_user
+                    fields["folderAuthUserName"] = ftp_user
+                if ftp_password:
+                    fields["folderPasswordIn"] = ftp_password
+                    fields["wk_folderPasswordIn"] = ftp_password
+                    fields["folderPasswordConfirmIn"] = ftp_password
+                    fields["wk_folderPasswordConfirmIn"] = ftp_password
+
                 res = ricoh_service.create_address_user_wizard(
                     printer=printer,
                     name=name,
                     email=email,
-                    folder=""
+                    folder=ftp_upload_url,
+                    fields=fields
                 )
             except Exception as exc:
                 LOGGER.exception("Failed to add scan email destination in thread")
