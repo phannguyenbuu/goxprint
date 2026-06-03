@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "1.3.88"
+DEFAULT_APP_VERSION = "1.3.89"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -378,7 +378,7 @@ class AutoUpdater:
                 "    )",
                 ")",
                 "rem Launch the new agent completely detached in the background",
-                f'start "" {relaunch_command}',
+                f'start /B "" {relaunch_command}',
                 "rem Self delete this batch script cleanly",
                 'del "%~f0"',
             ]
