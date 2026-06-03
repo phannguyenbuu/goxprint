@@ -333,61 +333,69 @@ class RicohAddressWizardMixin(RicohServiceBase):
         LOGGER.info("[RicohWizard] Submitting BASE step...")
         base_html = self._post_wizard_step(session, printer, base_items, referer="")
         wim_token = self._extract_wim_token(base_html) or wim_token
+        steps_submitted = ["BASE"]
 
-        mail_items: list[tuple[str, str]] = [
-            ("mode", "ADDUSER"),
-            ("step", "MAIL"),
-            ("wimToken", wim_token),
-            ("mailAddressIn", self._clean_text(email)),
-        ]
-        LOGGER.info("[RicohWizard] Submitting MAIL step...")
-        mail_html = self._post_wizard_step(session, printer, mail_items)
-        wim_token = self._extract_wim_token(mail_html) or wim_token
+        email_clean = self._clean_text(email)
+        if email_clean:
+            mail_items: list[tuple[str, str]] = [
+                ("mode", "ADDUSER"),
+                ("step", "MAIL"),
+                ("wimToken", wim_token),
+                ("mailAddressIn", email_clean),
+            ]
+            LOGGER.info("[RicohWizard] Submitting MAIL step...")
+            mail_html = self._post_wizard_step(session, printer, mail_items)
+            wim_token = self._extract_wim_token(mail_html) or wim_token
+            steps_submitted.append("MAIL")
 
-        folder_server_name, folder_port, folder_path = self._parse_folder_destination(folder)
-        folder_auth_user = self._field_text(fields, "folderAuthUserNameIn", "folderAuthUserName", default="")
-        folder_password = self._field_text(
-            fields,
-            "folderPasswordIn",
-            "wk_folderPasswordIn",
-            "folderPassword",
-            default="",
-        )
-        if not folder_password:
+        folder_clean = self._clean_text(folder)
+        if folder_clean:
+            folder_server_name, folder_port, folder_path = self._parse_folder_destination(folder_clean)
+            folder_auth_user = self._field_text(fields, "folderAuthUserNameIn", "folderAuthUserName", default="")
             folder_password = self._field_text(
                 fields,
-                "wk_folderPasswordConfirmIn",
-                "folderPasswordConfirmIn",
-                "folderPasswordConfirm",
+                "folderPasswordIn",
+                "wk_folderPasswordIn",
+                "folderPassword",
                 default="",
             )
+            if not folder_password:
+                folder_password = self._field_text(
+                    fields,
+                    "wk_folderPasswordConfirmIn",
+                    "folderPasswordConfirmIn",
+                    "folderPasswordConfirm",
+                    default="",
+                )
 
-        folder_items: list[tuple[str, str]] = [
-            ("mode", "ADDUSER"),
-            ("step", "FOLDER"),
+            folder_items: list[tuple[str, str]] = [
+                ("mode", "ADDUSER"),
+                ("step", "FOLDER"),
+                ("wimToken", wim_token),
+                ("folderProtocolIn", "FTP_O"),
+                ("folderPortNoIn", str(folder_port or 21)),
+                ("folderServerNameIn", folder_server_name),
+                ("folderPathNameIn", folder_path),
+                ("folderAuthUserNameIn", folder_auth_user),
+                ("wk_folderPasswordIn", folder_password),
+                ("folderPasswordIn", folder_password),
+                ("wk_folderPasswordConfirmIn", folder_password),
+                ("folderPasswordConfirmIn", folder_password),
+            ]
+            LOGGER.info("[RicohWizard] Submitting FOLDER step...")
+            folder_html = self._post_wizard_step(session, printer, folder_items)
+            wim_token = self._extract_wim_token(folder_html) or wim_token
+            steps_submitted.append("FOLDER")
+
+        confirm_items: list[tuple[str, str]] = [
             ("wimToken", wim_token),
-            ("folderProtocolIn", "FTP_O"),
-            ("folderPortNoIn", str(folder_port or 21)),
-            ("folderServerNameIn", folder_server_name),
-            ("folderPathNameIn", folder_path),
-            ("folderAuthUserNameIn", folder_auth_user),
-            ("wk_folderPasswordIn", folder_password),
-            ("folderPasswordIn", folder_password),
-            ("wk_folderPasswordConfirmIn", folder_password),
-            ("folderPasswordConfirmIn", folder_password),
         ]
-        LOGGER.info("[RicohWizard] Submitting FOLDER step...")
-        folder_html = self._post_wizard_step(session, printer, folder_items)
-        wim_token = self._extract_wim_token(folder_html) or wim_token
-
-        confirm_items = [
-            ("wimToken", wim_token),
-            ("stepListIn", "BASE"),
-            ("stepListIn", "MAIL"),
-            ("stepListIn", "FOLDER"),
+        for step in steps_submitted:
+            confirm_items.append(("stepListIn", step))
+        confirm_items.extend([
             ("mode", "ADDUSER"),
             ("step", "CONFIRM"),
-        ]
+        ])
         LOGGER.info("[RicohWizard] Submitting CONFIRM step...")
         confirm_html = self._post_wizard_step(session, printer, confirm_items)
         created_registration_no = self._extract_created_registration_no(confirm_html) or registration_no
