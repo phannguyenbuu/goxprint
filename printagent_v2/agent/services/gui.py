@@ -968,7 +968,15 @@ class PrintAgentGui:
                     err_msg = str(exc)
                 finally:
                     self.root.after(0, progress.destroy)
-                    self.root.after(10, self.refresh_printers)
+                    def refresh_single():
+                        try:
+                            from agent.modules.ricoh.service import RicohService
+                            api_client = APIClient(self.config)
+                            ricoh_service = RicohService(api_client, config=self.config)
+                            self.fetch_single_address_book(printer_node_id, printer, ricoh_service)
+                        except Exception:
+                            pass
+                    threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
                         self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
                     elif res and res.get("ok"):
@@ -1048,7 +1056,15 @@ class PrintAgentGui:
                     err_msg = str(exc)
                 finally:
                     self.root.after(0, progress.destroy)
-                    self.root.after(10, self.refresh_printers)
+                    def refresh_single():
+                        try:
+                            from agent.modules.ricoh.service import RicohService
+                            api_client = APIClient(self.config)
+                            ricoh_service = RicohService(api_client, config=self.config)
+                            self.fetch_single_address_book(parent_id, printer, ricoh_service)
+                        except Exception:
+                            pass
+                    threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
                         self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
                     elif res and res.get("ok"):
@@ -1103,7 +1119,15 @@ class PrintAgentGui:
                     err_msg = str(exc)
                 finally:
                     self.root.after(0, progress.destroy)
-                    self.root.after(10, self.refresh_printers)
+                    def refresh_single():
+                        try:
+                            from agent.modules.ricoh.service import RicohService
+                            api_client = APIClient(self.config)
+                            ricoh_service = RicohService(api_client, config=self.config)
+                            self.fetch_single_address_book(parent_id, printer, ricoh_service)
+                        except Exception:
+                            pass
+                    threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
                         self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
                     elif res and res.get("ok"):
@@ -1196,7 +1220,15 @@ class PrintAgentGui:
                 err_msg = str(exc)
             finally:
                 self.root.after(0, progress.destroy)
-                self.root.after(10, self.refresh_printers)
+                def refresh_single():
+                    try:
+                        from agent.modules.ricoh.service import RicohService
+                        api_client = APIClient(self.config)
+                        ricoh_service = RicohService(api_client, config=self.config)
+                        self.fetch_single_address_book(selected, printer, ricoh_service)
+                    except Exception:
+                        pass
+                threading.Thread(target=refresh_single, daemon=True).start()
                 if err_msg:
                     self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
                 elif res and res.get("ok"):
