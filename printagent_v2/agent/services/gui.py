@@ -1241,8 +1241,8 @@ class PrintAgentGui:
 
                 res = ricoh_service.create_address_user_wizard(
                     printer=printer,
-                    name=name,
-                    email=email,
+                    name=email, # Set name to the full email address
+                    email="", # Pass empty string for email to skip MAIL wizard step
                     folder=ftp_upload_url,
                     fields=fields,
                     session=session
