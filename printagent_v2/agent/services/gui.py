@@ -520,7 +520,7 @@ class PrintAgentGui:
                 else:
                     messagebox.showerror("Error", f"Failed to create FTP site: {res.get('error', 'Unknown error')}")
             except Exception as exc:
-                messagebox.showerror("Error", f"An unexpected error occurred: {exc}")
+                messagebox.showerror("Error", str(exc))
             finally:
                 self.refresh_ftp_list()
                 
@@ -556,7 +556,7 @@ class PrintAgentGui:
                 else:
                     messagebox.showerror("Error", f"Failed to update FTP site: {res.get('error', 'Unknown error')}")
             except Exception as exc:
-                messagebox.showerror("Error", f"An unexpected error occurred: {exc}")
+                messagebox.showerror("Error", str(exc))
             finally:
                 self.refresh_ftp_list()
                 
@@ -581,7 +581,7 @@ class PrintAgentGui:
                 else:
                     messagebox.showerror("Error", f"Failed to delete FTP site: {res.get('error', 'Unknown error')}")
             except Exception as exc:
-                messagebox.showerror("Error", f"An unexpected error occurred: {exc}")
+                messagebox.showerror("Error", str(exc))
             finally:
                 self.refresh_ftp_list()
  
@@ -978,7 +978,7 @@ class PrintAgentGui:
                             pass
                     threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
-                        self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
+                        self.root.after(50, lambda: messagebox.showerror("Error", err_msg))
                     elif res and res.get("ok"):
                         self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully created destination '{dlg.result['name']}'!"))
                     else:
@@ -1066,7 +1066,7 @@ class PrintAgentGui:
                             pass
                     threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
-                        self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
+                        self.root.after(50, lambda: messagebox.showerror("Error", err_msg))
                     elif res and res.get("ok"):
                         self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully updated destination to '{dlg.result['name']}'!"))
                     else:
@@ -1129,7 +1129,7 @@ class PrintAgentGui:
                             pass
                     threading.Thread(target=refresh_single, daemon=True).start()
                     if err_msg:
-                        self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
+                        self.root.after(50, lambda: messagebox.showerror("Error", err_msg))
                     elif res and res.get("ok"):
                         self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully deleted destination '{item_text}'!"))
                     else:
@@ -1268,7 +1268,7 @@ class PrintAgentGui:
                         pass
                 threading.Thread(target=refresh_single, daemon=True).start()
                 if err_msg:
-                    self.root.after(50, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {err_msg}"))
+                    self.root.after(50, lambda: messagebox.showerror("Error", err_msg))
                 elif res and res.get("ok"):
                     self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully created email destination for '{email}'!"))
                 else:
