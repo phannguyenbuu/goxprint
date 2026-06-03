@@ -100,6 +100,8 @@ class PollingBridge:
         self._emails = []
         self._last_discovered_printers = []
         self._load_scan_upload_state()
+        self._recent_commands = []
+        self._recent_commands_lock = threading.Lock()
 
     @staticmethod
     def _printer_type(value: str) -> str:
@@ -517,12 +519,20 @@ Get-NetNeighbor -AddressFamily IPv4 |
         return mapping
 
     def interval_seconds(self) -> int:
-        raw = self._config.get_string("polling.interval_seconds", "1").strip()
+        raw = self._config.get_string("polling.device_interval_seconds", self._config.get_string("polling.interval_seconds", "1")).strip()
         try:
             value = int(raw)
             return max(1, value)
         except Exception:  # noqa: BLE001
             return 1
+
+    def control_interval_seconds(self) -> float:
+        raw = self._config.get_string("polling.control_interval_seconds", "1").strip()
+        try:
+            value = float(raw)
+            return max(0.1, value)
+        except Exception:
+            return 1.0
 
     def scan_enabled(self) -> bool:
         return self._config.get_bool("polling.scan_enabled", True)
@@ -542,30 +552,28 @@ Get-NetNeighbor -AddressFamily IPv4 |
         return self._config.get_bool("polling.scan_recursive", True)
 
     def start(self) -> tuple[bool, str]:
-        if not self._config.get_bool("polling.enabled", False):
-            LOGGER.info("Polling bridge disabled by config polling.enabled=false")
-            return False, "Polling disabled"
         if not self.is_configured():
             issues = ", ".join(self._config_issues()) or "unknown"
             LOGGER.warning("Polling bridge not configured: %s", issues)
             return False, f"Polling not configured ({issues})"
-        if self._thread and self._thread.is_alive():
-            LOGGER.info("Polling bridge already running")
+
+        if self._thread and self._thread.is_alive() and self._control_thread and self._control_thread.is_alive():
+            LOGGER.info("Polling bridge is already running")
             return True, "Polling already running"
+
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._worker, daemon=True, name="polling-bridge")
-        self._thread.start()
-        self._control_thread = threading.Thread(target=self._control_loop, daemon=True, name="polling-control")
-        self._control_thread.start()
+        
+        if not self._thread or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._worker, daemon=True, name="polling-bridge")
+            self._thread.start()
+            LOGGER.info("Device polling thread initialized")
+            
+        if not self._control_thread or not self._control_thread.is_alive():
+            self._control_thread = threading.Thread(target=self._control_loop, daemon=True, name="polling-control")
+            self._control_thread.start()
+            LOGGER.info("Control polling thread initialized")
+
         self._last_started_at = self._now_iso()
-        LOGGER.info(
-            "Polling bridge started: url=%s lead=%s interval=%ss",
-            self._config.get_string("polling.url").strip(),
-            self._config.get_string("polling.lead").strip(),
-            self.interval_seconds(),
-        )
-        if self.scan_enabled():
-            LOGGER.info("Scan uploads are merged into polling cycle: interval=%ss dirs=%s", self.scan_interval_seconds(), ",".join(self._scan_dirs()))
         return True, "Polling started"
 
     def stop(self) -> None:
@@ -584,8 +592,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
         LOGGER.info("Polling bridge stop requested")
 
     def trigger_once(self) -> tuple[bool, str]:
-        if not self._config.get_bool("polling.enabled", False):
-            return False, "Polling disabled"
+        if not self._config.get_bool("polling.enabled", False) or not self._config.get_bool("polling.device_enabled", True):
+            return False, "Device polling is disabled"
         if not self.is_configured():
             issues = ", ".join(self._config_issues()) or "unknown"
             return False, f"Polling not configured ({issues})"
@@ -599,12 +607,19 @@ Get-NetNeighbor -AddressFamily IPv4 |
 
     def status(self) -> dict[str, object]:
         issues = self._config_issues()
+        device_running = bool(self._thread and self._thread.is_alive())
+        control_running = bool(self._control_thread and self._control_thread.is_alive())
         return {
             "configured": self.is_configured(),
             "config_issues": issues,
             "enabled": self._config.get_bool("polling.enabled", False),
-            "running": bool(self._thread and self._thread.is_alive()),
+            "device_enabled": self._config.get_bool("polling.device_enabled", True),
+            "control_enabled": self._config.get_bool("polling.control_enabled", True),
+            "device_running": device_running,
+            "control_running": control_running,
+            "running": device_running or control_running,
             "interval_seconds": self.interval_seconds(),
+            "control_interval_seconds": self.control_interval_seconds(),
             "url": self._config.get_string("polling.url"),
             "lead": self._config.get_string("polling.lead"),
             "last_started_at": self._last_started_at,
@@ -623,7 +638,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
             "last_ftp_control_apply_error": getattr(self, "_last_ftp_control_apply_error", ""),
             "resolved_lan_uid": getattr(self, "_resolved_lan_uid", ""),
             "scan_enabled": self.scan_enabled(),
-            "scan_running": bool(self._thread and self._thread.is_alive()) if self.scan_enabled() else False,
+            "scan_running": device_running if self.scan_enabled() else False,
             "scan_interval_seconds": self.scan_interval_seconds(),
             "scan_dirs": self._scan_dirs(),
             "scan_last_cycle_at": self._scan_last_cycle_at,
@@ -642,6 +657,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
             "release_last_check_at": self._release_last_check_at,
             "release_last_error": self._release_last_error,
             "release_status": self._updater.status() if self._updater is not None else {},
+            "recent_commands": getattr(self, "_recent_commands", []),
         }
 
     def _load_printers(self) -> list[Printer]:
@@ -1025,7 +1041,7 @@ if ($node) {{ $node }}
         return f"{base}/api/polling/scan-upload"
 
     def _check_for_agent_update(self, lead: str, lan_uid: str, agent_uid: str, hostname: str, local_ip: str) -> bool:
-        if self._updater is None or not self._updater.should_check():
+        if self._updater is None or not self._config.get_bool("modules.updater.enabled", True) or not self._updater.should_check():
             return False
         base_url = self._polling_base_url()
         token = self._config.get_string("polling.token").strip()
@@ -1249,6 +1265,8 @@ if ($node) {{ $node }}
         return owned
 
     def _reconcile_scan_address_ftp(self, is_master: bool, emails: list[dict]) -> None:
+        if not self._config.get_bool("modules.ftp.enabled", True):
+            return
         share_manager = getattr(self._ricoh_service, "share_manager", None)
         if share_manager is None:
             LOGGER.warning("share_manager not available in ricoh_service; skipping FTP reconciliation")
@@ -1611,6 +1629,9 @@ if ($node) {{ $node }}
         return matched, warning
 
     def _apply_ftp_command(self, command: FtpControlCommand) -> None:
+        if not self._config.get_bool("modules.ftp.enabled", True):
+            LOGGER.info("FTP module is disabled; ignoring FTP command")
+            return
         command_id = int(command.id or 0)
         if command_id <= 0:
             return
@@ -1674,12 +1695,24 @@ if ($node) {{ $node }}
         self._applied_ftp_controls[site_name or str(command_id)] = True
         self._post_ftp_control_result(command_id=command_id, ok=True, error="", warning=warning)
 
+    def _update_recent_command_status(self, command_id: int, status: str, error: str = "") -> None:
+        if command_id <= 0:
+            return
+        with self._recent_commands_lock:
+            for c in self._recent_commands:
+                if c["id"] == command_id:
+                    c["status"] = status
+                    if error:
+                        c["error"] = error
+                    break
+
     def _apply_command(self, printer: Printer, command: dict[str, object]) -> None:
         command_id = int(command.get("id", 0) or 0)
         desired_enabled = bool(command.get("desired_enabled", True))
         command_type = str(command.get("command_type", "enable_disable")).strip().lower()
         if command_id <= 0:
             return
+        self._update_recent_command_status(command_id, "processing")
         auth_user = str(command.get("auth_user", "") or "").strip()
         auth_password = str(command.get("auth_password", "") or "").strip()
         if auth_user:
@@ -1702,9 +1735,11 @@ if ($node) {{ $node }}
                     driver_url=driver_url,
                 )
                 self._post_control_result(command_id=command_id, ok=True, error="")
+                self._update_recent_command_status(command_id, "success")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("Failed to install driver for printer %s: %s", printer.ip, exc)
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                self._update_recent_command_status(command_id, "failed", str(exc))
             return
 
         if command_type == "fetch_address_book":
@@ -1774,18 +1809,22 @@ if ($node) {{ $node }}
                 LOGGER.info("[PollingBridge] process_address_list returned %d items", len(result.get("address_list", []) if isinstance(result, dict) else []))
                 LOGGER.info("[PollingBridge] Posting control result back to server for command ID: %s", command_id)
                 self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=result)
+                self._update_recent_command_status(command_id, "success")
                 LOGGER.info("[PollingBridge] === FINISH fetch_address_book command: ID=%s Success ===", command_id)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("[PollingBridge] Failed to fetch address book for printer %s: %s", printer.ip, exc, exc_info=True)
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                self._update_recent_command_status(command_id, "failed", str(exc))
                 raise
             return
 
         try:
             self._apply_machine_control(printer, desired_enabled)
             self._post_control_result(command_id=command_id, ok=True, error="")
+            self._update_recent_command_status(command_id, "success")
         except Exception as exc:  # noqa: BLE001
             self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+            self._update_recent_command_status(command_id, "failed", str(exc))
             raise
 
     def _handle_install_driver(self, printer_ip: str, brand: str, model: str, driver_name: str, driver_url: str) -> None:
@@ -2221,9 +2260,17 @@ if ($node) {{ $node }}
         }
 
     def _control_loop(self) -> None:
-        interval = 1.0  # Poll every 1 second for commands
         LOGGER.info("Polling control worker loop started")
         while not self._stop_event.is_set():
+            try:
+                self._config.reload()
+            except Exception:
+                pass
+
+            if not self._config.get_bool("polling.enabled", False) or not self._config.get_bool("polling.control_enabled", True):
+                time.sleep(1.0)
+                continue
+
             lan_uid = self._resolved_lan_uid
             if not lan_uid:
                 time.sleep(0.5)
@@ -2253,6 +2300,19 @@ if ($node) {{ $node }}
                                 if command_id in self._running_commands:
                                     continue
                                 self._running_commands.add(command_id)
+                            
+                            with self._recent_commands_lock:
+                                already_tracked = any(c["id"] == command_id for c in self._recent_commands)
+                                if not already_tracked:
+                                    self._recent_commands.append({
+                                        "id": command_id,
+                                        "printer_ip": ip,
+                                        "type": command.get("command_type", "enable_disable"),
+                                        "status": "pending",
+                                        "timestamp": datetime.now(timezone.utc).isoformat()
+                                    })
+                                    if len(self._recent_commands) > 20:
+                                        self._recent_commands.pop(0)
                         
                         # Find matching printer or create default
                         printer = next((p for p in printers if str(p.ip or "").strip() == ip), None)
@@ -2281,7 +2341,7 @@ if ($node) {{ $node }}
                         
                         threading.Thread(target=_run_async_command, daemon=True).start()
                         LOGGER.info("Control loop started async thread to apply command for printer %s", ip)
-            time.sleep(interval)
+            time.sleep(self.control_interval_seconds())
         LOGGER.info("Polling control worker loop stopped")
 
     def _worker(self) -> None:
@@ -2309,6 +2369,15 @@ if ($node) {{ $node }}
         if self._check_for_agent_update(lead, lan_uid, agent_uid, hostname, local_ip):
             return
         while not self._stop_event.is_set():
+            try:
+                self._config.reload()
+            except Exception as exc:
+                LOGGER.warning("Failed to reload configuration: %s", exc)
+
+            if not self._config.get_bool("polling.enabled", False) or not self._config.get_bool("polling.device_enabled", True):
+                time.sleep(1.0)
+                continue
+
             LOGGER.info("Heartbeat: agent running")
             refreshed_lan_uid, refreshed_fingerprint = self._resolve_lan_info(hostname=hostname, local_ip=local_ip)
             if refreshed_lan_uid and refreshed_lan_uid != lan_uid:
@@ -2359,6 +2428,14 @@ if ($node) {{ $node }}
                     LOGGER.info("Polling skipped (disabled): name=%s ip=%s", printer.name, printer.ip)
                     return
                 
+                printer_type = self._printer_type(printer.printer_type)
+                if printer_type == "ricoh" and not self._config.get_bool("modules.ricoh.enabled", True):
+                    LOGGER.info("Polling skipped (Ricoh disabled): name=%s ip=%s", printer.name, printer.ip)
+                    return
+                if printer_type == "toshiba" and not self._config.get_bool("modules.toshiba.enabled", True):
+                    LOGGER.info("Polling skipped (Toshiba disabled): name=%s ip=%s", printer.name, printer.ip)
+                    return
+
                 with cycle_lock:
                     self._last_cycle_ricoh_printers += 1
                 
@@ -2490,6 +2567,6 @@ if ($node) {{ $node }}
                 self._run_scan_cycle(lead, current_lan_uid, agent_uid, hostname, local_ip, fingerprint, reason="polling-cycle")
             if self._check_for_agent_update(lead, lan_uid, agent_uid, hostname, local_ip):
                 break
-            triggered = self._trigger_event.wait(interval)
+            triggered = self._trigger_event.wait(self.interval_seconds())
             if triggered:
                 self._trigger_event.clear()

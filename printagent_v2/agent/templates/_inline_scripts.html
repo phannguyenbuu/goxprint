@@ -1267,24 +1267,162 @@
     }
   }
 
+  // For toast system
+  const notifiedCommandsKey = "goxprint_notified_commands";
+
+  function getNotifiedCommands() {
+    try {
+      const val = sessionStorage.getItem(notifiedCommandsKey);
+      return val ? JSON.parse(val) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveNotifiedCommands(map) {
+    try {
+      sessionStorage.setItem(notifiedCommandsKey, JSON.stringify(map));
+    } catch (e) {}
+  }
+
+  function getFriendlyCommandType(type) {
+    const t = String(type || "").toLowerCase().trim();
+    if (t === "install_driver") return "Cài đặt Driver máy in";
+    if (t === "fetch_address_book") return "Đọc danh bạ (Address Book)";
+    if (t === "enable_disable") return "Bật/Tắt chế độ máy in";
+    return `Lệnh hệ thống: ${type}`;
+  }
+
+  function getFriendlyStatus(status, error) {
+    const s = String(status || "").toLowerCase().trim();
+    if (s === "pending") return "Đang chờ xử lý...";
+    if (s === "processing") return "Đang thực thi...";
+    if (s === "success") return "Thực hiện thành công";
+    if (s === "failed") return `Thất bại${error ? `: ${error}` : ""}`;
+    return status;
+  }
+
+  window.dismissToast = function(toastId) {
+    const toast = document.getElementById(toastId);
+    if (!toast) return;
+    toast.classList.add("dismissing");
+    toast.addEventListener("animationend", () => {
+      toast.remove();
+    });
+    // Fallback if animationend doesn't fire
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.remove();
+      }
+    }, 400);
+  };
+
+  function handleRecentCommandsNotification(recentCommands) {
+    if (!Array.isArray(recentCommands)) return;
+    
+    // Ensure container exists
+    let container = document.getElementById("toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "toast-container";
+      document.body.appendChild(container);
+    }
+
+    const notified = getNotifiedCommands();
+    let updated = false;
+
+    recentCommands.forEach((cmd) => {
+      if (!cmd || !cmd.id) return;
+      const cmdId = String(cmd.id);
+      const status = cmd.status || "pending";
+      const oldStatus = notified[cmdId];
+
+      // If we haven't notified or the status has changed
+      if (oldStatus === undefined || oldStatus !== status) {
+        notified[cmdId] = status;
+        updated = true;
+
+        const toastId = `toast-cmd-${cmdId}`;
+        let toast = document.getElementById(toastId);
+
+        const typeLabel = getFriendlyCommandType(cmd.type);
+        const statusLabel = getFriendlyStatus(status, cmd.error);
+        const printerIp = cmd.printer_ip ? `IP: ${cmd.printer_ip}` : "N/A";
+
+        if (toast) {
+          // Update existing toast
+          toast.className = `toast-card ${status}`;
+          
+          // Clear any existing dismissal timer
+          if (toast.dataset.dismissTimeoutId) {
+            clearTimeout(Number(toast.dataset.dismissTimeoutId));
+            toast.removeAttribute("data-dismiss-timeout-id");
+          }
+
+          // Update description/status
+          const descEl = toast.querySelector(".toast-desc");
+          if (descEl) descEl.textContent = printerIp;
+
+          const statusLineEl = toast.querySelector(".toast-status-line");
+          if (statusLineEl) {
+            statusLineEl.innerHTML = `<span class="toast-status-dot"></span> <span>Trạng thái: ${statusLabel}</span>`;
+          }
+        } else {
+          // Create new toast
+          toast = document.createElement("div");
+          toast.id = toastId;
+          toast.className = `toast-card ${status}`;
+          toast.innerHTML = `
+            <div class="toast-header">
+              <span class="toast-title">${escapeHtml(typeLabel)}</span>
+              <button class="toast-close" onclick="dismissToast('${toastId}')">&times;</button>
+            </div>
+            <div class="toast-desc">${escapeHtml(printerIp)}</div>
+            <div class="toast-status-line">
+              <span class="toast-status-dot"></span>
+              <span>Trạng thái: ${escapeHtml(statusLabel)}</span>
+            </div>
+          `;
+          container.appendChild(toast);
+        }
+
+        // Set dismissal timer if completed
+        if (status === "success" || status === "failed") {
+          const timeoutMs = status === "success" ? 5000 : 10000;
+          const timeoutId = setTimeout(() => {
+            dismissToast(toastId);
+          }, timeoutMs);
+          toast.dataset.dismissTimeoutId = String(timeoutId);
+        }
+      }
+    });
+
+    if (updated) {
+      saveNotifiedCommands(notified);
+    }
+  }
+
   async function loadDevicesPollingStatus() {
     const badge = document.getElementById("devices-polling-status");
-    if (!badge) return;
-    if (!badge.textContent || badge.textContent.includes("checking")) {
+    if (badge && (!badge.textContent || badge.textContent.includes("checking"))) {
       badge.classList.remove("ok", "warn", "off");
       badge.classList.add("loading");
       badge.textContent = "Polling: checking...";
     }
     try {
       const data = await jsonFetch("/api/polling/status");
-      renderDevicesPollingStatus(data || {});
+      if (badge) {
+        renderDevicesPollingStatus(data || {});
+      }
+      handleRecentCommandsNotification(data?.recent_commands || []);
     } catch (err) {
-      renderDevicesPollingStatus(null, String(err?.message || err));
+      if (badge) {
+        renderDevicesPollingStatus(null, String(err?.message || err));
+      }
     }
   }
 
   function startDevicesPollingStatusLoop() {
-    if (!document.getElementById("devices-polling-status")) return;
     if (devicesPollingStatusTimer) {
       clearInterval(devicesPollingStatusTimer);
       devicesPollingStatusTimer = null;
@@ -1505,7 +1643,6 @@
 
   async function initDevicesPage() {
     bindResultModal();
-    startDevicesPollingStatusLoop();
     const pollingTrigger = document.getElementById("devices-polling-trigger");
     if (pollingTrigger && !pollingTrigger.dataset.bound) {
       pollingTrigger.dataset.bound = "1";
@@ -2513,6 +2650,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindMobileMenu();
     initSidebarLanInfo();
+    startDevicesPollingStatusLoop();
     const page = document.body.dataset.page;
     if (page === "devices") {
       loadOverview().catch(() => { });

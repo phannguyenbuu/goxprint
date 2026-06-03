@@ -265,7 +265,10 @@ def run_normal_mode(
         service.stop()
 
 
-def run_ftp_worker_mode() -> None:
+def run_ftp_worker_mode(config: AppConfig) -> None:
+    if not config.get_bool("modules.ftp.enabled", True):
+        logging.info("FTP worker is disabled by configuration modules.ftp.enabled=false; exiting")
+        return
     worker = FtpWorker()
     try:
         worker.run_forever()
@@ -316,6 +319,9 @@ def main() -> int:
         load_dynamic_scripts()
     except Exception as exc:
         logging.error("Failed loading dynamic scripts: %s", exc)
+
+    config = AppConfig.load()
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
@@ -341,6 +347,12 @@ def main() -> int:
         help="Enable Flask debug mode (env: FLASK_DEBUG=true/false)",
     )
     args = parser.parse_args()
+
+    # Check config overrides for run modes
+    if args.mode == "web" and not config.get_bool("modules.web.enabled", True):
+        logging.info("Web module disabled by configuration modules.web.enabled=false; switching to service mode")
+        args.mode = "service"
+
     instance_name = "Global\\GoPrinxAgentFtpWorker" if args.mode == "" else "Global\\GoPrinxAgentMain"
     instance_lock, is_primary = acquire_single_instance(instance_name)
     if not is_primary:
@@ -349,11 +361,14 @@ def main() -> int:
 
     startup_ok = False
     startup_note = "skipped"
+    ftp_enabled = config.get_bool("modules.ftp.enabled", True)
     if args.mode == "":
-        worker_cmd = startup_command_for_current_exe("")
-        startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+        if ftp_enabled:
+            worker_cmd = startup_command_for_current_exe("")
+            startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+        else:
+            logging.info("FTP worker is disabled; skipping startup registration")
     else:
-        worker_cmd = startup_command_for_current_exe("")
         if args.mode == "web":
             main_cmd = startup_command_for_current_exe("web", args.host, args.port)
         elif args.mode == "service":
@@ -361,11 +376,17 @@ def main() -> int:
         else:
             main_cmd = startup_command_for_current_exe("web", args.host, args.port)
         startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
-        worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-        logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
+        
+        if ftp_enabled:
+            worker_cmd = startup_command_for_current_exe("")
+            worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+            logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
+        else:
+            logging.info("FTP worker is disabled; skipping FTP worker registration")
+            
     logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
     logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
-
+ 
     try:
         updater_args: list[str]
         if args.mode == "web":
@@ -377,7 +398,7 @@ def main() -> int:
         else:
             updater_args = ["--mode", "test"]
         updater = AutoUpdater(project_root=Path(__file__).resolve().parents[1], current_args=updater_args)
-
+ 
         if args.mode == "web":
             os.environ["APP_RUN_MODE"] = "web"
             os.environ["APP_WEB_PORT"] = str(args.port)
@@ -412,12 +433,11 @@ def main() -> int:
                 if server_thread.is_alive():
                     server_thread.join(timeout=5)
             return 0
-
+ 
         if args.mode == "":
-            run_ftp_worker_mode()
+            run_ftp_worker_mode(config)
             return 0
-
-        config = AppConfig.load()
+ 
         api_client = APIClient(config)
         service = RicohService(api_client, config=config)
         toshiba_service = ToshibaService(api_client)

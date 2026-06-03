@@ -31,6 +31,8 @@ if (Test-Path "agent_core.zip") {
     Write-Host "Copied agent_core.zip to dist/" -ForegroundColor Green
 }
 
+# Do not copy settings.json to dist/, as printagent will auto-generate it if missing
+
 # Create dist/storage/data directories
 New-Item -ItemType Directory -Force -Path "dist\storage\data" | Out-Null
 

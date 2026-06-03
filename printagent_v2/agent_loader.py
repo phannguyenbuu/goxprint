@@ -108,21 +108,27 @@ def get_config():
         "token": "change-me"
     }
     
-    db_path = Path("storage/data/agent_config.db")
-    if db_path.exists():
+    settings_path = Path("settings.json")
+    if settings_path.exists():
         try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT NOT NULL)")
-            rows = cursor.execute("SELECT key, value FROM app_settings").fetchall()
-            conn.close()
-            for key, val in rows:
-                if key == "polling.url":
-                    config["url"] = val.strip()
-                elif key == "polling.lead":
-                    config["lead"] = val.strip()
-                elif key == "polling.token":
-                    config["token"] = val.strip()
+            with settings_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                api_url = data.get("api_url") or data.get("polling", {}).get("url")
+                if api_url:
+                    url = str(api_url).strip()
+                    if url.endswith("/api"):
+                        url = url[:-4]
+                    config["url"] = url
+                
+                polling = data.get("polling")
+                if isinstance(polling, dict):
+                    lead = polling.get("lead")
+                    if lead:
+                        config["lead"] = str(lead).strip()
+                    token = polling.get("token")
+                    if token:
+                        config["token"] = str(token).strip()
         except Exception:
             pass
             

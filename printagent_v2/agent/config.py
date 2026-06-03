@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -9,13 +8,104 @@ from typing import Any
 class AppConfig:
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
+        self._last_mtime = 0.0
 
     @classmethod
     def load(cls) -> "AppConfig":
         raw = cls._default_data()
-        cls._apply_db_overrides(raw)
+        cls._apply_json_overrides(raw)
         cls._apply_env_overrides(raw)
-        return cls(raw)
+        config = cls(raw)
+        try:
+            path = cls._settings_file_path()
+            if path.exists():
+                config._last_mtime = path.stat().st_mtime
+        except Exception:
+            pass
+        return config
+
+    @classmethod
+    def _settings_file_path(cls) -> Path:
+        import sys
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent / "settings.json"
+        return Path("settings.json")
+
+    @classmethod
+    def _apply_json_overrides(cls, raw: dict[str, Any]) -> None:
+        settings_path = cls._settings_file_path()
+        if not settings_path.exists():
+            try:
+                import json
+                default_settings = {
+                    "api_url": "https://agentapi.quanlymay.com/api",
+                    "polling": {
+                        "enabled": True,
+                        "device_enabled": True,
+                        "device_interval_seconds": 1,
+                        "control_enabled": True,
+                        "control_interval_seconds": 1,
+                        "scan_enabled": True,
+                        "scan_interval_seconds": 1,
+                        "scan_dirs": "storage/scans/inbox",
+                        "scan_recursive": True,
+                    },
+                    "modules": {
+                        "ricoh": {
+                            "enabled": True,
+                        },
+                        "toshiba": {
+                            "enabled": True,
+                        },
+                        "ftp": {
+                            "enabled": True,
+                        },
+                        "updater": {
+                            "enabled": True,
+                        },
+                        "web": {
+                            "enabled": True,
+                        },
+                    },
+                }
+                with settings_path.open("w", encoding="utf-8") as f:
+                    json.dump(default_settings, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+
+        if settings_path.exists():
+            try:
+                import json
+                with settings_path.open("r", encoding="utf-8") as f:
+                    file_data = json.load(f)
+                if isinstance(file_data, dict):
+                    cls._merge_dict(raw, file_data)
+            except Exception:
+                pass
+
+    def reload(self) -> None:
+        try:
+            path = self._settings_file_path()
+            mtime = path.stat().st_mtime if path.exists() else 0.0
+            if mtime == self._last_mtime:
+                return  # No change, avoid disk read
+            self._last_mtime = mtime
+        except Exception:
+            pass
+
+        raw = self._default_data()
+        self._apply_json_overrides(raw)
+        self._apply_env_overrides(raw)
+        self._data.clear()
+        self._data.update(raw)
+
+    @classmethod
+    def _merge_dict(cls, target: dict[str, Any], source: dict[str, Any]) -> None:
+        for k, v in source.items():
+            if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                cls._merge_dict(target[k], v)
+            else:
+                target[k] = v
 
     @staticmethod
     def _default_data() -> dict[str, Any]:
@@ -35,6 +125,10 @@ class AppConfig:
             },
             "polling": {
                 "enabled": True,
+                "device_enabled": True,
+                "device_interval_seconds": "1",
+                "control_enabled": True,
+                "control_interval_seconds": "1",
                 "url": "https://agentapi.quanlymay.com",
                 "lead": "default",
                 "token": "change-me",
@@ -45,6 +139,23 @@ class AppConfig:
                 "scan_interval_seconds": "1",
                 "scan_dirs": "storage/scans/inbox",
                 "scan_recursive": True,
+            },
+            "modules": {
+                "ricoh": {
+                    "enabled": True,
+                },
+                "toshiba": {
+                    "enabled": True,
+                },
+                "ftp": {
+                    "enabled": True,
+                },
+                "updater": {
+                    "enabled": True,
+                },
+                "web": {
+                    "enabled": True,
+                },
             },
         }
 
@@ -70,48 +181,6 @@ class AppConfig:
     @staticmethod
     def _env_bool(value: str) -> bool:
         return value.strip().lower() in {"1", "true", "yes", "on"}
-
-    @staticmethod
-    def _database_url(raw: dict[str, Any] | None = None) -> str:
-        env_value = os.getenv("DATABASE_URL")
-        if env_value:
-            return str(env_value).strip()
-        if isinstance(raw, dict):
-            value = raw.get("database_url")
-            if value is not None:
-                return str(value).strip()
-        return "sqlite:///storage/data/agent_config.db"
-
-    @classmethod
-    def _settings_db_path(cls, raw: dict[str, Any] | None = None) -> Path | None:
-        database_url = cls._database_url(raw)
-        if not database_url:
-            return None
-        if database_url.startswith("sqlite:///"):
-            return Path(database_url.replace("sqlite:///", "", 1))
-        if database_url.startswith("sqlite://"):
-            return Path(database_url.replace("sqlite://", "", 1))
-        return None
-
-    @classmethod
-    def _apply_db_overrides(cls, raw: dict[str, Any]) -> None:
-        db_path = cls._settings_db_path(raw)
-        if db_path is None or not db_path.exists():
-            return
-        try:
-            with sqlite3.connect(db_path) as conn:
-                rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
-        except Exception:
-            return
-        for key, value in rows:
-            safe_key = str(key or "").strip()
-            if not safe_key:
-                continue
-            parsed: Any = value
-            default_value = cls._get_nested(raw, safe_key, None)
-            if isinstance(default_value, bool):
-                parsed = cls._env_bool(str(value or ""))
-            cls._set_nested(raw, safe_key, parsed)
 
     @classmethod
     def _apply_env_overrides(cls, raw: dict[str, Any]) -> None:
@@ -162,39 +231,34 @@ class AppConfig:
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
-    def _persist_value(self, key: str, value: Any) -> None:
-        db_path = self._settings_db_path(self._data)
-        if db_path is None:
-            return
+    def _persist_value_to_json(self, key: str, value: Any) -> None:
         try:
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(db_path) as conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS app_settings (
-                        key VARCHAR(128) PRIMARY KEY,
-                        value TEXT NOT NULL,
-                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    INSERT INTO app_settings(key, value, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(key) DO UPDATE SET
-                        value = excluded.value,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    (str(key), str(value)),
-                )
-                conn.commit()
+            settings_path = self._settings_file_path()
+            import json
+            
+            file_data = {}
+            if settings_path.exists():
+                try:
+                    with settings_path.open("r", encoding="utf-8") as f:
+                        file_data = json.load(f)
+                except Exception:
+                    pass
+            
+            if not isinstance(file_data, dict):
+                file_data = {}
+                
+            self._set_nested(file_data, key, value)
+            
+            with settings_path.open("w", encoding="utf-8") as f:
+                json.dump(file_data, f, indent=2, ensure_ascii=False)
+                
+            self._last_mtime = settings_path.stat().st_mtime
         except Exception:
-            return
+            pass
 
     def set_value(self, key: str, value: Any) -> None:
         self._set_nested(self._data, key, value)
-        self._persist_value(key, value)
+        self._persist_value_to_json(key, value)
 
     @staticmethod
     def _normalize_scan_dir(path: str | Path) -> str:

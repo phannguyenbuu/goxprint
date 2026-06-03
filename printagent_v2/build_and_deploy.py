@@ -75,10 +75,12 @@ def main():
     print("\n--- Copying printagent.exe and updating agent_release.json ---")
     exe_src = root / "dist" / "printagent.exe"
     exe_dest = root / "backend" / "static" / "releases" / "printagent.exe"
+    
+    import shutil
+    import json
+    
     if exe_src.exists():
         exe_dest.parent.mkdir(parents=True, exist_ok=True)
-        import shutil
-        import json
         shutil.copy2(exe_src, exe_dest)
         print(f"Copied printagent.exe to {exe_dest}")
         
