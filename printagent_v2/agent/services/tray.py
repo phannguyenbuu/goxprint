@@ -58,6 +58,8 @@ NIF_TIP = 0x00000004
 NIF_INFO = 0x00000010
 MF_STRING = 0x00000000
 MF_SEPARATOR = 0x00000800
+MF_CHECKED = 0x00000008
+MF_UNCHECKED = 0x00000000
 TPM_RIGHTBUTTON = 0x0002
 IDI_APPLICATION = 32512
 LR_DEFAULTSIZE = 0x0040
@@ -248,10 +250,76 @@ class TrayController:
         if not menu:
             return
         try:
+            from agent.config import AppConfig
+            config = AppConfig.load()
+
             user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show")
             user32.AppendMenuW(menu, MF_STRING, ID_VERSION, "Version")
             user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
+
+            # Polling Settings
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("polling.enabled", True) else MF_UNCHECKED),
+                2001,
+                "Polling Active",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("polling.device_enabled", True) else MF_UNCHECKED),
+                2002,
+                "  Device Polling",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("polling.control_enabled", True) else MF_UNCHECKED),
+                2003,
+                "  Control Polling",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("polling.scan_enabled", True) else MF_UNCHECKED),
+                2004,
+                "  Scan Polling",
+            )
+
+            user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
+
+            # Modules Settings
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("modules.ricoh.enabled", True) else MF_UNCHECKED),
+                2005,
+                "Module Ricoh",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("modules.toshiba.enabled", True) else MF_UNCHECKED),
+                2006,
+                "Module Toshiba",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("modules.ftp.enabled", True) else MF_UNCHECKED),
+                2007,
+                "Module FTP",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("modules.updater.enabled", True) else MF_UNCHECKED),
+                2008,
+                "Module Updater",
+            )
+            user32.AppendMenuW(
+                menu,
+                MF_STRING | (MF_CHECKED if config.get_bool("modules.web.enabled", True) else MF_UNCHECKED),
+                2009,
+                "Module Web Server",
+            )
+
+            user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
             user32.AppendMenuW(menu, MF_STRING, ID_CLOSE, "Close")
+            
             user32.SetForegroundWindow(self._hwnd)
             pt = POINT()
             user32.GetCursorPos(ctypes.byref(pt))
@@ -281,6 +349,23 @@ class TrayController:
                     self._show_version_dialog()
                 elif command == ID_CLOSE:
                     self._close()
+                elif command in (2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009):
+                    from agent.config import AppConfig
+                    config = AppConfig.load()
+                    settings_map = {
+                        2001: "polling.enabled",
+                        2002: "polling.device_enabled",
+                        2003: "polling.control_enabled",
+                        2004: "polling.scan_enabled",
+                        2005: "modules.ricoh.enabled",
+                        2006: "modules.toshiba.enabled",
+                        2007: "modules.ftp.enabled",
+                        2008: "modules.updater.enabled",
+                        2009: "modules.web.enabled",
+                    }
+                    key = settings_map[command]
+                    current_val = config.get_bool(key, True)
+                    config.set_value(key, not current_val)
                 return 0
             if msg == WM_USER + 20:
                 if lparam in (WM_LBUTTONDBLCLK, WM_LBUTTONUP):
