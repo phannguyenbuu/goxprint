@@ -409,9 +409,14 @@ class RicohAddressWizardMixin(RicohServiceBase):
         except Exception as list_exc:
             LOGGER.debug("[RicohWizard] Failed to load address list after wizard CONFIRM: %s", list_exc)
 
-        time.sleep(0.25)
-        LOGGER.info("[RicohWizard] Verifying created entry on printer...")
-        verified = self._verify_address_entry(session, printer, created_registration_no, name, folder)
+        verified = False
+        for attempt in range(4):
+            if attempt > 0:
+                time.sleep(1.0)
+            LOGGER.info("[RicohWizard] Verifying created entry on printer (attempt %d/4)...", attempt + 1)
+            verified = self._verify_address_entry(session, printer, created_registration_no, name, folder)
+            if verified:
+                break
         if not verified:
             LOGGER.error("[RicohWizard] Verification failed after creation for registration_no=%s, name=%s", created_registration_no, name)
             raise RuntimeError(
