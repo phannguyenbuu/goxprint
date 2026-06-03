@@ -19,13 +19,9 @@ def main():
     
     # We will read version from a file, or prompt / default
     # Let's see if there is an existing version we should use, e.g. "1.3.56"
-    version = "1.3.105"
+    version = "1.3.110"
     
-    exclude_names = {
-        "address_book.py",
-        "wizard.py",
-        "web_scan.py"
-    }
+    exclude_names = set()
     
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for file_path in agent_dir.rglob('*'):

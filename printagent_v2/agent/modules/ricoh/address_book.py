@@ -196,19 +196,24 @@ Get-NetIPAddress -AddressFamily IPv4 |
         registration_numbers: list[str],
         entry_ids: list[str] | None = None,
         verify: bool = True,
+        session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        session = self.create_http_client(printer)
+        close_session_at_end = False
+        if session is None:
+            session = self.create_http_client(printer)
+            close_session_at_end = True
         try:
             return self._delete_address_entries_internal(
                 session, printer, registration_numbers, entry_ids, verify
             )
         finally:
-            try:
-                self._reset_web_session(session, printer)
-                session.close()
-                LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
-            except Exception as close_exc:
-                LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
+            if close_session_at_end:
+                try:
+                    self._reset_web_session(session, printer)
+                    session.close()
+                    LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
+                except Exception as close_exc:
+                    LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
 
     def _delete_address_entries_internal(
         self,
@@ -306,12 +311,13 @@ Get-NetIPAddress -AddressFamily IPv4 |
             form["selectedRegiNoIn"] = ",".join(regs)
             form["deleteListIn"] = ",".join(regs)
 
+        multipart_form = {k: (None, str(v)) for k, v in form.items()}
+
         resp = session.post(
             f"http://{printer.ip}{delete_url}",
-            data=form,
+            files=multipart_form,
             headers={
                 "Referer": f"http://{printer.ip}{list_url}",
-                "Content-Type": "application/x-www-form-urlencoded",
             },
             timeout=15,
         )
@@ -321,28 +327,36 @@ Get-NetIPAddress -AddressFamily IPv4 |
         time.sleep(1.0)
 
         if verify:
-            verify_entries = []
-            try:
-                verify_raw = self.get_address_list_ajax_with_client(session, printer)
-                if verify_raw:
-                    verify_entries = self.parse_ajax_address_list(verify_raw)
-            except Exception:
-                pass
-                
-            if not verify_entries:
+            failed = []
+            for attempt in range(4):
+                if attempt > 0:
+                    time.sleep(1.0)
+                verify_entries = []
                 try:
-                    verify_resp = session.get(f"http://{printer.ip}{list_url}", timeout=15)
-                    if verify_resp.status_code == 200:
-                        verify_entries = self.parse_address_list(verify_resp.text)
+                    verify_raw = self.get_address_list_ajax_with_client(session, printer)
+                    if verify_raw:
+                        verify_entries = self.parse_ajax_address_list(verify_raw)
                 except Exception:
                     pass
+                    
+                if not verify_entries:
+                    try:
+                        verify_resp = session.get(f"http://{printer.ip}{list_url}", timeout=15)
+                        if verify_resp.status_code == 200:
+                            verify_entries = self.parse_address_list(verify_resp.text)
+                    except Exception:
+                        pass
 
-            if ids:
-                remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries if getattr(e, "entry_id", "")}
-                failed = [eid for eid in ids if eid in remain]
-            else:
-                remain = {str(getattr(e, "registration_no", "") or "").strip() for e in verify_entries if getattr(e, "registration_no", "")}
-                failed = [reg for reg in regs if reg in remain]
+                if ids:
+                    remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries if getattr(e, "entry_id", "")}
+                    failed = [eid for eid in ids if eid in remain]
+                else:
+                    remain = {str(getattr(e, "registration_no", "") or "").strip() for e in verify_entries if getattr(e, "registration_no", "")}
+                    failed = [reg for reg in regs if reg in remain]
+                
+                if not failed:
+                    break
+
             if failed:
                 label = "entry_id" if ids else "registration_no"
                 raise RuntimeError(f"Delete not confirmed for {label}: {', '.join(failed)}")
@@ -523,13 +537,16 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 entries.append(entry)
         return entries
 
-    def process_address_list(self, printer: Printer, trace_id: str = "") -> dict[str, Any]:
+    def process_address_list(self, printer: Printer, trace_id: str = "", session: requests.Session | None = None) -> dict[str, Any]:
         LOGGER.info("[RicohAddressBook] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
         start_time = time.time()
         
         # 1. Create authenticated session
-        LOGGER.info("[RicohAddressBook] Creating authenticated HTTP client...")
-        session = self.create_http_client(printer, authenticated=True)
+        close_session_at_end = False
+        if session is None:
+            LOGGER.info("[RicohAddressBook] Creating authenticated HTTP client...")
+            session = self.create_http_client(printer, authenticated=True)
+            close_session_at_end = True
         base_url = f"http://{printer.ip}"
         
         # 2. Fetch HTML address list page to get wimToken (direct session.get, matching test_list_address.py)
@@ -544,11 +561,15 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.info("[RicohAddressBook] AJAX failed on attempt %d, resetting session and retrying...", attempt)
                 try:
                     self._reset_web_session(session, printer)
-                    session.close()
+                    if close_session_at_end:
+                        session.close()
                 except Exception:
                     pass
                 time.sleep(1.5)
-                session = self.create_http_client(printer, authenticated=True)
+                if close_session_at_end:
+                    session = self.create_http_client(printer, authenticated=True)
+                else:
+                    self._login(session, printer)
 
             try:
                 LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", list_url)
@@ -601,73 +622,21 @@ Get-NetIPAddress -AddressFamily IPv4 |
             except Exception as html_exc:
                 LOGGER.error("[RicohAddressBook] Fallback HTML parsing failed: %s", html_exc)
 
-        # 5. Fetch detailed user configuration for each entry (excluding Summary header) to get email/FTP path info
-        detail_url = "/web/entry/en/address/adrsGetUser.cgi"
-        list_url_ref = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
-        LOGGER.info("[RicohAddressBook] Fetching detailed configuration for %d entries...", len(entries))
-        for entry in entries:
-            if getattr(entry, "type", "") == "Summary":
-                continue
-            reg_no = getattr(entry, "registration_no", "")
-            if not reg_no or reg_no == "-":
-                continue
-            try:
-                detail_resp = session.post(
-                    f"http://{printer.ip}{detail_url}",
-                    data={
-                        "wimToken": wim_token,
-                        "mode": "MODUSER",
-                        "outputSpecifyModeIn": "PROGRAMMED",
-                        "entryIndexIn": reg_no,
-                    },
-                    headers={
-                        "Referer": f"http://{printer.ip}{list_url_ref}",
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    },
-                    timeout=8
-                )
-                html_detail = detail_resp.text
-                
-                # Extract email
-                email_m = re.search(r'name=["\']?mailAddressIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
-                if not email_m:
-                    email_m = re.search(r'Email Address.*?<input[^>]*value=["\']([^"\']*)["\']', html_detail, re.I | re.S)
-                entry.email_address = email_m.group(1).strip() if email_m else ""
-
-                # Extract FTP folder info
-                server_m = re.search(r'name=["\']?folderServerNameIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
-                port_m = re.search(r'name=["\']?folderPortNoIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
-                path_m = re.search(r'name=["\']?folderPathNameIn["\']?[^>]*value=["\']([^"\']*)["\']', html_detail, re.I)
-
-                server = server_m.group(1).strip() if server_m else ""
-                port = port_m.group(1).strip() if port_m else ""
-                path = path_m.group(1).strip() if path_m else ""
-
-                if server:
-                    entry.folder = f"ftp://{server}:{port}{path}" if port else f"ftp://{server}{path}"
-                else:
-                    # Try SMB folder
-                    smb_m = re.search(r'name=["\']?folderPathNameIn["\']?[^>]*value=["\']([^"\']+)["\']', html_detail, re.I)
-                    entry.folder = smb_m.group(1).strip() if smb_m else ""
-
-                # Update wimToken for next request
-                new_token = self._extract_wim_token(html_detail)
-                if new_token:
-                    wim_token = new_token
-            except Exception as e:
-                LOGGER.warning("[RicohAddressBook] Detail fetch failed for reg_no %s: %s", reg_no, e)
-                
+        # Bypassed detailed config fetch loop because it executes slow sequential HTTP requests for every entry,
+        # causing the GUI to hang when the address book contains multiple entries.
+        # The main list HTML and AJAX response already contain the resolved email and folder destinations.
         elapsed = time.time() - start_time
         LOGGER.info("[RicohAddressBook] === FINISH process_address_list: IP: %s, Total Entries: %d, Elapsed: %.2fs ===", 
                     printer.ip, len(entries), elapsed)
         
         # Clean up session (highly critical for Ricoh copiers to release session lock)
-        try:
-            self._reset_web_session(session, printer)
-            session.close()
-            LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
-        except Exception as close_exc:
-            LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
+        if close_session_at_end:
+            try:
+                self._reset_web_session(session, printer)
+                session.close()
+                LOGGER.info("[RicohAddressBook] Request session logged out and closed successfully.")
+            except Exception as close_exc:
+                LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
             
         return {
             "printer_name": printer.name,
@@ -686,6 +655,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
         ftp_port: int = 2121,
         ftp_user: str = "",
         ftp_password: str = "",
+        session: requests.Session | None = None,
     ) -> dict[str, Any]:
         safe_username = re.sub(r"[^A-Za-z0-9_-]", "", str(username or "").strip().replace(" ", "_"))[:48] or "scan"
         ftp_name = self._sanitize_ftp_site_name(ftp_site_name or f"ftp_{safe_username}") or f"ftp_{safe_username}"
@@ -783,6 +753,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 name=f"Scan to {username}",
                 folder=ftp_upload_url,
                 fields=merged_fields,
+                session=session,
             )
             return {
                 "ok": True,

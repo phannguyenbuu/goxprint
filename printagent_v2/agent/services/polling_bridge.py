@@ -799,7 +799,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
         LOGGER.debug("Polling payload kept in-memory only; not writing local snapshot")
 
     def _check_and_update_scripts(self, remote_scripts: dict[str, str]) -> None:
-        if not remote_scripts or not isinstance(remote_scripts, dict):
+        if remote_scripts is None or not isinstance(remote_scripts, dict):
             return
         
         import os
@@ -816,6 +816,17 @@ Get-NetNeighbor -AddressFamily IPv4 |
         except Exception:
             pass
             
+        # Clean up local scripts that are not present in remote_scripts
+        updated_any = False
+        try:
+            for item in scripts_dir.glob("*.py"):
+                if item.name not in remote_scripts:
+                    LOGGER.info("Deleting obsolete local script: %s", item.name)
+                    item.unlink()
+                    updated_any = True
+        except Exception as del_exc:
+            LOGGER.warning("Failed to clean obsolete scripts: %s", del_exc)
+
         base_url = self._polling_base_url()
         if not base_url:
             return
@@ -823,7 +834,6 @@ Get-NetNeighbor -AddressFamily IPv4 |
         token = self._config.get_string("polling.token").strip()
         headers = {"X-Lead-Token": token}
         
-        updated_any = False
         import hashlib
         
         for name, expected_hash in remote_scripts.items():

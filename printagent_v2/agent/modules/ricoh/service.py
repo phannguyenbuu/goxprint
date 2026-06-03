@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+
+LOGGER = logging.getLogger(__name__)
+
 import threading
 import time
 from typing import Any
@@ -12,19 +15,20 @@ from agent.modules.ricoh.control import RicohControlMixin
 
 try:
     from agent.modules.ricoh.address_book import RicohAddressBookMixin
-except ImportError:
+except ImportError as err:
+    LOGGER.exception("Failed to import RicohAddressBookMixin from address_book.py:")
     class RicohAddressBookMixin:
         pass
 
 try:
     from agent.modules.ricoh.wizard import RicohAddressWizardMixin
-except ImportError:
+except ImportError as err:
+    LOGGER.exception("Failed to import RicohAddressWizardMixin from wizard.py:")
     class RicohAddressWizardMixin:
         pass
 from agent.services.api_client import APIClient, Printer
 from agent.utils.shares import ShareManager
 
-LOGGER = logging.getLogger(__name__)
 
 class RicohService(
     RicohCollectorMixin,

@@ -88,213 +88,210 @@ def main():
     service.reset_web_session(printer)
     time.sleep(2)
 
-    # 1. READ (Initial List)
-    log("Step 1: Reading initial address book list...")
-    try:
-        payload = service.process_address_list(printer)
-        initial_entries = payload.get("address_list", [])
-        log(f"Found {len(initial_entries)} initial entries:")
-        print_entries(initial_entries)
-    except Exception as e:
-        log(f"Failed to read address list: {e}")
-        sys.exit(1)
-    finally:
-        # Force release session lock from list page
-        service.reset_web_session(printer)
+    # Establish one requests Session for the entire test
+    log("Establishing a single requests session to reuse throughout all CRUD steps...")
+    session = service.create_http_client(printer, authenticated=True)
 
-    # 2. CREATE
-    log("Step 2: Creating a new address entry (and local FTP site)...")
-    test_username = f"crud_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
-    test_email = ""
-    
-    # A. Dynamically find vacant local FTP port
-    ftp_port = 2121
-    import socket
-    from agent.services.ftp_store import load_config, find_site_by_port
-    while True:
+    try:
+        # 1. READ (Initial List)
+        log("Step 1: Reading initial address book list...")
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('0.0.0.0', ftp_port))
-                config_data = load_config()
-                if not find_site_by_port(config_data, ftp_port):
-                    break
+            payload = service.process_address_list(printer, session=session)
+            initial_entries = payload.get("address_list", [])
+            log(f"Found {len(initial_entries)} initial entries:")
+            print_entries(initial_entries)
+        except Exception as e:
+            log(f"Failed to read address list: {e}")
+            sys.exit(1)
+
+        # 2. CREATE
+        log("Step 2: Creating a new address entry (and local FTP site)...")
+        test_username = f"crud_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
+        test_email = ""
+        
+        # A. Dynamically find vacant local FTP port
+        ftp_port = 2121
+        import socket
+        from agent.services.ftp_store import load_config, find_site_by_port
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('0.0.0.0', ftp_port))
+                    config_data = load_config()
+                    if not find_site_by_port(config_data, ftp_port):
+                        break
+            except Exception:
+                pass
+            ftp_port += 1
+        log(f"Auto-detected vacant local TCP port for test: {ftp_port}")
+
+        # B. Set up local FTP site configuration using ShareManager so the local FTP is up and running
+        log("Setting up local FTP site configuration...")
+        from agent.utils.shares import ShareManager
+        from agent.modules.ricoh.address_book import default_ftp_root
+        share_manager = ShareManager()
+        ftp_name = f"ftp_{test_username}"
+        
+        # Delete the old FTP site configuration if it exists to force creation on the newly detected vacant port
+        try:
+            share_manager.delete_ftp_site(ftp_name)
         except Exception:
             pass
-        ftp_port += 1
-    log(f"Auto-detected vacant local TCP port for test: {ftp_port}")
-
-    # B. Set up local FTP site configuration using ShareManager so the local FTP is up and running
-    log("Setting up local FTP site configuration...")
-    from agent.utils.shares import ShareManager
-    from agent.modules.ricoh.address_book import default_ftp_root
-    share_manager = ShareManager()
-    ftp_name = f"ftp_{test_username}"
-    
-    # Delete the old FTP site configuration if it exists to force creation on the newly detected vacant port
-    try:
-        share_manager.delete_ftp_site(ftp_name)
-    except Exception:
-        pass
-        
-    ftp_res = share_manager.create_ftp_site(
-        site_name=ftp_name,
-        local_path=default_ftp_root(ftp_name),
-        port=ftp_port,
-    )
-    if not ftp_res.get("ok"):
-        log(f"Failed to create local FTP site: {ftp_res.get('warning')}")
-        sys.exit(1)
-        
-    ftp_port_used = ftp_res.get("port") or ftp_port
-    
-    # C. Perform WIM address creation using the unified service
-    log("Creating address entry via unified RicohService...")
-    ftp_host_info = service.resolve_ftp_host_ip(ip)
-    ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
-    created_folder = f"ftp://{ftp_host}:{ftp_port_used}/"
-    
-    try:
-        create_res = service.create_address_user_wizard(
-            printer=printer,
-            name=test_username,
-            email=test_email,
-            folder=created_folder,
-            allow_auto_update=True
+            
+        ftp_res = share_manager.create_ftp_site(
+            site_name=ftp_name,
+            local_path=default_ftp_root(ftp_name),
+            port=ftp_port,
         )
-        if not create_res.get("ok"):
-            raise RuntimeError(f"create_address_user_wizard failed: {create_res}")
-        reg_no = create_res.get("created_registration_no")
-        log(f"[SUCCESS] Entry created with Reg No: {reg_no} on FTP Port: {ftp_port_used}")
-    except Exception as e:
-        log(f"Create entry failed: {e}")
-        sys.exit(1)
-
-    time.sleep(1.5)
-
-    # 3. READ (Verify Creation)
-    log("Step 3: Verifying creation by reading the list again...")
-    created_found = False
-    try:
-        payload = service.process_address_list(printer)
-        entries = payload.get("address_list", [])
-        print_entries(entries)
-        for item in entries:
-            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
-            if reg_val == reg_no:
-                created_found = True
-                log(f"[VERIFIED] Found newly created entry in the list: {item}")
-                break
-        if not created_found:
-            log("WARNING: Newly created entry was not found in the list!")
-    except Exception as e:
-        log(f"Failed to read address list: {e}")
-    finally:
-        service.reset_web_session(printer)
-
-    # 4. UPDATE (Modify)
-    # The official modify route in web_scan_address.py deletes and recreates the entry.
-    # We split these into explicit, well-spaced steps with session resets in between.
-    log(f"Step 4: Updating entry with Reg No {reg_no}...")
-    updated_name = f"crud_upd_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
-    updated_email = ""
-    # Resolve the FTP host candidate automatically
-    ftp_host_info = service.resolve_ftp_host_ip(ip)
-    ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
-    updated_folder = f"ftp://{ftp_host}:{ftp_port_used}/updated_path"
-
-    try:
-        # A. Delete the old entry
-        log("Deleting old entry for modification...")
-        service.delete_address_entries(printer, [reg_no], verify=True)
+        if not ftp_res.get("ok"):
+            log(f"Failed to create local FTP site: {ftp_res.get('warning')}")
+            sys.exit(1)
+            
+        ftp_port_used = ftp_res.get("port") or ftp_port
         
-        # B. Crucial web session reset after deletion
-        log("Releasing web session lock after deletion...")
-        service.reset_web_session(printer)
+        # C. Perform WIM address creation using the unified service
+        log("Creating address entry via unified RicohService...")
+        ftp_host_info = service.resolve_ftp_host_ip(ip)
+        ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
+        created_folder = f"ftp://{ftp_host}:{ftp_port_used}/"
+        
+        try:
+            create_res = service.create_address_user_wizard(
+                printer=printer,
+                name=test_username,
+                email=test_email,
+                folder=created_folder,
+                allow_auto_update=True,
+                session=session
+            )
+            if not create_res.get("ok"):
+                raise RuntimeError(f"create_address_user_wizard failed: {create_res}")
+            reg_no = create_res.get("created_registration_no")
+            log(f"[SUCCESS] Entry created with Reg No: {reg_no} on FTP Port: {ftp_port_used}")
+        except Exception as e:
+            log(f"Create entry failed: {e}")
+            sys.exit(1)
+
         time.sleep(1.5)
-        
-        # C. Create the updated entry with original desired reg_no
-        log("Creating updated entry with original Reg No...")
-        modify_res = service.create_address_user_wizard(
-            printer=printer,
-            name=updated_name,
-            email=updated_email,
-            folder=updated_folder,
-            desired_registration_no=reg_no,
-            allow_auto_update=False
-        )
-        log(f"[SUCCESS] Entry updated: {modify_res}")
-    except Exception as e:
-        log(f"Update entry failed: {e}")
-    finally:
-        # Make sure session lock is released
-        service.reset_web_session(printer)
 
-    time.sleep(1.5)
-
-    # 5. READ (Verify Update)
-    log("Step 5: Verifying updates in the list...")
-    updated_found = False
-    try:
-        payload = service.process_address_list(printer)
-        entries = payload.get("address_list", [])
-        print_entries(entries)
-        for item in entries:
-            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
-            if reg_val == reg_no:
-                actual_name = str(item.get("name", ""))
-                if actual_name == updated_name or (len(actual_name) >= 20 and updated_name.startswith(actual_name)):
-                    updated_found = True
-                    log(f"[VERIFIED] Found updated entry in the list: {item}")
+        # 3. READ (Verify Creation)
+        log("Step 3: Verifying creation by reading the list again...")
+        created_found = False
+        try:
+            payload = service.process_address_list(printer, session=session)
+            entries = payload.get("address_list", [])
+            print_entries(entries)
+            for item in entries:
+                reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+                if reg_val == reg_no:
+                    created_found = True
+                    log(f"[VERIFIED] Found newly created entry in the list: {item}")
                     break
-        if not updated_found:
-            log("WARNING: Updated entry was not found or name did not match!")
-    except Exception as e:
-        log(f"Failed to read address list: {e}")
+            if not created_found:
+                log("WARNING: Newly created entry was not found in the list!")
+        except Exception as e:
+            log(f"Failed to read address list: {e}")
+
+        # 4. UPDATE (Modify)
+        log(f"Step 4: Updating entry with Reg No {reg_no}...")
+        time.sleep(2.0)
+        updated_name = f"crud_upd_{time.strftime('%Y%m%d-%H%M%S')}@example.com"
+        updated_email = ""
+        # Resolve the FTP host candidate automatically
+        ftp_host_info = service.resolve_ftp_host_ip(ip)
+        ftp_host = ftp_host_info.get("ip") or "127.0.0.1"
+        updated_folder = f"ftp://{ftp_host}:{ftp_port_used}/updated_path"
+
+        try:
+            # A. Delete the old entry
+            log("Deleting old entry for modification...")
+            service.delete_address_entries(printer, [reg_no], verify=True, session=session)
+            time.sleep(1.5)
+            
+            # B. Create the updated entry with original desired reg_no
+            log("Creating updated entry with original Reg No...")
+            modify_res = service.create_address_user_wizard(
+                printer=printer,
+                name=updated_name,
+                email=updated_email,
+                folder=updated_folder,
+                desired_registration_no=reg_no,
+                allow_auto_update=False,
+                session=session
+            )
+            log(f"[SUCCESS] Entry updated: {modify_res}")
+        except Exception as e:
+            log(f"Update entry failed: {e}")
+
+        time.sleep(1.5)
+
+        # 5. READ (Verify Update)
+        log("Step 5: Verifying updates in the list...")
+        updated_found = False
+        try:
+            payload = service.process_address_list(printer, session=session)
+            entries = payload.get("address_list", [])
+            print_entries(entries)
+            for item in entries:
+                reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+                if reg_val == reg_no:
+                    actual_name = str(item.get("name", ""))
+                    if actual_name == updated_name or (len(actual_name) >= 20 and updated_name.startswith(actual_name)):
+                        updated_found = True
+                        log(f"[VERIFIED] Found updated entry in the list: {item}")
+                        break
+            if not updated_found:
+                log("WARNING: Updated entry was not found or name did not match!")
+        except Exception as e:
+            log(f"Failed to read address list: {e}")
+
+        # 6. DELETE
+        log(f"Step 6: Deleting entry with Reg No {reg_no}...")
+        try:
+            delete_res = service.delete_address_entries(
+                printer=printer,
+                registration_numbers=[reg_no],
+                verify=True,
+                session=session
+            )
+            log(f"[SUCCESS] Entry deleted: {delete_res}")
+        except Exception as e:
+            log(f"Delete entry failed: {e}")
+
+        time.sleep(1.5)
+
+        # 7. READ (Verify Deletion)
+        log("Step 7: Verifying deletion in the list...")
+        deleted_verified = True
+        try:
+            payload = service.process_address_list(printer, session=session)
+            entries = payload.get("address_list", [])
+            print_entries(entries)
+            for item in entries:
+                reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
+                if reg_val == reg_no:
+                    deleted_verified = False
+                    log("ERROR: Entry still exists in the address book!")
+                    break
+            if deleted_verified:
+                log("[VERIFIED] Entry has been successfully removed.")
+        except Exception as e:
+            log(f"Failed to read address list: {e}")
+
+        print("=" * 80)
+        if created_found and updated_found and deleted_verified:
+            log("ALL CRUD TESTS PASSED SUCCESSFULLY!")
+        else:
+            log("SOME CRUD TEST STEPS FAILED!")
+        print("=" * 80)
+
     finally:
-        service.reset_web_session(printer)
-
-    # 6. DELETE
-    log(f"Step 6: Deleting entry with Reg No {reg_no}...")
-    try:
-        delete_res = service.delete_address_entries(
-            printer=printer,
-            registration_numbers=[reg_no],
-            verify=True
-        )
-        log(f"[SUCCESS] Entry deleted: {delete_res}")
-    except Exception as e:
-        log(f"Delete entry failed: {e}")
-    finally:
-        service.reset_web_session(printer)
-
-    time.sleep(1.5)
-
-    # 7. READ (Verify Deletion)
-    log("Step 7: Verifying deletion in the list...")
-    deleted_verified = True
-    try:
-        payload = service.process_address_list(printer)
-        entries = payload.get("address_list", [])
-        print_entries(entries)
-        for item in entries:
-            reg_val = str(item.get("registration_no", "")).strip().zfill(5)[-5:]
-            if reg_val == reg_no:
-                deleted_verified = False
-                log("ERROR: Entry still exists in the address book!")
-                break
-        if deleted_verified:
-            log("[VERIFIED] Entry has been successfully removed.")
-    except Exception as e:
-        log(f"Failed to read address list: {e}")
-    finally:
-        service.reset_web_session(printer)
-
-    print("=" * 80)
-    if created_found and updated_found and deleted_verified:
-        log("🎉 ALL CRUD TESTS PASSED SUCCESSFULLY!")
-    else:
-        log("❌ SOME CRUD TEST STEPS FAILED!")
-    print("=" * 80)
+        log("Releasing reusable requests session...")
+        try:
+            service._reset_web_session(session, printer)
+            session.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

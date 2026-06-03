@@ -320,19 +320,24 @@ class RicohAddressWizardMixin(RicohServiceBase):
         fields: dict[str, Any] | None = None,
         desired_registration_no: str | None = None,
         allow_auto_update: bool = True,
+        session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        session = self.create_http_client_auth_form_only(printer)
+        close_session_at_end = False
+        if session is None:
+            session = self.create_http_client_auth_form_only(printer)
+            close_session_at_end = True
         try:
             return self._create_address_user_wizard_internal(
                 session, printer, name, email, folder, user_code, fields, desired_registration_no, allow_auto_update
             )
         finally:
-            try:
-                self._reset_web_session(session, printer)
-                session.close()
-                LOGGER.info("[RicohWizard] Request session logged out and closed successfully.")
-            except Exception as close_exc:
-                LOGGER.debug("[RicohWizard] Failed to close session: %s", close_exc)
+            if close_session_at_end:
+                try:
+                    self._reset_web_session(session, printer)
+                    session.close()
+                    LOGGER.info("[RicohWizard] Request session logged out and closed successfully.")
+                except Exception as close_exc:
+                    LOGGER.debug("[RicohWizard] Failed to close session: %s", close_exc)
 
     def _create_address_user_wizard_internal(
         self,
@@ -512,8 +517,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
         folder: str = "",
         user_code: str = "",
         fields: dict[str, Any] | None = None,
+        session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        self.delete_address_entries(printer, [registration_no], verify=False)
+        self.delete_address_entries(printer, [registration_no], verify=False, session=session)
         return self.create_address_user_wizard(
             printer,
             name=name,
@@ -523,4 +529,5 @@ class RicohAddressWizardMixin(RicohServiceBase):
             fields=fields,
             desired_registration_no=registration_no,
             allow_auto_update=False,
+            session=session,
         )

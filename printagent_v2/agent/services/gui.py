@@ -1205,13 +1205,19 @@ class PrintAgentGui:
         def task():
             res = None
             err_msg = None
+            session = None
             try:
                 from agent.modules.ricoh.service import RicohService
                 api_client = APIClient(self.config)
                 ricoh_service = RicohService(api_client, config=self.config)
+                
+                # Pre-authenticate a single requests session to reuse
+                session = ricoh_service.create_http_client(printer, authenticated=True)
+                
                 setup_res = ricoh_service.setup_scan_destination(
                     printer=printer,
-                    username=username
+                    username=username,
+                    session=session
                 )
                 
                 ftp_upload_url = ""
@@ -1238,12 +1244,19 @@ class PrintAgentGui:
                     name=name,
                     email=email,
                     folder=ftp_upload_url,
-                    fields=fields
+                    fields=fields,
+                    session=session
                 )
             except Exception as exc:
                 LOGGER.exception("Failed to add scan email destination in thread")
                 err_msg = str(exc)
             finally:
+                if session is not None:
+                    try:
+                        ricoh_service._reset_web_session(session, printer)
+                        session.close()
+                    except Exception:
+                        pass
                 self.root.after(0, progress.destroy)
                 def refresh_single():
                     try:
