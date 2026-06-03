@@ -1210,7 +1210,7 @@ class PrintAgentGui:
                 api_client = APIClient(self.config)
                 ricoh_service = RicohService(api_client, config=self.config)
                 setup_res = ricoh_service.setup_scan_destination(
-                    printer=None,
+                    printer=printer,
                     username=username
                 )
                 

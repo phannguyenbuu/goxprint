@@ -1,0 +1,31 @@
+{
+  "api_url": "https://agentapi.quanlymay.com/api",
+  "polling": {
+    "enabled": true,
+    "device_enabled": true,
+    "device_interval_seconds": 1,
+    "control_enabled": true,
+    "control_interval_seconds": 1,
+    "scan_enabled": true,
+    "scan_interval_seconds": 1,
+    "scan_dirs": "storage/scans/inbox",
+    "scan_recursive": true
+  },
+  "modules": {
+    "ricoh": {
+      "enabled": true
+    },
+    "toshiba": {
+      "enabled": true
+    },
+    "ftp": {
+      "enabled": true
+    },
+    "updater": {
+      "enabled": true
+    },
+    "web": {
+      "enabled": true
+    }
+  }
+}

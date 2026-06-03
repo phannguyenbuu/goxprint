@@ -62,6 +62,22 @@ class RicohAddressWizardMixin(RicohServiceBase):
             resp = session.post(url, data=items, headers=headers, timeout=20)
             resp.raise_for_status()
             LOGGER.info("[RicohWizard] Step post success. HTTP Status: %d, response length: %d", resp.status_code, len(resp.text or ""))
+            
+            # Save step response HTML for debugging
+            try:
+                import os
+                step_name = "unknown"
+                for k, v in items:
+                    if k == "step":
+                        step_name = v
+                        break
+                debug_dir = os.path.join("storage", "logs")
+                os.makedirs(debug_dir, exist_ok=True)
+                with open(os.path.join(debug_dir, f"last_step_{step_name}.html"), "w", encoding="utf-8") as f:
+                    f.write(resp.text)
+            except Exception:
+                pass
+                
             return resp.text
         except Exception as exc:
             LOGGER.error("[RicohWizard] Step post failed for %s: %s", printer.ip, exc)
@@ -130,6 +146,14 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 text_len = len(resp.text or "")
                 LOGGER.info("[RicohWizard] Wizard open response received. Length: %d, HTTP Status: %d", text_len, resp.status_code)
                 if resp.text.strip():
+                    try:
+                        import os
+                        debug_dir = os.path.join("storage", "logs")
+                        os.makedirs(debug_dir, exist_ok=True)
+                        with open(os.path.join(debug_dir, "last_step_OPEN.html"), "w", encoding="utf-8") as f:
+                            f.write(resp.text)
+                    except Exception:
+                        pass
                     return resp.text
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("[RicohWizard] Wizard open attempt (%s) failed for %s: %s", method, printer.ip, exc)
@@ -222,18 +246,20 @@ class RicohAddressWizardMixin(RicohServiceBase):
         try:
             raw = self.get_address_list_ajax_with_client(session, printer)
             candidates.extend(self.parse_ajax_address_list(raw))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            LOGGER.warning("[RicohWizard] get_address_list_ajax failed during verification: %s", e)
         try:
             raw = self.read_address_list_with_client(session, printer)
             candidates.extend(self.parse_address_list(raw))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            LOGGER.warning("[RicohWizard] read_address_list failed during verification: %s", e)
 
         seen_ids: set[tuple[str, str, str]] = set()
         normalized_name = self._clean_text(name).lower()
         normalized_folder = self._clean_text(folder).lower()
         target_reg = self._normalize_registration_no(registration_no)
+        
+        verified = False
         for entry in candidates:
             reg = self._normalize_registration_no(entry.registration_no)
             key = (reg, self._clean_text(entry.name).lower(), self._clean_text(entry.folder).lower())
@@ -244,17 +270,45 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 if normalized_name:
                     actual_name = self._clean_text(entry.name).lower()
                     if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
-                        return True
+                        verified = True
+                        break
                     else:
                         LOGGER.warning("[RicohWizard] Reg no matches %s, but name '%s' does not match expected '%s'", reg, entry.name, name)
                 else:
-                    return True
+                    verified = True
+                    break
             if normalized_name:
                 actual_name = self._clean_text(entry.name).lower()
                 if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
                     if not normalized_folder or normalized_folder == self._clean_text(entry.folder).lower():
-                        return True
-        return False
+                        verified = True
+                        break
+                        
+        if not verified:
+            # Write detailed debug log of verification failure to Dropbox for easy sync
+            try:
+                import os
+                debug_dir = os.path.join("storage", "logs")
+                os.makedirs(debug_dir, exist_ok=True)
+                with open(os.path.join(debug_dir, "last_verification_failure.log"), "w", encoding="utf-8") as f:
+                    f.write(f"Verification Failure Details\n")
+                    f.write(f"============================\n")
+                    f.write(f"Target Registration No: {target_reg} (original: {registration_no})\n")
+                    f.write(f"Target Name: {name} (normalized: {normalized_name})\n")
+                    f.write(f"Target Folder: {folder} (normalized: {normalized_folder})\n\n")
+                    f.write(f"Candidate Address Book Entries Found ({len(candidates)}):\n")
+                    for i, entry in enumerate(candidates):
+                        f.write(f"  Entry #{i+1}:\n")
+                        f.write(f"    Type: {entry.type}\n")
+                        f.write(f"    Reg No: {entry.registration_no}\n")
+                        f.write(f"    Name: {entry.name}\n")
+                        f.write(f"    Email: {entry.email_address}\n")
+                        f.write(f"    Folder: {entry.folder}\n")
+                        f.write(f"    Entry ID: {entry.entry_id}\n\n")
+            except Exception as log_exc:
+                LOGGER.warning("[RicohWizard] Failed to write verification failure log: %s", log_exc)
+                
+        return verified
 
     def create_address_user_wizard(
         self,
