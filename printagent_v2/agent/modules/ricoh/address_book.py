@@ -862,65 +862,131 @@ Get-NetIPAddress -AddressFamily IPv4 |
             except Exception as e:
                 LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after AJAX: %s", e)
 
-            # Resolve target registration number
+            # Resolve target registration number and exact entry_id
             target_reg_no = ""
+            resolved_entry_id = str(entry_id).strip()
+
+            def norm_digits(s):
+                return re.sub(r"\D", "", str(s or "")).lstrip("0")
+
+            req_norm = norm_digits(entry_id)
             for e in entries:
                 eid = getattr(e, "entry_id", "") or ""
                 reg = getattr(e, "registration_no", "") or ""
-                if (eid and str(eid).strip() == str(entry_id).strip()) or (reg and str(reg).strip() == str(entry_id).strip()):
+
+                eid_norm = norm_digits(eid)
+                reg_norm = norm_digits(reg)
+
+                if (eid and (eid.strip() == resolved_entry_id or (eid_norm and eid_norm == req_norm))) or \
+                   (reg and (reg.strip() == resolved_entry_id or (reg_norm and reg_norm == req_norm))):
                     target_reg_no = str(reg).strip()
+                    if eid:
+                        resolved_entry_id = str(eid).strip()
                     break
 
             if not target_reg_no:
                 # Strip and format entry_id as fallback
                 target_reg_no = str(entry_id).strip()
 
-            # Normalize to digits without leading zeros
+            # Normalize entry_id to 5 digits if numeric (Ricoh expected format for entryIndexIn)
+            digits_id = re.sub(r"\D", "", resolved_entry_id)
+            if digits_id:
+                resolved_entry_id = digits_id.zfill(5)
+
+            # Normalize registration no to digits without leading zeros
             digits = re.sub(r"\D", "", target_reg_no)
             if digits:
                 target_reg_no = digits.lstrip("0") or "0"
 
-            # 3. POST to retrieve details page
+            # 3. Try retrieving the details page
             url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi"
             post_data = {
                 "mode": "MODUSER",
                 "outputSpecifyModeIn": "PROGRAMMED",
-                "entryIndexIn": str(entry_id).strip(),
+                "entryIndexIn": resolved_entry_id,
                 "wimToken": wim_token
             }
-            LOGGER.info("[RicohAddressBook] Fetching entry details: POST %s with data %s", url, post_data)
-            
-            saved_wimsesid = session.cookies.get("wimsesid", "")
-            resp = session.post(
-                url,
-                data=post_data,
-                headers={"Referer": f"http://{printer.ip}{list_url}"},
-                timeout=15
-            )
-            LOGGER.info("[RicohAddressBook] POST response code: %d, length: %d", resp.status_code, len(resp.text or ""))
-            resp.raise_for_status()
-            html = resp.text
 
-            # Inspect HTML for session failures or redirection to login
-            is_login = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
-            if is_login:
-                LOGGER.info("[RicohAddressBook] Session expired or redirect to login page detected during POST. Re-authenticating...")
-                self._login(session, printer)
-                # Refresh wimToken
-                list_html = self.authenticate_and_get(session, printer, list_url)
-                wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
-                post_data["wimToken"] = wim_token
-                
-                LOGGER.info("[RicohAddressBook] Retrying POST with fresh credentials and token...")
-                saved_wimsesid = session.cookies.get("wimsesid", "")
+            resp = None
+            html = ""
+            saved_wimsesid = session.cookies.get("wimsesid", "")
+
+            try:
+                LOGGER.info("[RicohAddressBook] Fetching entry details (URLENCODED): POST %s with %s", url, post_data)
                 resp = session.post(
                     url,
                     data=post_data,
-                    headers={"Referer": f"http://{printer.ip}{list_url}"},
+                    headers={
+                        "Referer": f"http://{printer.ip}{list_url}",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
                     timeout=15
                 )
                 resp.raise_for_status()
                 html = resp.text
+            except Exception as e:
+                LOGGER.warning("[RicohAddressBook] Initial URLENCODED POST failed: %s", e)
+
+            # Inspect HTML for session failures or redirection to login
+            is_login = not html or any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            if is_login:
+                LOGGER.info("[RicohAddressBook] Session expired, redirect to login page, or empty response detected. Re-authenticating...")
+                self._login(session, printer)
+                
+                # Refresh wimToken
+                try:
+                    list_html = self.authenticate_and_get(session, printer, list_url)
+                    wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+                    post_data["wimToken"] = wim_token
+                except Exception as e:
+                    LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after re-auth: %s", e)
+
+                # Try strategies in order
+                strategies = [
+                    ("POST_URLENCODED", post_data, None),
+                    ("POST_MULTIPART", None, [(k, (None, str(v))) for k, v in post_data.items()]),
+                    ("GET", None, None)
+                ]
+
+                for method, payload_data, payload_files in strategies:
+                    LOGGER.info("[RicohAddressBook] Retrying wizard detail view with method %s...", method)
+                    try:
+                        saved_wimsesid = session.cookies.get("wimsesid", "")
+                        if method == "GET":
+                            get_url = f"{url}?mode=MODUSER&outputSpecifyModeIn=PROGRAMMED&entryIndexIn={resolved_entry_id}&wimToken={wim_token}"
+                            resp = session.get(
+                                get_url,
+                                headers={"Referer": f"http://{printer.ip}{list_url}"},
+                                timeout=15
+                            )
+                        elif method == "POST_MULTIPART":
+                            resp = session.post(
+                                url,
+                                files=payload_files,
+                                headers={"Referer": f"http://{printer.ip}{list_url}"},
+                                timeout=15
+                            )
+                        else:
+                            resp = session.post(
+                                url,
+                                data=payload_data,
+                                headers={
+                                    "Referer": f"http://{printer.ip}{list_url}",
+                                    "Content-Type": "application/x-www-form-urlencoded"
+                                },
+                                timeout=15
+                            )
+                        resp.raise_for_status()
+                        html = resp.text
+                        
+                        # Check if successful response (not redirection to login)
+                        is_login_resp = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+                        has_wizard_fields = any(x in html for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
+                        if not is_login_resp and has_wizard_fields:
+                            LOGGER.info("[RicohAddressBook] Successfully retrieved details via method: %s", method)
+                            break
+                    except Exception as exc:
+                        LOGGER.warning("[RicohAddressBook] Method %s failed: %s", method, exc)
 
             # Restore wimsesid if changed/reset to '--'
             current = session.cookies.get("wimsesid", "")
