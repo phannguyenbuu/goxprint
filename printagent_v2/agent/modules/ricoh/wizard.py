@@ -63,6 +63,11 @@ class RicohAddressWizardMixin(RicohServiceBase):
             resp.raise_for_status()
             LOGGER.info("[RicohWizard] Step post success. HTTP Status: %d, response length: %d", resp.status_code, len(resp.text or ""))
             
+            if self._is_session_full(resp.text):
+                raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+            if self._is_copier_busy(resp.text):
+                raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+            
             # Save step response HTML for debugging
             try:
                 import os
@@ -136,6 +141,10 @@ class RicohAddressWizardMixin(RicohServiceBase):
                         timeout=20,
                     )
                 resp.raise_for_status()
+                if self._is_session_full(resp.text):
+                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                if self._is_copier_busy(resp.text):
+                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
                 
                 # Restore wimsesid if reset to "--" or empty
                 current = session.cookies.get("wimsesid", "")

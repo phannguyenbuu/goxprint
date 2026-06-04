@@ -48,6 +48,41 @@ class RicohServiceBase:
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Failed to write address debug log: %s", exc)
 
+    def _is_login_page(self, html: str) -> bool:
+        """
+        Detects if the given HTML content represents the Ricoh Web Image Monitor login page.
+        Avoids false positives on successful wizard pages that happen to mention 'Login User Name' or 'Login Password'.
+        """
+        if not html:
+            return False
+        # If we see authForm.cgi or login.cgi in the HTML, it is a login page
+        if "authForm.cgi" in html or "login.cgi" in html:
+            return True
+        # Fallback check for other models/firmware versions
+        if "Login User Name" in html or "Login Password" in html:
+            # Check if this is actually a user wizard/configuration page
+            is_wizard = any(w in html for w in ["entryNameIn", "folderProtocolIn", "folderServerNameIn", "folderPathNameIn"])
+            if not is_wizard:
+                return True
+        return False
+
+    def _is_session_full(self, html: str) -> bool:
+        """
+        Detects if the copier returned a 'SESSIONFULL' page indicating session limit exceeded.
+        """
+        if not html:
+            return False
+        return "SESSIONFULL" in html or "exceeds the maximum allowable limit" in html
+
+    def _is_copier_busy(self, html: str) -> bool:
+        """
+        Detects if the copier returned a 'device in use' page.
+        """
+        if not html:
+            return False
+        return "currently in use by other functions" in html
+
+
     @staticmethod
     def _http_get(url: str, timeout: int = 10, session: requests.Session | None = None) -> str:
         if session:
@@ -77,7 +112,7 @@ class RicohServiceBase:
         try:
             url_a = urljoin(base_url, "/web/entry/en/websys/easySecurity/getEasySecurity.cgi")
             resp_a = session.get(url_a, timeout=5)
-            is_login_a = any(ind in resp_a.text for ind in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            is_login_a = self._is_login_page(resp_a.text)
             if resp_a.status_code == 200 and not is_login_a:
                 LOGGER.info("[RicohLogin] Admin session verified via EasySecurity")
                 return True
@@ -88,7 +123,7 @@ class RicohServiceBase:
         try:
             url_b = urljoin(base_url, "/web/entry/en/address/adrsGetUserWizard.cgi")
             resp_b = session.get(url_b, timeout=5)
-            is_login_b = any(ind in resp_b.text for ind in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            is_login_b = self._is_login_page(resp_b.text)
             if resp_b.status_code == 200 and not is_login_b:
                 LOGGER.info("[RicohLogin] Admin session verified via adrsGetUserWizard")
                 return True
@@ -170,6 +205,10 @@ class RicohServiceBase:
                                     resp = session.post(redirect_url, data=hidden, timeout=8)
                                     html_content = resp.text
 
+                            if self._is_session_full(html_content):
+                                LOGGER.warning("[RicohLogin] Session limit exceeded during form fetch for %s", printer.ip)
+                                raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+
                             wim_token = self._extract_wim_token(html_content)
                             if not wim_token:
                                 wim_token = self._extract_hidden_inputs(html_content).get("wimToken", "")
@@ -235,6 +274,10 @@ class RicohServiceBase:
                     except Exception as post_exc:
                         LOGGER.debug("[RicohLogin] POST %s failed: %s", strategy["path"], post_exc)
                         continue
+
+                    if self._is_session_full(resp.text):
+                        LOGGER.warning("[RicohLogin] Session limit exceeded during login for %s", printer.ip)
+                        raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
 
                     wim_session = session.cookies.get("wimsesid", "")
                     real_session = bool(wim_session) and wim_session != "--"
@@ -324,8 +367,14 @@ class RicohServiceBase:
         response.raise_for_status()
         html = response.text
 
+        if self._is_session_full(html):
+            raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+
+        if self._is_copier_busy(html):
+            raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+
         # Check if we hit a login page or if our session expired/redirected to guest view
-        is_login_page = any(m in html for m in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+        is_login_page = self._is_login_page(html)
         is_admin_page = "/web/entry/" in url
         
         # AJAX/JSON responses (starting with '[' or '{') do not contain HTML admin body markers
@@ -347,6 +396,10 @@ class RicohServiceBase:
             LOGGER.info("[RicohHTTP] Retry GET %s -> Status %d (%.2fs, length=%d)", target_url, response.status_code, elapsed, len(response.text))
             response.raise_for_status()
             html = response.text
+            if self._is_session_full(html):
+                raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+            if self._is_copier_busy(html):
+                raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
 
         return html
 

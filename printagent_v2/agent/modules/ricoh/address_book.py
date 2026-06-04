@@ -602,6 +602,10 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", list_url)
                 resp = session.get(list_url, timeout=10)
                 html = resp.text
+                if self._is_session_full(html):
+                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                if self._is_copier_busy(html):
+                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
                 wim_token = self._extract_wim_token(html)
                 if not wim_token:
                     wim_token = self._extract_hidden_inputs(html).get("wimToken", "")
@@ -618,6 +622,10 @@ Get-NetIPAddress -AddressFamily IPv4 |
             try:
                 LOGGER.info("[RicohAddressBook] Fetching entries via AJAX: GET %s", ajax_url)
                 ajax_resp = session.get(ajax_url, timeout=8)
+                if self._is_session_full(ajax_resp.text):
+                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                if self._is_copier_busy(ajax_resp.text):
+                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
                 LOGGER.info("[RicohAddressBook] AJAX response: status=%d, length=%d", ajax_resp.status_code, len(ajax_resp.text))
                 if ajax_resp.status_code == 200 and "[" in ajax_resp.text and "authForm" not in ajax_resp.text and "login" not in ajax_resp.text.lower():
                     entries = self.parse_ajax_address_list(ajax_resp.text)
@@ -833,223 +841,258 @@ Get-NetIPAddress -AddressFamily IPv4 |
         if session is None:
             session = self.create_http_client(printer, authenticated=True)
             close_session_at_end = True
+        
         try:
-            # 1. Fetch list page to get initial token and entries
-            list_url = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
-            list_html = self.authenticate_and_get(session, printer, list_url)
-            wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
-            if not wim_token:
-                raise RuntimeError("Could not retrieve wimToken for fetching entry details")
-
-            # 2. Parse entries to resolve entry_id to registration_no
-            entries = []
-            try:
-                entries = self.parse_address_list(list_html)
-            except Exception as e:
-                LOGGER.warning("[RicohAddressBook] Failed to parse HTML address list: %s", e)
-            
-            try:
-                ajax_raw = self.get_address_list_ajax_with_client(session, printer, wim_token=wim_token)
-                if ajax_raw:
-                    entries.extend(self.parse_ajax_address_list(ajax_raw))
-            except Exception as e:
-                LOGGER.warning("[RicohAddressBook] Failed to fetch AJAX address list: %s", e)
-
-            # Re-fetch list to get fresh wimToken since the AJAX call might have consumed the old one
-            try:
-                list_html = self.authenticate_and_get(session, printer, list_url)
-                wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
-            except Exception as e:
-                LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after AJAX: %s", e)
-
-            # Resolve target registration number and exact entry_id
-            target_reg_no = ""
-            resolved_entry_id = str(entry_id).strip()
-
-            def norm_digits(s):
-                return re.sub(r"\D", "", str(s or "")).lstrip("0")
-
-            req_norm = norm_digits(entry_id)
-            for e in entries:
-                eid = getattr(e, "entry_id", "") or ""
-                reg = getattr(e, "registration_no", "") or ""
-
-                eid_norm = norm_digits(eid)
-                reg_norm = norm_digits(reg)
-
-                if (eid and (eid.strip() == resolved_entry_id or (eid_norm and eid_norm == req_norm))) or \
-                   (reg and (reg.strip() == resolved_entry_id or (reg_norm and reg_norm == req_norm))):
-                    target_reg_no = str(reg).strip()
-                    if eid:
-                        resolved_entry_id = str(eid).strip()
-                    break
-
-            if not target_reg_no:
-                # Strip and format entry_id as fallback
-                target_reg_no = str(entry_id).strip()
-
-            # Normalize entry_id to 5 digits if numeric (Ricoh expected format for entryIndexIn)
-            digits_id = re.sub(r"\D", "", resolved_entry_id)
-            if digits_id:
-                resolved_entry_id = digits_id.zfill(5)
-
-            # Normalize registration no to digits without leading zeros
-            digits = re.sub(r"\D", "", target_reg_no)
-            if digits:
-                target_reg_no = digits.lstrip("0") or "0"
-
-            # 3. Try retrieving the details page
-            url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi"
-            post_data = {
-                "mode": "MODUSER",
-                "outputSpecifyModeIn": "PROGRAMMED",
-                "entryIndexIn": resolved_entry_id,
-                "wimToken": wim_token
-            }
-
-            resp = None
-            html = ""
-            saved_wimsesid = session.cookies.get("wimsesid", "")
-
-            try:
-                LOGGER.info("[RicohAddressBook] Fetching entry details (URLENCODED): POST %s with %s", url, post_data)
-                resp = session.post(
-                    url,
-                    data=post_data,
-                    headers={
-                        "Referer": f"http://{printer.ip}{list_url}",
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    },
-                    timeout=15
-                )
-                resp.raise_for_status()
-                html = resp.text
-            except Exception as e:
-                LOGGER.warning("[RicohAddressBook] Initial URLENCODED POST failed: %s", e)
-
-            # Inspect HTML for session failures or redirection to login
-            is_login = not html or any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
-            if is_login:
-                LOGGER.info("[RicohAddressBook] Session expired, redirect to login page, or empty response detected. Re-authenticating...")
-                self._login(session, printer)
+            last_error = None
+            for attempt in range(3):
+                if attempt > 0:
+                    LOGGER.info("[RicohAddressBook] Retrying get_address_entry_details for entry %s (attempt %d/3)...", entry_id, attempt + 1)
+                    time.sleep(2.0)
+                    try:
+                        session.cookies.clear()
+                    except Exception:
+                        pass
+                    try:
+                        self._login(session, printer)
+                    except Exception as login_err:
+                        LOGGER.warning("[RicohAddressBook] Re-login failed during detail fetch attempt %d: %s", attempt + 1, login_err)
                 
-                # Refresh wimToken
                 try:
+                    # 1. Fetch list page to get initial token and entries
+                    list_url = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
                     list_html = self.authenticate_and_get(session, printer, list_url)
                     wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
-                    post_data["wimToken"] = wim_token
-                except Exception as e:
-                    LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after re-auth: %s", e)
+                    if not wim_token:
+                        raise RuntimeError("Could not retrieve wimToken for fetching entry details")
 
-                # Try strategies in order
-                strategies = [
-                    ("POST_URLENCODED", post_data, None),
-                    ("POST_MULTIPART", None, [(k, (None, str(v))) for k, v in post_data.items()]),
-                    ("GET", None, None)
-                ]
-
-                for method, payload_data, payload_files in strategies:
-                    LOGGER.info("[RicohAddressBook] Retrying wizard detail view with method %s...", method)
+                    # 2. Parse entries to resolve entry_id to registration_no
+                    entries = []
                     try:
-                        saved_wimsesid = session.cookies.get("wimsesid", "")
-                        if method == "GET":
-                            get_url = f"{url}?mode=MODUSER&outputSpecifyModeIn=PROGRAMMED&entryIndexIn={resolved_entry_id}&wimToken={wim_token}"
-                            resp = session.get(
-                                get_url,
-                                headers={"Referer": f"http://{printer.ip}{list_url}"},
-                                timeout=15
-                            )
-                        elif method == "POST_MULTIPART":
-                            resp = session.post(
-                                url,
-                                files=payload_files,
-                                headers={"Referer": f"http://{printer.ip}{list_url}"},
-                                timeout=15
-                            )
-                        else:
-                            resp = session.post(
-                                url,
-                                data=payload_data,
-                                headers={
-                                    "Referer": f"http://{printer.ip}{list_url}",
-                                    "Content-Type": "application/x-www-form-urlencoded"
-                                },
-                                timeout=15
-                            )
+                        entries = self.parse_address_list(list_html)
+                    except Exception as e:
+                        LOGGER.warning("[RicohAddressBook] Failed to parse HTML address list: %s", e)
+                    
+                    try:
+                        ajax_raw = self.get_address_list_ajax_with_client(session, printer, wim_token=wim_token)
+                        if ajax_raw:
+                            entries.extend(self.parse_ajax_address_list(ajax_raw))
+                    except Exception as e:
+                        LOGGER.warning("[RicohAddressBook] Failed to fetch AJAX address list: %s", e)
+
+                    # Re-fetch list to get fresh wimToken since the AJAX call might have consumed the old one
+                    try:
+                        list_html = self.authenticate_and_get(session, printer, list_url)
+                        wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+                    except Exception as e:
+                        LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after AJAX: %s", e)
+
+                    # Resolve target registration number and exact entry_id
+                    target_reg_no = ""
+                    resolved_entry_id = str(entry_id).strip()
+
+                    def norm_digits(s):
+                        return re.sub(r"\D", "", str(s or "")).lstrip("0")
+
+                    req_norm = norm_digits(entry_id)
+                    for e in entries:
+                        eid = getattr(e, "entry_id", "") or ""
+                        reg = getattr(e, "registration_no", "") or ""
+
+                        eid_norm = norm_digits(eid)
+                        reg_norm = norm_digits(reg)
+
+                        if (eid and (eid.strip() == resolved_entry_id or (eid_norm and eid_norm == req_norm))) or \
+                           (reg and (reg.strip() == resolved_entry_id or (reg_norm and reg_norm == req_norm))):
+                            target_reg_no = str(reg).strip()
+                            if eid:
+                                resolved_entry_id = str(eid).strip()
+                            break
+
+                    if not target_reg_no:
+                        # Strip and format entry_id as fallback
+                        target_reg_no = str(entry_id).strip()
+
+                    # Normalize entry_id to 5 digits if numeric (Ricoh expected format for entryIndexIn)
+                    digits_id = re.sub(r"\D", "", resolved_entry_id)
+                    if digits_id:
+                        resolved_entry_id = digits_id.zfill(5)
+
+                    # Normalize registration no to digits without leading zeros
+                    digits = re.sub(r"\D", "", target_reg_no)
+                    if digits:
+                        target_reg_no = digits.lstrip("0") or "0"
+
+                    # 3. Try retrieving the details page
+                    url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi"
+                    post_data = {
+                        "mode": "MODUSER",
+                        "outputSpecifyModeIn": "PROGRAMMED",
+                        "entryIndexIn": resolved_entry_id,
+                        "wimToken": wim_token
+                    }
+
+                    resp = None
+                    html = ""
+                    saved_wimsesid = session.cookies.get("wimsesid", "")
+
+                    try:
+                        LOGGER.info("[RicohAddressBook] Fetching entry details (URLENCODED): POST %s with %s", url, post_data)
+                        resp = session.post(
+                            url,
+                            data=post_data,
+                            headers={
+                                "Referer": f"http://{printer.ip}{list_url}",
+                                "Content-Type": "application/x-www-form-urlencoded"
+                            },
+                            timeout=15
+                        )
                         resp.raise_for_status()
                         html = resp.text
+                    except Exception as e:
+                        LOGGER.warning("[RicohAddressBook] Initial URLENCODED POST failed: %s", e)
+
+                    if self._is_session_full(html):
+                        raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                    if self._is_copier_busy(html):
+                        raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+
+                    # Inspect HTML for session failures or redirection to login
+                    is_login = self._is_login_page(html)
+                    if is_login:
+                        LOGGER.info("[RicohAddressBook] Session expired, redirect to login page, or empty response detected. Re-authenticating...")
+                        try:
+                            session.cookies.clear()
+                        except Exception:
+                            pass
+                        self._login(session, printer)
                         
-                        # Check if successful response (not redirection to login)
-                        is_login_resp = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
-                        has_wizard_fields = any(x in html for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
-                        if not is_login_resp and has_wizard_fields:
-                            LOGGER.info("[RicohAddressBook] Successfully retrieved details via method: %s", method)
-                            break
-                    except Exception as exc:
-                        LOGGER.warning("[RicohAddressBook] Method %s failed: %s", method, exc)
+                        # Refresh wimToken
+                        try:
+                            list_html = self.authenticate_and_get(session, printer, list_url)
+                            wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+                            post_data["wimToken"] = wim_token
+                        except Exception as e:
+                            LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken after re-auth: %s", e)
 
-            # Restore wimsesid if changed/reset to '--'
-            current = session.cookies.get("wimsesid", "")
-            if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
-                session.cookies.set("wimsesid", saved_wimsesid)
-                LOGGER.info("[RicohAddressBook] Restored wimsesid cookie to preserve session")
+                        # Try strategies in order
+                        strategies = [
+                            ("POST_URLENCODED", post_data, None),
+                            ("POST_MULTIPART", None, [(k, (None, str(v))) for k, v in post_data.items()]),
+                            ("GET", None, None)
+                        ]
 
-            # Final check of the retrieved HTML
-            is_login = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
-            if is_login:
-                LOGGER.warning("[RicohAddressBook] Session redirected to login page on retry. Snippet: %s", html[:300].replace('\n', ' '))
-                raise RuntimeError("Authentication failed or session expired. The copier redirected to the login page.")
-                
-            if "Session timed out" in html:
-                LOGGER.warning("[RicohAddressBook] Session timed out indicator found in response HTML.")
-                raise RuntimeError("Copier reported session timed out. Please try logging in again.")
+                        for method, payload_data, payload_files in strategies:
+                            LOGGER.info("[RicohAddressBook] Retrying wizard detail view with method %s...", method)
+                            try:
+                                saved_wimsesid = session.cookies.get("wimsesid", "")
+                                if method == "GET":
+                                    get_url = f"{url}?mode=MODUSER&outputSpecifyModeIn=PROGRAMMED&entryIndexIn={resolved_entry_id}&wimToken={wim_token}"
+                                    resp = session.get(
+                                        get_url,
+                                        headers={"Referer": f"http://{printer.ip}{list_url}"},
+                                        timeout=15
+                                    )
+                                elif method == "POST_MULTIPART":
+                                    resp = session.post(
+                                        url,
+                                        files=payload_files,
+                                        headers={"Referer": f"http://{printer.ip}{list_url}"},
+                                        timeout=15
+                                    )
+                                else:
+                                    resp = session.post(
+                                        url,
+                                        data=payload_data,
+                                        headers={
+                                            "Referer": f"http://{printer.ip}{list_url}",
+                                            "Content-Type": "application/x-www-form-urlencoded"
+                                        },
+                                        timeout=15
+                                    )
+                                resp.raise_for_status()
+                                html_candidate = resp.text
+                                
+                                if self._is_session_full(html_candidate):
+                                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                                if self._is_copier_busy(html_candidate):
+                                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
 
-            if "unexpected error has occurred" in html or "errorMessage" in html:
-                err_m = re.search(r'<tr class="responseMessage"><td[^>]*>(.*?)</td>', html, re.I | re.S)
-                err_msg = err_m.group(1).strip() if err_m else "Unexpected error from copier."
-                LOGGER.error("[RicohAddressBook] Copier returned error page: %s", err_msg)
-                raise RuntimeError(f"Copier error: {err_msg}")
+                                # Check if successful response (not redirection to login)
+                                is_login_resp = self._is_login_page(html_candidate)
+                                has_wizard_fields = any(x in html_candidate for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
+                                if not is_login_resp and has_wizard_fields:
+                                    LOGGER.info("[RicohAddressBook] Successfully retrieved details via method: %s", method)
+                                    html = html_candidate
+                                    break
+                            except Exception as exc:
+                                LOGGER.warning("[RicohAddressBook] Method %s failed: %s", method, exc)
 
-            has_wizard = any(x in html for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
-            if not has_wizard:
-                LOGGER.warning("[RicohAddressBook] Response does not contain user wizard fields. HTML length: %d. Snippet: %s", len(html), html[:500].replace('\n', ' '))
-                raise RuntimeError(
-                    f"Invalid response from copier. The page does not contain address entry details. "
-                    f"Response length: {len(html)} characters."
-                )
+                    # Restore wimsesid if changed/reset to '--'
+                    current = session.cookies.get("wimsesid", "")
+                    if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
+                        session.cookies.set("wimsesid", saved_wimsesid)
+                        LOGGER.info("[RicohAddressBook] Restored wimsesid cookie to preserve session")
 
-            # Extract folder fields using regex
-            details = {}
-            
-            # 1. folderPortNoIn
-            port_m = re.search(r'name=["\']folderPortNoIn["\'][^>]*value=["\'](\d+)["\']', html, re.I)
-            if not port_m:
-                port_m = re.search(r'value=["\'](\d+)["\'][^>]*name=["\']folderPortNoIn["\']', html, re.I)
-            details["folder_port"] = int(port_m.group(1)) if port_m else 21
-            
-            # 2. folderProtocolIn
-            proto_m = re.search(r'name=["\']folderProtocolIn["\'][^>]*value=["\']([^"\']+)["\']', html, re.I)
-            if not proto_m:
-                proto_m = re.search(r'<select[^>]*name=["\']folderProtocolIn["\'][^>]*>.*?<option[^>]*value=["\']([^"\']+)["\'][^>]*selected.*?</select>', html, re.I | re.S)
-            details["folder_protocol"] = proto_m.group(1).strip() if proto_m else ""
-            
-            # 3. folderServerNameIn
-            server_m = re.search(r'name=["\']folderServerNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
-            details["folder_server"] = server_m.group(1).strip() if server_m else ""
-            
-            # 4. folderPathNameIn
-            path_m = re.search(r'name=["\']folderPathNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
-            details["folder_path"] = path_m.group(1).strip() if path_m else ""
-            
-            # 5. folderAuthUserNameIn
-            user_m = re.search(r'name=["\']folderAuthUserNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
-            details["folder_auth_user"] = user_m.group(1).strip() if user_m else ""
-            
-            LOGGER.info("[RicohAddressBook] Successfully parsed details for entry %s: %s", entry_id, details)
-            return details
-        except Exception as e:
-            LOGGER.exception("[RicohAddressBook] Exception in get_address_entry_details for entry %s", entry_id)
-            raise RuntimeError(f"Error fetching address entry details from copier: {e}") from e
+                    # Final check of the retrieved HTML
+                    is_login = self._is_login_page(html)
+                    if is_login:
+                        LOGGER.warning("[RicohAddressBook] Session redirected to login page on retry. Snippet: %s", html[:300].replace('\n', ' '))
+                        raise RuntimeError("Authentication failed or session expired. The copier redirected to the login page.")
+                        
+                    if "Session timed out" in html:
+                        LOGGER.warning("[RicohAddressBook] Session timed out indicator found in response HTML.")
+                        raise RuntimeError("Copier reported session timed out. Please try logging in again.")
+
+                    if "unexpected error has occurred" in html or "errorMessage" in html:
+                        err_m = re.search(r'<tr class="responseMessage"><td[^>]*>(.*?)</td>', html, re.I | re.S)
+                        err_msg = err_m.group(1).strip() if err_m else "Unexpected error from copier."
+                        LOGGER.error("[RicohAddressBook] Copier returned error page: %s", err_msg)
+                        raise RuntimeError(f"Copier error: {err_msg}")
+
+                    has_wizard = any(x in html for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
+                    if not has_wizard:
+                        LOGGER.warning("[RicohAddressBook] Response does not contain user wizard fields. HTML length: %d. Snippet: %s", len(html), html[:500].replace('\n', ' '))
+                        raise RuntimeError(
+                            f"Invalid response from copier. The page does not contain address entry details. "
+                            f"Response length: {len(html)} characters."
+                        )
+
+                    # Extract folder fields using regex
+                    details = {}
+                    
+                    # 1. folderPortNoIn
+                    port_m = re.search(r'name=["\']folderPortNoIn["\'][^>]*value=["\'](\d+)["\']', html, re.I)
+                    if not port_m:
+                        port_m = re.search(r'value=["\'](\d+)["\'][^>]*name=["\']folderPortNoIn["\']', html, re.I)
+                    details["folder_port"] = int(port_m.group(1)) if port_m else 21
+                    
+                    # 2. folderProtocolIn
+                    proto_m = re.search(r'name=["\']folderProtocolIn["\'][^>]*value=["\']([^"\']+)["\']', html, re.I)
+                    if not proto_m:
+                        proto_m = re.search(r'<select[^>]*name=["\']folderProtocolIn["\'][^>]*>.*?<option[^>]*value=["\']([^"\']+)["\'][^>]*selected.*?</select>', html, re.I | re.S)
+                    details["folder_protocol"] = proto_m.group(1).strip() if proto_m else ""
+                    
+                    # 3. folderServerNameIn
+                    server_m = re.search(r'name=["\']folderServerNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+                    details["folder_server"] = server_m.group(1).strip() if server_m else ""
+                    
+                    # 4. folderPathNameIn
+                    path_m = re.search(r'name=["\']folderPathNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+                    details["folder_path"] = path_m.group(1).strip() if path_m else ""
+                    
+                    # 5. folderAuthUserNameIn
+                    user_m = re.search(r'name=["\']folderAuthUserNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+                    details["folder_auth_user"] = user_m.group(1).strip() if user_m else ""
+                    
+                    LOGGER.info("[RicohAddressBook] Successfully parsed details for entry %s: %s", entry_id, details)
+                    return details
+                except Exception as attempt_exc:
+                    LOGGER.warning("[RicohAddressBook] Attempt %d to fetch details failed: %s", attempt + 1, attempt_exc)
+                    last_error = attempt_exc
+                    
+            # If all attempts failed
+            LOGGER.exception("[RicohAddressBook] Exception in get_address_entry_details for entry %s after 3 attempts", entry_id)
+            raise RuntimeError(f"Error fetching address entry details from copier: {last_error}") from last_error
         finally:
             if close_session_at_end:
                 try:
