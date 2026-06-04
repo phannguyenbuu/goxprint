@@ -170,45 +170,90 @@ class PrinterDestinationDialog(tk.Toplevel):
         self.email_entry = ttk.Entry(frame, textvariable=self.email_var, width=35)
         self.email_entry.grid(row=2, column=1, sticky=tk.W, pady=5)
         
-        # FTP Path
-        ttk.Label(frame, text="FTP URL (ftp://...):").grid(row=3, column=0, sticky=tk.W, pady=5)
-        self.ftp_var = tk.StringVar(value=self.dest_data.get("folder", ""))
-        self.ftp_entry = ttk.Entry(frame, textvariable=self.ftp_var, width=35)
-        self.ftp_entry.grid(row=3, column=1, sticky=tk.W, pady=5)
+        # Parse host, port, path from dest_data
+        folder_str = self.dest_data.get("folder", "")
+        server = self.dest_data.get("folder_server", "")
+        port = self.dest_data.get("folder_port", "")
+        path = self.dest_data.get("folder_path", "")
+        
+        if not server and folder_str:
+            if folder_str.startswith("ftp://"):
+                match = re.match(r'ftp://([^:/]+)(?::(\d+))?(.*)', folder_str)
+                if match:
+                    server = match.group(1)
+                    port = match.group(2) or "21"
+                    path = match.group(3)
+            elif folder_str.startswith("\\\\"):
+                match = re.match(r'\\\\([^\\]+)\\(.*)', folder_str)
+                if match:
+                    server = match.group(1)
+                    path = "\\" + match.group(2)
+                    port = "445"
+            else:
+                server = folder_str
+                port = "21"
+                path = "/"
+                
+        if not port:
+            port = "2121"
+        if not path:
+            path = "/"
+            
+        # Host/IP
+        ttk.Label(frame, text="Host / IP (Máy chủ/IP):").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.host_var = tk.StringVar(value=server)
+        self.host_entry = ttk.Entry(frame, textvariable=self.host_var, width=35)
+        self.host_entry.grid(row=3, column=1, sticky=tk.W, pady=5)
+        
+        # Port
+        ttk.Label(frame, text="Port (Cổng):").grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.port_var = tk.StringVar(value=str(port))
+        self.port_entry = ttk.Entry(frame, textvariable=self.port_var, width=35)
+        self.port_entry.grid(row=4, column=1, sticky=tk.W, pady=5)
+        
+        # Path
+        ttk.Label(frame, text="Path (Đường dẫn):").grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.path_var = tk.StringVar(value=path)
+        self.path_entry = ttk.Entry(frame, textvariable=self.path_var, width=35)
+        self.path_entry.grid(row=5, column=1, sticky=tk.W, pady=5)
         
         # FTP User
-        ttk.Label(frame, text="FTP User (Tùùy chọn):").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Label(frame, text="FTP User (Tài khoản):").grid(row=6, column=0, sticky=tk.W, pady=5)
         self.user_var = tk.StringVar(value=self.dest_data.get("ftp_user", ""))
         self.user_entry = ttk.Entry(frame, textvariable=self.user_var, width=35)
-        self.user_entry.grid(row=4, column=1, sticky=tk.W, pady=5)
+        self.user_entry.grid(row=6, column=1, sticky=tk.W, pady=5)
         
         # FTP Password
-        ttk.Label(frame, text="FTP Pass (Tùùy chọn):").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Label(frame, text="FTP Pass (Mật khẩu):").grid(row=7, column=0, sticky=tk.W, pady=5)
         self.pass_var = tk.StringVar(value=self.dest_data.get("ftp_password", ""))
         self.pass_entry = ttk.Entry(frame, textvariable=self.pass_var, show="*", width=35)
-        self.pass_entry.grid(row=5, column=1, sticky=tk.W, pady=5)
+        self.pass_entry.grid(row=7, column=1, sticky=tk.W, pady=5)
         
         self.on_type_change()
         
         # Buttons
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=15, sticky=tk.E)
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=15, sticky=tk.E)
         
         ttk.Button(btn_frame, text="Cancel (Hủy)", command=self.destroy, width=12).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="OK (Lưu)", command=self.save, width=12).pack(side=tk.LEFT, padx=5)
         
-        center_window(self, 420, 290)
+        center_window(self, 450, 390)
         
     def on_type_change(self, event=None) -> None:
         dtype = self.type_var.get()
         if dtype == "Email":
             self.email_entry.config(state="normal")
-            self.ftp_entry.config(state="disabled")
+            self.host_entry.config(state="disabled")
+            self.port_entry.config(state="disabled")
+            self.path_entry.config(state="disabled")
             self.user_entry.config(state="disabled")
             self.pass_entry.config(state="disabled")
         else:
             self.email_entry.config(state="disabled")
-            self.ftp_entry.config(state="normal")
+            self.host_entry.config(state="normal")
+            self.port_entry.config(state="normal")
+            self.path_entry.config(state="normal")
             self.user_entry.config(state="normal")
             self.pass_entry.config(state="normal")
             
@@ -216,7 +261,9 @@ class PrinterDestinationDialog(tk.Toplevel):
         name = self.name_var.get().strip()
         dtype = self.type_var.get()
         email = self.email_var.get().strip()
-        ftp_url = self.ftp_var.get().strip()
+        host = self.host_var.get().strip()
+        port_str = self.port_var.get().strip()
+        path = self.path_var.get().strip()
         ftp_user = self.user_var.get().strip()
         ftp_password = self.pass_var.get().strip()
         
@@ -232,11 +279,18 @@ class PrinterDestinationDialog(tk.Toplevel):
             ftp_user = ""
             ftp_password = ""
         else:
-            if not ftp_url:
-                messagebox.showerror("Error", "FTP URL is required!", parent=self)
+            if not host:
+                messagebox.showerror("Error", "Host/IP is required!", parent=self)
                 return
-            if not ftp_url.startswith("ftp://"):
-                ftp_url = f"ftp://{ftp_url}"
+            try:
+                port = int(port_str) if port_str else 21
+            except ValueError:
+                messagebox.showerror("Error", "Port must be an integer!", parent=self)
+                return
+                
+            if not path.startswith("/"):
+                path = "/" + path
+            ftp_url = f"ftp://{host}:{port}{path}"
             email = ""
             
         self.result = {
@@ -1081,29 +1135,53 @@ class PrintAgentGui:
                 def open_dialog():
                     nonlocal folder, email
                     ftp_user = ""
+                    folder_server = ""
+                    folder_port = ""
+                    folder_path = ""
+                    
                     if details:
                         proto = details.get("folder_protocol", "")
-                        srv = details.get("folder_server", "")
-                        port = details.get("folder_port", 21)
-                        path = details.get("folder_path", "")
+                        folder_server = details.get("folder_server", "")
+                        folder_port = str(details.get("folder_port", 21))
+                        folder_path = details.get("folder_path", "")
                         ftp_user = details.get("folder_auth_user", "")
                         
-                        if srv:
+                        if folder_server:
                             if proto == "FTP_O":
-                                folder = f"ftp://{srv}:{port}{path}"
+                                folder = f"ftp://{folder_server}:{folder_port}{folder_path}"
                             elif proto == "SMB":
-                                norm_path = path.replace("/", "\\")
+                                norm_path = folder_path.replace("/", "\\")
                                 if not norm_path.startswith("\\") and norm_path:
                                     norm_path = f"\\{norm_path}"
-                                folder = f"\\\\{srv}{norm_path}"
+                                folder = f"\\\\{folder_server}{norm_path}"
                             else:
-                                folder = srv
+                                folder = folder_server
+                    else:
+                        if folder.startswith("ftp://"):
+                            match = re.match(r'ftp://([^:/]+)(?::(\d+))?(.*)', folder)
+                            if match:
+                                folder_server = match.group(1)
+                                folder_port = match.group(2) or "21"
+                                folder_path = match.group(3)
+                        elif folder.startswith("\\\\"):
+                            match = re.match(r'\\\\([^\\]+)\\(.*)', folder)
+                            if match:
+                                folder_server = match.group(1)
+                                folder_path = "\\" + match.group(2)
+                                folder_port = "445"
+                        else:
+                            folder_server = folder
+                            folder_port = "21"
+                            folder_path = "/"
                                 
                     dest_data = {
                         "name": name,
                         "type": dtype,
                         "email": email,
                         "folder": folder,
+                        "folder_server": folder_server,
+                        "folder_port": folder_port,
+                        "folder_path": folder_path,
                         "ftp_user": ftp_user,
                         "ftp_password": ""
                     }
