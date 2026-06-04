@@ -901,16 +901,37 @@ Get-NetIPAddress -AddressFamily IPv4 |
             resp.raise_for_status()
             html = resp.text
 
+            # Inspect HTML for session failures or redirection to login
+            is_login = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            if is_login:
+                LOGGER.info("[RicohAddressBook] Session expired or redirect to login page detected during POST. Re-authenticating...")
+                self._login(session, printer)
+                # Refresh wimToken
+                list_html = self.authenticate_and_get(session, printer, list_url)
+                wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+                post_data["wimToken"] = wim_token
+                
+                LOGGER.info("[RicohAddressBook] Retrying POST with fresh credentials and token...")
+                saved_wimsesid = session.cookies.get("wimsesid", "")
+                resp = session.post(
+                    url,
+                    data=post_data,
+                    headers={"Referer": f"http://{printer.ip}{list_url}"},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                html = resp.text
+
             # Restore wimsesid if changed/reset to '--'
             current = session.cookies.get("wimsesid", "")
             if (not current or current == "--") and saved_wimsesid and saved_wimsesid != "--":
                 session.cookies.set("wimsesid", saved_wimsesid)
                 LOGGER.info("[RicohAddressBook] Restored wimsesid cookie to preserve session")
 
-            # Inspect HTML for session failures or redirection to login
+            # Final check of the retrieved HTML
             is_login = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
             if is_login:
-                LOGGER.warning("[RicohAddressBook] Session redirected to login page. Snippet: %s", html[:300].replace('\n', ' '))
+                LOGGER.warning("[RicohAddressBook] Session redirected to login page on retry. Snippet: %s", html[:300].replace('\n', ' '))
                 raise RuntimeError("Authentication failed or session expired. The copier redirected to the login page.")
                 
             if "Session timed out" in html:
