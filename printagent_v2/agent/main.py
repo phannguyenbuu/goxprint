@@ -23,6 +23,8 @@ from agent.services.ftp_worker import FtpWorker
 from agent.web import create_app, run_web_server, shutdown_app_resources
 
 
+LOGGER = logging.getLogger(__name__)
+
 DEFAULT_WEB_PORT = 9173
 BACKGROUND_HEARTBEAT_SECONDS = 300
 
