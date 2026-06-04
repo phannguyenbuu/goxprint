@@ -82,7 +82,15 @@ class AutoUpdater:
         self.state = UpdateState(current_version=self.current_version)
         self._lock = threading.Lock()
         self._current_args = list(current_args or ["--mode", "service"])
-        self._release_check_interval_seconds = max(300, int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", "300") or "300"))
+        self._release_check_interval_seconds = self.get_check_interval_seconds()
+
+    def get_check_interval_seconds(self) -> int:
+        try:
+            from agent.config import AppConfig
+            config = AppConfig.load()
+            return max(300, config.get_int("modules.updater.check_interval_seconds", 300))
+        except Exception:
+            return max(300, int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", "300") or "300"))
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -92,14 +100,14 @@ class AutoUpdater:
                 "auto_apply": self.auto_apply,
                 "allowed_prefixes": self.allowed_prefixes,
                 "default_command": self.default_command,
-                "check_interval_seconds": self._release_check_interval_seconds,
+                "check_interval_seconds": self.get_check_interval_seconds(),
             }
         )
         return payload
 
     @property
     def check_interval_seconds(self) -> int:
-        return self._release_check_interval_seconds
+        return self.get_check_interval_seconds()
 
     def _is_allowed(self, command: str) -> bool:
         if not command:
@@ -218,7 +226,7 @@ class AutoUpdater:
             return True
         try:
             elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last_check_at)
-            return elapsed.total_seconds() >= self._release_check_interval_seconds
+            return elapsed.total_seconds() >= self.get_check_interval_seconds()
         except Exception:
             return True
 

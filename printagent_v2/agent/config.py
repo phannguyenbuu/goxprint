@@ -62,6 +62,7 @@ class AppConfig:
                         },
                         "updater": {
                             "enabled": True,
+                            "check_interval_seconds": 300,
                         },
                         "web": {
                             "enabled": True,
@@ -152,6 +153,7 @@ class AppConfig:
                 },
                 "updater": {
                     "enabled": True,
+                    "check_interval_seconds": 300,
                 },
                 "web": {
                     "enabled": True,
