@@ -924,22 +924,17 @@ Get-NetIPAddress -AddressFamily IPv4 |
                         # Strip and format entry_id as fallback
                         target_reg_no = str(entry_id).strip()
 
-                    # Normalize entry_id to 5 digits if numeric (Ricoh expected format for entryIndexIn)
-                    digits_id = re.sub(r"\D", "", resolved_entry_id)
-                    if digits_id:
-                        resolved_entry_id = digits_id.zfill(5)
-
-                    # Normalize registration no to digits without leading zeros
+                    # Normalize registration no to 5 digits (Ricoh expected format for entryIndexIn)
                     digits = re.sub(r"\D", "", target_reg_no)
                     if digits:
-                        target_reg_no = digits.lstrip("0") or "0"
+                        target_reg_no = digits.zfill(5)
 
                     # 3. Try retrieving the details page
                     url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi"
                     post_data = {
                         "mode": "MODUSER",
                         "outputSpecifyModeIn": "PROGRAMMED",
-                        "entryIndexIn": resolved_entry_id,
+                        "entryIndexIn": target_reg_no,
                         "wimToken": wim_token
                     }
 
@@ -999,7 +994,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                             try:
                                 saved_wimsesid = session.cookies.get("wimsesid", "") if hasattr(session, "cookies") and session.cookies is not None else ""
                                 if method == "GET":
-                                    get_url = f"{url}?mode=MODUSER&outputSpecifyModeIn=PROGRAMMED&entryIndexIn={resolved_entry_id}&wimToken={wim_token}"
+                                    get_url = f"{url}?mode=MODUSER&outputSpecifyModeIn=PROGRAMMED&entryIndexIn={target_reg_no}&wimToken={wim_token}"
                                     resp = session.get(
                                         get_url,
                                         headers={"Referer": f"http://{printer.ip}{list_url}"},

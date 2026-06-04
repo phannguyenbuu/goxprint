@@ -16,17 +16,24 @@ def main():
         password="",
         printer_type="ricoh",
     )
-    print(f"Testing address list fetch from printer IP: {printer.ip}")
+    print(f"Testing address details fetch from printer IP: {printer.ip}")
     api_client = APIClient(config)
     service = RicohService(api_client, config=config)
     try:
+        # Fetch address book list first
         payload = service.process_address_list(printer)
-        print("\n=== SUCCESS ===")
-        print(f"Timestamp: {payload.get('timestamp')}")
-        print(f"Total entries: {len(payload.get('address_list', []))}")
-        print("\nAddress Book Entries:")
+        print("\n=== Address Book Entries ===")
         for idx, entry in enumerate(payload.get('address_list', [])):
-            print(f"[{idx}] RegNo: {entry.get('registration_no')} | Type: {entry.get('type')} | Name: {entry.get('name')} | UserCode: {entry.get('user_code')} | Email: {entry.get('email_address')} | Folder: {entry.get('folder')}")
+            print(f"[{idx}] RegNo: {entry.get('registration_no')} | EntryID: {entry.get('entry_id')} | Name: {entry.get('name')}")
+            
+        print("\n=== Fetching Details for Entry ID 25 ===")
+        details_25 = service.get_address_entry_details(printer, "25")
+        print(f"Details for 25: {details_25}")
+        
+        print("\n=== Fetching Details for Entry ID 54 ===")
+        details_54 = service.get_address_entry_details(printer, "54")
+        print(f"Details for 54: {details_54}")
+        
     except Exception as e:
         print(f"\n=== FAILED ===")
         print(f"Error: {e}")

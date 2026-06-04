@@ -39,18 +39,18 @@ def main():
             pass
             
     manifest.update({
-        "version": "1.4.11",
+        "version": "1.4.12",
         "sha256": exe_sha,
         "size": exe_size,
         "published_at": now_str,
         "mandatory": True,
         "download_url": "/static/releases/printagent.exe",
-        "notes": "Build 1.4.11: Fix handling of non-existent/deleted address book entries to prevent unexpected copier error page retries.",
+        "notes": "Build 1.4.12: Fix address entry details query index to use Registration Number instead of Entry ID.",
         "channel": "stable"
     })
     
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Successfully updated agent_release.json manifest: version 1.4.11")
+    print(f"Successfully updated agent_release.json manifest: version 1.4.12")
 
 if __name__ == "__main__":
     main()
