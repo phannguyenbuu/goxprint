@@ -100,6 +100,29 @@ class AppConfig:
         self._data.clear()
         self._data.update(raw)
 
+    def update_pc_info(self, hostname: str, local_ip: str) -> None:
+        try:
+            path = self._settings_file_path()
+            file_data = {}
+            if path.exists():
+                import json
+                try:
+                    with path.open("r", encoding="utf-8") as f:
+                        file_data = json.load(f)
+                except Exception:
+                    pass
+            if not isinstance(file_data, dict):
+                file_data = {}
+            file_data["pc_name"] = hostname
+            file_data["pc_ip"] = local_ip
+            
+            import json
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(file_data, f, indent=2, ensure_ascii=False)
+            self._last_mtime = path.stat().st_mtime
+        except Exception:
+            pass
+
     @classmethod
     def _merge_dict(cls, target: dict[str, Any], source: dict[str, Any]) -> None:
         for k, v in source.items():

@@ -2361,6 +2361,10 @@ if ($node) {{ $node }}
         lead = self._config.get_string("polling.lead").strip()
         hostname = socket.gethostname()
         local_ip = self._resolve_local_ip()
+        try:
+            self._config.update_pc_info(hostname, local_ip)
+        except Exception as config_exc:
+            LOGGER.warning("Failed to save pc info to settings.json: %s", config_exc)
         lan_uid, fingerprint = self._resolve_lan_info(hostname=hostname, local_ip=local_ip)
         agent_uid = self._agent_uid or hostname
         
