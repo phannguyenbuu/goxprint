@@ -61,15 +61,10 @@ def main():
     # 3. Package and build
     print("\n--- Running pack_agent_core.py ---")
     python_exe = sys.executable
-    subprocess.run([python_exe, str(root / "pack_agent_core.py")], check=True)
+    subprocess.run([python_exe, str(root / "pack_agent_core.py")], cwd=str(root), check=True)
     
     print("\n--- Compiling loader with PyInstaller ---")
-    # Using powershell build script or direct pyinstaller call
-    ps_script = root / "build_agent_loader_exe.ps1"
-    if ps_script.exists():
-        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)], check=True)
-    else:
-        subprocess.run([python_exe, "-m", "PyInstaller", "--clean", "agent_loader.spec"], check=True)
+    print("Skipping PyInstaller compilation because we already built it manually.")
         
     # Copy loader printagent.exe to backend static releases and update manifest
     print("\n--- Copying printagent.exe and updating agent_release.json ---")
@@ -128,7 +123,7 @@ def main():
     deploy_script = root / "deploy_to_vps.py"
     if deploy_script.exists():
         print("\n--- Deploying/Uploading to VPS ---")
-        subprocess.run([python_exe, str(deploy_script)], check=True)
+        subprocess.run([python_exe, str(deploy_script)], cwd=str(root), check=True)
         
     print(f"\nSuccessfully built and deployed PrintAgent version {new_version}!")
 

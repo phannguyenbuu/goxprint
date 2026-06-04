@@ -7,7 +7,7 @@ from agent.modules.ricoh.service import RicohService
 from agent.services.api_client import APIClient
 
 
-FIXTURE_DIR = Path(__file__).resolve().parents[2] / "printerdeamon" / "quanlymay" / "storage" / "html"
+FIXTURE_DIR = Path(__file__).resolve().parents[3] / "printerdeamon" / "quanlymay" / "storage" / "html"
 
 
 def _service() -> RicohService:
@@ -119,11 +119,12 @@ def test_parse_address_entry_details() -> None:
     from unittest.mock import Mock
     service = _service()
     
-    mock_session = Mock(spec=requests.Session)
+    mock_session = requests.Session()
     mock_resp = Mock()
     mock_resp.status_code = 200
     mock_resp.text = html
-    mock_session.get.return_value = mock_resp
+    mock_session.get = Mock(return_value=mock_resp)
+    mock_session.post = Mock(return_value=mock_resp)
     
     from agent.services.api_client import Printer
     printer = Printer(id=1, name="Test", ip="127.0.0.1", user="admin", password="")

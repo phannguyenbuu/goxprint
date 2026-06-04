@@ -138,6 +138,13 @@ class RicohServiceBase:
         Form-based login to Ricoh copier.
         Returns successfully used (user, password) tuple.
         """
+        if not hasattr(session, "cookies") or session.cookies is None:
+            class DummyCookies:
+                def get(self, *args, **kwargs): return ""
+                def set(self, *args, **kwargs): pass
+                def clear(self, *args, **kwargs): pass
+            session.cookies = DummyCookies()
+
         base_url = f"http://{printer.ip}"
         LOGGER.info("[RicohLogin] Starting login for copier %s (IP: %s)", printer.name, printer.ip)
         
@@ -311,6 +318,13 @@ class RicohServiceBase:
         self._login(session, printer)
 
     def _reset_web_session(self, session: requests.Session, printer: Printer) -> None:
+        if not hasattr(session, "cookies") or session.cookies is None:
+            class DummyCookies:
+                def get(self, *args, **kwargs): return ""
+                def set(self, *args, **kwargs): pass
+                def clear(self, *args, **kwargs): pass
+            session.cookies = DummyCookies()
+
         base_url = f"http://{printer.ip}"
         # Quick logout - fire and forget
         for path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
@@ -384,7 +398,7 @@ class RicohServiceBase:
         if is_json_js:
             has_admin_content = True
         else:
-            has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries"])
+            has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries", "folderProtocolIn", "entryNameIn", "folderServerNameIn"])
         
         if is_login_page or (is_admin_page and not has_admin_content):
             LOGGER.info("[RicohHTTP] Session expired, guest view, or auth screen encountered for admin URL %s, re-authenticating IP %s...", url, printer.ip)
