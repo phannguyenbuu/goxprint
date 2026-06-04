@@ -553,9 +553,10 @@ class RicohAddressWizardMixin(RicohServiceBase):
         folder: str = "",
         user_code: str = "",
         fields: dict[str, Any] | None = None,
+        entry_id: str | None = None,
         session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        self.delete_address_entries(printer, [registration_no], verify=False, session=session)
+        self.delete_address_entries(printer, [registration_no], entry_ids=[entry_id] if entry_id else None, verify=False, session=session)
         return self.create_address_user_wizard(
             printer,
             name=name,

@@ -101,3 +101,36 @@ def test_parse_address_list_fixture() -> None:
     entries = _service().parse_address_list(html)
     assert entries
     assert entries[0].type == "Summary"
+
+
+def test_parse_address_entry_details() -> None:
+    html = """
+    <html><body>
+      <input type="text" name="folderPortNoIn" value="2121">
+      <select name="folderProtocolIn">
+        <option value="FTP_O" selected>FTP</option>
+      </select>
+      <input name="folderServerNameIn" value="192.168.1.50">
+      <input name="folderPathNameIn" value="/scans">
+      <input name="folderAuthUserNameIn" value="scanner_user">
+    </body></html>
+    """
+    import requests
+    from unittest.mock import Mock
+    service = _service()
+    
+    mock_session = Mock(spec=requests.Session)
+    mock_resp = Mock()
+    mock_resp.status_code = 200
+    mock_resp.text = html
+    mock_session.get.return_value = mock_resp
+    
+    from agent.services.api_client import Printer
+    printer = Printer(id=1, name="Test", ip="127.0.0.1", user="admin", password="")
+    
+    details = service.get_address_entry_details(printer, "123", session=mock_session)
+    assert details["folder_port"] == 2121
+    assert details["folder_protocol"] == "FTP_O"
+    assert details["folder_server"] == "192.168.1.50"
+    assert details["folder_path"] == "/scans"
+    assert details["folder_auth_user"] == "scanner_user"

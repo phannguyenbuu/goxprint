@@ -1029,12 +1029,15 @@ class PrintAgentGui:
         parts = selected.split("_", 3)
         printer_ip = parts[1]
         reg_no = parts[2]
+        entry_id = parts[3] if len(parts) > 3 else ""
         
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
             messagebox.showerror("Error", f"Printer with IP {printer_ip} is not loaded.")
             return
             
+        parent_id = self.printer_tree.parent(selected)
+        
         item_text = self.printer_tree.item(selected, "text")
         if "] " in item_text:
             dtype, name = item_text.split("] ", 1)
@@ -1047,66 +1050,132 @@ class PrintAgentGui:
         email = dest_values[0] if dtype == "Email" else ""
         folder = dest_values[1] if dtype != "Email" else ""
         
-        dest_data = {
-            "name": name,
-            "type": dtype,
-            "email": email,
-            "folder": folder,
-            "ftp_user": "",
-            "ftp_password": ""
-        }
+        progress = ProgressDialog(self.root, "Connecting to Copier", "Fetching destination details from Ricoh printer...")
         
-        dlg = PrinterDestinationDialog(self.root, f"Edit Dest: {name}", dest_data)
-        self.root.wait_window(dlg)
-        
-        if dlg.result:
-            progress = ProgressDialog(self.root, "Connecting to Copier", "Updating destination on Ricoh printer...")
-            
-            def task():
-                res = None
-                err_msg = None
-                try:
-                    from agent.modules.ricoh.service import RicohService
-                    api_client = APIClient(self.config)
-                    ricoh_service = RicohService(api_client, config=self.config)
-                    res = ricoh_service.modify_address_user_wizard(
-                        printer=printer,
-                        registration_no=reg_no,
-                        name=dlg.result["name"],
-                        email=dlg.result["email"],
-                        folder=dlg.result["folder"],
-                        fields={
-                            "folderAuthUserNameIn": dlg.result["ftp_user"],
-                            "folderAuthUserName": dlg.result["ftp_user"],
-                            "folderPasswordIn": dlg.result["ftp_password"],
-                            "wk_folderPasswordIn": dlg.result["ftp_password"],
-                            "folderPasswordConfirmIn": dlg.result["ftp_password"],
-                            "wk_folderPasswordConfirmIn": dlg.result["ftp_password"]
-                        }
-                    )
-                except Exception as exc:
-                    LOGGER.exception("Failed to modify scan destination in thread")
-                    err_msg = str(exc)
-                finally:
-                    self.root.after(0, progress.destroy)
-                    def refresh_single():
-                        try:
-                            from agent.modules.ricoh.service import RicohService
-                            api_client = APIClient(self.config)
-                            ricoh_service = RicohService(api_client, config=self.config)
-                            self.fetch_single_address_book(parent_id, printer, ricoh_service)
-                        except Exception:
-                            pass
-                    threading.Thread(target=refresh_single, daemon=True).start()
-                    if err_msg:
-                        self.root.after(50, lambda: messagebox.showerror("Error", err_msg))
-                    elif res and res.get("ok"):
-                        self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully updated destination to '{dlg.result['name']}'!"))
-                    else:
-                        error_detail = res.get('error', 'Unknown error') if res else 'Could not connect'
-                        self.root.after(50, lambda: messagebox.showerror("Error", f"Failed to update destination: {error_detail}"))
+        def fetch_task():
+            details = None
+            err_msg = None
+            session = None
+            try:
+                from agent.modules.ricoh.service import RicohService
+                api_client = APIClient(self.config)
+                ricoh_service = RicohService(api_client, config=self.config)
+                
+                session = ricoh_service.create_http_client(printer, authenticated=True)
+                
+                if entry_id:
+                    details = ricoh_service.get_address_entry_details(printer, entry_id, session=session)
+            except Exception as exc:
+                LOGGER.warning("Failed to fetch entry details from copier: %s", exc)
+                err_msg = str(exc)
+            finally:
+                if session is not None:
+                    try:
+                        ricoh_service._reset_web_session(session, printer)
+                        session.close()
+                    except Exception:
+                        pass
+                
+                self.root.after(0, progress.destroy)
+                
+                def open_dialog():
+                    nonlocal folder, email
+                    ftp_user = ""
+                    if details:
+                        proto = details.get("folder_protocol", "")
+                        srv = details.get("folder_server", "")
+                        port = details.get("folder_port", 21)
+                        path = details.get("folder_path", "")
+                        ftp_user = details.get("folder_auth_user", "")
+                        
+                        if srv:
+                            if proto == "FTP_O":
+                                folder = f"ftp://{srv}:{port}{path}"
+                            elif proto == "SMB":
+                                norm_path = path.replace("/", "\\")
+                                if not norm_path.startswith("\\") and norm_path:
+                                    norm_path = f"\\{norm_path}"
+                                folder = f"\\\\{srv}{norm_path}"
+                            else:
+                                folder = srv
+                                
+                    dest_data = {
+                        "name": name,
+                        "type": dtype,
+                        "email": email,
+                        "folder": folder,
+                        "ftp_user": ftp_user,
+                        "ftp_password": ""
+                    }
                     
-            threading.Thread(target=task, daemon=True).start()
+                    dlg = PrinterDestinationDialog(self.root, f"Edit Dest: {name}", dest_data)
+                    self.root.wait_window(dlg)
+                    
+                    if dlg.result:
+                        progress_update = ProgressDialog(self.root, "Connecting to Copier", "Updating destination on Ricoh printer...")
+                        
+                        def update_task():
+                            res = None
+                            update_err = None
+                            update_session = None
+                            try:
+                                from agent.modules.ricoh.service import RicohService
+                                api_client = APIClient(self.config)
+                                ricoh_service = RicohService(api_client, config=self.config)
+                                
+                                update_session = ricoh_service.create_http_client(printer, authenticated=True)
+                                
+                                res = ricoh_service.modify_address_user_wizard(
+                                    printer=printer,
+                                    registration_no=reg_no,
+                                    name=dlg.result["name"],
+                                    email=dlg.result["email"],
+                                    folder=dlg.result["folder"],
+                                    entry_id=entry_id,
+                                    fields={
+                                        "folderAuthUserNameIn": dlg.result["ftp_user"],
+                                        "folderAuthUserName": dlg.result["ftp_user"],
+                                        "folderPasswordIn": dlg.result["ftp_password"],
+                                        "wk_folderPasswordIn": dlg.result["ftp_password"],
+                                        "folderPasswordConfirmIn": dlg.result["ftp_password"],
+                                        "wk_folderPasswordConfirmIn": dlg.result["ftp_password"]
+                                    },
+                                    session=update_session
+                                )
+                            except Exception as exc:
+                                LOGGER.exception("Failed to modify scan destination in thread")
+                                update_err = str(exc)
+                            finally:
+                                if update_session is not None:
+                                    try:
+                                        ricoh_service._reset_web_session(update_session, printer)
+                                        update_session.close()
+                                    except Exception:
+                                        pass
+                                self.root.after(0, progress_update.destroy)
+                                def refresh_single():
+                                    try:
+                                        from agent.modules.ricoh.service import RicohService
+                                        api_client = APIClient(self.config)
+                                        ricoh_service = RicohService(api_client, config=self.config)
+                                        self.fetch_single_address_book(parent_id, printer, ricoh_service)
+                                    except Exception:
+                                        pass
+                                threading.Thread(target=refresh_single, daemon=True).start()
+                                if update_err:
+                                    self.root.after(50, lambda: messagebox.showerror("Error", update_err))
+                                elif res and res.get("ok"):
+                                    self.root.after(50, lambda: messagebox.showinfo("Success", f"Successfully updated destination to '{dlg.result['name']}'!"))
+                                else:
+                                    error_detail = res.get('error', 'Unknown error') if res else 'Could not connect'
+                                    self.root.after(50, lambda: messagebox.showerror("Error", f"Failed to update destination: {error_detail}"))
+                        
+                        threading.Thread(target=update_task, daemon=True).start()
+                
+                self.root.after(50, open_dialog)
+                
+        threading.Thread(target=fetch_task, daemon=True).start()
+
             
     def delete_printer_destination(self, selected: str = None) -> None:
         if not selected:

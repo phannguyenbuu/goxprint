@@ -406,6 +406,11 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 id_match = re.search(r'value=["\'](\d+)["\'][^>]*name=["\']entryIndex["\']', row, re.I)
             if id_match:
                 entry_id = id_match.group(1)
+            else:
+                # Fallback: Parse from adrsGetUserWizard.cgi?entryIndexIn=XXX or similar CHANGE link
+                fallback_match = re.search(r'entryIndexIn=(\d+)', row, re.I)
+                if fallback_match:
+                    entry_id = fallback_match.group(1)
 
             entry = AddressEntry(
                 type=self._strip_html(cells[1]),
@@ -795,3 +800,56 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 "scan_dir_added": scan_dir_added,
                 "scan_dirs": scan_dirs,
             }
+
+    def get_address_entry_details(
+        self,
+        printer: Printer,
+        entry_id: str,
+        session: requests.Session | None = None,
+    ) -> dict[str, Any]:
+        close_session_at_end = False
+        if session is None:
+            session = self.create_http_client(printer, authenticated=True)
+            close_session_at_end = True
+        try:
+            url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi?entryIndexIn={entry_id}&modeIn=CHANGEUSER"
+            LOGGER.info("[RicohAddressBook] Fetching entry details: GET %s", url)
+            resp = session.get(url, timeout=10)
+            resp.raise_for_status()
+            html = resp.text
+            
+            # Extract folder fields using regex
+            details = {}
+            
+            # 1. folderPortNoIn
+            port_m = re.search(r'name=["\']folderPortNoIn["\'][^>]*value=["\'](\d+)["\']', html, re.I)
+            if not port_m:
+                port_m = re.search(r'value=["\'](\d+)["\'][^>]*name=["\']folderPortNoIn["\']', html, re.I)
+            details["folder_port"] = int(port_m.group(1)) if port_m else 21
+            
+            # 2. folderProtocolIn
+            proto_m = re.search(r'name=["\']folderProtocolIn["\'][^>]*value=["\']([^"\']+)["\']', html, re.I)
+            if not proto_m:
+                proto_m = re.search(r'<select[^>]*name=["\']folderProtocolIn["\'][^>]*>.*?<option[^>]*value=["\']([^"\']+)["\'][^>]*selected.*?</select>', html, re.I | re.S)
+            details["folder_protocol"] = proto_m.group(1).strip() if proto_m else ""
+            
+            # 3. folderServerNameIn
+            server_m = re.search(r'name=["\']folderServerNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+            details["folder_server"] = server_m.group(1).strip() if server_m else ""
+            
+            # 4. folderPathNameIn
+            path_m = re.search(r'name=["\']folderPathNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+            details["folder_path"] = path_m.group(1).strip() if path_m else ""
+            
+            # 5. folderAuthUserNameIn
+            user_m = re.search(r'name=["\']folderAuthUserNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
+            details["folder_auth_user"] = user_m.group(1).strip() if user_m else ""
+            
+            return details
+        finally:
+            if close_session_at_end:
+                try:
+                    self._reset_web_session(session, printer)
+                    session.close()
+                except Exception:
+                    pass
