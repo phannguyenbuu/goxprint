@@ -417,8 +417,8 @@ class RicohAddressWizardMixin(RicohServiceBase):
             ("step", "BASE"),
             ("wimToken", wim_token),
             ("entryIndexIn", registration_no),
-            ("entryNameIn", self._clean_text(name)),
-            ("entryDisplayNameIn", entry_display_name),
+            ("entryNameIn", self._clean_text(name)[:20]),
+            ("entryDisplayNameIn", entry_display_name[:16]),
         ]
         for value in tag_values[:4]:
             base_items.append(("entryTagInfoIn", value))
