@@ -289,6 +289,15 @@ Get-NetIPAddress -AddressFamily IPv4 |
         except Exception as e:
             LOGGER.warning("[RicohAddressBook] Failed to refresh wimToken, using original: %s", e)
 
+        # Normalize regs to 5 digits zfill if they are numeric
+        norm_regs = []
+        for r in regs:
+            digits = re.sub(r"\D", "", r)
+            if digits:
+                norm_regs.append(digits.zfill(5))
+            else:
+                norm_regs.append(r)
+
         form = {
             "wimToken": token,
         }
@@ -298,18 +307,19 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
-            form["regiNoListIn"] = ",".join(ids)
-            form["selectedRegiNoIn"] = ",".join(ids)
-            form["deleteListIn"] = ",".join(ids)
+            reg_list = ",".join(norm_regs) if norm_regs else ",".join(ids)
+            form["regiNoListIn"] = reg_list
+            form["selectedRegiNoIn"] = reg_list
+            form["deleteListIn"] = reg_list
         else:
-            joined = ",".join(regs)
+            joined = ",".join(norm_regs)
             if joined and not joined.endswith(","):
                 joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
-            form["regiNoListIn"] = ",".join(regs)
-            form["selectedRegiNoIn"] = ",".join(regs)
-            form["deleteListIn"] = ",".join(regs)
+            form["regiNoListIn"] = ",".join(norm_regs)
+            form["selectedRegiNoIn"] = ",".join(norm_regs)
+            form["deleteListIn"] = ",".join(norm_regs)
 
         headers = {
             "Referer": f"http://{printer.ip}{list_url}",
