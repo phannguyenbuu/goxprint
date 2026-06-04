@@ -822,6 +822,7 @@ class PrintAgentGui:
                                         mac_address=item.get("mac_address", ""),
                                         printer_type=item.get("printer_type", ""),
                                         status=item.get("status", "offline"),
+                                        physical_status=item.get("physical_status", "Unknown"),
                                     )
                                     printer_objs.append(p)
                     except Exception as err:
