@@ -502,6 +502,7 @@ class PrintAgentGui:
         
         self.printer_tree.grid(row=0, column=0, sticky="nsew")
         self.printer_tree.bind("<Button-3>", self.show_printer_context_menu)
+        self.printer_tree.bind("<Double-1>", self.on_printer_tree_double_click)
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
         
@@ -1251,6 +1252,115 @@ class PrintAgentGui:
                         threading.Thread(target=update_task, daemon=True).start()
                 
                 self.root.after(50, open_dialog)
+                
+        threading.Thread(target=fetch_task, daemon=True).start()
+            
+    def on_printer_tree_double_click(self, event) -> None:
+        selected = self.printer_tree.focus()
+        if not selected or not selected.startswith("dest_"):
+            return
+            
+        parts = selected.split("_", 3)
+        printer_ip = parts[1]
+        reg_no = parts[2]
+        entry_id = parts[3] if len(parts) > 3 else ""
+        
+        printer = self.printers_by_ip.get(printer_ip.lower())
+        if not printer:
+            return
+            
+        progress = ProgressDialog(self.root, "Connecting to Copier", "Fetching destination details from Ricoh printer...")
+        
+        def fetch_task():
+            details = None
+            session = None
+            try:
+                from agent.modules.ricoh.service import RicohService
+                api_client = APIClient(self.config)
+                ricoh_service = RicohService(api_client, config=self.config)
+                session = ricoh_service.create_http_client(printer, authenticated=True)
+                if entry_id:
+                    details = ricoh_service.get_address_entry_details(printer, entry_id, session=session)
+            except Exception as exc:
+                LOGGER.warning("Failed to fetch entry details: %s", exc)
+            finally:
+                if session is not None:
+                    try:
+                        ricoh_service._reset_web_session(session, printer)
+                        session.close()
+                    except Exception:
+                        pass
+                
+                self.root.after(0, progress.destroy)
+                
+                def show_details():
+                    if not details:
+                        messagebox.showerror("Error", "Could not fetch details for this destination from the printer.")
+                        return
+                        
+                    proto = details.get("folder_protocol", "")
+                    srv = details.get("folder_server", "")
+                    port = details.get("folder_port", 21)
+                    path = details.get("folder_path", "")
+                    
+                    physical_path = ""
+                    
+                    if proto == "FTP_O":
+                        try:
+                            from agent.services.ftp_store import load_config
+                            config_data = load_config()
+                            for site in config_data.get("sites", []):
+                                if int(site.get("port", 0)) == int(port):
+                                    physical_path = site.get("physical_path", "")
+                                    break
+                        except Exception:
+                            pass
+                    elif proto == "SMB":
+                        import socket
+                        local_host = socket.gethostname().strip().lower()
+                        is_local = False
+                        if srv.lower() in {"127.0.0.1", "localhost", local_host}:
+                            is_local = True
+                        else:
+                            try:
+                                local_ips = socket.gethostbyname_ex(local_host)[2]
+                                if srv in local_ips:
+                                    is_local = True
+                            except Exception:
+                                pass
+                                
+                        if is_local:
+                            share_name = path.replace("\\", "/").strip("/")
+                            if "/" in share_name:
+                                share_name = share_name.split("/")[0]
+                            if share_name:
+                                try:
+                                    import subprocess
+                                    import re
+                                    res = subprocess.run(["net", "share", share_name], capture_output=True, text=True, timeout=3, shell=True)
+                                    if res.returncode == 0:
+                                        for line in res.stdout.splitlines():
+                                            if line.strip().lower().startswith("path"):
+                                                parts_line = re.split(r'\s+', line.strip(), 1)
+                                                if len(parts_line) > 1:
+                                                    physical_path = parts_line[1].strip()
+                                                    break
+                                except Exception:
+                                    pass
+                                    
+                    if not physical_path:
+                        physical_path = f"Remote / Not found on this PC ({srv})"
+                        
+                    info_msg = (
+                        f"Name (Tên hiển thị): {self.printer_tree.item(selected, 'text')}\r\n"
+                        f"Protocol (Giao thức): {'FTP' if proto == 'FTP_O' else proto}\r\n"
+                        f"Folder Port No. (Cổng): {port}\r\n"
+                        f"Path on Copier (Đường dẫn WIM): {path}\r\n"
+                        f"Path to Source Folder (Thư mục vật lý trên PC): {physical_path}"
+                    )
+                    messagebox.showinfo("Destination Information", info_msg)
+                    
+                self.root.after(50, show_details)
                 
         threading.Thread(target=fetch_task, daemon=True).start()
 
