@@ -408,8 +408,16 @@ def main() -> int:
             server, server_thread = run_web_server(app, args.host, args.port)
             def force_update_cb():
                 LOGGER.info("Force update callback triggered from Tray")
-                updater.state.last_check_at = ""
-                polling_bridge.trigger_once()
+                app_updater = app.config.get("UPDATER")
+                if app_updater is not None:
+                    app_updater.state.last_check_at = ""
+                else:
+                    updater.state.last_check_at = ""
+                app_bridge = app.config.get("POLLING_BRIDGE")
+                if app_bridge is not None:
+                    app_bridge.trigger_once()
+                else:
+                    LOGGER.error("PollingBridge not found in app config during force update callback")
 
             tray = TrayController(
                 f"http://127.0.0.1:{args.port}",
