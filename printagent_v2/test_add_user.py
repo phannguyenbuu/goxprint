@@ -371,13 +371,14 @@ def delete_address_entry(session, ip: str, entry_ref: str) -> dict:
                     entry_id = id_match.group(1)
                     break
 
+    joined_reg = f"{entry_id}," if entry_id and not entry_id.endswith(",") else entry_id
     resp = session.post(delete_url, data={
         "wimToken": wim_token,
         "entryIndex": f"{entry_id},",
         "entryIndexIn": f"{entry_id},",
-        "regiNoListIn": entry_id,
-        "selectedRegiNoIn": entry_id,
-        "deleteListIn": entry_id,
+        "regiNoListIn": joined_reg,
+        "selectedRegiNoIn": joined_reg,
+        "deleteListIn": joined_reg,
     }, headers={"Referer": list_url, "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
     resp.raise_for_status()
 

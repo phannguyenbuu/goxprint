@@ -307,19 +307,18 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
-            reg_list = ",".join(norm_regs) if norm_regs else ",".join(ids)
-            form["regiNoListIn"] = reg_list
-            form["selectedRegiNoIn"] = reg_list
-            form["deleteListIn"] = reg_list
+            form["regiNoListIn"] = joined
+            form["selectedRegiNoIn"] = joined
+            form["deleteListIn"] = joined
         else:
             joined = ",".join(norm_regs)
             if joined and not joined.endswith(","):
                 joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
-            form["regiNoListIn"] = ",".join(norm_regs)
-            form["selectedRegiNoIn"] = ",".join(norm_regs)
-            form["deleteListIn"] = ",".join(norm_regs)
+            form["regiNoListIn"] = joined
+            form["selectedRegiNoIn"] = joined
+            form["deleteListIn"] = joined
 
         multipart_form = {k: (None, str(v)) for k, v in form.items()}
 
