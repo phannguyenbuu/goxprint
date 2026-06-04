@@ -18,6 +18,7 @@ class Printer:
     printer_type: str = ""
     status: str = ""
     mac_address: str = ""
+    physical_status: str = "Unknown"
 
 
 class APIClient:

@@ -100,6 +100,7 @@ class PollingBridge:
         self._emails = []
         self._last_discovered_printers = []
         self._printer_online_states: dict[str, bool] = {}
+        self._printer_physical_statuses: dict[str, str] = {}
         self._load_scan_upload_state()
         self._recent_commands = []
         self._recent_commands_lock = threading.Lock()
@@ -2504,9 +2505,13 @@ if ($node) {{ $node }}
                         ack.get("skipped_counter", "?"),
                         ack.get("skipped_status", "?"),
                     )
+                    status_data = status_payload.get("status_data", {})
+                    sys_status = status_data.get("system_status") or status_data.get("printer_status") or "OK"
+                    self._printer_physical_statuses[printer.ip] = sys_status
                     self._printer_online_states[printer.ip] = True
                 except Exception as exc:  # noqa: BLE001
                     self._printer_online_states[printer.ip] = False
+                    self._printer_physical_statuses[printer.ip] = "Offline"
                     with cycle_lock:
                         self._last_cycle_failed += 1
                         self._last_error = str(exc)
@@ -2577,12 +2582,14 @@ if ($node) {{ $node }}
                     if not ip:
                         continue
                     is_online = self._printer_online_states.get(ip, False)
+                    phys_status = self._printer_physical_statuses.get(ip, "Unknown") if is_online else "Offline"
                     status_list.append({
                         "name": printer.name,
                         "ip": printer.ip,
                         "mac_address": printer.mac_address,
                         "printer_type": printer.printer_type,
                         "status": "online" if is_online else "offline",
+                        "physical_status": phys_status,
                         "is_online": is_online
                     })
                 

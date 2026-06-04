@@ -481,7 +481,7 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("IP", "MAC", "Type", "Status")
+        cols = ("IP", "MAC", "Type", "Status", "DevStatus")
         self.printer_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
         self.printer_tree.heading("#0", text="Tên Thiết Bị / Địa chỉ nhận")
@@ -489,12 +489,14 @@ class PrintAgentGui:
         self.printer_tree.heading("MAC", text="Địa chỉ MAC / FTP / SMB")
         self.printer_tree.heading("Type", text="Hãng/Loại")
         self.printer_tree.heading("Status", text="Kết nối")
+        self.printer_tree.heading("DevStatus", text="Trạng thái")
         
-        self.printer_tree.column("#0", width=250, anchor=tk.W)
+        self.printer_tree.column("#0", width=230, anchor=tk.W)
         self.printer_tree.column("IP", width=140, anchor=tk.W)
-        self.printer_tree.column("MAC", width=230, anchor=tk.W)
-        self.printer_tree.column("Type", width=80, anchor=tk.CENTER)
-        self.printer_tree.column("Status", width=80, anchor=tk.CENTER)
+        self.printer_tree.column("MAC", width=220, anchor=tk.W)
+        self.printer_tree.column("Type", width=70, anchor=tk.CENTER)
+        self.printer_tree.column("Status", width=60, anchor=tk.CENTER)
+        self.printer_tree.column("DevStatus", width=100, anchor=tk.CENTER)
         
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.printer_tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.printer_tree.xview)
@@ -796,7 +798,7 @@ class PrintAgentGui:
         for item in self.printer_tree.get_children():
             self.printer_tree.delete(item)
             
-        self.printer_tree.insert("", tk.END, text="Loading printers...", values=("", "", "", ""))
+        self.printer_tree.insert("", tk.END, text="Loading printers...", values=("", "", "", "", ""))
         
         def run() -> None:
             try:
@@ -893,17 +895,17 @@ class PrintAgentGui:
                 "",
                 tk.END,
                 text=p.name,
-                values=(p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize())
+                values=(p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
             )
             self.printer_node_ids[p.ip.lower()] = node_id
             # Insert a "Connecting/Loading..." child row
             if p.printer_type.lower() == "ricoh":
-                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", "", ""))
             else:
-                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", "", ""))
                 
         if not unique_printers:
-            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", ""))
+            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", "", ""))
             
     def start_address_book_fetching(self, unique_printers: list[Printer], ricoh_service: Any) -> None:
         def run_executor():
@@ -968,7 +970,7 @@ class PrintAgentGui:
                         tk.END,
                         iid=item_iid,
                         text=f"[{dest_type}] {name}",
-                        values=(dest_val, "", "", "")
+                        values=(dest_val, "", "", "", "")
                     )
                 else:
                     self.printer_tree.insert(
@@ -976,7 +978,7 @@ class PrintAgentGui:
                         tk.END,
                         iid=item_iid,
                         text=f"[{dest_type}] {name}",
-                        values=("", dest_val, "", "")
+                        values=("", dest_val, "", "", "")
                     )
                     
         if not has_valid_dest:
@@ -984,7 +986,7 @@ class PrintAgentGui:
                 node_id,
                 tk.END,
                 text="(No scan/ftp/folder destinations)",
-                values=("", "", "", "")
+                values=("", "", "", "", "")
             )
             
     def update_printer_destinations_error(self, node_id: str, error_msg: str) -> None:
@@ -996,7 +998,7 @@ class PrintAgentGui:
             node_id,
             tk.END,
             text=f"(Error: {error_msg})",
-            values=("", "", "", "")
+            values=("", "", "", "", "")
         )
         
     def add_printer_destination(self, selected: str = None) -> None:
