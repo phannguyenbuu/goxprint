@@ -885,7 +885,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
             post_data = {
                 "mode": "MODUSER",
                 "outputSpecifyModeIn": "PROGRAMMED",
-                "entryIndexIn": target_reg_no,
+                "entryIndexIn": str(entry_id).strip(),
                 "wimToken": wim_token
             }
             LOGGER.info("[RicohAddressBook] Fetching entry details: POST %s with data %s", url, post_data)
