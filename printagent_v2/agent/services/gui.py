@@ -1354,8 +1354,15 @@ def show_gui_window(app_version: str) -> None:
                 _gui_root = root
                 PrintAgentGui(root, app_version)
                 
-                # Center window on load
-                center_window(root, 850, 550)
+                # Center window on load with width at 90vw (90% of screen width)
+                try:
+                    root.update_idletasks()
+                    screen_width = root.winfo_screenwidth()
+                    width_90vw = max(850, int(screen_width * 0.9))
+                except Exception:
+                    width_90vw = 1200
+                
+                center_window(root, width_90vw, 550)
                 
                 root.mainloop()
             except Exception as exc:
