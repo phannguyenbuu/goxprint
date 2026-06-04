@@ -259,6 +259,38 @@ class RicohAddressWizardMixin(RicohServiceBase):
         normalized_folder = self._clean_text(folder).lower()
         target_reg = self._normalize_registration_no(registration_no)
         
+        # Helper to extract host from folder for robust comparison
+        def extract_host(folder_str: str) -> str:
+            cleaned = str(folder_str or "").replace("\\", "/").strip().lower()
+            for proto in ["ftp://", "smb://", "http://", "https://"]:
+                if cleaned.startswith(proto):
+                    cleaned = cleaned[len(proto):]
+            cleaned = cleaned.lstrip("/")
+            parts = re.split(r"[/: ]", cleaned)
+            return parts[0] if parts else ""
+
+        # Helper to match names robustly (supporting email/username fallbacks)
+        def names_match(actual: str, expected: str) -> bool:
+            act = str(actual or "").strip().lower()
+            exp = str(expected or "").strip().lower()
+            if not act or not exp:
+                return False
+            if act == exp:
+                return True
+            if len(act) >= 20 and exp.startswith(act):
+                return True
+            if "@" in exp:
+                username = exp.split("@")[0]
+                if act == username:
+                    return True
+            if "@" in act:
+                username = act.split("@")[0]
+                if exp == username:
+                    return True
+            return False
+
+        expected_host = extract_host(normalized_folder)
+        
         verified = False
         for entry in candidates:
             reg = self._normalize_registration_no(entry.registration_no)
@@ -269,7 +301,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
             if target_reg and reg == target_reg:
                 if normalized_name:
                     actual_name = self._clean_text(entry.name).lower()
-                    if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
+                    if names_match(actual_name, normalized_name):
                         verified = True
                         break
                     else:
@@ -279,11 +311,15 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     break
             if normalized_name:
                 actual_name = self._clean_text(entry.name).lower()
-                if actual_name == normalized_name or (len(actual_name) >= 20 and normalized_name.startswith(actual_name)):
-                    if not normalized_folder or normalized_folder == self._clean_text(entry.folder).lower():
+                if names_match(actual_name, normalized_name):
+                    actual_folder = self._clean_text(entry.folder).lower()
+                    actual_host = extract_host(actual_folder)
+                    if (not normalized_folder or 
+                        normalized_folder == actual_folder or 
+                        (expected_host and expected_host == actual_host)):
                         verified = True
                         break
-                        
+
         if not verified:
             # Write detailed debug log of verification failure to Dropbox for easy sync
             try:
