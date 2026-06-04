@@ -323,7 +323,7 @@ class AutoUpdater:
             self.state.last_return_code = None
 
         release_dir = current_binary.parent
-        staged_binary = release_dir / f"{current_binary.stem}.new{current_binary.suffix}"
+        staged_binary = release_dir / f"{current_binary.stem}.new.tmp"
         backup_binary = release_dir / f"{current_binary.stem}.bak{current_binary.suffix}"
         helper_script = release_dir / "storage" / "data" / "agent_update.bat"
         notice_file = UPDATE_NOTICE_FILE if UPDATE_NOTICE_FILE.is_absolute() else release_dir / UPDATE_NOTICE_FILE
