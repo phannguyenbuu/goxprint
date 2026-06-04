@@ -222,11 +222,45 @@ class RicohAddressWizardMixin(RicohServiceBase):
         return host, port, path
 
     def _next_registration_no(self, session: requests.Session, printer: Printer) -> str:
-        # Strictly use shuffled HHMMSS timestamp mapping to avoid slow address book fetches and guarantee uniqueness
-        import random
-        timestamp_digits = list(time.strftime("%H%M%S"))
-        random.shuffle(timestamp_digits)
-        return "".join(timestamp_digits)[:5]
+        LOGGER.info("[RicohWizard] Calculating next vacant registration number...")
+        occupied = set()
+        
+        # 1. Try to fetch existing entries to find occupied numbers
+        try:
+            # We fetch the list page to get a wimToken first
+            list_url = "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+            list_html = self.authenticate_and_get(session, printer, list_url)
+            wim_token = self._extract_wim_token(list_html) or self._extract_hidden_inputs(list_html).get("wimToken", "")
+            
+            # Parse entries from the HTML table
+            for entry in self.parse_address_list(list_html):
+                reg = re.sub(r"\D", "", entry.registration_no)
+                if reg:
+                    occupied.add(int(reg))
+                    
+            # Parse entries from AJAX for completeness
+            if wim_token:
+                ajax_raw = self.get_address_list_ajax_with_client(session, printer, wim_token=wim_token)
+                if ajax_raw:
+                    for entry in self.parse_ajax_address_list(ajax_raw):
+                        reg = re.sub(r"\D", "", entry.registration_no)
+                        if reg:
+                            occupied.add(int(reg))
+        except Exception as e:
+            LOGGER.warning("[RicohWizard] Failed to fetch existing registration numbers: %s", e)
+
+        # 2. Find the first vacant number starting from 1
+        vacant = 1
+        if occupied:
+            while vacant in occupied:
+                vacant += 1
+        else:
+            # Fallback if fetching failed: select a random vacant number between 1 and 999
+            import random
+            vacant = random.randint(1, 999)
+            
+        LOGGER.info("[RicohWizard] Found next vacant registration number: %05d", vacant)
+        return f"{vacant:05d}"
 
 
 
