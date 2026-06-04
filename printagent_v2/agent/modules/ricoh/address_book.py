@@ -311,14 +311,15 @@ Get-NetIPAddress -AddressFamily IPv4 |
             form["selectedRegiNoIn"] = ",".join(regs)
             form["deleteListIn"] = ",".join(regs)
 
-        multipart_form = {k: (None, str(v)) for k, v in form.items()}
+        headers = {
+            "Referer": f"http://{printer.ip}{list_url}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
 
         resp = session.post(
             f"http://{printer.ip}{delete_url}",
-            files=multipart_form,
-            headers={
-                "Referer": f"http://{printer.ip}{list_url}",
-            },
+            data=form,
+            headers=headers,
             timeout=15,
         )
         resp.raise_for_status()
