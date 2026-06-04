@@ -78,6 +78,13 @@ def register_ui_routes(app):
         ok, message = updater.handle_signal(version=version, command_text=command, source=source, raw_text=str(body))
         return jsonify({"ok": ok, "message": message, "status": updater.status()})
 
+    @app.post("/api/update/force-check")
+    def api_update_force_check() -> Any:
+        updater.state.last_check_at = ""
+        polling_bridge = app.config["POLLING_BRIDGE"]
+        polling_bridge.trigger_once()
+        return jsonify({"ok": True, "message": "Force update check triggered successfully"})
+
     @app.post("/api/update/receive-text")
     def api_update_receive_text() -> Any:
         mode = config.get_string("webhook.mode", "listen").strip().lower() or "listen"

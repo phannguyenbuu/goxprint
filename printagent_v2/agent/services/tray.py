@@ -9,6 +9,7 @@ import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from ctypes import wintypes
+from typing import Callable
 
 
 LOGGER = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ MB_ICONINFORMATION = 0x00000040
 ID_SHOW = 1001
 ID_VERSION = 1002
 ID_CLOSE = 1003
+ID_FORCE_UPDATE = 1004
 DEFAULT_TRAY_TIP = "GoPrinxAgent"
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 
@@ -106,6 +108,7 @@ class TrayController:
     url: str
     stop_event: threading.Event | None = None
     app_version: str = ""
+    force_update_callback: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         self._closed = False
@@ -177,6 +180,22 @@ class TrayController:
         hwnd = self._hwnd or 0
         user32.SetForegroundWindow(hwnd)
         user32.MessageBoxW(hwnd, message, title, MB_OK | MB_ICONINFORMATION)
+
+    def _force_update(self) -> None:
+        LOGGER.info("Tray: Force update requested")
+        self._show_balloon("GoPrinxAgent", "Checking for updates...")
+        if self.force_update_callback is not None:
+            try:
+                self.force_update_callback()
+            except Exception as exc:
+                LOGGER.exception("Failed to run force update callback: %s", exc)
+        else:
+            try:
+                import requests
+                resp = requests.post(f"{self.url}/api/update/force-check", timeout=5)
+                LOGGER.info("Tray force update HTTP response: %s", resp.text)
+            except Exception as e:
+                LOGGER.warning("Tray force update HTTP request failed: %s", e)
 
     def _load_icon(self) -> int:
         if not user32:
@@ -259,6 +278,7 @@ class TrayController:
             version_text = f"Version (v{self.app_version})" if self.app_version else "Version"
             user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show")
             user32.AppendMenuW(menu, MF_STRING, ID_VERSION, version_text)
+            user32.AppendMenuW(menu, MF_STRING, ID_FORCE_UPDATE, "Force Update (Cập nhật)")
             user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
 
             # Polling Settings
@@ -351,6 +371,8 @@ class TrayController:
                     self._show()
                 elif command == ID_VERSION:
                     self._show_version_dialog()
+                elif command == ID_FORCE_UPDATE:
+                    self._force_update()
                 elif command == ID_CLOSE:
                     self._close()
                 elif command in (2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009):

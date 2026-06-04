@@ -406,10 +406,16 @@ def main() -> int:
             stop_event = threading.Event()
             app = create_app(current_args=current_args, shutdown_event=stop_event)
             server, server_thread = run_web_server(app, args.host, args.port)
+            def force_update_cb():
+                LOGGER.info("Force update callback triggered from Tray")
+                updater.state.last_check_at = ""
+                polling_bridge.trigger_once()
+
             tray = TrayController(
                 f"http://127.0.0.1:{args.port}",
                 stop_event=stop_event,
                 app_version=updater.current_version,
+                force_update_callback=force_update_cb,
             )
             tray_thread = threading.Thread(target=tray.run, daemon=True, name="agent-tray")
             tray_thread.start()
