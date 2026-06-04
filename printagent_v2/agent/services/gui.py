@@ -320,7 +320,11 @@ class PrintAgentGui:
         main_frame = ttk.Frame(self.ftp_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Treeview
+        # Action Buttons frame packed first on the right so it gets sizing priority
+        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Treeview frame packed second to fill remaining left area
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
@@ -353,9 +357,7 @@ class PrintAgentGui:
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
         
-        # Action Buttons
-        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        # Buttons are packed into the pre-created btn_frame
         
         ttk.Button(btn_frame, text="Add FTP (Thêm)", command=self.add_ftp_site, width=18).pack(pady=5)
         ttk.Button(btn_frame, text="Edit FTP (Sửa)", command=self.edit_ftp_site, width=18).pack(pady=5)
@@ -370,6 +372,10 @@ class PrintAgentGui:
         
         main_frame = ttk.Frame(self.scan_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Action Buttons frame packed first on the right so it gets sizing priority
+        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Treeview list of paths
         tree_frame = ttk.Frame(main_frame)
@@ -398,9 +404,7 @@ class PrintAgentGui:
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
         
-        # Action Buttons
-        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        # Buttons are packed into the pre-created btn_frame
         
         ttk.Button(btn_frame, text="Add Folder (Thêm)", command=self.add_scan_dir, width=18).pack(pady=5)
         ttk.Button(btn_frame, text="Remove Folder (Xóa)", command=self.remove_scan_dir, width=18).pack(pady=5)
@@ -414,6 +418,10 @@ class PrintAgentGui:
         
         main_frame = ttk.Frame(self.printers_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Action Buttons frame packed first on the right so it gets sizing priority
+        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Treeview
         tree_frame = ttk.Frame(main_frame)
@@ -446,9 +454,7 @@ class PrintAgentGui:
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
         
-        # Action Buttons
-        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        # Buttons are packed into the pre-created btn_frame
         
         ttk.Button(btn_frame, text="Add Dest (Thêm nhận)", command=self.add_printer_destination, width=18).pack(pady=5)
         ttk.Button(btn_frame, text="Edit Dest (Sửa nhận)", command=self.edit_printer_destination, width=18).pack(pady=5)
@@ -561,29 +567,46 @@ class PrintAgentGui:
                 self.refresh_ftp_list()
                 
     def delete_ftp_site(self) -> None:
-        selected = self.ftp_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select an FTP site to delete.")
+        selected_items = self.ftp_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select one or more FTP sites to delete.")
             return
             
-        site_name = self.ftp_tree.item(selected, "values")[0]
+        site_names = [self.ftp_tree.item(item, "values")[0] for item in selected_items]
         
+        if len(site_names) == 1:
+            confirm_msg = f"Are you sure you want to delete FTP site '{site_names[0]}'?\nThis will stop the FTP service on this port."
+        else:
+            confirm_msg = f"Are you sure you want to delete {len(site_names)} FTP sites?\n{', '.join(site_names)}\nThis will stop the FTP services on their ports."
+            
         confirm = messagebox.askyesno(
             "Confirm Delete",
-            f"Are you sure you want to delete FTP site '{site_name}'?\nThis will stop the FTP service on this port.",
+            confirm_msg,
             default=messagebox.NO
         )
         if confirm:
-            try:
-                res = self.share_manager.delete_ftp_site(site_name)
-                if res.get("ok"):
-                    messagebox.showinfo("Success", f"FTP site '{site_name}' deleted successfully!")
+            success_count = 0
+            errors = []
+            for site_name in site_names:
+                try:
+                    res = self.share_manager.delete_ftp_site(site_name)
+                    if res.get("ok"):
+                        success_count += 1
+                    else:
+                        errors.append(f"{site_name}: {res.get('error', 'Unknown error')}")
+                except Exception as exc:
+                    errors.append(f"{site_name}: {exc}")
+            
+            if not errors:
+                if len(site_names) == 1:
+                    messagebox.showinfo("Success", f"FTP site '{site_names[0]}' deleted successfully!")
                 else:
-                    messagebox.showerror("Error", f"Failed to delete FTP site: {res.get('error', 'Unknown error')}")
-            except Exception as exc:
-                messagebox.showerror("Error", str(exc))
-            finally:
-                self.refresh_ftp_list()
+                    messagebox.showinfo("Success", f"Successfully deleted {success_count} FTP sites!")
+            else:
+                err_msg = "\n".join(errors)
+                messagebox.showerror("Error", f"Failed to delete some FTP sites:\n{err_msg}")
+                
+            self.refresh_ftp_list()
  
     # --- SCAN SYNC LOGIC ---
     def refresh_scan_dirs(self) -> None:
@@ -676,15 +699,21 @@ class PrintAgentGui:
                 self.refresh_scan_dirs()
                 
     def remove_scan_dir(self) -> None:
-        selected = self.scan_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a scan directory to remove.")
+        selected_items = self.scan_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select one or more scan directories to remove.")
             return
             
-        path = self.scan_tree.item(selected, "values")[0]
+        paths = [self.scan_tree.item(item, "values")[0] for item in selected_items]
+        
+        if len(paths) == 1:
+            confirm_msg = f"Are you sure you want to stop monitoring this folder for scan synchronization?\n{paths[0]}"
+        else:
+            confirm_msg = f"Are you sure you want to stop monitoring these {len(paths)} folders for scan synchronization?\n" + "\n".join(paths)
+            
         confirm = messagebox.askyesno(
             "Confirm Remove",
-            f"Are you sure you want to stop monitoring this folder for scan synchronization?\n{path}",
+            confirm_msg,
             default=messagebox.NO
         )
         if confirm:
@@ -693,11 +722,15 @@ class PrintAgentGui:
                 raw = self.config.get_string("polling.scan_dirs", "").strip()
                 dirs = [d.strip() for d in raw.split(";") if d.strip()]
                 
-                # Filter out the selected one
-                filtered = [d for d in dirs if os.path.normcase(os.path.normpath(d)) != os.path.normcase(os.path.normpath(path))]
+                # Filter out the selected ones
+                paths_norm = [os.path.normcase(os.path.normpath(p)) for p in paths]
+                filtered = [d for d in dirs if os.path.normcase(os.path.normpath(d)) not in paths_norm]
                 
                 self.config.set_value("polling.scan_dirs", ";".join(filtered))
-                messagebox.showinfo("Success", "Scan directory removed successfully!")
+                if len(paths) == 1:
+                    messagebox.showinfo("Success", "Scan directory removed successfully!")
+                else:
+                    messagebox.showinfo("Success", f"Successfully removed {len(paths)} scan directories!")
             except Exception as exc:
                 messagebox.showerror("Error", f"Failed to update scan folders: {exc}")
             finally:
