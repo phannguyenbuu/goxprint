@@ -360,7 +360,18 @@ Get-NetIPAddress -AddressFamily IPv4 |
 
             if failed:
                 label = "entry_id" if ids else "registration_no"
-                raise RuntimeError(f"Delete not confirmed for {label}: {', '.join(failed)}")
+                snippet = ""
+                if resp is not None and resp.text:
+                    # Clean up multiple spaces and strip html tag wrappers if large
+                    snippet = resp.text[:1000].replace('\r', '').replace('\n', ' ')
+                raise RuntimeError(
+                    f"Delete not confirmed for {label}: {', '.join(failed)}.\n\n"
+                    f"Diagnostics:\n"
+                    f"- POST URL: {delete_url}\n"
+                    f"- POST Data: {form}\n"
+                    f"- HTTP Status: {resp.status_code if resp is not None else 'None'}\n"
+                    f"- Response: {snippet}"
+                )
 
         return {
             "printer_name": printer.name,
