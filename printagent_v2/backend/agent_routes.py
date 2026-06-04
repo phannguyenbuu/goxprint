@@ -482,6 +482,37 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
         current_version = _to_text(request.args.get("current_version"))
         current_sha256 = _to_text(request.args.get("current_sha256")).lower()
+
+        lan_uid = _to_text(request.args.get("lan_uid"))
+        agent_uid = _to_text(request.args.get("agent_uid"))
+        hostname = _to_text(request.args.get("hostname"))
+        local_ip = _to_text(request.args.get("local_ip"))
+
+        if lan_uid and agent_uid:
+            try:
+                with session_factory() as session:
+                    _upsert_lan_and_agent(
+                        session=session,
+                        lead=lead_valid,
+                        lan_uid=lan_uid,
+                        agent_uid=agent_uid,
+                        lan_name="",
+                        subnet_cidr="",
+                        gateway_ip="",
+                        gateway_mac="",
+                        hostname=hostname,
+                        local_ip=local_ip,
+                        local_mac="",
+                        app_version=current_version,
+                        run_mode="",
+                        web_port=0,
+                        ftp_ports="",
+                        ftp_sites=None,
+                    )
+                    session.commit()
+            except Exception as upsert_exc:
+                LOGGER.warning("Failed to upsert agent in release check: %s", upsert_exc)
+
         manifest = _load_agent_release_manifest()
         version = _to_text(manifest.get("version"))
         sha256 = _to_text(manifest.get("sha256")).lower()
