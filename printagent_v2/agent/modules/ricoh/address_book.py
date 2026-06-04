@@ -837,9 +837,28 @@ Get-NetIPAddress -AddressFamily IPv4 |
             url = f"http://{printer.ip}/web/entry/en/address/adrsGetUserWizard.cgi?entryIndexIn={entry_id}&modeIn=CHANGEUSER"
             LOGGER.info("[RicohAddressBook] Fetching entry details: GET %s", url)
             resp = session.get(url, timeout=10)
+            LOGGER.info("[RicohAddressBook] GET response code: %d, length: %d", resp.status_code, len(resp.text or ""))
             resp.raise_for_status()
             html = resp.text
             
+            # Inspect HTML for session failures or redirection to login
+            is_login = any(x in html for x in ["authForm.cgi", "login.cgi", "Login User Name", "Login Password"])
+            if is_login:
+                LOGGER.warning("[RicohAddressBook] Session redirected to login page. Snippet: %s", html[:300].replace('\n', ' '))
+                raise RuntimeError("Authentication failed or session expired. The copier redirected to the login page.")
+                
+            if "Session timed out" in html:
+                LOGGER.warning("[RicohAddressBook] Session timed out indicator found in response HTML.")
+                raise RuntimeError("Copier reported session timed out. Please try logging in again.")
+
+            has_wizard = any(x in html for x in ["folderProtocolIn", "folderServerNameIn", "folderPathNameIn", "entryNameIn"])
+            if not has_wizard:
+                LOGGER.warning("[RicohAddressBook] Response does not contain user wizard fields. HTML length: %d. Snippet: %s", len(html), html[:500].replace('\n', ' '))
+                raise RuntimeError(
+                    f"Invalid response from copier. The page does not contain address entry details. "
+                    f"Response length: {len(html)} characters."
+                )
+
             # Extract folder fields using regex
             details = {}
             
@@ -867,7 +886,11 @@ Get-NetIPAddress -AddressFamily IPv4 |
             user_m = re.search(r'name=["\']folderAuthUserNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)
             details["folder_auth_user"] = user_m.group(1).strip() if user_m else ""
             
+            LOGGER.info("[RicohAddressBook] Successfully parsed details for entry %s: %s", entry_id, details)
             return details
+        except Exception as e:
+            LOGGER.exception("[RicohAddressBook] Exception in get_address_entry_details for entry %s", entry_id)
+            raise RuntimeError(f"Error fetching address entry details from copier: {e}") from e
         finally:
             if close_session_at_end:
                 try:
