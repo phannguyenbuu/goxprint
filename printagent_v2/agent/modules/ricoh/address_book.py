@@ -383,6 +383,12 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     f"- Response: {snippet}"
                 )
 
+        # Refresh list page to cleanly reset copier CGI state after deletion
+        try:
+            session.get(f"http://{printer.ip}{list_url}", timeout=8)
+        except Exception:
+            pass
+
         return {
             "printer_name": printer.name,
             "ip": printer.ip,

@@ -373,6 +373,12 @@ def register_scan_address_routes(app):
             html = _step(f"mode=ADDUSER&step=CONFIRM&wimToken={wim_token}&stepListIn=BASE&stepListIn=MAIL&stepListIn=FOLDER")
 
             try:
+                # Refresh list page to cleanly commit the wizard session and reset copier CGI state
+                session.get(list_url, timeout=8)
+            except Exception:
+                pass
+
+            try:
                 session.get(_urljoin(base_url, "/web/entry/en/websys/webArch/logout.cgi"), timeout=3)
             except Exception:
                 pass
