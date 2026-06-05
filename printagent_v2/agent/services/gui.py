@@ -1508,7 +1508,7 @@ class PrintAgentGui:
                 session = ricoh_service.create_http_client(printer, authenticated=True)
                 
                 setup_res = ricoh_service.setup_scan_destination(
-                    printer=printer,
+                    printer=None,
                     username=username,
                     session=session
                 )
