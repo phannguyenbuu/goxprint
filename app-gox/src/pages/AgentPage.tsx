@@ -1,1950 +1,2262 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlowCard } from '../components/ui/GlowCard';
-import { AnimatedButton } from '../components/ui/AnimatedButton';
 import { AnimatedList } from '../components/ui/AnimatedList';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import {
-  mockGetAgents,
-  mockGetCopiers,
-  mockInstallPrinterDriver,
-  mockInstallScan,
-  mockBulkInstallDriver,
-  mockBulkInstallScan,
-  mockSendNotification,
-  mockConfigureCopier,
-  mockUpdateAgent,
-  mockDeleteAgent,
-  mockDeleteCopier,
-  getDriversCatalog,
   getLanSites,
+  saveCopierCredentials,
+  triggerFetchAddressBook,
+  getCommandStatus,
+  addEmailDestination,
+  addPrivateLanEmail,
+  deleteEmailDestination,
+  deleteLanEmail,
+  getScansFiles,
+  installDriverOnAgent,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
-import type { Agent, AgentActionResult, PrinterBrand, PrinterModel, Copier } from '../types/agent';
-import { PRINTER_MODELS, PRINTER_BRANDS } from '../types/agent';
 
-type ModalType = 'driver' | 'scan' | 'bulk_driver' | 'bulk_scan' | 'bulk_all' | 'notify' | 'settings' | 'connect_lan' | 'copier_scan' | 'copier_add' | 'copier_config' | 'copier_delete' | 'agent_edit' | 'agent_delete' | null;
-type LanTab = 'agents' | 'copiers' | 'downloads';
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
 
-const PORT_OPTIONS = [
-  { label: '9100 (RAW)', value: 9100 },
-  { label: 'Custom', value: 'custom' as const },
-];
+interface Toast {
+  id: string;
+  message: string;
+  type: 'info' | 'success' | 'error' | 'pending';
+}
 
-export function AgentPage() {
-  const [lanTab, setLanTab] = useState<LanTab>('agents');
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [copiers, setCopiers] = useState<Copier[]>([]);
-  const [expandedCopier, setExpandedCopier] = useState<string | null>(null);
-  const [loading] = useState(false);
-  const [agentsLoading, setAgentsLoading] = useState(false);
-  const [copiersLoading, setCopiersLoading] = useState(false);
-
-  // LAN filter
-  const [lanSites, setLanSites] = useState<LanSiteInfo[]>([]);
-  const [selectedLanUid, setSelectedLanUid] = useState<string>('');
-  const [lanSitesLoading, setLanSitesLoading] = useState(false);
-
-  // Pagination
-  const [agentPage, setAgentPage] = useState(0);
-  const [copierPage, setCopierPage] = useState(0);
-  const [pageSize, setPageSize] = useState(5);
-  const pagedAgents = useMemo(() => agents.slice(agentPage * pageSize, (agentPage + 1) * pageSize), [agents, agentPage, pageSize]);
-  const pagedCopiers = useMemo(() => copiers.slice(copierPage * pageSize, (copierPage + 1) * pageSize), [copiers, copierPage, pageSize]);
-  const agentTotalPages = Math.ceil(agents.length / pageSize);
-  const copierTotalPages = Math.ceil(copiers.length / pageSize);
-
-  // Copier scan state
-  const [scanProgress, setScanProgress] = useState<'idle' | 'scanning' | 'done'>('idle');
-  const [scanFound, setScanFound] = useState<{ ip: string; mac: string }[]>([]);
-
-  // MAC ID edit state for manual add form
-  const [macEditing, setMacEditing] = useState(false);
-  const [macLookupLoading, setMacLookupLoading] = useState(false);
-
-  // Manual add copier form
-  const [newCopierName, setNewCopierName] = useState('');
-  const [newCopierBrand, setNewCopierBrand] = useState<PrinterBrand | ''>('');
-  const [newCopierModel, setNewCopierModel] = useState('');
-  const [newCopierIp, setNewCopierIp] = useState('');
-  const [newCopierLocation, setNewCopierLocation] = useState('');
-  const [newCopierMac, setNewCopierMac] = useState('');
-  const [addCopierError, setAddCopierError] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
-
-  // Agent edit state
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [editAgentHostname, setEditAgentHostname] = useState('');
-  const [editAgentIp, setEditAgentIp] = useState('');
-  const [editAgentError, setEditAgentError] = useState('');
-
-  // Copier config state
-  const [configCopier, setConfigCopier] = useState<Copier | null>(null);
-  const [configIp, setConfigIp] = useState('');
-  const [configMac, setConfigMac] = useState('');
-  const [configMacEditing, setConfigMacEditing] = useState(false);
-  const [configMacLookupLoading, setConfigMacLookupLoading] = useState(false);
-  const [configUser, setConfigUser] = useState('');
-  const [configPass, setConfigPass] = useState('');
-  const [configShowPass, setConfigShowPass] = useState(false);
-  const [configError, setConfigError] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [modal, setModal] = useState<ModalType>(null);
-  const [settingsTab, setSettingsTab] = useState<'config' | 'download'>('config');
-  const [results, setResults] = useState<AgentActionResult[]>([]);
-
-  // Driver fields
-  const [selectedBrand, setSelectedBrand] = useState<PrinterBrand | ''>('');
-  const [selectedModel, setSelectedModel] = useState<PrinterModel | null>(null);
-  const [printerIp, setPrinterIp] = useState('');
-  const [printerPort, setPrinterPort] = useState<9100 | 'custom'>(9100);
-  const [customPort, setCustomPort] = useState('');
-
-  // Dynamic driver catalogs
-  const [brandCatalog, setBrandCatalog] = useState<any[]>([]);
-  const [loadingCatalog, setLoadingCatalog] = useState(false);
-  const [selectedCatalogModel, setSelectedCatalogModel] = useState<any | null>(null);
-  const [selectedDriverOption, setSelectedDriverOption] = useState<any | null>(null);
-  const [pendingModelName, setPendingModelName] = useState<string>('');
-
-  // Scan fields — SMB and FTP are independent
-  const [enableSmb, setEnableSmb] = useState(true);
-  const [enableFtp, setEnableFtp] = useState(false);
-  const [scanPriority, setScanPriority] = useState<'smb' | 'ftp'>('smb');
-  const [scanAutoConfig, setScanAutoConfig] = useState(true);
-  // Copier credentials — dùng để đăng nhập web UI máy photocopy khi cấu hình scan
-  const [copierIp, setCopierIp] = useState('');
-  const [copierUser, setCopierUser] = useState('admin');
-  const [copierPass, setCopierPass] = useState('');
-  // Drive picker for auto-create folder
-  const [smbDrive, setSmbDrive] = useState('C');
-  const [ftpDrive, setFtpDrive] = useState('C');
-  // Available drives — mock: agent may have D, E; C always present
-  const availableDrives = useMemo(() => {
-    if (!selectedAgent) return ['C', 'D', 'E'];
-    // Simulate: online agents with printerConfig tend to have extra drives
-    return selectedAgent.driverInstalled ? ['C', 'D', 'E'] : ['C'];
-  }, [selectedAgent]);
-
-  // SMB config
-  const [smbServer, setSmbServer] = useState('');
-  const [smbPath, setSmbPath] = useState('');
-  const [smbUser, setSmbUser] = useState('');
-  const [smbPass, setSmbPass] = useState('');
-  // FTP config
-  const [ftpServer, setFtpServer] = useState('');
-  const [ftpPath, setFtpPath] = useState('');
-  const [ftpUser, setFtpUser] = useState('');
-  const [ftpPass, setFtpPass] = useState('');
-
-  // Notification
-  const [notifyMessage, setNotifyMessage] = useState('');
-  const [notifyTarget, setNotifyTarget] = useState<string>('all');
-
-  const fetchAgents = useCallback(async () => {
-    setAgentsLoading(true);
-    setCopiersLoading(true);
-    try {
-      const [agentData, copierData] = await Promise.all([
-        mockGetAgents(selectedLanUid || undefined),
-        mockGetCopiers(selectedLanUid || undefined),
-      ]);
-      setAgents(agentData);
-      setCopiers(copierData);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setAgentsLoading(false);
-      setCopiersLoading(false);
-    }
-  }, [selectedLanUid]);
-
-  // Load LAN sites once
-  const fetchLanSites = useCallback(async () => {
-    setLanSitesLoading(true);
-    const sites = await getLanSites();
-    setLanSites(sites);
-    setLanSitesLoading(false);
-  }, []);
-
-  useEffect(() => { fetchLanSites(); }, [fetchLanSites]);
-  useEffect(() => { fetchAgents(); }, [fetchAgents]);
-
-  const onlineCount = agents.filter((a) => a.status === 'online').length;
-
-  const modelsForBrand = useMemo(() => {
-    if (!selectedBrand) return [];
-    return PRINTER_MODELS.filter((m) => m.brand === selectedBrand);
-  }, [selectedBrand]);
-
-  const driverOptionsForModel = useMemo(() => {
-    if (!selectedCatalogModel) return [];
-    
-    let list: any[] = [];
-    
-    // Ricoh format: object mapping name to url
-    if (selectedCatalogModel.drivers && !Array.isArray(selectedCatalogModel.drivers)) {
-      list = Object.entries(selectedCatalogModel.drivers).map(([name, url]) => ({
-        name,
-        download_url: url,
-      }));
-    }
-    // Toshiba format: array of objects
-    else if (Array.isArray(selectedCatalogModel.drivers)) {
-      list = selectedCatalogModel.drivers.map((d: any) => ({
-        name: d.name || d.description || 'Printer Driver',
-        download_url: d.download_url,
-        version: d.version,
-        date: d.date,
-      }));
-    }
-    // Fujifilm format: array of links in all_links
-    else if (Array.isArray(selectedCatalogModel.all_links)) {
-      list = selectedCatalogModel.all_links.map((link: string) => {
-        const filename = link.split('/').pop() || 'Driver Installer';
-        return {
-          name: filename,
-          download_url: link,
-        };
-      });
-    }
-    
-    // Filter out generic utilities and installers to only keep specific/correct drivers
-    const genericKeywords = [
-      "diagnostic", "diagnostictool", "diagnostic_tool", "utility", 
-      "webinstaller", "web_installer", "installer", "easysetup", 
-      "easy_setup", "opkpcl6", "opkps", "mmdspcl6", "mmd2pcl6", "xps"
-    ];
-    
-    return list.filter((opt) => {
-      const filename = (opt.download_url || '').split('/').pop()?.toLowerCase() || '';
-      return !genericKeywords.some((k) => filename.includes(k));
-    });
-  }, [selectedCatalogModel]);
-
-  // Auto-select the first driver option when catalog model changes
-  useEffect(() => {
-    if (selectedCatalogModel) {
-      if (driverOptionsForModel.length > 0) {
-        const exists = driverOptionsForModel.some(opt => opt.download_url === selectedDriverOption?.download_url);
-        if (!exists) {
-          setSelectedDriverOption(driverOptionsForModel[0]);
-        }
-      } else {
-        setSelectedDriverOption(null);
-      }
-    } else {
-      setSelectedDriverOption(null);
-    }
-  }, [selectedCatalogModel, driverOptionsForModel]);
-
-  useEffect(() => {
-    if (!selectedBrand) {
-      setBrandCatalog([]);
-      setSelectedCatalogModel(null);
-      setSelectedDriverOption(null);
-      return;
-    }
-    setLoadingCatalog(true);
-    getDriversCatalog(selectedBrand)
-      .then((data) => {
-        setBrandCatalog(data);
-        setLoadingCatalog(false);
-        
-        // If there is a pending model name to select, find and select it automatically
-        if (pendingModelName) {
-          const matched = data.find((m: any) => m.model && m.model.toLowerCase().trim() === pendingModelName.toLowerCase().trim());
-          if (matched) {
-            setSelectedCatalogModel(matched);
-          }
-          setPendingModelName('');
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        setLoadingCatalog(false);
-      });
-  }, [selectedBrand, pendingModelName]);
-
-  const resetForm = () => {
-    setSelectedBrand('');
-    setSelectedModel(null);
-    setPrinterIp('');
-    setPrinterPort(9100);
-    setCustomPort('');
-    setBrandCatalog([]);
-    setSelectedCatalogModel(null);
-    setSelectedDriverOption(null);
-    setPendingModelName('');
-    setEnableSmb(true); setEnableFtp(false); setScanPriority('smb'); setScanAutoConfig(true);
-    setCopierUser('admin'); setCopierPass(''); setCopierIp('');
-    setSmbDrive('C'); setFtpDrive('C');
-    setSmbServer(''); setSmbPath(''); setSmbUser(''); setSmbPass('');
-    setFtpServer(''); setFtpPath(''); setFtpUser(''); setFtpPass('');
-    setNotifyMessage(''); setResults([]);
-    // copier form
-    setNewCopierName(''); setNewCopierBrand(''); setNewCopierModel('');
-    setNewCopierIp(''); setNewCopierLocation(''); setNewCopierMac('');
-    setAddCopierError(''); setScanProgress('idle'); setScanFound([]);
-    setMacEditing(false); setMacLookupLoading(false);
-    setConfigMac(''); setConfigUser(''); setConfigPass(''); setConfigError(''); setConfigMacEditing(false); setConfigShowPass(false); setConfigIp(''); setConfigMacLookupLoading(false);
-  };
-
-  const openModal = (type: ModalType, agent?: Agent) => {
-    setSelectedAgent(agent ?? null);
-    setModal(type);
-    resetForm();
-    setNotifyTarget(agent ? agent.id : 'all');
-  };
-
-  const closeModal = () => { setModal(null); setSelectedAgent(null); setConfigCopier(null); resetForm(); };
-
-  const openCopierConfig = (copier: Copier) => {
-    setConfigCopier(copier);
-    setConfigIp(copier.ipAddress);
-    setConfigMac(copier.macId);
-    setConfigUser(copier.webUsername ?? '');
-    setConfigPass(copier.webPassword ?? '');
-    setConfigError('');
-    setConfigMacEditing(false);
-    setConfigMacLookupLoading(false);
-    setConfigShowPass(false);
-    setModal('copier_config');
-  };
-
-  const openCopierDriverInstall = (copier: Copier) => {
-    resetForm();
-    setPrinterIp(copier.ipAddress);
-    if (copier.brand) {
-      setSelectedBrand(copier.brand as PrinterBrand);
-    }
-    if (copier.model) {
-      setPendingModelName(copier.model);
-    }
-    setModal('driver');
-    setSelectedAgent(null);
-  };
-
-  const handleConfigIpChange = async (ip: string) => {
-    setConfigIp(ip);
-    if (!configMacEditing) {
-      const trimmed = ip.trim();
-      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) {
-        setConfigMacLookupLoading(true);
-        await new Promise((r) => setTimeout(r, 400));
-        setConfigMac(mockMacFromIp(trimmed));
-        setConfigMacLookupLoading(false);
-      } else {
-        setConfigMac('');
-      }
-    }
-  };
-
-  const handleSaveCopierConfig = async () => {
-    if (!configCopier) return;
-    setConfigError('');
-    if (!configMac.trim()) { setConfigError('Vui lòng nhập MAC ID'); return; }
-    setActionLoading(true);
-    const r = await mockConfigureCopier(configCopier.id, {
-      macId: configMac,
-      ipAddress: configIp.trim(),
-      webUsername: configUser,
-      webPassword: configPass,
-    });
-    setActionLoading(false);
-    if (r.success) {
-      await fetchAgents();
-      closeModal();
-    } else {
-      setConfigError(r.message);
-    }
-  };
-
-  const buildDriverConfig = () => ({
-    brand: selectedBrand as PrinterBrand,
-    model: selectedCatalogModel?.model ?? selectedModel?.model ?? '',
-    driverName: selectedDriverOption?.name ?? selectedModel?.driverName ?? '',
-    driverUrl: selectedDriverOption?.download_url ?? '',
-    printerIp: printerIp.trim(),
-    port: printerPort,
-    customPort: printerPort === 'custom' ? Number(customPort) || undefined : undefined,
-  });
-
-
-  const buildScanConfig = () => ({
-    enableSmb,
-    enableFtp,
-    priority: scanPriority,
-    autoConfig: scanAutoConfig,
-    copierUsername: copierUser.trim(),
-    copierPassword: copierPass,
-    copierIp: copierIp.trim(),
-    smb: enableSmb ? { server: smbServer.trim(), path: smbPath.trim(), username: smbUser.trim(), password: smbPass.trim() } : undefined,
-    ftp: enableFtp ? { server: ftpServer.trim(), path: ftpPath.trim(), username: ftpUser.trim(), password: ftpPass.trim() } : undefined,
-  });
-
-  const handleInstallDriver = useCallback(async () => {
-    if ((!selectedCatalogModel && !selectedModel) || !printerIp.trim()) return;
-    if (!selectedDriverOption && !selectedModel?.driverName) return;
-    setActionLoading(true);
-    const config = buildDriverConfig();
-    const r = await mockInstallPrinterDriver(selectedAgent?.id ?? 'direct', config);
-    setResults([r]);
-    setActionLoading(false);
-    if (!selectedAgent) return; // opened from copier, no need to refresh agents
-    await fetchAgents();
-  }, [selectedAgent, selectedCatalogModel, selectedModel, printerIp, printerPort, customPort, selectedDriverOption, selectedBrand, fetchAgents]);
-
-  const handleInstallScan = useCallback(async () => {
-    if (!selectedAgent || (!enableSmb && !enableFtp)) return;
-    setActionLoading(true);
-    const r = await mockInstallScan(selectedAgent.id, buildScanConfig());
-    setResults([r]);
-    setActionLoading(false);
-    await fetchAgents();
-  }, [selectedAgent, enableSmb, enableFtp, scanPriority, scanAutoConfig, copierIp, copierUser, copierPass, smbServer, smbPath, smbUser, smbPass, ftpServer, ftpPath, ftpUser, ftpPass, fetchAgents]);
-
-  const handleBulkDriver = useCallback(async () => {
-    if ((!selectedCatalogModel && !selectedModel) || !printerIp.trim()) return;
-    setActionLoading(true);
-    const r = await mockBulkInstallDriver(buildDriverConfig());
-    setResults(r);
-    setActionLoading(false);
-    await fetchAgents();
-  }, [selectedCatalogModel, selectedModel, printerIp, printerPort, customPort, selectedDriverOption, selectedBrand, fetchAgents]);
-
-  const handleBulkScan = useCallback(async () => {
-    if (!enableSmb && !enableFtp) return;
-    setActionLoading(true);
-    const r = await mockBulkInstallScan(buildScanConfig());
-    setResults(r);
-    setActionLoading(false);
-    await fetchAgents();
-  }, [enableSmb, enableFtp, scanPriority, scanAutoConfig, copierIp, copierUser, copierPass, smbServer, smbPath, smbUser, smbPass, ftpServer, ftpPath, ftpUser, ftpPass, fetchAgents]);
-
-  const handleBulkAll = useCallback(async () => {
-    if (!selectedModel || !printerIp.trim() || (!enableSmb && !enableFtp)) return;
-    setActionLoading(true);
-    const driverResults = await mockBulkInstallDriver(buildDriverConfig());
-    const scanResults = await mockBulkInstallScan(buildScanConfig());
-    setResults([{ success: true, message: '--- Driver ---' }, ...driverResults, { success: true, message: '--- Scan ---' }, ...scanResults]);
-    setActionLoading(false);
-    await fetchAgents();
-  }, [selectedModel, printerIp, printerPort, customPort, enableSmb, enableFtp, scanPriority, scanAutoConfig, copierIp, copierUser, copierPass, smbServer, smbPath, smbUser, smbPass, ftpServer, ftpPath, ftpUser, ftpPass, fetchAgents]);
-
-  const handleSendNotification = useCallback(async () => {
-    if (!notifyMessage.trim()) return;
-    setActionLoading(true);
-    const r = await mockSendNotification(notifyTarget, notifyMessage.trim());
-    setResults([r]);
-    setActionLoading(false);
-  }, [notifyTarget, notifyMessage]);
-
-  const handleUpdateAgent = async () => {
-    if (!editingAgent || !editAgentHostname.trim()) return;
-    setActionLoading(true);
-    const r = await mockUpdateAgent(editingAgent.id, {
-      hostname: editAgentHostname.trim(),
-      ipAddress: editAgentIp.trim(),
-    });
-    setActionLoading(false);
-    if (r.success) {
-      await fetchAgents();
-      closeModal();
-    } else {
-      setEditAgentError(r.message);
-    }
-  };
-
-  const handleDeleteAgent = async () => {
-    if (!selectedAgent) return;
-    setActionLoading(true);
-    const r = await mockDeleteAgent(selectedAgent.id);
-    setActionLoading(false);
-    if (r.success) {
-      await fetchAgents();
-      closeModal();
-    }
-  };
-
-  const handleDeleteCopier = async (copierId: string) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa máy photocopy này?')) return;
-    setActionLoading(true);
-    const r = await mockDeleteCopier(copierId);
-    setActionLoading(false);
-    if (r.success) {
-      await fetchAgents();
-    }
-  };
-
-  const openAgentEdit = (agent: Agent) => {
-    setEditingAgent(agent);
-    setEditAgentHostname(agent.hostname);
-    setEditAgentIp(agent.ipAddress);
-    setEditAgentError('');
-    setModal('agent_edit');
-  };
-
-  const openAgentDelete = (agent: Agent) => {
-    setSelectedAgent(agent);
-    setModal('agent_delete');
-  };
-
-  const handleExecute = () => {
-    if (modal === 'driver') handleInstallDriver();
-    else if (modal === 'scan') handleInstallScan();
-    else if (modal === 'bulk_driver') handleBulkDriver();
-    else if (modal === 'bulk_scan') handleBulkScan();
-    else if (modal === 'bulk_all' || modal === 'settings') handleBulkAll();
-    else if (modal === 'notify') handleSendNotification();
-  };
-
-  const handleCopierScan = async () => {
-    setScanProgress('scanning');
-    setScanFound([]);
-    await new Promise((r) => setTimeout(r, 1800));
-    // Mock: simulate ARP table — each IP gets a deterministic MAC
-    const mockIps = ['192.168.1.200', '192.168.1.201', '192.168.1.205', '192.168.1.210'];
-    setScanFound(mockIps.map((ip) => ({ ip, mac: mockMacFromIp(ip) })));
-    setScanProgress('done');
-  };
-
-  // Mock ARP lookup: derive a plausible MAC from last 2 octets of IP
-  const mockMacFromIp = (ip: string): string => {
-    const parts = ip.split('.');
-    const seed = [0xAA, 0xBB, 0xCC,
-      parseInt(parts[1] ?? '0') & 0xFF,
-      parseInt(parts[2] ?? '0') & 0xFF,
-      parseInt(parts[3] ?? '0') & 0xFF,
-    ];
-    return seed.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
-  };
-
-  // When IP field changes in manual form, auto-lookup MAC after short debounce
-  const handleCopierIpChange = async (ip: string) => {
-    setNewCopierIp(ip);
-    if (!macEditing) {
-      const trimmed = ip.trim();
-      // Only lookup when IP looks complete (x.x.x.x)
-      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) {
-        setMacLookupLoading(true);
-        await new Promise((r) => setTimeout(r, 400));
-        setNewCopierMac(mockMacFromIp(trimmed));
-        setMacLookupLoading(false);
-      } else {
-        setNewCopierMac('');
-      }
-    }
-  };
-
-  // MAC input auto-format: insert ':' every 2 hex chars
-  const handleMacInput = (raw: string) => {
-    // Strip everything except hex chars
-    const hex = raw.replace(/[^0-9a-fA-F]/g, '').toUpperCase().slice(0, 12);
-    // Insert ':' every 2 chars
-    const formatted = hex.match(/.{1,2}/g)?.join(':') ?? hex;
-    setNewCopierMac(formatted);
-  };
-
-  const handleAddCopier = () => {
-    setAddCopierError('');
-    if (!newCopierName.trim()) { setAddCopierError('Vui lòng nhập tên máy'); return; }
-    if (!newCopierBrand) { setAddCopierError('Vui lòng chọn dòng máy'); return; }
-    if (!newCopierModel.trim()) { setAddCopierError('Vui lòng nhập mã/model máy'); return; }
-    if (!newCopierIp.trim()) { setAddCopierError('Vui lòng nhập địa chỉ IP'); return; }
-    if (!newCopierMac.trim()) { setAddCopierError('Vui lòng nhập MAC ID'); return; }
-    const macId = newCopierMac.trim().toUpperCase();
-    if (copiers.some((c) => c.macId === macId)) { setAddCopierError('MAC ID này đã tồn tại'); return; }
-    const newCopier: Copier = {
-      id: macId,
-      macId,
-      name: newCopierName.trim(),
-      brand: newCopierBrand as PrinterBrand,
-      model: newCopierModel.trim(),
-      ipAddress: newCopierIp.trim(),
-      status: 'offline',
-      lastSeen: new Date().toISOString(),
-      connectedPCs: [],
-      location: newCopierLocation.trim() || undefined,
-    };
-    setCopiers((prev) => [...prev, newCopier]);
-    closeModal();
-  };
-
-  const showDriverFields = modal === 'driver' || modal === 'bulk_driver' || modal === 'bulk_all' || modal === 'settings';
-  const showScanFields = modal === 'scan' || modal === 'bulk_scan' || modal === 'bulk_all' || modal === 'settings';
-
-  if (loading) {
-    return <div style={styles.loadingContainer}><LoadingSpinner size="lg" /></div>;
+function getDestinationStatusHtml(entry: any, emails: any[], agents: any[]) {
+  const emailVal = entry.email_address || entry.email || '';
+  const folderVal = entry.physical_path || entry.folder || entry.folder_path || '';
+  const addressValue = (emailVal || folderVal || '').trim();
+  
+  if (!addressValue) {
+    return { label: 'UNKNOWN', type: 'error', title: '' };
+  }
+  
+  const isEmail = entry.type === 'Email' || emailVal.includes('@');
+  if (isEmail) {
+    return { label: '✔ ACTIVE', type: 'success', title: '' };
   }
 
+  const matchedEmail = emails.find(e => e.email.toLowerCase().trim() === addressValue.toLowerCase().trim());
+  const portNumber = matchedEmail ? matchedEmail.email_number : Number(entry.registration_no);
+
+  if (!portNumber || isNaN(portNumber)) {
+    return { label: '✔ ACTIVE', type: 'success', title: '' };
+  }
+
+  const masterAgent = (agents || []).find(a => a.is_master && a.is_online) || (agents || []).find(a => a.is_online) || (agents || [])[0];
+  if (masterAgent) {
+    const site = (masterAgent.ftp_sites || []).find((s: any) => Number(s.port) === Number(portNumber));
+    if (site) {
+      const expectedPath = ('C:/Scangox/' + addressValue).toLowerCase().replace(/\\/g, '/');
+      const actualPath = (site.path || '').toLowerCase().replace(/\\/g, '/');
+      const isCorrectPath = actualPath === expectedPath;
+
+      if (site.running && isCorrectPath) {
+        return { label: '✔ OK', type: 'success', title: '' };
+      } else if (site.running && !isCorrectPath) {
+        return { label: '⚠ CONFLICT', type: 'warning', title: `FTP site uses folder: ${site.path} instead of expected: C:/Scangox/${addressValue}` };
+      } else if (site.error && (site.error.toLowerCase().includes('in use') || site.error.toLowerCase().includes('busy') || site.error.toLowerCase().includes('already bound') || site.error.toLowerCase().includes('already in use'))) {
+        return { label: '❌ PORT BUSY', type: 'error', title: site.error };
+      } else {
+        return { label: '❌ FAILED', type: 'error', title: site.error || 'FTP site failed to start' };
+      }
+    } else {
+      return { label: 'PENDING SETUP', type: 'warning', title: '' };
+    }
+  } else {
+    return { label: 'OFFLINE', type: 'neutral', title: '' };
+  }
+}
+
+export function AgentPage() {
+  const [lanSites, setLanSites] = useState<LanSiteInfo[]>([]);
+  const [selectedLanUid, setSelectedLanUid] = useState<string>(() => {
+    return localStorage.getItem('goxprint_selected_lan_uid') || '';
+  });
+  const [lanSitesLoading, setLanSitesLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'agents' | 'copiers'>(() => {
+    const saved = localStorage.getItem('goxprint_active_tab');
+    return (saved === 'agents' || saved === 'copiers') ? saved : 'agents';
+  });
+
+  // Polling / Command Status Map (key: printerId or entryRegNo, value: status message)
+  const [commandStatus, setCommandStatus] = useState<Record<string, { message: string; isPending: boolean }>>({});
+  
+  // Collapsible lists
+  const [expandedPrinters, setExpandedPrinters] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('goxprint_expanded_printers');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [expandedDrivers, setExpandedDrivers] = useState<Record<string, boolean>>({});
+  const [expandedDriverMenus, setExpandedDriverMenus] = useState<Record<string, boolean>>({});
+
+  // Credentials input states (key: printerId)
+  const [copierCredentials, setCopierCredentials] = useState<Record<string, { user: string; pass: string }>>({});
+  const [saveAuthLoading, setSaveAuthLoading] = useState<Record<string, boolean>>({});
+
+  // Target Agent Select state (key: printerId, value: agentUid)
+  const [selectedTargetAgents, setSelectedTargetAgents] = useState<Record<string, string>>({});
+
+  // Toast notifications
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // Modals
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | null>(null);
+  
+  // Custom Confirm Modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  // Storage Modal states
+  const [storageModalData, setStorageModalData] = useState<{ lanUid: string; email: string }>({ lanUid: '', email: '' });
+  const [storageFiles, setStorageFiles] = useState<any[]>([]);
+  const [storageLoading, setStorageLoading] = useState(false);
+
+  // Add Public FTP states
+  const [publicFtpData, setPublicFtpData] = useState<{ printerId: string; email: string; agentUid: string }>({ printerId: '', email: '', agentUid: '' });
+  const [publicFtpLoading, setPublicFtpLoading] = useState(false);
+
+  // Add Private FTP states
+  const [privateFtpData, setPrivateFtpData] = useState<{ lanUid: string; agentUid: string; email: string }>({ lanUid: '', agentUid: '', email: '' });
+  const [privateFtpLoading, setPrivateFtpLoading] = useState(false);
+
+  // Info Detail states
+  const [infoDetailData, setInfoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
+
+  // Scroll and tracking references
+  const hasScrolledRef = useRef(false);
+
+  // ── LOCAL STORAGE SYNC ──
+  useEffect(() => {
+    localStorage.setItem('goxprint_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('goxprint_expanded_printers', JSON.stringify(expandedPrinters));
+  }, [expandedPrinters]);
+
+  // ── TOAST HELPER ──
+  const showToast = useCallback((message: string, type: Toast['type'] = 'info', duration = 5000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, duration);
+    }
+  }, []);
+
+  // ── FETCH DATA ──
+  const fetchLanSitesData = useCallback(async (showLoader = false) => {
+    if (showLoader) setLanSitesLoading(true);
+    try {
+      const data = await getLanSites();
+      setLanSites(data);
+      
+      // Auto select first LAN if none selected or invalid
+      const savedLanUid = localStorage.getItem('goxprint_selected_lan_uid');
+      const isValidSaved = savedLanUid && data.some(site => site.lan_uid === savedLanUid);
+      if (data.length > 0) {
+        if (isValidSaved) {
+          setSelectedLanUid(savedLanUid);
+        } else {
+          setSelectedLanUid(data[0].lan_uid);
+          localStorage.setItem('goxprint_selected_lan_uid', data[0].lan_uid);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Không thể kết nối dữ liệu VPS', 'error');
+    } finally {
+      if (showLoader) setLanSitesLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    fetchLanSitesData(true);
+  }, []);
+
+  // Computed active LAN
+  const selectedLan = useMemo(() => {
+    return lanSites.find((site) => site.lan_uid === selectedLanUid);
+  }, [lanSites, selectedLanUid]);
+
+  // Filter out offline and Unknown Printers
+  const filteredPrinters = useMemo(() => {
+    if (!selectedLan) return [];
+    return (selectedLan.printers || []).filter((p: any) => {
+      // 1. Không show các máy in offline
+      if (!p.is_online) return false;
+      
+      // 2. Không show Unknown Printer
+      const name = (p.printer_name || '').toLowerCase().trim();
+      if (!name || name.includes('unknown') || name === 'unknown printer') return false;
+
+      // 3. Lọc generic printer như pdf, fax, brother, etc.
+      if (
+        name.includes('pdf') ||
+        name.includes('fax') ||
+        name.includes('brother') ||
+        name.includes('canon lbp') ||
+        name.includes('rustdesk')
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [selectedLan]);
+
+  // ── SCROLL TO LAST VIEWED COPIER ──
+  const scrollToCopier = useCallback((printerId: string | number, behavior: ScrollBehavior = 'smooth') => {
+    const element = document.getElementById(`copier-card-${printerId}`);
+    if (element) {
+      const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+      const offsetPosition = elementPosition - 188; // offsets fixed header height (176px + some margin)
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: behavior
+      });
+    }
+  }, []);
+
+  const handleCopierClick = (printerId: string) => {
+    localStorage.setItem('goxprint_last_viewed_copier_id', printerId);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'copiers' && !lanSitesLoading && filteredPrinters.length > 0) {
+      if (!hasScrolledRef.current) {
+        hasScrolledRef.current = true;
+        const lastViewedId = localStorage.getItem('goxprint_last_viewed_copier_id');
+        if (lastViewedId) {
+          const timer = setTimeout(() => {
+            scrollToCopier(lastViewedId, 'auto');
+          }, 150);
+          return () => clearTimeout(timer);
+        }
+      }
+    }
+  }, [activeTab, lanSitesLoading, filteredPrinters.length, scrollToCopier]);
+
+  // Pre-fill target agent and credentials maps when selectedLan changes
+  useEffect(() => {
+    if (selectedLan) {
+      const defaultTargets: Record<string, string> = {};
+      const defaultCreds: Record<string, { user: string; pass: string }> = {};
+
+      selectedLan.printers.forEach((p) => {
+        // Target agent default (first online agent or printer.agent_uid)
+        const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
+        const matchedAgent = onlineAgents.find((a) => a.agent_uid === p.agent_uid) || onlineAgents[0];
+        defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
+
+        // Web credentials
+        defaultCreds[p.id] = { user: p.auth_user || '', pass: p.auth_password || '' };
+      });
+
+      setSelectedTargetAgents((prev) => ({ ...defaultTargets, ...prev }));
+      setCopierCredentials((prev) => ({ ...defaultCreds, ...prev }));
+    }
+  }, [selectedLan]);
+
+  // ── SAVE AUTH (WEB CREDENTIALS) ──
+  const handleSaveAuth = async (printerId: string) => {
+    const creds = copierCredentials[printerId] || { user: '', pass: '' };
+    setSaveAuthLoading((prev) => ({ ...prev, [printerId]: true }));
+    try {
+      const res = await saveCopierCredentials(printerId, creds.user, creds.pass);
+      if (res.ok) {
+        showToast('Đã lưu tài khoản Web UI máy photocopy thành công', 'success');
+        // Update local status in state
+        setLanSites((prevSites) =>
+          prevSites.map((site) => ({
+            ...site,
+            printers: site.printers.map((p) =>
+              String(p.id) === String(printerId)
+                ? { ...p, auth_user: creds.user, auth_password: creds.pass }
+                : p
+            ),
+          }))
+        );
+      } else {
+        throw new Error(res.error || 'Lưu thất bại');
+      }
+    } catch (err: any) {
+      showToast(`Lỗi lưu Auth: ${err.message}`, 'error');
+    } finally {
+      setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+    }
+  };
+
+  // ── POLLING COMMAND STATUS ──
+  const pollCommandStatus = (
+    commandId: number,
+    targetKey: string,
+    onSuccess: (pollData: any) => void,
+    onFailed: (errorMsg: string) => void,
+    pendingLabel = 'Đang thực hiện lệnh...'
+  ) => {
+    setCommandStatus((prev) => ({ ...prev, [targetKey]: { message: pendingLabel, isPending: true } }));
+
+    const maxPollMs = 180000;
+    const pollInterval = 2000;
+    const startTime = Date.now();
+    let toastReceivedShown = false;
+
+    const timer = setInterval(async () => {
+      try {
+        const elapsed = Date.now() - startTime;
+        if (elapsed > maxPollMs) {
+          clearInterval(timer);
+          setCommandStatus((prev) => {
+            const updated = { ...prev };
+            delete updated[targetKey];
+            return updated;
+          });
+          onFailed('Lệnh bị quá thời gian (Timeout 180s)');
+          return;
+        }
+
+        const res = await getCommandStatus(commandId);
+        const elapsedSec = Math.round(elapsed / 1000);
+
+        if (res.status === 'success') {
+          clearInterval(timer);
+          setCommandStatus((prev) => {
+            const updated = { ...prev };
+            delete updated[targetKey];
+            return updated;
+          });
+          onSuccess(res);
+        } else if (res.status === 'failed' || !res.ok) {
+          clearInterval(timer);
+          setCommandStatus((prev) => {
+            const updated = { ...prev };
+            delete updated[targetKey];
+            return updated;
+          });
+          onFailed(res.error || 'Lệnh thực hiện thất bại từ Agent');
+        } else {
+          // Command is pending
+          if (res.received_at) {
+            setCommandStatus((prev) => ({
+              ...prev,
+              [targetKey]: { message: `⚡ Agent đã nhận - đang thực thi... (${elapsedSec}s)`, isPending: true },
+            }));
+            if (!toastReceivedShown) {
+              toastReceivedShown = true;
+              showToast('Agent đã nhận lệnh và đang truy cập máy photocopy...', 'info', 3000);
+            }
+          } else {
+            setCommandStatus((prev) => ({
+              ...prev,
+              [targetKey]: { message: `⌛ Đang gửi lệnh tới agent... (${elapsedSec}s)`, isPending: true },
+            }));
+          }
+        }
+      } catch (err: any) {
+        console.warn('Poll command error:', err.message);
+      }
+    }, pollInterval);
+  };
+
+  // ── REFECTH / SYNC ADDRESS BOOK ──
+  const handleRefetchAddressBook = async (printerId: string) => {
+    const targetAgent = selectedTargetAgents[printerId] || '';
+    showToast('Bắt đầu gửi yêu cầu đồng bộ danh bạ máy in...', 'info', 3000);
+    
+    try {
+      const res = await triggerFetchAddressBook(printerId, targetAgent || undefined);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh đồng bộ');
+      }
+
+      pollCommandStatus(
+        res.command_id,
+        printerId,
+        async () => {
+          showToast('Đã đồng bộ danh bạ máy photocopy thành công!', 'success');
+          await fetchLanSitesData();
+          
+          // Auto expand and view address book after sync
+          setExpandedPrinters((prev) => ({ ...prev, [printerId]: true }));
+        },
+        (errorMsg) => {
+          showToast(`Đồng bộ thất bại: ${errorMsg}`, 'error');
+        },
+        '⌛ Đang đồng bộ danh bạ...'
+      );
+    } catch (err: any) {
+      showToast(`Lỗi gửi lệnh đồng bộ: ${err.message}`, 'error');
+    }
+  };
+
+  // ── ADD PUBLIC FTP ──
+  const handleAddPublicFtp = async () => {
+    const { printerId, email, agentUid } = publicFtpData;
+    if (!email || !email.includes('@')) {
+      showToast('Địa chỉ email không hợp lệ', 'error');
+      return;
+    }
+    setPublicFtpLoading(true);
+    showToast('Đang tạo yêu cầu thêm FTP/Email lên máy in...', 'info', 3000);
+
+    try {
+      const res = await addEmailDestination(printerId, email, agentUid || undefined);
+      setPublicFtpLoading(false);
+      setActiveModal(null);
+
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Lỗi gửi lệnh');
+      }
+
+      pollCommandStatus(
+        res.command_id,
+        printerId,
+        async () => {
+          showToast(`Đã thêm điểm scan ${email} thành công!`, 'success');
+          await fetchLanSitesData();
+        },
+        (errorMsg) => {
+          showToast(`Thêm điểm scan thất bại: ${errorMsg}`, 'error');
+        },
+        `⌛ Đang thêm điểm scan ${email}...`
+      );
+    } catch (err: any) {
+      setPublicFtpLoading(false);
+      showToast(`Lỗi: ${err.message}`, 'error');
+    }
+  };
+
+  // ── ADD PRIVATE FTP ──
+  const handleAddPrivateFtp = async () => {
+    const { lanUid, agentUid, email } = privateFtpData;
+    if (!email || !email.includes('@')) {
+      showToast('Địa chỉ email không hợp lệ', 'error');
+      return;
+    }
+    setPrivateFtpLoading(true);
+    try {
+      const res = await addPrivateLanEmail('default', lanUid, agentUid, email);
+      setPrivateFtpLoading(false);
+      setActiveModal(null);
+
+      if (res.ok) {
+        showToast('Đã thêm Private FTP thành công', 'success');
+        await fetchLanSitesData();
+      } else {
+        throw new Error(res.error || 'Lỗi server');
+      }
+    } catch (err: any) {
+      setPrivateFtpLoading(false);
+      showToast(`Lỗi thêm FTP riêng: ${err.message}`, 'error');
+    }
+  };
+
+  // ── DELETE DESTINATION ──
+  const handleDeleteDest = (printerId: string, entry: any) => {
+    const emailVal = entry.email_address || entry.email || '';
+    const folderVal = entry.physical_path || entry.folder || entry.folder_path || '';
+    const destVal = (emailVal || folderVal || '').trim();
+    const regNo = String(entry.registration_no || '').trim();
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Xác nhận xóa',
+      message: `Bạn có chắc chắn muốn xóa điểm scan này khỏi máy photocopy?\nEmail/Folder: ${destVal}`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+
+        // Checking if it is a private LAN email
+        const emailsList = selectedLan?.emails || [];
+        const matchedEmail = emailsList.find((e) => e.email.toLowerCase().trim() === destVal.toLowerCase().trim());
+        
+        if (matchedEmail && matchedEmail.id) {
+          // Direct deletion from LAN Emails
+          showToast('Đang xóa điểm scan private khỏi LAN...', 'info', 3000);
+          try {
+            const res = await deleteLanEmail(matchedEmail.id);
+            if (res.ok) {
+              showToast('Đã xóa thành công!', 'success');
+              await fetchLanSitesData();
+            } else {
+              throw new Error(res.error || 'Không thể xóa');
+            }
+          } catch (err: any) {
+            showToast(`Lỗi xóa: ${err.message}`, 'error');
+          }
+          return;
+        }
+
+        // Copier Address Book entry deletion (requires command status polling)
+        const targetAgent = selectedTargetAgents[printerId] || '';
+        showToast('Gửi lệnh xóa điểm scan trên máy photocopy...', 'info', 3000);
+
+        try {
+          const res = await deleteEmailDestination(printerId, regNo, entry.entry_id || '', targetAgent || undefined);
+          if (!res.ok || !res.command_id) {
+            throw new Error(res.error || 'Không thể tạo lệnh xóa');
+          }
+
+          pollCommandStatus(
+            res.command_id,
+            printerId,
+            async () => {
+              showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
+              await fetchLanSitesData();
+            },
+            (errorMsg) => {
+              showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
+            },
+            `⌛ Đang xóa điểm scan #${regNo}...`
+          );
+        } catch (err: any) {
+          showToast(`Lỗi gửi lệnh xóa: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
+
+  // ── DETAILED INFO ENTRY (INFOR) ──
+  const handleFetchEntryDetail = async (printerId: string, entry: any) => {
+    const regNo = String(entry.registration_no || '').trim();
+    const targetAgent = selectedTargetAgents[printerId] || '';
+    
+    // Key to show command status on the specific entry row
+    const entryRowKey = `${printerId}-${regNo}`;
+    showToast(`Đang truy vấn thông số chi tiết của điểm scan #${regNo}...`, 'info', 3000);
+
+    try {
+      const res = await triggerFetchAddressBook(printerId, targetAgent || undefined);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể gửi yêu cầu');
+      }
+
+      pollCommandStatus(
+        res.command_id,
+        entryRowKey,
+        async (pollData) => {
+          showToast('Đã tải thông số chi tiết!', 'success');
+          await fetchLanSitesData();
+
+          const syncData = pollData.address_book_sync || {};
+          const matchedEntry = (syncData.address_list || []).find(
+            (e: any) => String(e.registration_no).trim() === regNo
+          );
+
+          if (matchedEntry) {
+            const folderStr = matchedEntry.folder_path || matchedEntry.folder || '';
+            let details = null;
+
+            if (folderStr) {
+              let proto = '';
+              let server = '';
+              let port = '';
+              let path = '';
+
+              if (folderStr.startsWith('ftp://')) {
+                proto = 'FTP';
+                const match = folderStr.match(/ftp:\/\/([^:\/]+)(?::(\d+))?(.*)/);
+                if (match) {
+                  server = match[1];
+                  port = match[2] || '21';
+                  path = match[3] || '/';
+                }
+              } else if (folderStr.startsWith('\\\\')) {
+                proto = 'SMB';
+                const match = folderStr.match(/\\\\([^\\]+)\\(.*)/);
+                if (match) {
+                  server = match[1];
+                  path = '\\' + match[2];
+                  port = '445';
+                } else {
+                  server = folderStr.substring(2);
+                  path = '\\';
+                  port = '445';
+                }
+              } else {
+                server = folderStr;
+              }
+
+              details = { proto, server, port, path };
+            }
+
+            setInfoDetailData({
+              regNo,
+              name: matchedEntry.name,
+              details,
+              error: details ? undefined : 'Không tìm thấy cấu hình thư mục scan.',
+            });
+          } else {
+            setInfoDetailData({
+              regNo,
+              name: entry.name,
+              details: null,
+              error: 'Không tìm thấy chi tiết đăng ký trong danh bạ đồng bộ.',
+            });
+          }
+          setActiveModal('info_detail');
+        },
+        (errorMsg) => {
+          showToast(`Truy vấn thất bại: ${errorMsg}`, 'error');
+        },
+        '⌛ Đang lấy dữ liệu...'
+      );
+    } catch (err: any) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+    }
+  };
+
+  // ── STORAGE SCANS FILES LIST ──
+  const handleOpenStorageFiles = async (lanUid: string, email: string) => {
+    setStorageModalData({ lanUid, email });
+    setStorageLoading(true);
+    setStorageFiles([]);
+    setActiveModal('storage');
+
+    try {
+      const res = await getScansFiles(lanUid, email);
+      if (res.ok) {
+        setStorageFiles(res.rows || []);
+      } else {
+        throw new Error(res.error || 'Lỗi server');
+      }
+    } catch (err: any) {
+      showToast(`Không thể lấy tệp đã scan: ${err.message}`, 'error');
+    } finally {
+      setStorageLoading(false);
+    }
+  };
+
+  // ── INSTALL DRIVER ON CLIENT PC ──
+  const handleRemoteInstallDriver = (printerId: string, brand: string, model: string, drName: string, drUrl: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Cài đặt Driver từ xa',
+      message: `Bạn có chắc muốn gửi lệnh cài đặt driver "${drName}" từ xa lên PC đại diện?`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        showToast('Đang gửi lệnh cài đặt driver tới Agent...', 'info', 3000);
+        try {
+          const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl);
+          if (res.ok) {
+            showToast('Đã xếp hàng lệnh cài đặt driver thành công! Đang xử lý ở client.', 'success', 6000);
+          } else {
+            throw new Error(res.error || 'Server trả về lỗi');
+          }
+        } catch (err: any) {
+          showToast(`Không thể cài driver: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
+
+  // Helpers
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const getDestinationStatus = (entry: any) => {
+    return getDestinationStatusHtml(
+      entry,
+      selectedLan?.emails || [],
+      selectedLan?.agents || []
+    );
+  };
+
   return (
-    <motion.div style={styles.container}
-      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}>
-
-      <h1 style={styles.title}>🖥️ Kỹ thuật - Agent</h1>
-      <p style={{ ...styles.subtitle, margin: 0 }}>{agents.length} máy tính · {onlineCount} online · {agents.length - onlineCount} offline</p>
-
-      {/* ── LAN Filter ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        padding: '10px 14px',
-        margin: '16px 0 8px 0',
-        background: 'color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))',
-        borderRadius: '10px',
-        border: '1px solid color-mix(in srgb, var(--color-primary) 20%, transparent)',
-        flexWrap: 'wrap',
-      }}>
-        <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', fontWeight: 600 }}>
-          🌐 Mạng LAN:
-        </span>
-        {lanSitesLoading ? (
-          <LoadingSpinner size="sm" />
-        ) : (
-          <select
-            value={selectedLanUid}
-            onChange={(e) => {
-              setSelectedLanUid(e.target.value);
-              setAgentPage(0);
-              setCopierPage(0);
-            }}
-            style={{
-              ...styles.input,
-              flex: 1,
-              minWidth: '180px',
-              maxWidth: '360px',
-              fontSize: '0.82rem',
-              padding: '6px 10px',
-              margin: 0,
-            }}
-          >
-            <option value="">— Tất cả LAN ({lanSites.length} mạng) —</option>
-            {lanSites.map((lan) => (
-              <option key={lan.lan_uid} value={lan.lan_uid}>
-                {lan.lan_name || lan.lan_uid} · {lan.gateway_ip} · {lan.active_agents} agent · {lan.printers?.length ?? 0} máy
-              </option>
-            ))}
-          </select>
-        )}
-        {selectedLanUid && (
-          <button
-            style={{ ...styles.smallBtn, fontSize: '0.72rem', padding: '4px 10px' }}
-            onClick={() => { setSelectedLanUid(''); setAgentPage(0); setCopierPage(0); }}
-          >
-            ✕ Bỏ lọc
-          </button>
-        )}
+    <motion.div
+      style={styles.container}
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      {/* Toast Notification Container */}
+      <div style={styles.toastContainer}>
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              style={{
+                ...styles.toast,
+                borderLeft: `4px solid ${
+                  t.type === 'success'
+                    ? 'var(--color-success)'
+                    : t.type === 'error'
+                    ? 'var(--color-error)'
+                    : 'var(--color-primary)'
+                }`,
+              }}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 50, scale: 0.9 }}
+            >
+              <span style={styles.toastIcon}>
+                {t.type === 'success' ? '✔️' : t.type === 'error' ? '❌' : 'ℹ️'}
+              </span>
+              <div style={{ flex: 1, fontSize: '0.8rem' }}>{t.message}</div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
-      {/* Tab switcher */}
-      <div style={styles.tabBar}>
-        {([['agents', '🖥️ Máy tính'], ['copiers', '🖨️ Photocopy']] as [LanTab, string][]).map(([tab, label]) => (
+      {/* FIXED HEADER BLOCK */}
+      <div style={styles.fixedHeader}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>🛠️ Quản lý Mạng LAN</h1>
           <button
-            key={tab}
+            style={{ ...styles.smallBtn, borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
+            onClick={() => fetchLanSitesData(true)}
+          >
+            🔄 Làm mới
+          </button>
+        </div>
+
+        {/* LAN Select filter */}
+        <div style={styles.filterBar}>
+          <label style={styles.filterLabel}>Mạng LAN hiện tại:</label>
+          {lanSitesLoading && lanSites.length === 0 ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <select
+              value={selectedLanUid}
+              onChange={(e) => setSelectedLanUid(e.target.value)}
+              style={styles.lanSelect}
+            >
+              {lanSites.map((site) => (
+                <option key={site.lan_uid} value={site.lan_uid}>
+                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent · {site.printers?.length ?? 0} Máy)
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Tab bar switch */}
+        <div style={styles.tabBar}>
+          <button
             style={{
               ...styles.tabBtn,
-              background: lanTab === tab ? 'color-mix(in srgb, var(--color-primary) 10%, var(--color-surface))' : 'transparent',
-              color: lanTab === tab ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              borderBottom: lanTab === tab ? '2px solid var(--color-primary)' : '2px solid transparent',
+              color: activeTab === 'agents' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              borderBottom: activeTab === 'agents' ? '2px solid var(--color-primary)' : '2px solid transparent',
             }}
-            onClick={() => setLanTab(tab)}
+            onClick={() => setActiveTab('agents')}
           >
-            {label}
-            {tab === 'copiers' && (
-              <span style={styles.tabBadge}>{copiers.length}</span>
-            )}
+            💻 Máy tính ({selectedLan?.agents?.length ?? 0})
           </button>
-        ))}
+          <button
+            style={{
+              ...styles.tabBtn,
+              color: activeTab === 'copiers' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              borderBottom: activeTab === 'copiers' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            }}
+            onClick={() => setActiveTab('copiers')}
+          >
+            🖨️ Photocopy ({filteredPrinters.length})
+          </button>
+        </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        {lanTab === 'agents' ? (
-          <motion.div key="agents" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.2 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <GlowCard>
-              <h2 style={styles.sectionTitle}>Thao tác hàng loạt</h2>
-              {/* Row 1: Driver + Scan riêng lẻ */}
-              <div style={styles.bulkRow}>
-                <button style={styles.bulkTile} onClick={() => openModal('bulk_driver')}>
-                  <span style={styles.bulkTileIcon}>🖨️</span>
-                  <span style={styles.bulkTileLabel}>Cài Driver</span>
-                  <span style={styles.bulkTileSub}>Toàn bộ agent</span>
-                </button>
-                <button style={styles.bulkTile} onClick={() => openModal('bulk_scan')}>
-                  <span style={styles.bulkTileIcon}>📠</span>
-                  <span style={styles.bulkTileLabel}>Cài Scan</span>
-                  <span style={styles.bulkTileSub}>Toàn bộ agent</span>
-                </button>
-              </div>
-              {/* Row 2: Driver + Scan cùng lúc — nổi bật */}
-              <button style={styles.bulkPrimary} onClick={() => openModal('bulk_all')}>
-                <span>⚡</span>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>Driver + Scan toàn bộ</span>
-                  <span style={{ fontSize: '0.72rem', opacity: 0.75 }}>Cài đặt cùng lúc cho tất cả agent</span>
-                </div>
-              </button>
-              {/* Row 3: Thông báo + Thiết lập */}
-              <div style={styles.bulkRow}>
-                <button style={styles.bulkSecondary} onClick={() => openModal('notify')}>
-                  📢 Thông báo
-                </button>
-                <button style={{ ...styles.bulkSecondary, color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                  onClick={() => openModal('settings')}>
-                  ⚙️ Thiết lập chung
-                </button>
-              </div>
-            </GlowCard>
+      {/* Content Area with Top Margin to avoid overlapping the fixed header */}
+      <div style={styles.scrollableContent}>
+        {lanSitesLoading && (
+          <div style={styles.loadingWrapper}>
+            <LoadingSpinner size="md" />
+          </div>
+        )}
 
-            {agentsLoading && agents.length === 0 ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-                <LoadingSpinner size="md" />
-              </div>
-            ) : (
-              <AnimatedList>
-                {pagedAgents.map((agent) => (
-                <GlowCard key={agent.id}>
-                  <div style={styles.agentHeader}>
-                    <div style={styles.agentInfo}>
-                      <span style={styles.agentName}>{agent.hostname}</span>
-                      <span style={{
-                        ...styles.statusBadge,
-                        background: agent.status === 'online' ? 'rgba(var(--rgb-success,0,255,136),0.12)' : 'rgba(var(--rgb-error,255,68,102),0.12)',
-                        color: agent.status === 'online' ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                        borderColor: agent.status === 'online' ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                      }}>
-                        {agent.status === 'online' ? '🟢 Online' : '🔴 Offline'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button style={{ ...styles.smallBtn, padding: '4px 6px' }} onClick={() => openAgentEdit(agent)} title="Chỉnh sửa">✏️</button>
-                      <button style={{ ...styles.smallBtn, padding: '4px 6px', color: 'var(--color-error)' }} onClick={() => openAgentDelete(agent)} title="Xóa">🗑️</button>
-                    </div>
-                  </div>
-                  <div style={styles.agentMeta}>
-                    <span style={styles.metaText}>IP: {agent.ipAddress}</span>
-                    <span style={styles.metaText}>OS: {agent.os}</span>
-                  </div>
-
-                  {/* Status chips */}
-                  <div style={styles.statusRow}>
-                    {[
-                      { label: '🖨️ Driver', ok: agent.driverInstalled },
-                      { label: 'SMB', ok: agent.scanSmbInstalled },
-                      { label: 'FTP', ok: agent.scanFtpInstalled },
-                      { label: 'Auto CFG', ok: agent.scanConfigured },
-                    ].map(({ label, ok }) => (
-                      <span key={label} style={{
-                        ...styles.statusChip,
-                        background: ok ? 'rgba(var(--rgb-success,0,255,136),0.12)' : 'var(--color-chip-bg)',
-                        color: ok ? 'var(--color-success)' : 'var(--color-text-secondary)',
-                        borderColor: ok ? 'var(--color-success)' : 'var(--color-chip-border)',
-                      }}>
-                        {label}: {ok ? '✓' : '✗'}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Driver detail */}
-                  {agent.printerConfig && (
-                    <div style={styles.configDetail}>
-                      <span style={styles.configLabel}>🖨️ {agent.printerConfig.brand} {agent.printerConfig.model}</span>
-                      <span style={styles.configSub}>
-                        IP: {agent.printerConfig.printerIp} · Port: {agent.printerConfig.port === 'custom' ? agent.printerConfig.customPort : agent.printerConfig.port}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Scan detail */}
-                  {agent.scanConfig && (
-                    <div style={styles.configDetail}>
-                      <span style={styles.configLabel}>
-                        📠 Scan {[agent.scanConfig.enableSmb && 'SMB', agent.scanConfig.enableFtp && 'FTP'].filter(Boolean).join('+')}
-                        {agent.scanConfig.enableSmb && agent.scanConfig.enableFtp && ` · Ưu tiên: ${agent.scanConfig.priority.toUpperCase()}`}
-                        {agent.scanConfig.autoConfig && ' · ⚡ Auto'}
-                      </span>
-                      {agent.scanConfig.smb && <span style={styles.configSub}>SMB: {agent.scanConfig.smb.server}{agent.scanConfig.smb.path} ({agent.scanConfig.smb.username})</span>}
-                      {agent.scanConfig.ftp && <span style={styles.configSub}>FTP: {agent.scanConfig.ftp.server}{agent.scanConfig.ftp.path} ({agent.scanConfig.ftp.username})</span>}
-                    </div>
-                  )}
-
-                  {/* Photocopy machines synced to this agent */}
-                  {(() => {
-                    const linked = copiers.filter((c) => c.connectedPCs.includes(agent.hostname));
-                    if (linked.length === 0) return null;
-                    return (
-                      <div style={styles.configDetail}>
-                        <span style={{ ...styles.configLabel, color: 'var(--color-secondary)' }}>🖨️ Máy photocopy đồng bộ ({linked.length})</span>
-                        {linked.map((c) => (
-                          <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                            <span style={styles.configSub}>{c.name} · {c.ipAddress}</span>
-                            <span style={{
-                              fontSize: '0.65rem', fontWeight: 600, padding: '1px 6px', borderRadius: '6px',
-                              background: c.isConfigured ? 'color-mix(in srgb, var(--color-success) 10%, var(--color-surface))' : 'var(--color-chip-bg)',
-                              color: c.isConfigured ? 'var(--color-success)' : 'var(--color-text-secondary)',
-                              border: `1px solid ${c.isConfigured ? 'var(--color-success)' : 'var(--color-chip-border)'}`,
-                            }}>
-                              {c.isConfigured ? '🔗 Đã kết nối' : '⚠️ Chưa cấu hình'}
+        {!lanSitesLoading && selectedLan && (
+          <AnimatePresence mode="wait">
+            {activeTab === 'agents' ? (
+              <motion.div
+                key="agents-tab"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                style={styles.tabContent}
+              >
+                <AnimatedList>
+                  {selectedLan.agents.length === 0 ? (
+                    <div style={styles.emptyText}>Không có Agent nào kết nối trong mạng LAN này.</div>
+                  ) : (
+                    selectedLan.agents.map((agent) => {
+                      const isOnline = agent.is_online;
+                      return (
+                        <GlowCard key={agent.agent_uid}>
+                          <div style={styles.cardHeader}>
+                            <span style={styles.cardTitle}>💻 {agent.hostname}</span>
+                            <span
+                              style={{
+                                ...styles.statusBadge,
+                                color: isOnline ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                borderColor: isOnline ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                background: isOnline ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
+                              }}
+                            >
+                              {isOnline ? (agent.is_master ? '★ MASTER' : '● ONLINE') : '● OFFLINE'}
                             </span>
+                          </div>
+
+                          <div style={styles.cardDetails}>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>UID:</span>
+                              <span style={{ ...styles.detailValue, fontFamily: 'monospace', fontSize: '0.75rem' }}>{agent.agent_uid}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>IP cục bộ:</span>
+                              <span style={styles.detailValue}>{agent.local_ip}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>Địa chỉ MAC:</span>
+                              <span style={styles.detailValue}>{agent.local_mac || '—'}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>Phiên bản:</span>
+                              <span style={styles.detailValue}>{agent.app_version || '—'}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>Cổng Web:</span>
+                              <span style={styles.detailValue}>{agent.run_mode || '—'} / {agent.web_port || '—'}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>FTP Ports:</span>
+                              <span style={styles.detailValue}>{agent.ftp_ports || '—'}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>Cập nhật lúc:</span>
+                              <span style={styles.detailValue}>{agent.updated_at || '—'}</span>
+                            </div>
+                          </div>
+
+                          <div style={styles.cardActionWrapper}>
+                            <button
+                              style={{ ...styles.smallBtn, width: '100%', padding: '10px 12px', fontSize: '0.8rem', display: 'flex', justifyContent: 'center' }}
+                              onClick={() => {
+                                setPrivateFtpData({ lanUid: selectedLan.lan_uid, agentUid: agent.agent_uid, email: '' });
+                                setActiveModal('private_ftp');
+                              }}
+                            >
+                              + Đăng ký Private FTP
+                            </button>
+                          </div>
+                        </GlowCard>
+                      );
+                    })
+                  )}
+                </AnimatedList>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="copiers-tab"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                style={styles.tabContent}
+              >
+                <AnimatedList>
+                  {filteredPrinters.length === 0 ? (
+                    <div style={styles.emptyText}>Không tìm thấy máy photocopy nào hoạt động trong dải LAN này.</div>
+                  ) : (
+                    filteredPrinters.map((p) => {
+                      const isExpanded = expandedPrinters[p.id] || false;
+                      const driversExpanded = expandedDrivers[p.id] || false;
+                      const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
+                      
+                      const sync = p.address_book_sync || {};
+                      const syncCount = sync.address_list ? sync.address_list.length : 0;
+                      const syncTime = sync.timestamp ? new Date(sync.timestamp).toLocaleTimeString('vi-VN') : '';
+                      
+                      const isPending = commandStatus[p.id]?.isPending || false;
+                      const statusMsg = commandStatus[p.id]?.message || '';
+
+                      // Filter online agents for relays
+                      const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
+                      const selectedAgentUid = selectedTargetAgents[p.id] || '';
+
+                      return (
+                        <div
+                          key={p.id}
+                          id={`copier-card-${p.id}`}
+                          onClick={() => handleCopierClick(String(p.id))}
+                          style={{ width: '100%' }}
+                        >
+                          <GlowCard>
+                          {/* Header details */}
+                          <div style={styles.cardHeader}>
+                            <div>
+                              <span style={styles.copierTitle}>🖨️ {p.printer_name}</span>
+                              <div style={styles.copierSubtitle}>IP: {p.ip} · MAC: {p.mac_id || '—'}</div>
+                            </div>
+                            <span
+                              style={{
+                                ...styles.statusBadge,
+                                color: p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                borderColor: p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                background: p.is_online ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
+                              }}
+                            >
+                              {p.is_online ? 'ONLINE' : 'OFFLINE'}
+                            </span>
+                          </div>
+
+                          {/* Connection Credentials Form */}
+                          <div style={styles.sectionBlock}>
+                            <span style={styles.sectionBlockTitle}>🔐 Tài khoản Web máy in:</span>
+                            <div style={styles.credsInputRow}>
+                              <input
+                                type="text"
+                                style={styles.credsInput}
+                                placeholder="admin"
+                                value={copierCredentials[p.id]?.user || ''}
+                                onChange={(e) =>
+                                  setCopierCredentials((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], user: e.target.value },
+                                  }))
+                                }
+                              />
+                              <input
+                                type="password"
+                                style={styles.credsInput}
+                                placeholder="mật khẩu"
+                                value={copierCredentials[p.id]?.pass || ''}
+                                onChange={(e) =>
+                                  setCopierCredentials((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], pass: e.target.value },
+                                  }))
+                                }
+                              />
+                              <button
+                                style={{ ...styles.smallBtn, padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                                onClick={() => handleSaveAuth(p.id)}
+                                disabled={saveAuthLoading[p.id]}
+                              >
+                                {saveAuthLoading[p.id] ? 'Lưu...' : 'Lưu Auth'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Relay Target Agent selector */}
+                          <div style={styles.detailRow}>
+                            <span style={styles.detailLabel}>Target Agent:</span>
+                            <select
+                              style={styles.relaySelect}
+                              value={selectedAgentUid}
+                              onChange={(e) =>
+                                setSelectedTargetAgents((prev) => ({ ...prev, [p.id]: e.target.value }))
+                              }
+                            >
+                              {onlineAgents.length === 0 ? (
+                                <option value="">(Không có Agent online)</option>
+                              ) : (
+                                onlineAgents.map((a) => (
+                                  <option key={a.agent_uid} value={a.agent_uid}>
+                                    {a.hostname} ({a.local_ip})
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+
+                          {/* Sync Status Box */}
+                          <div
+                            style={{
+                              ...styles.syncStatusBox,
+                              background:
+                                sync.status === 'success'
+                                  ? 'rgba(0, 255, 136, 0.05)'
+                                  : sync.status === 'error'
+                                  ? 'rgba(255, 68, 102, 0.05)'
+                                  : 'var(--color-inset-bg)',
+                              borderColor:
+                                sync.status === 'success'
+                                  ? 'rgba(0, 255, 136, 0.15)'
+                                  : sync.status === 'error'
+                                  ? 'rgba(255, 68, 102, 0.15)'
+                                  : 'var(--color-surface-light)',
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={styles.syncStatusTitle}>Trạng thái đồng bộ danh bạ:</span>
+                              <div style={styles.syncStatusText}>
+                                {isPending ? (
+                                  <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>{statusMsg}</span>
+                                ) : sync.status === 'success' ? (
+                                  <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
+                                    ✔ Đồng bộ OK ({syncCount} mục) · {syncTime}
+                                  </span>
+                                ) : sync.status === 'error' ? (
+                                  <span style={{ color: 'var(--color-error)' }}>
+                                    ❌ Lỗi: {sync.error} {syncTime ? `(${syncTime})` : ''}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-secondary)' }}>Chưa có thông tin danh bạ</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
+                                onClick={() => handleRefetchAddressBook(p.id)}
+                                disabled={isPending || onlineAgents.length === 0}
+                              >
+                                🔄 {sync.status === 'success' ? 'Cập nhật' : 'Đồng bộ'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Suggested Drivers Block */}
+                          {hasDrivers && (
+                            <div style={{ marginTop: '8px' }}>
+                              <button
+                                style={styles.expandSubBtn}
+                                onClick={() =>
+                                  setExpandedDrivers((prev) => ({ ...prev, [p.id]: !driversExpanded }))
+                                }
+                              >
+                                {driversExpanded ? '▲ Ẩn driver đề xuất' : '▼ Xem driver đề xuất từ catalog'}
+                              </button>
+
+                              <AnimatePresence>
+                                {driversExpanded && (
+                                  <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    style={{ overflow: 'hidden', marginTop: '6px' }}
+                                  >
+                                    <div style={styles.suggestedDriverBlock}>
+                                      {p.suggested_drivers.map((sd: any, idx: number) => {
+                                        const brandColor =
+                                          sd.brand === 'ricoh'
+                                            ? 'var(--color-primary)'
+                                            : sd.brand === 'toshiba'
+                                            ? 'var(--color-error)'
+                                            : 'var(--color-success)';
+                                        const sdMenuKey = `${p.id}-${idx}`;
+                                        const isMenuOpen = expandedDriverMenus[sdMenuKey] || false;
+
+                                        return (
+                                          <div key={idx} style={styles.driverSuggestionItem}>
+                                            <div
+                                              style={styles.driverModelHeader}
+                                              onClick={() =>
+                                                setExpandedDriverMenus((prev) => ({
+                                                  ...prev,
+                                                  [sdMenuKey]: !isMenuOpen,
+                                                }))
+                                              }
+                                            >
+                                              <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                                                <span
+                                                  style={{
+                                                    display: 'inline-block',
+                                                    width: '6px',
+                                                    height: '6px',
+                                                    borderRadius: '50%',
+                                                    backgroundColor: brandColor,
+                                                    marginRight: '6px',
+                                                  }}
+                                                />
+                                                {sd.brand.toUpperCase()} - {sd.model}
+                                              </span>
+                                              <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>
+                                                {isMenuOpen ? '▲' : '▼'}
+                                              </span>
+                                            </div>
+
+                                            {isMenuOpen && (
+                                              <div style={styles.driverOptionsList}>
+                                                {sd.drivers && sd.drivers.length > 0 ? (
+                                                  sd.drivers.map((drv: any, dIdx: number) => (
+                                                    <div key={dIdx} style={styles.driverFileRow}>
+                                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={styles.driverFileName}>{drv.name}</div>
+                                                        <div style={styles.driverFileUrl} title={drv.url}>
+                                                          {drv.url.split('/').pop()}
+                                                        </div>
+                                                      </div>
+                                                      <div style={{ display: 'flex', gap: '4px' }}>
+                                                        <a
+                                                          href={drv.url}
+                                                          target="_blank"
+                                                          rel="noreferrer"
+                                                          style={styles.driverDownloadBtn}
+                                                        >
+                                                          Tải về
+                                                        </a>
+                                                        <button
+                                                          style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
+                                                          onClick={() =>
+                                                            handleRemoteInstallDriver(
+                                                              p.id,
+                                                              sd.brand,
+                                                              sd.model,
+                                                              drv.name,
+                                                              drv.url
+                                                            )
+                                                          }
+                                                          disabled={onlineAgents.length === 0}
+                                                        >
+                                                          Cài đặt
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  ))
+                                                ) : (
+                                                  <div style={styles.emptySubText}>Không tìm thấy driver nào.</div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          )}
+
+                          {/* Top Action buttons */}
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                            <button
+                              style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center' }}
+                              onClick={() => {
+                                setPublicFtpData({ printerId: p.id, email: '', agentUid: selectedAgentUid });
+                                setActiveModal('public_ftp');
+                              }}
+                              disabled={onlineAgents.length === 0}
+                            >
+                              ➕ Thêm FTP/Email
+                            </button>
+
+                            <button
+                              style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
+                              onClick={() =>
+                                setExpandedPrinters((prev) => ({ ...prev, [p.id]: !isExpanded }))
+                              }
+                            >
+                              {isExpanded ? '▲ Ẩn danh bạ' : '👁 Xem danh bạ'}
+                            </button>
+                          </div>
+
+                          {/* Copier Scan Destinations list */}
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                style={{ overflow: 'hidden' }}
+                              >
+                                <div style={styles.destinationsBlock}>
+                                  <span style={styles.destBlockTitle}>📂 Danh sách điểm scan:</span>
+                                  
+                                  {sync.status === 'success' && sync.address_list && sync.address_list.length > 0 ? (
+                                    sync.address_list
+                                      .filter((entry: any) => entry.type !== 'Summary' && entry.registration_no !== '-')
+                                      .map((entry: any, eIdx: number) => {
+                                        const emailVal = entry.email_address || entry.email || '';
+                                        const folderVal = entry.physical_path || entry.folder || entry.folder_path || '';
+                                        const destVal = (emailVal || folderVal || '').trim();
+
+                                        let destType = 'Folder';
+                                        if (folderVal.startsWith('ftp://')) destType = 'FTP';
+                                        else if (folderVal.startsWith('\\\\')) destType = 'SMB';
+                                        else if (emailVal || emailVal.includes('@')) destType = 'Email';
+
+                                        const statusInfo = getDestinationStatus(entry);
+                                        const regNo = entry.registration_no;
+                                        const rowKey = `${p.id}-${regNo}`;
+                                        const isRowPending = commandStatus[rowKey]?.isPending || false;
+                                        const rowStatusMsg = commandStatus[rowKey]?.message || '';
+
+                                        return (
+                                          <div key={eIdx} style={styles.destItemCard}>
+                                            <div style={styles.destItemHeader}>
+                                              <span style={styles.destItemTitle}>
+                                                <span
+                                                  style={{
+                                                    ...styles.destTypeBadge,
+                                                    backgroundColor:
+                                                      destType === 'FTP'
+                                                        ? 'rgba(0, 212, 255, 0.12)'
+                                                        : destType === 'SMB'
+                                                        ? 'rgba(123, 47, 247, 0.12)'
+                                                        : 'rgba(0, 255, 136, 0.12)',
+                                                    color:
+                                                      destType === 'FTP'
+                                                        ? 'var(--color-primary)'
+                                                        : destType === 'SMB'
+                                                        ? 'var(--color-secondary)'
+                                                        : 'var(--color-success)',
+                                                  }}
+                                                >
+                                                  {destType}
+                                                </span>
+                                                {entry.name}
+                                              </span>
+                                              <span style={styles.destRegNo}>Reg: #{regNo}</span>
+                                            </div>
+
+                                            <div style={styles.destPathValue}>{destVal}</div>
+
+                                            {/* FTP Credentials */}
+                                            {destType === 'FTP' && (
+                                              <div style={styles.ftpCredentialsBox}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                  <span>User: <strong style={{ color: 'var(--color-primary)' }}>goxprint</strong></span>
+                                                  <button
+                                                    style={styles.copyTextBtn}
+                                                    onClick={() => {
+                                                      navigator.clipboard.writeText('goxprint');
+                                                      showToast('Đã copy user goxprint', 'success', 1500);
+                                                    }}
+                                                  >
+                                                    Copy
+                                                  </button>
+                                                </div>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                                  <span>Pass: <strong style={{ color: 'var(--color-text-secondary)' }}>goxprint</strong></span>
+                                                  <button
+                                                    style={styles.copyTextBtn}
+                                                    onClick={() => {
+                                                      navigator.clipboard.writeText('goxprint');
+                                                      showToast('Đã copy password goxprint', 'success', 1500);
+                                                    }}
+                                                  >
+                                                    Copy
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {/* Connection Status badge */}
+                                            <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                              <span
+                                                style={{
+                                                  ...styles.destStatusBadge,
+                                                  color:
+                                                    statusInfo.type === 'success'
+                                                      ? 'var(--color-success)'
+                                                      : statusInfo.type === 'warning'
+                                                      ? 'var(--color-warning)'
+                                                      : 'var(--color-error)',
+                                                  background:
+                                                    statusInfo.type === 'success'
+                                                      ? 'rgba(0, 255, 136, 0.08)'
+                                                      : statusInfo.type === 'warning'
+                                                      ? 'rgba(255, 170, 0, 0.08)'
+                                                      : 'rgba(255, 68, 102, 0.08)',
+                                                }}
+                                                title={statusInfo.title}
+                                              >
+                                                {statusInfo.label}
+                                              </span>
+
+                                              {isRowPending && (
+                                                <span style={{ fontSize: '0.72rem', color: 'var(--color-warning)' }}>
+                                                  {rowStatusMsg}
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {/* Row action buttons */}
+                                            <div style={styles.destRowActions}>
+                                              <button
+                                                style={styles.destRowBtn}
+                                                onClick={() => handleOpenStorageFiles(selectedLan.lan_uid, destVal)}
+                                              >
+                                                📁 Tệp tin
+                                              </button>
+                                              <button
+                                                style={styles.destRowBtn}
+                                                onClick={() => handleFetchEntryDetail(p.id, entry)}
+                                                disabled={isRowPending || onlineAgents.length === 0}
+                                              >
+                                                ℹ Chi tiết
+                                              </button>
+                                              <button
+                                                style={{ ...styles.destRowBtn, color: 'var(--color-error)' }}
+                                                onClick={() => handleDeleteDest(p.id, entry)}
+                                                disabled={isRowPending}
+                                              >
+                                                🗑️ Xóa
+                                              </button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                  ) : (
+                                    <div style={styles.emptySubText}>
+                                      {sync.status === 'error'
+                                        ? 'Không thể tải danh sách (Lỗi đồng bộ)'
+                                        : 'Đang tải hoặc danh sách trống. Nhấn đồng bộ để lấy trực tiếp.'}
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </GlowCard>
+                      </div>
+                    );
+                    })
+                  )}
+                </AnimatedList>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
+      </div>
+
+      {/* ── MODALS IMPLEMENTATIONS ── */}
+      <AnimatePresence>
+        {activeModal && (
+          <div style={styles.modalOverlay} onClick={() => setActiveModal(null)}>
+            <motion.div
+              style={styles.modalCard}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              {/* 1. Storage files view modal */}
+              {activeModal === 'storage' && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <div>
+                      <h3 style={styles.modalTitle}>📁 Kho tệp tin đã scan</h3>
+                      <div style={styles.modalSubtitle}>{storageModalData.email}</div>
+                    </div>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={styles.modalBody}>
+                    {storageLoading ? (
+                      <div style={styles.modalLoading}>
+                        <LoadingSpinner size="md" />
+                        <span style={{ marginTop: '8px', fontSize: '0.82rem' }}>Đang tải danh sách tệp tin từ VPS...</span>
+                      </div>
+                    ) : storageFiles.length === 0 ? (
+                      <div style={styles.emptySubText}>Không tìm thấy tệp tin đã scan nào trong thư mục này.</div>
+                    ) : (
+                      <div style={styles.filesList}>
+                        {storageFiles.map((f, idx) => (
+                          <div key={idx} style={styles.fileItemRow}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <a
+                                href={`${BASE_URL}${f.url}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={styles.fileLinkName}
+                              >
+                                {f.name}
+                              </a>
+                              <div style={styles.fileMetaDetails}>
+                                Dung lượng: {formatBytes(f.size)} · Mtime: {new Date(f.mtime).toLocaleString('vi-VN')}
+                              </div>
+                              {f.upload_completed_at && (
+                                <div style={styles.fileUploadMeta}>
+                                  Tải lên VPS: {new Date(f.upload_completed_at).toLocaleTimeString('vi-VN')}
+                                  {f.upload_duration != null ? ` (${f.upload_duration}s)` : ''}
+                                </div>
+                              )}
+                            </div>
+                            <a
+                              href={`${BASE_URL}${f.url}`}
+                              download
+                              target="_blank"
+                              rel="noreferrer"
+                              style={styles.fileDownloadBtn}
+                            >
+                              Tải về
+                            </a>
                           </div>
                         ))}
                       </div>
-                    );
-                  })()}
+                    )}
+                  </div>
 
-                  {agent.status === 'online' && (
-                    <div style={styles.agentActions}>
-                      <button style={styles.smallBtn} onClick={() => openModal('driver', agent)}>🖨️ Driver</button>
-                      <button style={styles.smallBtn} onClick={() => openModal('scan', agent)}>📠 Scan</button>
-                      <button style={styles.smallBtn} onClick={() => openModal('notify', agent)}>📢 Thông báo</button>
-                    </div>
-                  )}
-                </GlowCard>
-                ))}
-              </AnimatedList>
-            )}
-          </motion.div>
-        ) : lanTab === 'copiers' ? (
-          <motion.div key="copiers" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={styles.copierSummaryText}>
-                {copiers.length} máy · {copiers.filter(c => c.status === 'online').length} online · {copiers.filter(c => c.status === 'offline').length} offline
-                {selectedLanUid && <span style={{ color: 'var(--color-primary)', marginLeft: 6 }}>· đang lọc theo LAN</span>}
-              </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={styles.smallBtn} onClick={() => openModal('copier_scan')}>🔍 Quét mạng</button>
-                <button style={{ ...styles.smallBtn, borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-                  onClick={() => openModal('copier_add')}>➕ Thêm thủ công</button>
-              </div>
-            </div>
-
-            {copiersLoading && copiers.length === 0 ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-                <LoadingSpinner size="md" />
-              </div>
-            ) : (
-              <AnimatedList>
-                {pagedCopiers.map((copier) => {
-                const isExpanded = expandedCopier === copier.id;
-                const isOnline = copier.status === 'online';
-                return (
-                  <GlowCard key={copier.id}>
-                    {/* Header row */}
-                    <div style={styles.copierHeader}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: 0 }}>
-                        <span style={styles.copierName}>{copier.name}</span>
-                        {copier.location && <span style={styles.copierLocation}>📍 {copier.location}</span>}
-                      </div>
-                      <span style={{
-                        ...styles.statusBadge,
-                        background: isOnline ? 'rgba(var(--rgb-success,0,255,136),0.12)' : 'rgba(var(--rgb-error,255,68,102),0.12)',
-                        color: isOnline ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                        borderColor: isOnline ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                        flexShrink: 0,
-                      }}>
-                        {isOnline ? '🟢 Online' : '🔴 Offline'}
-                      </span>
-                    </div>
-
-                    {/* Meta */}
-                    <div style={styles.copierMeta}>
-                      <span style={styles.metaText}>🖨️ {copier.brand} {copier.model}</span>
-                      <span style={styles.metaText}>IP: {copier.ipAddress}</span>
-                      <span style={styles.metaText}>MAC: {copier.macId}</span>
-                      {copier.driverVersion && <span style={styles.metaText}>Driver: {copier.driverVersion}</span>}
-                    </div>
-
-                    {/* PC count chip */}
-                    <div style={styles.statusRow}>
-                      <span style={{
-                        ...styles.statusChip,
-                        background: copier.connectedPCs.length > 0 ? 'color-mix(in srgb, var(--color-primary) 10%, var(--color-surface))' : 'var(--color-chip-bg)',
-                        color: copier.connectedPCs.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                        borderColor: copier.connectedPCs.length > 0 ? 'var(--color-primary)' : 'var(--color-chip-border)',
-                      }}>
-                        🖥️ {copier.connectedPCs.length} PC đang dùng
-                      </span>
-                      {/* Connection status */}
-                      <span style={{
-                        ...styles.statusChip,
-                        background: copier.isConfigured ? 'color-mix(in srgb, var(--color-success) 10%, var(--color-surface))' : 'var(--color-chip-bg)',
-                        color: copier.isConfigured ? 'var(--color-success)' : 'var(--color-text-secondary)',
-                        borderColor: copier.isConfigured ? 'var(--color-success)' : 'var(--color-chip-border)',
-                      }}>
-                        {copier.isConfigured ? '🔗 Đã kết nối' : '⚠️ Chưa cấu hình'}
-                      </span>
-                    </div>
-
-                    {/* Config button */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                      <button
-                        style={{ ...styles.smallBtn, color: 'var(--color-error)' }}
-                        onClick={() => handleDeleteCopier(copier.id)}
-                      >
-                        🗑️ Xóa
-                      </button>
-                      <button
-                        style={{ ...styles.smallBtn, borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-                        onClick={() => openCopierConfig(copier)}
-                      >
-                        ⚙️ Cấu hình
-                      </button>
-                      <button
-                        style={{ ...styles.smallBtn, borderColor: 'var(--color-success, #00e676)', color: 'var(--color-success, #00e676)' }}
-                        onClick={() => openCopierDriverInstall(copier)}
-                      >
-                        🖨️ Cài driver
-                      </button>
-                    </div>
-
-                    {/* Expand/collapse PC list */}
+                  <div style={styles.modalFooter}>
                     <button
-                      style={styles.expandBtn}
-                      onClick={() => setExpandedCopier(isExpanded ? null : copier.id)}
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={() => handleOpenStorageFiles(storageModalData.lanUid, storageModalData.email)}
                     >
-                      {isExpanded ? '▲ Ẩn danh sách PC' : '▼ Xem danh sách PC'}
+                      Làm mới danh sách
                     </button>
-
-                    <AnimatePresence>
-                      {isExpanded && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.2 }}
-                          style={{ overflow: 'hidden' }}
-                        >
-                          <div style={styles.pcList}>
-                            {copier.connectedPCs.length === 0 ? (
-                              <span style={styles.emptyPcText}>Chưa có PC nào kết nối</span>
-                            ) : (
-                              copier.connectedPCs.map((pc) => {
-                                const agent = agents.find((a) => a.hostname === pc);
-                                return (
-                                  <div key={pc} style={styles.pcRow}>
-                                    <span style={styles.pcName}>🖥️ {pc}</span>
-                                    {agent && (
-                                      <span style={{
-                                        ...styles.statusBadge,
-                                        fontSize: '0.65rem',
-                                        background: agent.status === 'online' ? 'rgba(var(--rgb-success,0,255,136),0.12)' : 'rgba(var(--rgb-error,255,68,102),0.12)',
-                                        color: agent.status === 'online' ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                        borderColor: agent.status === 'online' ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                      }}>
-                                        {agent.status === 'online' ? '🟢' : '🔴'} {agent.ipAddress}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </GlowCard>
-                );
-              })}
-              </AnimatedList>
-            )}
-          </motion.div>
-        ) : (
-          <motion.div key="downloads" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }} transition={{ duration: 0.2 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <GlowCard>
-              <h2 style={styles.sectionTitle}>📥 Tải Agent cho VPS/Server</h2>
-              <p style={styles.subtitle}>Sử dụng các phiên bản này để cài đặt PrintAgent lên máy chủ hoặc máy trạm đích.</p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-                <div style={styles.configDetail}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <span style={styles.configLabel}>PrintAgent v1.2.0 (Ổn định)</span>
-                      <span style={styles.configSub}>Phát hành: 10/03/2026 · 12.5 MB</span>
-                    </div>
-                    <a href="https://github.com/nguyenbuu/printagent/releases/download/v1.2.0/PrintAgent_Setup.exe"
-                      style={{ ...styles.bulkSecondary, flex: 'none', background: 'var(--color-primary)', color: 'white', border: 'none', textDecoration: 'none', textAlign: 'center' }}>
-                      Tải về .exe
-                    </a>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
+                      onClick={() => setActiveModal(null)}
+                    >
+                      Đóng
+                    </button>
                   </div>
-                </div>
+                </>
+              )}
 
-                <div style={styles.configDetail}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <span style={styles.configLabel}>PrintAgent v1.3.0-beta (Thử nghiệm)</span>
-                      <span style={styles.configSub}>Phát hành: 05/03/2026 · 14.1 MB</span>
-                    </div>
-                    <a href="#" style={{ ...styles.bulkSecondary, flex: 'none', textDecoration: 'none', textAlign: 'center' }}>
-                      Tải về .exe
-                    </a>
+              {/* 2. Add Public FTP Modal */}
+              {activeModal === 'public_ftp' && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>➕ Thêm Public FTP/Email</h3>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
                   </div>
-                </div>
 
-                <div style={{ ...styles.scanBlock, background: 'rgba(var(--rgb-primary, 59, 130, 246), 0.05)', borderColor: 'rgba(var(--rgb-primary, 59, 130, 246), 0.2)' }}>
-                  <span style={styles.scanBlockTitle}>💡 Hướng dẫn cài đặt</span>
-                  <ul style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', paddingLeft: '20px', margin: '4px 0' }}>
-                    <li>Tải file .exe về máy tính cần giám sát.</li>
-                    <li>Chạy file cài đặt với quyền Administrator.</li>
-                    <li>Nhập mã định danh (Agent ID) khi được yêu cầu.</li>
-                    <li>Máy tính sẽ tự động xuất hiện trong danh sách "Máy tính" sau khi khởi chạy.</li>
-                  </ul>
-                </div>
-              </div>
-            </GlowCard>
-          </motion.div>
+                  <div style={styles.modalBody}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Địa chỉ Email *</label>
+                      <input
+                        type="email"
+                        style={styles.modalInput}
+                        placeholder="VD: goxprint@gmail.com"
+                        value={publicFtpData.email}
+                        onChange={(e) => setPublicFtpData((p) => ({ ...p, email: e.target.value }))}
+                      />
+                      <span style={styles.formHelpText}>Mã FTP/Folder scan sẽ tự động được gán theo email này.</span>
+                    </div>
+
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Relay Agent *</label>
+                      <select
+                        style={styles.modalInput}
+                        value={publicFtpData.agentUid}
+                        onChange={(e) => setPublicFtpData((p) => ({ ...p, agentUid: e.target.value }))}
+                      >
+                        {((selectedLan && selectedLan.agents) || [])
+                          .filter((a) => a.is_online)
+                          .map((a) => (
+                            <option key={a.agent_uid} value={a.agent_uid}>
+                              {a.hostname} ({a.local_ip})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={handleAddPublicFtp}
+                      disabled={publicFtpLoading}
+                    >
+                      {publicFtpLoading ? 'Đang tạo...' : 'Tạo điểm scan'}
+                    </button>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
+                      onClick={() => setActiveModal(null)}
+                    >
+                      Hủy bỏ
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 3. Add Private FTP Modal */}
+              {activeModal === 'private_ftp' && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>➕ Thêm Private FTP</h3>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={styles.modalBody}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Địa chỉ Email riêng *</label>
+                      <input
+                        type="email"
+                        style={styles.modalInput}
+                        placeholder="VD: user.pc1@gmail.com"
+                        value={privateFtpData.email}
+                        onChange={(e) => setPrivateFtpData((p) => ({ ...p, email: e.target.value }))}
+                      />
+                      <span style={styles.formHelpText}>Cấu hình FTP riêng cho máy tính {privateFtpData.agentUid}</span>
+                    </div>
+                  </div>
+
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={handleAddPrivateFtp}
+                      disabled={privateFtpLoading}
+                    >
+                      {privateFtpLoading ? 'Đang tạo...' : 'Tạo FTP riêng'}
+                    </button>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
+                      onClick={() => setActiveModal(null)}
+                    >
+                      Hủy bỏ
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 4. Info Detail modal */}
+              {activeModal === 'info_detail' && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <div>
+                      <h3 style={styles.modalTitle}>ℹ Chi tiết đăng ký điểm scan</h3>
+                      <div style={styles.modalSubtitle}>Đăng ký: #{infoDetailData.regNo} · {infoDetailData.name}</div>
+                    </div>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={styles.modalBody}>
+                    {infoDetailData.error ? (
+                      <div style={{ color: 'var(--color-error)', fontSize: '0.85rem' }}>{infoDetailData.error}</div>
+                    ) : (
+                      <div style={styles.modalDetailsList}>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Giao thức:</span>
+                          <span style={{ ...styles.detailValue, fontWeight: 700, color: 'var(--color-primary)' }}>
+                            {infoDetailData.details?.proto}
+                          </span>
+                        </div>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Server Host:</span>
+                          <span style={styles.detailValue}>{infoDetailData.details?.server}</span>
+                        </div>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Cổng Port:</span>
+                          <span style={styles.detailValue}>{infoDetailData.details?.port}</span>
+                        </div>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Đường dẫn tệp:</span>
+                          <span style={{ ...styles.detailValue, fontFamily: 'monospace' }}>{infoDetailData.details?.path}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={() => setActiveModal(null)}
+                    >
+                      Đóng cửa sổ
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
-      {/* Floating paging toolbar */}
-      {(lanTab === 'agents' || lanTab === 'copiers') && (
-        <div style={{
-          position: 'fixed', bottom: 70, left: 0, right: 0, zIndex: 85,
-          background: 'color-mix(in srgb, var(--color-surface) 92%, transparent)',
-          backdropFilter: 'blur(12px)',
-          borderTop: '1px solid var(--color-surface-light)',
-          padding: '6px 16px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
-        }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-            {lanTab === 'agents'
-              ? `${Math.min(agentPage * pageSize + 1, agents.length)}–${Math.min((agentPage + 1) * pageSize, agents.length)} / ${agents.length} máy tính`
-              : `${Math.min(copierPage * pageSize + 1, copiers.length)}–${Math.min((copierPage + 1) * pageSize, copiers.length)} / ${copiers.length} photo`
-            }
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <select
-              value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setAgentPage(0); setCopierPage(0); }}
-              style={{ background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-surface-light)', borderRadius: '6px', padding: '4px 6px', fontSize: '0.75rem' }}
+      {/* 5. CUSTOM CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div style={styles.confirmOverlay} onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}>
+            <motion.div
+              style={styles.confirmModalCard}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
             >
-              {[5, 10, 20, 50].map(n => <option key={n} value={n}>{n} / trang</option>)}
-            </select>
-            {lanTab === 'agents' ? (
-              <>
-                <button disabled={agentPage === 0} onClick={() => setAgentPage(p => p - 1)}
-                  style={{ ...styles.smallBtn, padding: '4px 10px', opacity: agentPage === 0 ? 0.4 : 1 }}>‹</button>
-                <span style={{ fontSize: '0.8rem', color: 'var(--color-text)', fontWeight: 600, minWidth: 40, textAlign: 'center' }}>{agentPage + 1}/{agentTotalPages}</span>
-                <button disabled={agentPage >= agentTotalPages - 1} onClick={() => setAgentPage(p => p + 1)}
-                  style={{ ...styles.smallBtn, padding: '4px 10px', opacity: agentPage >= agentTotalPages - 1 ? 0.4 : 1 }}>›</button>
-              </>
-            ) : (
-              <>
-                <button disabled={copierPage === 0} onClick={() => setCopierPage(p => p - 1)}
-                  style={{ ...styles.smallBtn, padding: '4px 10px', opacity: copierPage === 0 ? 0.4 : 1 }}>‹</button>
-                <span style={{ fontSize: '0.8rem', color: 'var(--color-text)', fontWeight: 600, minWidth: 40, textAlign: 'center' }}>{copierPage + 1}/{copierTotalPages}</span>
-                <button disabled={copierPage >= copierTotalPages - 1} onClick={() => setCopierPage(p => p + 1)}
-                  style={{ ...styles.smallBtn, padding: '4px 10px', opacity: copierPage >= copierTotalPages - 1 ? 0.4 : 1 }}>›</button>
-              </>
-            )}
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>⚠️ {confirmModal.title}</h3>
+                <button
+                  style={styles.modalCloseBtn}
+                  onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={styles.modalBody}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--color-text)', lineHeight: 1.4, margin: 0, whiteSpace: 'pre-line' }}>
+                  {confirmModal.message}
+                </p>
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    background: 'var(--color-error)',
+                    borderColor: 'var(--color-error)',
+                    color: 'white',
+                  }}
+                  onClick={confirmModal.onConfirm}
+                >
+                  Đồng ý
+                </button>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    borderColor: 'var(--color-secondary)',
+                    color: 'var(--color-secondary)',
+                  }}
+                  onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy bỏ
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
-
-      {/* Modal */}
-      {modal && (
-        <div style={styles.overlay} onClick={closeModal}>
-          <motion.div style={styles.modal} onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-            <h3 style={styles.modalTitle}>
-              {modal === 'driver' && `🖨️ Cài driver - ${selectedAgent?.hostname ?? (printerIp ? `IP: ${printerIp}` : 'Máy in')}`}
-              {modal === 'scan' && `📠 Cài scan - ${selectedAgent?.hostname}`}
-              {modal === 'bulk_driver' && '🖨️ Cài driver toàn bộ agent'}
-              {modal === 'bulk_scan' && '📠 Cài scan toàn bộ agent'}
-              {modal === 'bulk_all' && '⚡ Cài driver + scan toàn bộ'}
-              {modal === 'settings' && '⚙️ Thiết lập & Tải về'}
-              {modal === 'notify' && '📢 Gửi thông báo'}
-              {modal === 'copier_scan' && '🔍 Quét máy Photocopy trong mạng'}
-              {modal === 'copier_add' && '➕ Thêm máy Photocopy thủ công'}
-              {modal === 'copier_config' && `⚙️ Cấu hình - ${configCopier?.name}`}
-              {modal === 'agent_edit' && `✏️ Chỉnh sửa Agent - ${editingAgent?.hostname}`}
-              {modal === 'agent_delete' && `🗑️ Xóa Agent - ${selectedAgent?.hostname}`}
-            </h3>
-
-            {/* Inner Tabs for Settings Modal */}
-            {modal === 'settings' && (
-              <div style={{ display: 'flex', borderBottom: '1px solid var(--color-surface-light)', marginBottom: '12px' }}>
-                <button
-                  onClick={() => setSettingsTab('config')}
-                  style={{
-                    flex: 1, padding: '10px', background: 'none', border: 'none',
-                    borderBottom: settingsTab === 'config' ? '2px solid var(--color-primary)' : '2px solid transparent',
-                    color: settingsTab === 'config' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  ⚙️ Cấu hình
-                </button>
-                <button
-                  onClick={() => setSettingsTab('download')}
-                  style={{
-                    flex: 1, padding: '10px', background: 'none', border: 'none',
-                    borderBottom: settingsTab === 'download' ? '2px solid var(--color-primary)' : '2px solid transparent',
-                    color: settingsTab === 'download' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  📥 Tải Agent
-                </button>
-              </div>
-            )}
-
-            {/* ── SETTINGS DOWNLOAD TAB ── */}
-            {modal === 'settings' && settingsTab === 'download' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                  Tải bộ cài đặt PrintAgent để cài lên các máy tính khác trong mạng.
-                </p>
-                <div style={styles.configDetail}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={styles.configLabel}>PrintAgent v1.2.0 (Ổn định)</span>
-                    <a href="https://github.com/nguyenbuu/printagent/releases/download/v1.2.0/PrintAgent_Setup.exe"
-                      style={{ ...styles.smallBtn, background: 'var(--color-primary)', color: 'white', border: 'none', textDecoration: 'none' }}>
-                      Tải .exe
-                    </a>
-                  </div>
-                </div>
-                <div style={{ padding: '10px', background: 'rgba(var(--rgb-primary, 59, 130, 246), 0.05)', borderRadius: '8px', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-                  💡 Sau khi tải về, hãy copy file vào VPS hoặc máy tính cần giám sát và chạy file cài đặt.
-                </div>
-              </div>
-            )}
-
-            {/* ── AGENT EDIT ── */}
-            {modal === 'agent_edit' && editingAgent && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Hostname *</label>
-                  <input type="text" value={editAgentHostname} onChange={(e) => setEditAgentHostname(e.target.value)}
-                    placeholder="VD: DESKTOP-PC1" style={styles.input} />
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>IP Address</label>
-                  <input type="text" value={editAgentIp} onChange={(e) => setEditAgentIp(e.target.value)}
-                    placeholder="192.168.1.10" style={styles.input} />
-                </div>
-                {editAgentError && (
-                  <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '0.82rem', background: 'color-mix(in srgb, var(--color-error) 10%, var(--color-surface))', color: 'var(--color-error)', border: '1px solid var(--color-error)' }}>
-                    {editAgentError}
-                  </div>
-                )}
-                <div style={styles.modalActions}>
-                  {actionLoading ? <LoadingSpinner size="sm" /> : (
-                    <>
-                      <AnimatedButton onClick={handleUpdateAgent}>Cập nhật</AnimatedButton>
-                      <AnimatedButton onClick={closeModal} variant="secondary">Hủy</AnimatedButton>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ── AGENT DELETE ── */}
-            {modal === 'agent_delete' && selectedAgent && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <p style={{ fontSize: '0.9rem', color: 'var(--color-text)', margin: 0 }}>
-                  Bạn có chắc chắn muốn xóa agent <strong>{selectedAgent.hostname}</strong>?
-                </p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                  Hành động này sẽ gỡ bỏ agent khỏi hệ thống. Agent sẽ tự động xuất hiện lại nếu vẫn còn đang chạy trên máy tính đó.
-                </p>
-                <div style={styles.modalActions}>
-                  {actionLoading ? <LoadingSpinner size="sm" /> : (
-                    <>
-                      <AnimatedButton onClick={handleDeleteAgent} variant="danger">
-                        Xác nhận xóa
-                      </AnimatedButton>
-                      <AnimatedButton onClick={closeModal} variant="secondary">Hủy</AnimatedButton>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ── COPIER CONFIG ── */}
-            {modal === 'copier_config' && configCopier && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                  Nhập địa chỉ IP để tra cứu MAC ID, sau đó cấu hình thông tin đăng nhập web UI.
-                </p>
-
-                {/* Connection status banner */}
-                <div style={{
-                  padding: '10px 14px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600,
-                  background: configCopier.isConfigured
-                    ? 'color-mix(in srgb, var(--color-success) 10%, var(--color-surface))'
-                    : 'color-mix(in srgb, var(--color-warning) 10%, var(--color-surface))',
-                  color: configCopier.isConfigured ? 'var(--color-success)' : 'var(--color-warning)',
-                  border: `1px solid ${configCopier.isConfigured ? 'var(--color-success)' : 'var(--color-warning)'}`,
-                }}>
-                  {configCopier.isConfigured ? '🔗 Đã kết nối máy' : '⚠️ Chưa cấu hình kết nối'}
-                </div>
-
-                {/* IP Address — primary input, triggers MAC lookup */}
-                <div style={styles.formField}>
-                  <label style={styles.label}>Địa chỉ IP *</label>
-                  <input
-                    type="text"
-                    value={configIp}
-                    onChange={(e) => handleConfigIpChange(e.target.value)}
-                    placeholder="192.168.1.200"
-                    style={styles.input}
-                    autoFocus
-                  />
-                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                    Nhập IP đầy đủ để tự động tra cứu MAC ID
-                  </span>
-                </div>
-
-                {/* MAC ID — auto-filled from IP, editable */}
-                <div style={styles.formField}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <label style={styles.label}>MAC ID *</label>
-                    {configMacLookupLoading && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--color-primary)' }}>⏳ Đang tra cứu...</span>
-                    )}
-                    {!configMacLookupLoading && configMac && !configMacEditing && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--color-success)' }}>✓ Đã nhận diện</span>
-                    )}
-                    {!configMacEditing && configMac && (
-                      <button type="button"
-                        style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontSize: '0.72rem', cursor: 'pointer' }}
-                        onClick={() => setConfigMacEditing(true)}>✏️ Sửa</button>
-                    )}
-                  </div>
-                  {configMacEditing ? (
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <input type="text" value={configMac}
-                        onChange={(e) => {
-                          const hex = e.target.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase().slice(0, 12);
-                          setConfigMac(hex.match(/.{1,2}/g)?.join(':') ?? hex);
-                        }}
-                        placeholder="AA:BB:CC:DD:EE:FF"
-                        style={{ ...styles.input, fontFamily: 'monospace', letterSpacing: '0.05em', flex: 1 }}
-                        maxLength={17} autoFocus />
-                      <button type="button" onClick={() => setConfigMacEditing(false)}
-                        style={{ ...styles.smallBtn, flexShrink: 0 }}>✓</button>
-                    </div>
-                  ) : (
-                    <div style={{
-                      ...styles.input,
-                      fontFamily: 'monospace',
-                      background: 'var(--color-inset-bg)',
-                      color: configMac ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                      opacity: configMac ? 0.85 : 0.5,
-                    }}>
-                      {configMac || 'Nhập IP để tự động điền'}
-                    </div>
-                  )}
-                </div>
-
-                {/* Web UI credentials */}
-                <div style={styles.scanBlock}>
-                  <div style={styles.scanBlockTitle}>🔐 Tài khoản đăng nhập web UI</div>
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Username</label>
-                    <input type="text" value={configUser} onChange={(e) => setConfigUser(e.target.value)}
-                      placeholder="admin" style={styles.input} autoComplete="off" />
-                  </div>
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Password</label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <input
-                        type={configShowPass ? 'text' : 'password'}
-                        value={configPass}
-                        onChange={(e) => setConfigPass(e.target.value)}
-                        placeholder="(để trống nếu không có)"
-                        style={{ ...styles.input, flex: 1 }}
-                        autoComplete="new-password"
-                      />
-                      <button type="button"
-                        style={{ ...styles.smallBtn, flexShrink: 0, fontSize: '0.8rem' }}
-                        onClick={() => setConfigShowPass((v) => !v)}>
-                        {configShowPass ? '🙈' : '👁️'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {configError && (
-                  <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '0.82rem', background: 'color-mix(in srgb, var(--color-error) 10%, var(--color-surface))', color: 'var(--color-error)', border: '1px solid var(--color-error)' }}>
-                    {configError}
-                  </div>
-                )}
-
-                <div style={styles.modalActions}>
-                  {actionLoading
-                    ? <LoadingSpinner size="sm" />
-                    : <>
-                      <AnimatedButton onClick={handleSaveCopierConfig} disabled={!configIp.trim() || !configMac.trim()}>
-                        💾 Lưu cấu hình
-                      </AnimatedButton>
-                      <AnimatedButton onClick={closeModal} variant="secondary">Hủy</AnimatedButton>
-                    </>
-                  }
-                </div>
-              </div>
-            )}
-
-            {/* ── COPIER SCAN ── */}
-            {modal === 'copier_scan' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                  Quét toàn bộ dải IP trong mạng LAN để tìm máy photocopy đang hoạt động.
-                </p>
-                {scanProgress === 'idle' && (
-                  <AnimatedButton onClick={handleCopierScan}>🔍 Bắt đầu quét</AnimatedButton>
-                )}
-                {scanProgress === 'scanning' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', background: 'color-mix(in srgb, var(--color-primary) 8%, var(--color-surface))', borderRadius: '8px', border: '1px solid var(--color-primary)' }}>
-                    <LoadingSpinner size="sm" />
-                    <span style={{ fontSize: '0.85rem', color: 'var(--color-primary)' }}>Đang quét mạng...</span>
-                  </div>
-                )}
-                {scanProgress === 'done' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                      Tìm thấy {scanFound.length} thiết bị:
-                    </p>
-                    {scanFound.map(({ ip, mac }) => {
-                      const exists = copiers.some((c) => c.ipAddress === ip);
-                      return (
-                        <div key={ip} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--color-inset-bg)', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--color-text)' }}>🖨️ {ip}</span>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>MAC: {mac}</span>
-                          </div>
-                          {exists ? (
-                            <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>Đã có</span>
-                          ) : (
-                            <button style={{ ...styles.smallBtn, fontSize: '0.72rem', padding: '4px 8px' }}
-                              onClick={() => {
-                                setNewCopierIp(ip);
-                                setNewCopierMac(mac);
-                                setModal('copier_add');
-                                setScanProgress('idle');
-                              }}>
-                              + Thêm
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <button style={{ ...styles.smallBtn, marginTop: '4px' }} onClick={() => setScanProgress('idle')}>🔄 Quét lại</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── COPIER ADD MANUAL ── */}
-            {modal === 'copier_add' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Tên máy *</label>
-                  <input type="text" value={newCopierName} onChange={(e) => setNewCopierName(e.target.value)}
-                    placeholder="VD: Ricoh MP 7503 - Tầng 2" style={styles.input} />
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Dòng máy *</label>
-                  <div style={styles.brandRow}>
-                    {PRINTER_BRANDS.map((brand) => (
-                      <button key={brand} style={{
-                        ...styles.brandBtn,
-                        background: newCopierBrand === brand ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-surface))' : 'var(--color-bg)',
-                        borderColor: newCopierBrand === brand ? 'var(--color-primary)' : 'var(--color-surface-light)',
-                        color: newCopierBrand === brand ? 'var(--color-primary)' : 'var(--color-text)',
-                      }} onClick={() => setNewCopierBrand(brand)}>
-                        {brand}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Model *</label>
-                  <input type="text" value={newCopierModel} onChange={(e) => setNewCopierModel(e.target.value)}
-                    placeholder="VD: MP 7503" style={styles.input} />
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Địa chỉ IP *</label>
-                  <input type="text" value={newCopierIp} onChange={(e) => handleCopierIpChange(e.target.value)}
-                    placeholder="192.168.1.200" style={styles.input} />
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Vị trí</label>
-                  <input type="text" value={newCopierLocation} onChange={(e) => setNewCopierLocation(e.target.value)}
-                    placeholder="VD: Phòng kế toán - Tầng 2" style={styles.input} />
-                </div>
-                {/* MAC ID — disabled by default, click to edit */}
-                <div style={styles.formField}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <label style={styles.label}>MAC ID *</label>
-                    {macLookupLoading && <span style={{ fontSize: '0.72rem', color: 'var(--color-primary)' }}>⏳ Đang tra cứu...</span>}
-                    {!macLookupLoading && !macEditing && newCopierMac && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--color-success)' }}>✓ Tự động nhận diện</span>
-                    )}
-                  </div>
-                  {!macEditing ? (
-                    <button
-                      type="button"
-                      onClick={() => setMacEditing(true)}
-                      style={{
-                        ...styles.input,
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        opacity: newCopierMac ? 0.65 : 0.45,
-                        fontFamily: 'monospace',
-                        color: newCopierMac ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                        background: 'var(--color-inset-bg)',
-                        border: '1px dashed var(--color-surface-light)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      }}
-                    >
-                      <span>{newCopierMac || 'AA:BB:CC:DD:EE:FF'}</span>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--color-primary)', fontFamily: 'inherit', opacity: 1 }}>✏️ Sửa</span>
-                    </button>
-                  ) : (
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        value={newCopierMac}
-                        onChange={(e) => handleMacInput(e.target.value)}
-                        placeholder="AA:BB:CC:DD:EE:FF"
-                        style={{ ...styles.input, fontFamily: 'monospace', letterSpacing: '0.05em', flex: 1 }}
-                        autoFocus
-                        maxLength={17}
-                      />
-                      <button type="button" onClick={() => setMacEditing(false)}
-                        style={{ ...styles.smallBtn, flexShrink: 0, padding: '10px 10px', fontSize: '0.75rem' }}>
-                        ✓
-                      </button>
-                    </div>
-                  )}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                    Nhập IP để tự động tra cứu · Bấm để sửa thủ công
-                  </span>
-                </div>
-                {addCopierError && (
-                  <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '0.82rem', background: 'color-mix(in srgb, var(--color-error) 10%, var(--color-surface))', color: 'var(--color-error)', border: '1px solid var(--color-error)' }}>
-                    {addCopierError}
-                  </div>
-                )}
-                <div style={styles.modalActions}>
-                  <AnimatedButton onClick={handleAddCopier}>Thêm máy</AnimatedButton>
-                  <AnimatedButton onClick={closeModal} variant="secondary">Hủy</AnimatedButton>
-                </div>
-              </div>
-            )}
-
-            {/* ── DRIVER FIELDS ── */}
-            {showDriverFields && (
-              <>
-                {modal === 'settings' && <div style={styles.sectionLabel}>🖨️ Thiết lập Driver máy in</div>}
-
-                {/* Brand */}
-                <div style={styles.formField}>
-                  <label style={styles.label}>Dòng máy *</label>
-                  <div style={styles.brandRow}>
-                    {PRINTER_BRANDS.map((brand) => (
-                      <button key={brand} style={{
-                        ...styles.brandBtn,
-                        background: selectedBrand === brand ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-surface))' : 'var(--color-bg)',
-                        borderColor: selectedBrand === brand ? 'var(--color-primary)' : 'var(--color-surface-light)',
-                        color: selectedBrand === brand ? 'var(--color-primary)' : 'var(--color-text)',
-                      }} onClick={() => { setSelectedBrand(brand); setSelectedModel(null); }}>
-                        {brand}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Model */}
-                {selectedBrand && (
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Mã máy *</label>
-                    {loadingCatalog ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 0' }}>
-                        <LoadingSpinner size="sm" />
-                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Đang tải danh sách driver từ server...</span>
-                      </div>
-                    ) : brandCatalog.length > 0 ? (
-                      <div style={{ ...styles.modelGrid, maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                        {brandCatalog.map((m: any) => (
-                          <button key={m.model} style={{
-                            ...styles.modelBtn,
-                            background: selectedCatalogModel?.model === m.model ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-surface))' : 'var(--color-bg)',
-                            borderColor: selectedCatalogModel?.model === m.model ? 'var(--color-primary)' : 'var(--color-surface-light)',
-                            color: selectedCatalogModel?.model === m.model ? 'var(--color-primary)' : 'var(--color-text)',
-                          }} onClick={() => {
-                            setSelectedCatalogModel(m);
-                          }}>
-                            <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{m.model}</span>
-                            <span style={{ fontSize: '0.62rem', color: 'var(--color-text-secondary)', textAlign: 'center' as const }}>{m.category || m.family || 'Printer'}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div style={{ ...styles.modelGrid }}>
-                        {modelsForBrand.map((m) => (
-                          <button key={m.code} style={{
-                            ...styles.modelBtn,
-                            background: selectedModel?.code === m.code ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-surface))' : 'var(--color-bg)',
-                            borderColor: selectedModel?.code === m.code ? 'var(--color-primary)' : 'var(--color-surface-light)',
-                            color: selectedModel?.code === m.code ? 'var(--color-primary)' : 'var(--color-text)',
-                          }} onClick={() => setSelectedModel(m)}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{m.code}</span>
-                            <span style={{ fontSize: '0.6rem', color: 'var(--color-text-secondary)', textAlign: 'center' as const }}>{m.model}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Driver variant selection for catalog models */}
-                {selectedCatalogModel && driverOptionsForModel.length > 0 && (
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Driver đề xuất *</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
-                      {driverOptionsForModel.map((opt: any) => (
-                        <div key={opt.download_url} style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          border: '1px solid var(--color-surface-light)',
-                          background: selectedDriverOption?.download_url === opt.download_url ? 'color-mix(in srgb, var(--color-primary) 8%, var(--color-surface))' : 'var(--color-bg)',
-                          borderColor: selectedDriverOption?.download_url === opt.download_url ? 'var(--color-primary)' : 'var(--color-surface-light)',
-                          cursor: 'pointer',
-                        }} onClick={() => setSelectedDriverOption(opt)}>
-                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: selectedDriverOption?.download_url === opt.download_url ? 'var(--color-primary)' : 'var(--color-text)' }}>
-                              {opt.name}
-                            </span>
-                            {opt.version && (
-                              <span style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)' }}>
-                                Version: {opt.version} {opt.date ? `| Release: ${opt.date}` : ''}
-                              </span>
-                            )}
-                            <span style={{ fontSize: '0.62rem', color: 'color-mix(in srgb, var(--color-primary) 65%, var(--color-text-secondary))', wordBreak: 'break-all' }}>
-                              URL: {opt.download_url}
-                            </span>
-                          </div>
-                          <input
-                            type="radio"
-                            name="driver_option"
-                            checked={selectedDriverOption?.download_url === opt.download_url}
-                            onChange={() => setSelectedDriverOption(opt)}
-                            style={{ marginLeft: '12px', accentColor: 'var(--color-primary)' }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedModel && !selectedCatalogModel && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>Driver: {selectedModel.driverName}</div>
-                )}
-
-                {/* IP + Port */}
-                <div style={styles.formRow}>
-                  <div style={{ ...styles.formField, flex: 2 }}>
-                    <label style={styles.label}>IP máy in *</label>
-                    <input type="text" value={printerIp} onChange={(e) => setPrinterIp(e.target.value)}
-                      placeholder="192.168.1.200" style={styles.input} />
-                  </div>
-                  <div style={{ ...styles.formField, flex: 1 }}>
-                    <label style={styles.label}>Port</label>
-                    <select value={printerPort} onChange={(e) => setPrinterPort(e.target.value === 'custom' ? 'custom' : 9100)} style={styles.input}>
-                      {PORT_OPTIONS.map((o) => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                </div>
-                {printerPort === 'custom' && (
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Số port *</label>
-                    <input type="number" value={customPort} onChange={(e) => setCustomPort(e.target.value)}
-                      placeholder="VD: 515" style={styles.input} min="1" max="65535" />
-                  </div>
-                )}
-              </>
-            )}
-
-            {showDriverFields && showScanFields && <div style={styles.divider} />}
-
-            {/* ── SCAN FIELDS ── */}
-            {showScanFields && (
-              <>
-                {modal === 'settings' && <div style={styles.sectionLabel}>📠 Thiết lập Scan</div>}
-
-                {/* Copier credentials */}
-                <div style={styles.scanBlock}>
-                  <div style={styles.scanBlockTitle}>🖨️ Tài khoản máy Photocopy</div>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', margin: 0 }}>
-                    Dùng để đăng nhập web UI máy photocopy và cấu hình scan destination.
-                  </p>
-                  <div style={styles.formField}>
-                    <label style={styles.label}>IP máy Photocopy *</label>
-                    <input type="text" value={copierIp} onChange={(e) => setCopierIp(e.target.value)}
-                      placeholder="192.168.1.200" style={styles.input} />
-                  </div>
-                  <div style={styles.formRow}>
-                    <div style={{ ...styles.formField, flex: 1 }}>
-                      <label style={styles.label}>Username *</label>
-                      <input type="text" value={copierUser} onChange={(e) => setCopierUser(e.target.value)}
-                        placeholder="admin" style={styles.input} autoComplete="off" />
-                    </div>
-                    <div style={{ ...styles.formField, flex: 1 }}>
-                      <label style={styles.label}>Password</label>
-                      <input type="password" value={copierPass} onChange={(e) => setCopierPass(e.target.value)}
-                        placeholder="(để trống nếu không có)" style={styles.input} autoComplete="new-password" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Enable SMB / FTP checkboxes */}
-                <div style={styles.formField}>
-                  <label style={styles.label}>Loại scan (có thể chọn cả hai)</label>
-                  <div style={styles.checkRow}>
-                    <label style={styles.checkLabel}>
-                      <input type="checkbox" checked={enableSmb} onChange={(e) => setEnableSmb(e.target.checked)}
-                        style={{ accentColor: 'var(--color-primary)', flexShrink: 0, width: 'auto' }} />
-                      SMB
-                    </label>
-                    <label style={styles.checkLabel}>
-                      <input type="checkbox" checked={enableFtp} onChange={(e) => setEnableFtp(e.target.checked)}
-                        style={{ accentColor: 'var(--color-primary)', flexShrink: 0, width: 'auto' }} />
-                      FTP
-                    </label>
-                  </div>
-                </div>
-
-                {/* Priority — only when both enabled */}
-                {enableSmb && enableFtp && (
-                  <div style={styles.formField}>
-                    <label style={styles.label}>Ưu tiên</label>
-                    <div style={styles.checkRow}>
-                      {(['smb', 'ftp'] as const).map((t) => (
-                        <label key={t} style={styles.checkLabel}>
-                          <input type="radio" name="scanPriority" value={t} checked={scanPriority === t}
-                            onChange={() => setScanPriority(t)}
-                            style={{ accentColor: 'var(--color-primary)', flexShrink: 0, width: 'auto' }} />
-                          {t.toUpperCase()}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Auto config checkbox */}
-                <div style={styles.formField}>
-                  <label style={styles.checkLabel}>
-                    <input type="checkbox" checked={scanAutoConfig} onChange={(e) => setScanAutoConfig(e.target.checked)}
-                      style={{ accentColor: 'var(--color-primary)', flexShrink: 0, width: 'auto' }} />
-                    Tự động cấu hình scan (Auto)
-                  </label>
-                </div>
-
-                {/* SMB config */}
-                {enableSmb && (
-                  <div style={styles.scanBlock}>
-                    <div style={styles.scanBlockTitle}>SMB</div>
-                    <div style={styles.formField}>
-                      <label style={styles.label}>Server *</label>
-                      <input type="text" value={smbServer} onChange={(e) => setSmbServer(e.target.value)}
-                        placeholder="192.168.1.10" style={styles.input} />
-                    </div>
-                    <div style={styles.formField}>
-                      <label style={styles.label}>Đường dẫn *</label>
-                      <div style={styles.pathRow}>
-                        <input type="text" value={smbPath} onChange={(e) => setSmbPath(e.target.value)}
-                          placeholder="/scan/folder" style={{ ...styles.input, flex: 1 }} />
-                        <select
-                          value={smbDrive}
-                          onChange={(e) => setSmbDrive(e.target.value)}
-                          style={styles.driveSelect}
-                          title="Chọn ổ đĩa"
-                        >
-                          {availableDrives.map((d) => <option key={d} value={d}>{d}:</option>)}
-                        </select>
-                        <button
-                          style={styles.autoPathBtn}
-                          onClick={() => setSmbPath(`${smbDrive}:\\ScanGox`)}
-                          title={`Tạo thư mục ${smbDrive}:\\ScanGox`}
-                          type="button"
-                        >
-                          📁 Tự động
-                        </button>
-                      </div>
-                    </div>
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formField, flex: 1 }}>
-                        <label style={styles.label}>Username *</label>
-                        <input type="text" value={smbUser} onChange={(e) => setSmbUser(e.target.value)}
-                          placeholder="user" style={styles.input} />
-                      </div>
-                      <div style={{ ...styles.formField, flex: 1 }}>
-                        <label style={styles.label}>Password *</label>
-                        <input type="password" value={smbPass} onChange={(e) => setSmbPass(e.target.value)}
-                          placeholder="pass" style={styles.input} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* FTP config */}
-                {enableFtp && (
-                  <div style={styles.scanBlock}>
-                    <div style={styles.scanBlockTitle}>FTP</div>
-                    <div style={styles.formField}>
-                      <label style={styles.label}>Server *</label>
-                      <input type="text" value={ftpServer} onChange={(e) => setFtpServer(e.target.value)}
-                        placeholder="192.168.1.10" style={styles.input} />
-                    </div>
-                    <div style={styles.formField}>
-                      <label style={styles.label}>Đường dẫn *</label>
-                      <div style={styles.pathRow}>
-                        <input type="text" value={ftpPath} onChange={(e) => setFtpPath(e.target.value)}
-                          placeholder="/ftp/folder" style={{ ...styles.input, flex: 1 }} />
-                        <select
-                          value={ftpDrive}
-                          onChange={(e) => setFtpDrive(e.target.value)}
-                          style={styles.driveSelect}
-                          title="Chọn ổ đĩa"
-                        >
-                          {availableDrives.map((d) => <option key={d} value={d}>{d}:</option>)}
-                        </select>
-                        <button
-                          style={styles.autoPathBtn}
-                          onClick={() => setFtpPath(`${ftpDrive}:\\ScanGox`)}
-                          title={`Tạo thư mục ${ftpDrive}:\\ScanGox`}
-                          type="button"
-                        >
-                          📁 Tự động
-                        </button>
-                      </div>
-                    </div>
-                    <div style={styles.formRow}>
-                      <div style={{ ...styles.formField, flex: 1 }}>
-                        <label style={styles.label}>Username *</label>
-                        <input type="text" value={ftpUser} onChange={(e) => setFtpUser(e.target.value)}
-                          placeholder="user" style={styles.input} />
-                      </div>
-                      <div style={{ ...styles.formField, flex: 1 }}>
-                        <label style={styles.label}>Password *</label>
-                        <input type="password" value={ftpPass} onChange={(e) => setFtpPass(e.target.value)}
-                          placeholder="pass" style={styles.input} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Notification */}
-            {modal === 'notify' && (
-              <>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Gửi đến</label>
-                  <select value={notifyTarget} onChange={(e) => setNotifyTarget(e.target.value)} style={styles.input}>
-                    <option value="all">Tất cả agent</option>
-                    {agents.filter((a) => a.status === 'online').map((a) => (
-                      <option key={a.id} value={a.id}>{a.hostname}</option>
-                    ))}
-                  </select>
-                </div>
-                <div style={styles.formField}>
-                  <label style={styles.label}>Nội dung thông báo</label>
-                  <textarea value={notifyMessage} onChange={(e) => setNotifyMessage(e.target.value)}
-                    placeholder="Nhập nội dung thông báo..." rows={3}
-                    style={{ ...styles.input, resize: 'vertical' as const, fontFamily: 'inherit' }} />
-                </div>
-              </>
-            )}
-
-            {/* Results */}
-            {results.length > 0 && (
-              <div style={styles.resultBox}>
-                {results.map((r, i) => (
-                  <div key={i} style={{ fontSize: '0.8rem', color: r.success ? 'var(--color-success)' : 'var(--color-error)', marginBottom: '2px' }}>
-                    {r.message}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={styles.modalActions}>
-              {actionLoading ? <LoadingSpinner size="sm" /> : (
-                modal !== 'copier_scan' && modal !== 'copier_add' && modal !== 'copier_config' ? (
-                  <>
-                    <AnimatedButton onClick={handleExecute}>{results.length > 0 ? 'Thực hiện lại' : 'Thực hiện'}</AnimatedButton>
-                    <AnimatedButton onClick={closeModal} variant="secondary">Đóng</AnimatedButton>
-                  </>
-                ) : modal === 'copier_scan' ? (
-                  <AnimatedButton onClick={closeModal} variant="secondary">Đóng</AnimatedButton>
-                ) : null
-              )}
-            </div>
-          </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { minHeight: '100vh', padding: '20px 16px', paddingBottom: '150px', display: 'flex', flexDirection: 'column', gap: '16px' },
-  loadingContainer: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)', margin: 0 },
-  subtitle: { fontSize: '0.85rem', color: 'var(--color-text-secondary)', margin: 0 },
-  sectionTitle: { fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 10px' },
-  sectionLabel: { fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-primary)', paddingBottom: '4px' },
-  bulkActions: { display: 'flex', flexWrap: 'wrap' as const, gap: '8px' },
-  bulkRow: { display: 'flex', gap: '8px', marginBottom: '8px' },
-  bulkTile: {
-    flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: '4px',
-    padding: '14px 8px', borderRadius: '10px', cursor: 'pointer',
-    background: 'var(--color-inset-bg)', border: '1px solid var(--color-surface-light)',
-    color: 'var(--color-text)', transition: 'border-color 150ms',
+  container: {
+    minHeight: '100vh',
+    paddingBottom: '100px',
+    display: 'flex',
+    flexDirection: 'column',
+    maxWidth: '428px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    boxSizing: 'border-box',
+    position: 'relative',
   },
-  bulkTileIcon: { fontSize: '1.4rem', lineHeight: 1 },
-  bulkTileLabel: { fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text)' },
-  bulkTileSub: { fontSize: '0.68rem', color: 'var(--color-text-secondary)' },
-  bulkPrimary: {
-    width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '13px 16px', borderRadius: '10px', cursor: 'pointer', marginBottom: '8px',
-    background: 'color-mix(in srgb, var(--color-primary) 10%, var(--color-surface))',
-    border: '1px solid var(--color-primary)', color: 'var(--color-primary)',
-    fontSize: '1.2rem',
+  fixedHeader: {
+    position: 'fixed',
+    top: 0,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: '100%',
+    maxWidth: '428px',
+    background: 'var(--color-bg)',
+    zIndex: 100,
+    padding: '16px 14px 8px 14px',
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    borderBottom: '1px solid var(--color-surface-light)',
   },
-  bulkSecondary: {
-    flex: 1, padding: '10px 8px', borderRadius: '8px', cursor: 'pointer',
-    background: 'transparent', border: '1px solid var(--color-surface-light)',
-    color: 'var(--color-text-secondary)', fontSize: '0.8rem', fontWeight: 600,
+  scrollableContent: {
+    marginTop: '176px', // Offsets the height of fixedHeader
+    padding: '12px 14px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
   },
-  actionBtn: {
-    background: 'var(--color-bg)', color: 'var(--color-text)',
-    border: '1px solid var(--color-surface-light)', borderRadius: '8px',
-    padding: '10px 14px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  agentHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' },
-  agentInfo: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const },
-  agentName: { fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text)' },
-  statusBadge: { fontSize: '0.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: '6px', border: '1px solid' },
-  agentMeta: { display: 'flex', flexDirection: 'column' as const, gap: '2px', marginBottom: '6px' },
-  metaText: { fontSize: '0.8rem', color: 'var(--color-text-secondary)' },
-  statusRow: { display: 'flex', flexWrap: 'wrap' as const, gap: '6px', marginBottom: '8px' },
-  statusChip: { fontSize: '0.7rem', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', border: '1px solid', whiteSpace: 'nowrap' as const },
-  configDetail: {
-    display: 'flex', flexDirection: 'column' as const, gap: '2px',
-    padding: '6px 10px', marginBottom: '6px',
-    background: 'var(--color-inset-bg)', borderRadius: '6px', border: '1px solid var(--color-surface-light)',
+  title: {
+    fontSize: '1.25rem',
+    fontWeight: 700,
+    color: 'var(--color-primary)',
+    margin: 0,
   },
-  configLabel: { fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)' },
-  configSub: { fontSize: '0.75rem', color: 'var(--color-text-secondary)', paddingLeft: '4px' },
-  agentActions: { display: 'flex', gap: '6px', flexWrap: 'wrap' as const },
-  smallBtn: {
-    background: 'transparent', color: 'var(--color-primary)',
-    border: '1px solid var(--color-surface-light)', borderRadius: '6px',
-    padding: '6px 10px', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer',
+  filterBar: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '10px 12px',
+    borderRadius: '10px',
+    background: 'color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))',
+    border: '1px solid color-mix(in srgb, var(--color-primary) 15%, transparent)',
   },
-  overlay: {
-    position: 'fixed' as const, top: 0, left: 0, right: 0, bottom: 0,
-    background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '16px',
+  filterLabel: {
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    color: 'var(--color-text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
-  modal: {
-    background: 'var(--color-surface)', border: '1px solid var(--color-surface-light)',
-    borderRadius: '12px', padding: '20px', width: '100%', maxWidth: 'min(500px, 90vw)',
-    maxHeight: '88vh', overflowY: 'auto' as const,
-    display: 'flex', flexDirection: 'column' as const, gap: '10px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+  lanSelect: {
+    fontSize: '0.82rem',
+    padding: '8px 10px',
+    background: 'var(--color-bg)',
+    color: 'var(--color-text)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    width: '100%',
   },
-  modalTitle: { fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 },
-  formField: { display: 'flex', flexDirection: 'column' as const, gap: '4px' },
-  formRow: { display: 'flex', gap: '8px' },
-  label: { fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 500 },
-  input: {
-    background: 'var(--color-bg)', color: 'var(--color-text)',
-    border: '1px solid var(--color-surface-light)', borderRadius: '8px',
-    padding: '10px 12px', fontSize: '0.9rem', width: '100%', boxSizing: 'border-box' as const,
+  tabBar: {
+    display: 'flex',
+    borderBottom: '1px solid var(--color-surface-light)',
   },
-  brandRow: { display: 'flex', gap: '8px' },
-  brandBtn: { flex: 1, padding: '10px 8px', borderRadius: '8px', border: '1px solid', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' },
-  modelGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' },
-  modelBtn: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: '2px', padding: '8px 4px', borderRadius: '8px', border: '1px solid', cursor: 'pointer' },
-  // Checkbox/radio row — key fix: use flexbox with proper wrapping, no overflow
-  checkRow: { display: 'flex', gap: '16px', flexWrap: 'wrap' as const },
-  checkLabel: {
-    display: 'flex', alignItems: 'center', gap: '6px',
-    fontSize: '0.85rem', color: 'var(--color-text)', cursor: 'pointer',
-    fontWeight: 500, minWidth: 0,
-  },
-  scanBlock: {
-    border: '1px solid var(--color-surface-light)', borderRadius: '8px',
-    padding: '10px 12px', display: 'flex', flexDirection: 'column' as const, gap: '8px',
-  },
-  scanBlockTitle: { fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-primary)', marginBottom: '2px' },
-  pathRow: { display: 'flex', gap: '6px', alignItems: 'center' },
-  driveSelect: {
-    background: 'var(--color-bg)', color: 'var(--color-text)',
-    border: '1px solid var(--color-surface-light)', borderRadius: '8px',
-    padding: '10px 8px', fontSize: '0.85rem', width: '52px', flexShrink: 0,
-    boxSizing: 'border-box' as const,
-  },
-  autoPathBtn: {
-    background: 'color-mix(in srgb, var(--color-primary) 10%, var(--color-surface))', color: 'var(--color-primary)',
-    border: '1px solid var(--color-primary)', borderRadius: '8px',
-    padding: '10px 10px', fontSize: '0.75rem', fontWeight: 600,
-    cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0,
-  },
-  divider: { height: '1px', background: 'var(--color-surface-light)', margin: '2px 0' },
-  resultBox: {
-    background: 'var(--color-inset-bg)', borderRadius: '8px', padding: '10px 12px',
-    border: '1px solid var(--color-surface-light)', maxHeight: '150px', overflowY: 'auto' as const,
-  },
-  modalActions: { display: 'flex', gap: '8px', marginTop: '4px' },
-  connectHint: { fontSize: '0.82rem', color: 'var(--color-text-secondary)', margin: '0 0 4px' },
-  backBtn: {
-    background: 'none', border: 'none', color: 'var(--color-text-secondary)',
-    fontSize: '0.85rem', cursor: 'pointer', padding: '0', fontWeight: 500,
-  },
-  // Tab bar
-  tabBar: { display: 'flex', borderBottom: '1px solid var(--color-surface-light)', gap: '0' },
   tabBtn: {
-    flex: 1, padding: '10px 8px', fontSize: '0.85rem', fontWeight: 600,
-    cursor: 'pointer', border: 'none', borderRadius: '0',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-    transition: 'color 200ms, background 200ms',
+    flex: 1,
+    padding: '10px 4px',
+    fontSize: '0.82rem',
+    fontWeight: 700,
+    textAlign: 'center',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'color var(--anim-fast)',
   },
-  tabBadge: {
-    fontSize: '0.65rem', fontWeight: 700, padding: '1px 6px', borderRadius: '8px',
-    background: 'color-mix(in srgb, var(--color-primary) 15%, var(--color-surface))', color: 'var(--color-primary)',
+  tabContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
   },
-  // Copier section
-  copierSummary: { padding: '4px 0' },
-  copierSummaryText: { fontSize: '0.82rem', color: 'var(--color-text-secondary)' },
-  copierHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' },
-  copierName: { fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-text)' },
-  copierLocation: { fontSize: '0.75rem', color: 'var(--color-text-secondary)' },
-  copierMeta: { display: 'flex', flexDirection: 'column' as const, gap: '2px', marginBottom: '8px' },
-  expandBtn: {
-    background: 'none', border: '1px solid var(--color-surface-light)', borderRadius: '6px',
-    color: 'var(--color-primary)', fontSize: '0.75rem', fontWeight: 500,
-    padding: '5px 10px', cursor: 'pointer', alignSelf: 'flex-start' as const, marginTop: '4px',
+  loadingWrapper: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: '40px 0',
   },
-  pcList: {
-    display: 'flex', flexDirection: 'column' as const, gap: '6px',
-    marginTop: '10px', padding: '10px 12px',
-    background: 'var(--color-inset-bg)', borderRadius: '8px',
+  emptyText: {
+    textAlign: 'center',
+    color: 'var(--color-text-secondary)',
+    fontSize: '0.8rem',
+    padding: '24px 0',
+    fontStyle: 'italic',
+  },
+  cardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '8px',
+    gap: '8px',
+  },
+  cardTitle: {
+    fontSize: '0.9rem',
+    fontWeight: 700,
+    color: 'var(--color-text)',
+  },
+  copierTitle: {
+    fontSize: '0.9rem',
+    fontWeight: 700,
+    color: 'var(--color-primary)',
+    display: 'block',
+  },
+  copierSubtitle: {
+    fontSize: '0.72rem',
+    color: 'var(--color-text-secondary)',
+    marginTop: '2px',
+    fontFamily: 'monospace',
+  },
+  statusBadge: {
+    fontSize: '0.65rem',
+    fontWeight: 700,
+    padding: '1px 6px',
+    borderRadius: '4px',
+    border: '1px solid',
+    flexShrink: 0,
+  },
+  cardDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    background: 'var(--color-inset-bg)',
+    padding: '8px 10px',
+    borderRadius: '8px',
     border: '1px solid var(--color-surface-light)',
   },
-  pcRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
-  pcName: { fontSize: '0.82rem', fontWeight: 500, color: 'var(--color-text)' },
-  emptyPcText: { fontSize: '0.8rem', color: 'var(--color-text-secondary)', textAlign: 'center' as const, padding: '4px 0' },
+  detailRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: '0.78rem',
+  },
+  detailLabel: {
+    color: 'var(--color-text-secondary)',
+    fontWeight: 500,
+  },
+  detailValue: {
+    color: 'var(--color-text)',
+    fontWeight: 600,
+    textAlign: 'right',
+  },
+  cardActionWrapper: {
+    marginTop: '8px',
+  },
+  sectionBlock: {
+    marginTop: '8px',
+    padding: '8px',
+    background: 'var(--color-inset-bg)',
+    borderRadius: '8px',
+    border: '1px solid var(--color-surface-light)',
+  },
+  sectionBlockTitle: {
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    color: 'var(--color-text-secondary)',
+    display: 'block',
+    marginBottom: '6px',
+  },
+  credsInputRow: {
+    display: 'flex',
+    gap: '6px',
+  },
+  credsInput: {
+    fontSize: '0.8rem',
+    padding: '6px 8px',
+    background: 'var(--color-bg)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    flex: 1,
+    minWidth: 0,
+  },
+  relaySelect: {
+    fontSize: '0.8rem',
+    padding: '4px 6px',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    width: '130px',
+  },
+  syncStatusBox: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 10px',
+    borderRadius: '8px',
+    border: '1px solid',
+    marginTop: '8px',
+    gap: '8px',
+  },
+  syncStatusTitle: {
+    fontSize: '0.72rem',
+    color: 'var(--color-text-secondary)',
+    fontWeight: 600,
+    display: 'block',
+  },
+  syncStatusText: {
+    fontSize: '0.75rem',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  destinationsBlock: {
+    marginTop: '10px',
+    padding: '10px 8px',
+    background: 'var(--color-inset-bg)',
+    borderRadius: '8px',
+    border: '1px solid var(--color-surface-light)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  destBlockTitle: {
+    fontSize: '0.78rem',
+    fontWeight: 700,
+    color: 'var(--color-text-secondary)',
+    borderBottom: '1px solid var(--color-surface-light)',
+    paddingBottom: '4px',
+  },
+  destItemCard: {
+    padding: '8px 10px',
+    background: 'var(--color-surface)',
+    borderRadius: '6px',
+    border: '1px solid var(--color-surface-light)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  destItemHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  destItemTitle: {
+    fontSize: '0.8rem',
+    fontWeight: 700,
+    color: 'var(--color-text)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  destTypeBadge: {
+    fontSize: '0.6rem',
+    fontWeight: 800,
+    padding: '1px 4px',
+    borderRadius: '3px',
+  },
+  destRegNo: {
+    fontSize: '0.7rem',
+    color: 'var(--color-text-secondary)',
+    fontWeight: 600,
+  },
+  destPathValue: {
+    fontSize: '0.72rem',
+    color: 'var(--color-text-secondary)',
+    fontFamily: 'monospace',
+    wordBreak: 'break-all',
+  },
+  destStatusBadge: {
+    fontSize: '0.62rem',
+    fontWeight: 700,
+    padding: '1px 5px',
+    borderRadius: '3px',
+  },
+  destRowActions: {
+    display: 'flex',
+    gap: '4px',
+    marginTop: '6px',
+    borderTop: '1px solid var(--color-surface-light)',
+    paddingTop: '6px',
+  },
+  destRowBtn: {
+    flex: 1,
+    padding: '4px 0',
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    textAlign: 'center',
+    color: 'var(--color-primary)',
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '4px',
+    cursor: 'pointer',
+  },
+  ftpCredentialsBox: {
+    marginTop: '4px',
+    background: 'var(--color-inset-bg)',
+    padding: '4px 6px',
+    borderRadius: '4px',
+    fontSize: '0.7rem',
+    border: '1px solid var(--color-surface-light)',
+    color: 'var(--color-text)',
+  },
+  copyTextBtn: {
+    color: 'var(--color-primary)',
+    fontSize: '0.65rem',
+    fontWeight: 700,
+    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
+  },
+  expandSubBtn: {
+    fontSize: '0.72rem',
+    color: 'var(--color-primary)',
+    fontWeight: 600,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '4px 0',
+    display: 'block',
+  },
+  suggestedDriverBlock: {
+    padding: '8px',
+    background: 'var(--color-inset-bg)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '8px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  driverSuggestionItem: {
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    overflow: 'hidden',
+  },
+  driverModelHeader: {
+    padding: '6px 8px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    cursor: 'pointer',
+    background: 'rgba(255,255,255,0.02)',
+  },
+  driverOptionsList: {
+    padding: '6px',
+    borderTop: '1px solid var(--color-surface-light)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  driverFileRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '4px 6px',
+    background: 'var(--color-inset-bg)',
+    borderRadius: '4px',
+    gap: '6px',
+  },
+  driverFileName: {
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    color: 'var(--color-text)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  driverFileUrl: {
+    fontSize: '0.62rem',
+    color: 'var(--color-text-secondary)',
+    fontFamily: 'monospace',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  driverDownloadBtn: {
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    color: 'var(--color-primary)',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    background: 'rgba(0, 212, 255, 0.08)',
+    border: '1px solid rgba(0, 212, 255, 0.2)',
+    whiteSpace: 'nowrap',
+  },
+  emptySubText: {
+    fontSize: '0.72rem',
+    color: 'var(--color-text-secondary)',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: '8px 0',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    zIndex: 150,
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: 'var(--color-surface)',
+    borderTop: '1px solid var(--color-surface-light)',
+    borderTopLeftRadius: '16px',
+    borderTopRightRadius: '16px',
+    width: '100%',
+    maxWidth: '428px',
+    maxHeight: '82vh',
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '16px',
+    boxSizing: 'border-box',
+    boxShadow: '0 -4px 24px rgba(0,0,0,0.3)',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+  },
+  modalTitle: {
+    fontSize: '0.95rem',
+    fontWeight: 700,
+    color: 'var(--color-text)',
+    margin: 0,
+  },
+  modalSubtitle: {
+    fontSize: '0.72rem',
+    color: 'var(--color-text-secondary)',
+    fontFamily: 'monospace',
+    marginTop: '2px',
+    wordBreak: 'break-all',
+  },
+  modalCloseBtn: {
+    fontSize: '1.5rem',
+    lineHeight: 1,
+    cursor: 'pointer',
+    color: 'var(--color-text-secondary)',
+    background: 'none',
+    border: 'none',
+    padding: '0 4px',
+  },
+  modalBody: {
+    flex: 1,
+    overflowY: 'auto',
+    marginBottom: '12px',
+  },
+  modalLoading: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '30px 0',
+  },
+  modalFooter: {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'flex-end',
+  },
+  formGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    marginBottom: '12px',
+  },
+  formHelpText: {
+    fontSize: '0.68rem',
+    color: 'var(--color-text-secondary)',
+    marginTop: '2px',
+  },
+  modalInput: {
+    fontSize: '0.85rem',
+    padding: '8px 10px',
+    background: 'var(--color-bg)',
+    color: 'var(--color-text)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    width: '100%',
+  },
+  filesList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  fileItemRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 10px',
+    background: 'var(--color-inset-bg)',
+    borderRadius: '6px',
+    border: '1px solid var(--color-surface-light)',
+    gap: '8px',
+  },
+  fileLinkName: {
+    fontSize: '0.78rem',
+    fontWeight: 700,
+    color: 'var(--color-primary)',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    wordBreak: 'break-all',
+  },
+  fileMetaDetails: {
+    fontSize: '0.68rem',
+    color: 'var(--color-text-secondary)',
+    marginTop: '2px',
+  },
+  fileUploadMeta: {
+    fontSize: '0.65rem',
+    color: 'var(--color-secondary)',
+    marginTop: '1px',
+    fontWeight: 500,
+  },
+  fileDownloadBtn: {
+    fontSize: '0.72rem',
+    fontWeight: 700,
+    color: 'var(--color-primary)',
+    padding: '5px 10px',
+    borderRadius: '4px',
+    background: 'rgba(0, 212, 255, 0.08)',
+    border: '1px solid rgba(0, 212, 255, 0.2)',
+    whiteSpace: 'nowrap',
+  },
+  modalDetailsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    padding: '10px',
+    background: 'var(--color-inset-bg)',
+    borderRadius: '8px',
+    border: '1px solid var(--color-surface-light)',
+  },
+  toastContainer: {
+    position: 'fixed',
+    top: '12px',
+    left: '12px',
+    right: '12px',
+    zIndex: 999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    maxWidth: '404px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    pointerEvents: 'none',
+  },
+  toast: {
+    background: 'rgba(18, 18, 26, 0.95)',
+    backdropFilter: 'blur(10px)',
+    borderRadius: '8px',
+    padding: '10px 12px',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    border: '1px solid var(--color-surface-light)',
+    color: 'var(--color-text)',
+    pointerEvents: 'auto',
+  },
+  toastIcon: {
+    fontSize: '0.9rem',
+    flexShrink: 0,
+  },
+  smallBtn: {
+    background: 'transparent',
+    color: 'var(--color-primary)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '6px',
+    padding: '6px 10px',
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    boxSizing: 'border-box',
+    display: 'inline-flex',
+    alignItems: 'center',
+  },
+  confirmOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    zIndex: 160,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '16px',
+  },
+  confirmModalCard: {
+    backgroundColor: 'var(--color-surface)',
+    border: '1px solid var(--color-surface-light)',
+    borderRadius: '12px',
+    width: '90%',
+    maxWidth: '360px',
+    padding: '16px',
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    margin: 'auto',
+  },
 };

@@ -125,18 +125,18 @@ export async function mockSendNotification(_agentId: string | 'all', _message: s
 }
 
 export interface LanSiteInfo {
+  lead: string;
   lan_uid: string;
   lan_name: string;
-  gateway_ip: string;
+  address?: string;
+  subnet_cidr?: string;
+  gateway_ip?: string;
+  gateway_mac?: string;
+  fingerprint_signature?: string;
   active_agents: number;
-  printers: Array<{
-    id: number;
-    printer_name: string;
-    ip: string;
-    mac_id: string;
-    is_online: boolean;
-    enabled: boolean;
-  }>;
+  agents: any[];
+  emails: any[];
+  printers: any[];
 }
 
 export async function getLanSites(): Promise<LanSiteInfo[]> {
@@ -211,4 +211,61 @@ export async function mockUpdateAgent(agentId: string, _data: Partial<Agent>): P
 
 export async function mockDeleteAgent(agentId: string): Promise<AgentActionResult> {
   return { success: true, message: `Đã xóa agent ${agentId}` };
+}
+
+// ── REAL API CALLS TO VPS BACKEND ──
+
+export async function saveCopierCredentials(printerId: string, user: string, pass: string): Promise<any> {
+  return fetchApi(`/api/devices/${printerId}/credentials`, {
+    method: 'PATCH',
+    body: JSON.stringify({ auth_user: user, auth_password: pass })
+  });
+}
+
+export async function triggerFetchAddressBook(printerId: string, agentUid?: string): Promise<any> {
+  const path = agentUid ? `/api/devices/${printerId}/fetch-address-book?agent_uid=${agentUid}` : `/api/devices/${printerId}/fetch-address-book`;
+  return fetchApi(path, { method: 'POST' });
+}
+
+export async function getCommandStatus(commandId: number): Promise<any> {
+  return fetchApi(`/api/commands/${commandId}/status`);
+}
+
+export async function addEmailDestination(printerId: string, email: string, agentUid?: string): Promise<any> {
+  const path = agentUid ? `/api/devices/${printerId}/add-email-dest?agent_uid=${agentUid}` : `/api/devices/${printerId}/add-email-dest`;
+  return fetchApi(path, {
+    method: 'POST',
+    body: JSON.stringify({ email })
+  });
+}
+
+export async function addPrivateLanEmail(lead: string, lanUid: string, pcName: string, email: string): Promise<any> {
+  return fetchApi('/api/lan-emails', {
+    method: 'POST',
+    body: JSON.stringify({ lead, lan_uid: lanUid, email, email_type: 'private', pc_name: pcName })
+  });
+}
+
+export async function deleteEmailDestination(printerId: string, regNo: string, entryId: string, agentUid?: string): Promise<any> {
+  return fetchApi(`/api/devices/${printerId}/delete-email-dest`, {
+    method: 'POST',
+    body: JSON.stringify({ registration_no: regNo, entry_id: entryId, agent_uid: agentUid })
+  });
+}
+
+export async function deleteLanEmail(emailId: number): Promise<any> {
+  return fetchApi(`/api/lan-emails/${emailId}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function getScansFiles(lanUid: string, email: string): Promise<any> {
+  return fetchApi(`/api/scans/files?lan_uid=${encodeURIComponent(lanUid)}&email=${encodeURIComponent(email)}`);
+}
+
+export async function installDriverOnAgent(printerId: string, brand: string, model: string, driverName: string, driverUrl: string): Promise<any> {
+  return fetchApi(`/api/devices/${printerId}/install-driver`, {
+    method: 'POST',
+    body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl })
+  });
 }
