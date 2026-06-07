@@ -1837,7 +1837,10 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid var(--color-surface-light)',
     borderRadius: '6px',
     cursor: 'pointer',
-    width: '130px',
+    flex: 1,
+    marginLeft: '12px',
+    minWidth: 0,
+    color: 'var(--color-text)',
   },
   syncStatusBox: {
     display: 'flex',
