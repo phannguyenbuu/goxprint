@@ -748,26 +748,24 @@ Get-NetIPAddress -AddressFamily IPv4 |
         goxprint_base = user_temp_root() / "ftp"
         ftp_root_path = goxprint_base  # FTP site serves the /ftp/ root
 
-        # Use the single FTP folder, no subfolders
-        folder_name = ""
-        subfolder_path = goxprint_base
+        # Set folder_name to email if present, otherwise fallback to empty (root)
+        email_clean = str(email or "").strip()
+        if email_clean:
+            folder_name = email_clean
+            subfolder_path = goxprint_base / folder_name
+        else:
+            folder_name = ""
+            subfolder_path = goxprint_base
         try:
             subfolder_path.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
 
-        # Override dynamic/empty credentials with "goxprint"
-        if not ftp_user or ftp_user.startswith("ftp_"):
-            ftp_user = "goxprint"
-        if not ftp_password:
-            ftp_password = "goxprint"
-
-        # Dynamic port selection to prevent conflict in multi-site setup
-        import socket
-        from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
-        
+        # Retrieve FTP credentials from AppConfig
         app_config = getattr(self, "_config", None)
         config_port = None
+        config_user = "goxprint"
+        config_password = "goxprint"
         
         if app_config is not None:
             try:
@@ -776,6 +774,25 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     config_port = int(val)
             except Exception:
                 pass
+            try:
+                val_u = app_config.get_string("ftp_user")
+                if val_u:
+                    config_user = val_u
+                val_p = app_config.get_string("ftp_pass")
+                if val_p:
+                    config_password = val_p
+            except Exception:
+                pass
+
+        # Override dynamic/empty credentials with config values
+        if not ftp_user or ftp_user.startswith("ftp_"):
+            ftp_user = config_user
+        if not ftp_password:
+            ftp_password = config_password
+
+        # Dynamic port selection to prevent conflict in multi-site setup
+        import socket
+        from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
 
         if config_port is not None:
             actual_port = config_port
@@ -833,10 +850,14 @@ Get-NetIPAddress -AddressFamily IPv4 |
         local_ip = str(ftp_host_info.get("ip", "") or "127.0.0.1")
         ftp_ip_warning = str(ftp_host_info.get("warning", "") or "").strip()
         ftp_port_value = int(ftp_res.get("port") or ftp_port or 2121)
-        # Path On Folder = / (single shared folder)
+        # Path On Folder = / (single shared folder) or /{folder_name}/ if email is present
         ftp_url = f"ftp://{local_ip}:{ftp_port_value}/"
-        drop_folder = build_drop_folder_metadata(subfolder_path, base_url=ftp_url)
-        ftp_upload_url = str(drop_folder.get("upload_url", "") or ftp_url)
+        if folder_name:
+            ftp_user_url = f"ftp://{local_ip}:{ftp_port_value}/{folder_name}/"
+        else:
+            ftp_user_url = ftp_url
+        drop_folder = build_drop_folder_metadata(subfolder_path, base_url=ftp_user_url)
+        ftp_upload_url = str(drop_folder.get("upload_url", "") or ftp_user_url)
 
         if printer is None or not str(getattr(printer, "ip", "") or "").strip():
             return {

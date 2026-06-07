@@ -424,6 +424,19 @@ class PrintAgentGui:
         self.scan_tab = ttk.Frame(self.notebook, padding="10 10 10 10")
         self.notebook.add(self.scan_tab, text=" Scan Sync (Thư mục Sync) ")
         
+        # Cấu hình thư mục giám sát (Top Area)
+        config_frame = ttk.LabelFrame(self.scan_tab, text=" Cấu hình thư mục giám sát (Monitored Directory) ", padding="10 10 10 10")
+        config_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(config_frame, text="Đường dẫn:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.scan_path_var = tk.StringVar()
+        self.scan_path_entry = ttk.Entry(config_frame, textvariable=self.scan_path_var, width=50)
+        self.scan_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        ttk.Button(config_frame, text="Chọn thư mục...", command=self.browse_scan_dir, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(config_frame, text="Lưu", command=self.save_scan_dir, width=8).pack(side=tk.LEFT, padx=5)
+        
         main_frame = ttk.Frame(self.scan_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -435,17 +448,19 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("Path", "Exists", "VPS_Path", "GDrive_Path")
+        cols = ("Filename", "Size", "Mtime", "Status", "Url")
         self.scan_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
-        self.scan_tree.heading("Path", text="Thư mục giám sát (Monitored)")
-        self.scan_tree.heading("Exists", text="Tồn tại")
-        self.scan_tree.heading("VPS_Path", text="Thư mục VPS (VPS Path)")
-        self.scan_tree.heading("GDrive_Path", text="Thư mục GDrive")
+        self.scan_tree.heading("Filename", text="Tên tệp (File Name)")
+        self.scan_tree.heading("Size", text="Dung lượng")
+        self.scan_tree.heading("Mtime", text="Ngày sửa")
+        self.scan_tree.heading("Status", text="Trạng thái VPS")
+        self.scan_tree.heading("Url", text="URL Tải (Download URL)")
         
-        self.scan_tree.column("Path", width=220, anchor=tk.W)
-        self.scan_tree.column("Exists", width=70, anchor=tk.CENTER)
-        self.scan_tree.column("VPS_Path", width=230, anchor=tk.W)
-        self.scan_tree.column("GDrive_Path", width=230, anchor=tk.W)
+        self.scan_tree.column("Filename", width=180, anchor=tk.W)
+        self.scan_tree.column("Size", width=90, anchor=tk.E)
+        self.scan_tree.column("Mtime", width=130, anchor=tk.CENTER)
+        self.scan_tree.column("Status", width=110, anchor=tk.CENTER)
+        self.scan_tree.column("Url", width=260, anchor=tk.W)
         
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.scan_tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.scan_tree.xview)
@@ -459,10 +474,7 @@ class PrintAgentGui:
         tree_frame.columnconfigure(0, weight=1)
         
         # Buttons are packed into the pre-created btn_frame
-        
-        ttk.Button(btn_frame, text="Add Folder (Thêm)", command=self.add_scan_dir, width=18).pack(pady=5)
-        ttk.Button(btn_frame, text="Remove Folder (Xóa)", command=self.remove_scan_dir, width=18).pack(pady=5)
-        
+        ttk.Button(btn_frame, text="Mở thư mục", command=self.open_local_scan_dir, width=18).pack(pady=5)
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_scan_dirs, width=18).pack(pady=5)
         
@@ -534,7 +546,7 @@ class PrintAgentGui:
                 self.root.after(0, lambda: self.update_ftp_list_ui(sites))
             except Exception as exc:
                 LOGGER.exception("Failed to load FTP sites in GUI")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to list FTP sites: {exc}"))
+                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", f"Failed to list FTP sites: {exc}"))
                 self.root.after(0, lambda: self.update_ftp_list_ui([]))
                 
         threading.Thread(target=run, daemon=True, name="gui-ftp-refresh").start()
@@ -666,11 +678,57 @@ class PrintAgentGui:
             self.refresh_ftp_list()
  
     # --- SCAN SYNC LOGIC ---
+    def browse_scan_dir(self) -> None:
+        selected = filedialog.askdirectory(parent=self.root, title="Chọn thư mục giám sát để đồng bộ scan")
+        if selected:
+            path = os.path.normpath(selected)
+            self.scan_path_var.set(path)
+
+    def save_scan_dir(self) -> None:
+        path = self.scan_path_var.get().strip()
+        if not path:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập hoặc chọn thư mục giám sát trước khi lưu.")
+            return
+        if not os.path.exists(path):
+            if messagebox.askyesno("Thư mục không tồn tại", "Thư mục đã nhập không tồn tại. Bạn có muốn tạo nó không?"):
+                try:
+                    os.makedirs(path, exist_ok=True)
+                except Exception as exc:
+                    messagebox.showerror("Lỗi", f"Không thể tạo thư mục: {exc}")
+                    return
+            else:
+                return
+        try:
+            self.config = AppConfig.load()
+            self.config.set_value("polling.scan_dirs", path)
+            messagebox.showinfo("Thành công", f"Đã lưu thư mục giám sát: {path}")
+        except Exception as exc:
+            messagebox.showerror("Lỗi", f"Không thể lưu thư mục: {exc}")
+        finally:
+            self.refresh_scan_dirs()
+
+    def open_local_scan_dir(self) -> None:
+        path = self.scan_path_var.get().strip()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("Cảnh báo", "Thư mục giám sát không tồn tại hoặc chưa được cấu hình.")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", path])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", path])
+        except Exception as exc:
+            messagebox.showerror("Lỗi", f"Không thể mở thư mục: {exc}")
+
     def refresh_scan_dirs(self) -> None:
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
             
-        self.scan_tree.insert("", tk.END, values=("Loading sync folders...", "", "", ""))
+        self.scan_tree.insert("", tk.END, values=("Loading files...", "", "", "", ""))
         
         def run() -> None:
             try:
@@ -678,7 +736,14 @@ class PrintAgentGui:
                 raw = self.config.get_string("polling.scan_dirs", "").strip()
                 dirs = [d.strip() for d in raw.split(";") if d.strip()]
                 
-                # Resolve network info to get lan_uid
+                monitored_dir = dirs[0] if dirs else ""
+                self.root.after(0, lambda: self.scan_path_var.set(monitored_dir))
+                
+                if not monitored_dir:
+                    self.root.after(0, lambda: self.update_scan_files_ui([], "", "", "", ""))
+                    return
+                
+                # Resolve network info to get lan_uid, agent_uid, lead
                 from agent.services.polling_bridge import PollingBridge
                 
                 lead = self.config.get_string("polling.lead", "default").strip()
@@ -700,98 +765,103 @@ class PrintAgentGui:
                 lan_uid = PollingBridge._compose_lan_uid(lead, gateway_mac, gateway_ip)
                 if not lan_uid:
                     lan_uid = self.config.get_string("polling.lan_uid", "").strip() or "legacy-lan"
-                    
-                self.root.after(0, lambda: self.update_scan_dirs_ui(dirs, lead, lan_uid, agent_uid))
+                
+                # Load the upload state
+                uploaded_fingerprints = {}
+                state_file = Path("storage/data/scan_upload_state.json")
+                if state_file.exists():
+                    try:
+                        import json
+                        payload = json.loads(state_file.read_text(encoding="utf-8"))
+                        uploaded_fingerprints = payload.get("uploaded_fingerprints", {}) or {}
+                    except Exception:
+                        pass
+                
+                # Read all files in the monitored folder
+                files_list = []
+                folder_path = Path(monitored_dir)
+                if folder_path.exists() and folder_path.is_dir():
+                    for entry in folder_path.iterdir():
+                        if entry.is_file() and not entry.name.endswith(".meta.json"):
+                            try:
+                                st = entry.stat()
+                                size = st.st_size
+                                mtime = st.st_mtime
+                                mtime_ns = st.st_mtime_ns
+                                fingerprint = f"{entry.resolve()}|{size}|{mtime_ns}"
+                                is_uploaded = fingerprint in uploaded_fingerprints
+                                
+                                files_list.append({
+                                    "name": entry.name,
+                                    "size": size,
+                                    "mtime": mtime,
+                                    "is_uploaded": is_uploaded
+                                })
+                            except Exception:
+                                pass
+                
+                # Sort files by mtime descending
+                files_list.sort(key=lambda x: x["mtime"], reverse=True)
+                
+                self.root.after(0, lambda: self.update_scan_files_ui(files_list, lead, lan_uid, agent_uid, monitored_dir))
             except Exception as exc:
-                LOGGER.exception("Failed to load scan directories in GUI")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to list scan folders: {exc}"))
-                self.root.after(0, lambda: self.update_scan_dirs_ui([], "", "", ""))
+                LOGGER.exception("Failed to load scan files in GUI")
+                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", f"Failed to list scan files: {exc}"))
+                self.root.after(0, lambda: self.update_scan_files_ui([], "", "", "", ""))
                 
         threading.Thread(target=run, daemon=True, name="gui-scan-refresh").start()
         
-    def update_scan_dirs_ui(self, dirs: list[str], lead: str, lan_uid: str, agent_uid: str) -> None:
+    def update_scan_files_ui(self, files: list[dict], lead: str, lan_uid: str, agent_uid: str, monitored_dir: str) -> None:
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
             
         def safe_token(val: str) -> str:
-            t = re.sub(r"[^A-Za-z0-9._-]+", "-", val).strip(" -_.")
+            t = re.sub(r"[^A-Za-z0-9._@-]+", "-", val).strip(" -_.")
             return t or "default"
             
-        for d in dirs:
-            exists = "Yes (Có)" if os.path.exists(d) else "No (Không)"
-            
-            # Compute VPS path and GDrive path
-            original_folder_name = "default"
-            if d:
-                d_clean = str(d).replace("\\", "/")
-                original_folder_name = Path(d_clean).name or "default"
+        def format_size(size_bytes: int) -> str:
+            if size_bytes < 1024:
+                return f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                return f"{size_bytes / 1024:.1f} KB"
+            else:
+                return f"{size_bytes / (1024 * 1024):.1f} MB"
                 
-            lead_token = safe_token(lead)
-            lan_token = safe_token(lan_uid)
-            agent_token = safe_token(agent_uid)
-            label_token = safe_token(original_folder_name)
+        from datetime import datetime
+        
+        original_folder_name = "default"
+        if monitored_dir:
+            original_folder_name = Path(monitored_dir).name or "default"
             
-            vps_path = f"static/scans/{lan_token}/{label_token}"
-            gdrive_path = f"{lead_token}/{lan_token}/{agent_token}/{label_token}"
+        lead_token = safe_token(lead)
+        lan_token = safe_token(lan_uid)
+        agent_token = safe_token(agent_uid)
+        label_token = safe_token(original_folder_name)
+        
+        vps_url = self.config.get_string("polling.url").strip()
+        if not vps_url:
+            vps_url = "https://agentapi.quanlymay.com"
+        else:
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(vps_url)
+                if parsed.scheme and parsed.netloc:
+                    vps_url = f"{parsed.scheme}://{parsed.netloc}"
+            except Exception:
+                pass
+                
+        for f in files:
+            size_str = format_size(f["size"])
+            dt = datetime.fromtimestamp(f["mtime"])
+            mtime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             
-            self.scan_tree.insert("", tk.END, values=(d, exists, vps_path, gdrive_path))
+            status_str = "Đã online" if f["is_uploaded"] else "Chưa online"
+            download_url = f"{vps_url}/static/scans/{lan_token}/{label_token}/{f['name']}"
+            
+            self.scan_tree.insert("", tk.END, values=(f["name"], size_str, mtime_str, status_str, download_url))
             
         if not self.scan_tree.get_children():
-            self.scan_tree.insert("", tk.END, values=("No monitored scan folders found", "", "", ""))
-            
-    def add_scan_dir(self) -> None:
-        selected = filedialog.askdirectory(parent=self.root, title="Select Monitored Directory for Scan Sync")
-        if selected:
-            path = os.path.normpath(selected)
-            try:
-                self.config = AppConfig.load()
-                added, _ = self.config.ensure_scan_dir(path)
-                if added:
-                    messagebox.showinfo("Success", f"Added directory to monitor: {path}")
-                else:
-                    messagebox.showinfo("Info", "Directory is already being monitored.")
-            except Exception as exc:
-                messagebox.showerror("Error", f"Failed to save scan folder: {exc}")
-            finally:
-                self.refresh_scan_dirs()
-                
-    def remove_scan_dir(self) -> None:
-        selected_items = self.scan_tree.selection()
-        if not selected_items:
-            messagebox.showwarning("Warning", "Please select one or more scan directories to remove.")
-            return
-            
-        paths = [self.scan_tree.item(item, "values")[0] for item in selected_items]
-        
-        if len(paths) == 1:
-            confirm_msg = f"Are you sure you want to stop monitoring this folder for scan synchronization?\n{paths[0]}"
-        else:
-            confirm_msg = f"Are you sure you want to stop monitoring these {len(paths)} folders for scan synchronization?\n" + "\n".join(paths)
-            
-        confirm = messagebox.askyesno(
-            "Confirm Remove",
-            confirm_msg,
-            default=messagebox.NO
-        )
-        if confirm:
-            try:
-                self.config = AppConfig.load()
-                raw = self.config.get_string("polling.scan_dirs", "").strip()
-                dirs = [d.strip() for d in raw.split(";") if d.strip()]
-                
-                # Filter out the selected ones
-                paths_norm = [os.path.normcase(os.path.normpath(p)) for p in paths]
-                filtered = [d for d in dirs if os.path.normcase(os.path.normpath(d)) not in paths_norm]
-                
-                self.config.set_value("polling.scan_dirs", ";".join(filtered))
-                if len(paths) == 1:
-                    messagebox.showinfo("Success", "Scan directory removed successfully!")
-                else:
-                    messagebox.showinfo("Success", f"Successfully removed {len(paths)} scan directories!")
-            except Exception as exc:
-                messagebox.showerror("Error", f"Failed to update scan folders: {exc}")
-            finally:
-                self.refresh_scan_dirs()
+            self.scan_tree.insert("", tk.END, values=("Không tìm thấy tệp tin nào trong thư mục giám sát", "", "", "", ""))
  
     # --- PRINTERS LOGIC (Asynchronous load) ---
     def refresh_printers(self) -> None:
@@ -880,7 +950,7 @@ class PrintAgentGui:
                 
             except Exception as exc:
                 LOGGER.exception("Failed to load printers in GUI")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to list printers: {exc}"))
+                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", f"Failed to list printers: {exc}"))
                 self.root.after(0, lambda: self.clear_printers_tree())
                 
         threading.Thread(target=run, daemon=True, name="gui-printers-refresh").start()
@@ -926,7 +996,7 @@ class PrintAgentGui:
             self.root.after(0, lambda: self.update_printer_destinations(node_id, addr_list))
         except Exception as exc:
             LOGGER.warning("Failed to fetch address book for %s: %s", printer.ip, exc)
-            self.root.after(0, lambda: self.update_printer_destinations_error(node_id, str(exc)))
+            self.root.after(0, lambda exc=exc: self.update_printer_destinations_error(node_id, str(exc)))
             
     def update_printer_destinations(self, node_id: str, addr_list: list[dict[str, Any]]) -> None:
         if not self.printer_tree.exists(node_id):

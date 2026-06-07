@@ -125,9 +125,9 @@ class FtpWorker:
         try:
             safe_path = str(spec.get("path", "") or "")
             safe_port = normalize_port(spec.get("port"), default=2121)
-            # Always use fixed shared credentials (ignore per-site user/pass)
-            ftp_user = FTP_FIXED_USER
-            ftp_password = FTP_FIXED_PASSWORD
+            # Use credentials from site spec (loaded from settings.json via load_config)
+            ftp_user = spec.get("ftp_user") or FTP_FIXED_USER
+            ftp_password = spec.get("ftp_password") or FTP_FIXED_PASSWORD
 
             path_obj = Path(safe_path).absolute()
             path_obj.mkdir(parents=True, exist_ok=True)

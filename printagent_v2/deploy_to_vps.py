@@ -61,7 +61,8 @@ files_to_copy = [
     (str(local_backend / 'storage' / 'releases' / 'agent_release.json'), '/opt/printagent/storage/releases/agent_release.json'),
     (str(local_backend / 'storage' / 'releases' / 'agent_core_release.json'), '/opt/printagent/storage/releases/agent_core_release.json'),
     (str(local_backend / 'static' / 'releases' / 'agent_core.zip'), '/opt/printagent/static/releases/agent_core.zip'),
-    (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe')
+    (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
+    (str(local_backend / 'static' / 'releases' / 'diagnose.py'), '/opt/printagent/static/releases/diagnose.py')
 ]
 
 for local_file, remote_file in files_to_copy:

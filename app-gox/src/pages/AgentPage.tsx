@@ -71,6 +71,14 @@ function getDestinationStatusHtml(entry: any, emails: any[], agents: any[]) {
   }
 }
 
+// Mirrors backend _safe_path_token: strips accents, replaces non-alphanumeric with '-'
+function safePathToken(value: string): string {
+  const text = (value || '').trim();
+  if (!text) return 'unknown';
+  const ascii = text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._@-]/g, '-').replace(/^[\s\-_.]+|[\s\-_.]+$/g, '');
+  return ascii || 'unknown';
+}
+
 export function AgentPage() {
   const [lanSites, setLanSites] = useState<LanSiteInfo[]>([]);
   const [selectedLanUid, setSelectedLanUid] = useState<string>(() => {
@@ -138,7 +146,7 @@ export function AgentPage() {
   const [privateFtpLoading, setPrivateFtpLoading] = useState(false);
 
   // Info Detail states
-  const [infoDetailData, setInfoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
+  const [infoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
 
   // Scroll and tracking references
   const [initialLastViewedId] = useState<string>(() => {
@@ -199,6 +207,50 @@ export function AgentPage() {
   const selectedLan = useMemo(() => {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
+
+  // State to store scan file counts for each private email destination on VPS
+  const [emailFileCounts, setEmailFileCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!selectedLan || !selectedLan.emails) {
+      setEmailFileCounts({});
+      return;
+    }
+    
+    let isMounted = true;
+    const fetchCounts = async () => {
+      const counts: Record<string, number> = {};
+      const privateEmails = selectedLan.emails.filter(e => e.email_type === 'private');
+      
+      await Promise.all(
+        privateEmails.map(async (em) => {
+          try {
+            const res = await getScansFiles(selectedLan.lan_uid, em.email);
+            if (isMounted) {
+              if (res.ok && Array.isArray(res.rows)) {
+                counts[em.email] = res.rows.length;
+              } else {
+                counts[em.email] = 0;
+              }
+            }
+          } catch (err) {
+            console.error(`Failed to fetch scan files count for ${em.email}`, err);
+            if (isMounted) {
+              counts[em.email] = 0;
+            }
+          }
+        })
+      );
+      if (isMounted) {
+        setEmailFileCounts(counts);
+      }
+    };
+    
+    fetchCounts();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedLan]);
 
   // Filter out offline and Unknown Printers, and sort the last viewed one to the top
   const filteredPrinters = useMemo(() => {
@@ -521,6 +573,7 @@ export function AgentPage() {
     });
   };
 
+  /*
   // ── DETAILED INFO ENTRY (INFOR) ──
   const handleFetchEntryDetail = async (printerId: string, entry: any) => {
     const regNo = String(entry.registration_no || '').trim();
@@ -610,6 +663,7 @@ export function AgentPage() {
       showToast(`Lỗi: ${err.message}`, 'error');
     }
   };
+  */
 
   // ── STORAGE SCANS FILES LIST ──
   const handleOpenStorageFiles = async (lanUid: string, email: string) => {
@@ -733,7 +787,7 @@ export function AgentPage() {
             >
               {lanSites.map((site) => (
                 <option key={site.lan_uid} value={site.lan_uid}>
-                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent · {site.printers?.length ?? 0} Máy)
+                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.length ?? 0} máy Photo)
                 </option>
               ))}
             </select>
@@ -819,13 +873,75 @@ export function AgentPage() {
                               <span style={styles.detailValue}>{agent.local_mac || '—'}</span>
                             </div>
                             <div style={styles.detailRow}>
-                              <span style={styles.detailLabel}>Phiên bản:</span>
-                              <span style={styles.detailValue}>{agent.app_version || '—'}</span>
+                              <span style={styles.detailLabel}>Tệp scan (VPS):</span>
+                              <span style={styles.detailValue}>
+                                {(() => {
+                                  // Path máy: FTP site "goxprint" là site duy nhất agent tạo
+                                  const goxprintSite = (agent.ftp_sites || []).find(
+                                    (s: any) => (s.name || '').toLowerCase() === 'goxprint'
+                                  ) || (agent.ftp_sites || [])[0];
+                                  const localPath = goxprintSite?.path || '';
+
+                                  // Path VPS thống nhất: storage/uploads/scans/<lead>/<lan_uid>/<agent_uid>/
+                                  const lanUidSafe = safePathToken(selectedLan?.lan_uid || '');
+                                  const agentUidSafe = safePathToken(agent.agent_uid || '');
+                                  const leadSafe = safePathToken(agent.lead || 'default');
+                                  const vpsPath = `storage/uploads/scans/${leadSafe}/${lanUidSafe}/${agentUidSafe}/`;
+
+                                  const agentEmails = selectedLan ? selectedLan.emails.filter(
+                                    (e: any) => e.email_type === 'private' && e.pc_name && e.pc_name.toLowerCase().trim() === agent.agent_uid.toLowerCase().trim()
+                                  ) : [];
+                                  const totalCount = agentEmails.reduce((sum: number, em: any) => sum + (emailFileCounts[em.email] ?? 0), 0);
+
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                      {/* Paths chung cho agent */}
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', background: 'var(--color-inset-bg)', borderRadius: '6px', padding: '6px 8px', fontSize: '0.65rem' }}>
+                                        <div style={{ wordBreak: 'break-all' }}>
+                                          <span style={{ color: 'var(--color-text-secondary)' }}>🖥 Máy: </span>
+                                          <code style={{ fontFamily: 'monospace', color: localPath ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontStyle: localPath ? 'normal' : 'italic' }}>
+                                            {localPath || '%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp'}
+                                          </code>
+                                        </div>
+                                        <div style={{ wordBreak: 'break-all' }}>
+                                          <span style={{ color: 'var(--color-text-secondary)' }}>☁ VPS: </span>
+                                          <code style={{ fontFamily: 'monospace', color: 'var(--color-accent, #7c6af7)' }}>{vpsPath}</code>
+                                        </div>
+                                      </div>
+
+                                      {/* Danh sách email private có tệp */}
+                                      {agentEmails.length > 0 && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                          {agentEmails.map((em: any) => {
+                                            const count = emailFileCounts[em.email] ?? 0;
+                                            return (
+                                              <button
+                                                key={em.email}
+                                                style={{ ...styles.linkButton, textAlign: 'left', fontSize: '0.68rem' }}
+                                                onClick={() => handleOpenStorageFiles(selectedLan?.lan_uid || '', em.email)}
+                                                title={`Xem tệp của ${em.email}`}
+                                              >
+                                                📁 {count} tệp
+                                              </button>
+                                            );
+                                          })}
+                                          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>
+                                            Tổng: <strong style={{ color: 'var(--color-text)' }}>{totalCount} tệp</strong>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {agentEmails.length === 0 && (
+                                        <span style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                                          Chưa có email riêng trên máy này
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </span>
                             </div>
-                            <div style={styles.detailRow}>
-                              <span style={styles.detailLabel}>Cổng Web:</span>
-                              <span style={styles.detailValue}>{agent.run_mode || '—'} / {agent.web_port || '—'}</span>
-                            </div>
+
+
                             <div style={styles.detailRow}>
                               <span style={styles.detailLabel}>FTP Ports:</span>
                               <span style={styles.detailValue}>{agent.ftp_ports || '—'}</span>
@@ -845,45 +961,64 @@ export function AgentPage() {
                                 Không có FTP site nào hoạt động.
                               </div>
                             ) : (
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 {agent.ftp_sites.map((site: any, sIdx: number) => {
                                   const isRunning = site.running;
                                   return (
                                     <div
                                       key={sIdx}
-                                      title={`Port: ${site.port}\nThư mục: ${site.path}${site.error ? `\nLỗi: ${site.error}` : ''}`}
-                                      onClick={() => {
-                                        setFtpDetailData({ port: site.port, path: site.path, error: site.error });
-                                        setActiveModal('ftp_detail');
-                                      }}
                                       style={{
                                         background: 'var(--color-inset-bg)',
                                         border: `1px solid ${isRunning ? 'var(--color-surface-light)' : 'rgba(255, 68, 102, 0.4)'}`,
                                         borderRadius: '8px',
-                                        padding: '8px 4px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '6px',
-                                        minWidth: 0,
-                                        cursor: 'pointer',
+                                        padding: '10px 12px',
+                                        fontSize: '0.72rem',
+                                        color: 'var(--color-text)',
                                         boxShadow: isRunning ? 'none' : '0 0 8px rgba(255, 68, 102, 0.15)',
                                       }}
                                     >
-                                      <span
-                                        style={{
-                                          display: 'inline-block',
-                                          width: '6px',
-                                          height: '6px',
-                                          borderRadius: '50%',
-                                          backgroundColor: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                          boxShadow: isRunning ? '0 0 6px var(--color-status-online)' : 'none'
-                                        }}
-                                      />
-                                      <span style={{ fontSize: '0.72rem', fontWeight: 600, color: isRunning ? 'var(--color-text)' : 'var(--color-error)' }}>
-                                        {site.port}
-                                      </span>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span
+                                            style={{
+                                              display: 'inline-block',
+                                              width: '6px',
+                                              height: '6px',
+                                              borderRadius: '50%',
+                                              backgroundColor: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                              boxShadow: isRunning ? '0 0 6px var(--color-status-online)' : 'none'
+                                            }}
+                                          />
+                                          <strong style={{ color: isRunning ? 'var(--color-text)' : 'var(--color-error)' }}>
+                                            Cổng Port: {site.port}
+                                          </strong>
+                                          <span style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)' }}>
+                                            ({isRunning ? 'Đang chạy' : 'Đã dừng'})
+                                          </span>
+                                        </div>
+                                        {site.error && (
+                                          <span style={{ fontSize: '0.65rem', color: 'var(--color-error)' }}>
+                                            Lỗi: {site.error}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '12px' }}>
+                                        <div style={{ wordBreak: 'break-all' }}>
+                                          <span style={{ color: 'var(--color-text-secondary)' }}>🖥 Thư mục (máy): </span>
+                                          <code style={{ fontFamily: 'monospace', color: 'var(--color-primary)' }}>{site.path}</code>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '16px' }}>
+                                          <div>
+                                            <span style={{ color: 'var(--color-text-secondary)' }}>User: </span>
+                                            <strong style={{ color: 'var(--color-text)' }}>{site.ftp_user || 'goxprint'}</strong>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: 'var(--color-text-secondary)' }}>Pass: </span>
+                                            <strong style={{ color: 'var(--color-text)' }}>{site.ftp_password || 'goxprint'}</strong>
+                                          </div>
+                                        </div>
+                                      </div>
                                     </div>
                                   );
                                 })}
@@ -1250,7 +1385,27 @@ export function AgentPage() {
                                                 </span>
                                                 {entry.name}
                                               </span>
-                                              <span style={styles.destRegNo}>Reg: #{regNo}</span>
+                                              <span style={styles.destRegNo}>
+                                                {typeof entry.file_count === 'number' && (
+                                                  <span
+                                                    onClick={() => handleOpenStorageFiles(selectedLan.lan_uid, destVal)}
+                                                    style={{
+                                                      color: 'var(--color-primary)',
+                                                      marginRight: '8px',
+                                                      fontWeight: 600,
+                                                      cursor: 'pointer',
+                                                      textDecoration: 'underline',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '3px'
+                                                    }}
+                                                    title="Xem danh sách tệp tin đã scan trên VPS"
+                                                  >
+                                                    📁 {entry.file_count} files
+                                                  </span>
+                                                )}
+                                                Reg: #{regNo}
+                                              </span>
                                             </div>
 
                                             <div style={styles.destPathValue}>{destVal}</div>
@@ -1287,51 +1442,47 @@ export function AgentPage() {
 
                                             {/* Connection Status badge */}
                                             <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                              <span
-                                                style={{
-                                                  ...styles.destStatusBadge,
-                                                  color:
-                                                    statusInfo.type === 'success'
-                                                      ? 'var(--color-success)'
-                                                      : statusInfo.type === 'warning'
-                                                      ? 'var(--color-warning)'
-                                                      : 'var(--color-error)',
-                                                  background:
-                                                    statusInfo.type === 'success'
-                                                      ? 'rgba(0, 255, 136, 0.08)'
-                                                      : statusInfo.type === 'warning'
-                                                      ? 'rgba(255, 170, 0, 0.08)'
-                                                      : 'rgba(255, 68, 102, 0.08)',
-                                                }}
-                                                title={statusInfo.title}
-                                              >
-                                                {statusInfo.label}
-                                              </span>
-
-                                              {isRowPending && (
-                                                <span style={{ fontSize: '0.72rem', color: 'var(--color-warning)' }}>
-                                                  {rowStatusMsg}
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span
+                                                  style={{
+                                                    ...styles.destStatusBadge,
+                                                    color:
+                                                      statusInfo.type === 'success'
+                                                        ? 'var(--color-success)'
+                                                        : statusInfo.type === 'warning'
+                                                        ? 'var(--color-warning)'
+                                                        : 'var(--color-error)',
+                                                    background:
+                                                      statusInfo.type === 'success'
+                                                        ? 'rgba(0, 255, 136, 0.08)'
+                                                        : statusInfo.type === 'warning'
+                                                        ? 'rgba(255, 170, 0, 0.08)'
+                                                        : 'rgba(255, 68, 102, 0.08)',
+                                                  }}
+                                                  title={statusInfo.title}
+                                                >
+                                                  {statusInfo.label}
                                                 </span>
-                                              )}
-                                            </div>
 
-                                            {/* Row action buttons */}
-                                            <div style={styles.destRowActions}>
+                                                {isRowPending && (
+                                                  <span style={{ fontSize: '0.72rem', color: 'var(--color-warning)' }}>
+                                                    {rowStatusMsg}
+                                                  </span>
+                                                )}
+                                              </div>
+
                                               <button
-                                                style={styles.destRowBtn}
-                                                onClick={() => handleOpenStorageFiles(selectedLan.lan_uid, destVal)}
-                                              >
-                                                📁 Tệp tin
-                                              </button>
-                                              <button
-                                                style={styles.destRowBtn}
-                                                onClick={() => handleFetchEntryDetail(p.id, entry)}
-                                                disabled={isRowPending || onlineAgents.length === 0}
-                                              >
-                                                ℹ Chi tiết
-                                              </button>
-                                              <button
-                                                style={{ ...styles.destRowBtn, color: 'var(--color-error)' }}
+                                                style={{
+                                                  padding: '2px 8px',
+                                                  fontSize: '0.7rem',
+                                                  fontWeight: 600,
+                                                  textAlign: 'center',
+                                                  color: 'var(--color-error)',
+                                                  background: 'rgba(255,255,255,0.02)',
+                                                  border: '1px solid var(--color-surface-light)',
+                                                  borderRadius: '4px',
+                                                  cursor: 'pointer',
+                                                }}
                                                 onClick={() => handleDeleteDest(p.id, entry)}
                                                 disabled={isRowPending}
                                               >

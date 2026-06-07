@@ -229,6 +229,33 @@ def startup_command_for_current_exe(mode: str = "web", host: str = "127.0.0.1", 
         return f'"{sys.executable}" "{target}" --mode {safe_mode}'
 
 
+def startup_command_args(mode: str = "web", host: str = "127.0.0.1", port: int = 9173) -> list[str]:
+    if is_frozen():
+        target = Path(sys.executable).resolve()
+        safe_mode = str(mode).strip()
+        if safe_mode == "web":
+            return [str(target), "--mode", "web", "--host", host, "--port", str(port)]
+        if safe_mode == "":
+            return [str(target), "--mode", ""]
+        return [str(target), "--mode", safe_mode]
+    else:
+        argv_target = Path(sys.argv[0]).resolve()
+        if argv_target.name == "main.py":
+            target = argv_target
+        else:
+            target = Path(__file__).resolve().parent.parent / "main.py"
+            if not target.exists():
+                target = argv_target
+                
+        safe_mode = str(mode).strip()
+        if safe_mode == "web":
+            return [sys.executable, str(target), "--mode", "web", "--host", host, "--port", str(port)]
+        if safe_mode == "":
+            # Use windowless pythonw.exe/pyw.exe for background worker execution
+            return [_gui_python_exe(), str(target), "--mode", ""]
+        return [sys.executable, str(target), "--mode", safe_mode]
+
+
 def get_machine_agent_uid(preferred: str = "") -> str:
     text = str(preferred or "").strip()
     if text and text.lower() not in {"agent-pc-01", "legacy-agent", "agent-default", "pc-01"}:
@@ -276,15 +303,32 @@ def ensure_startup_registration(app_name: str = "GoPrinxAgent", command: str | N
         return False, str(exc)
 
 
-def spawn_detached_command(command: str) -> None:
-    if not command.strip():
-        raise ValueError("Detached command is empty")
+def spawn_detached_command(command: str | list[str]) -> None:
+    if isinstance(command, str):
+        if not command.strip():
+            raise ValueError("Detached command is empty")
+        import shlex
+        cmd_args = shlex.split(command, posix=False)
+        cleaned_args = []
+        for arg in cmd_args:
+            if arg.startswith('"') and arg.endswith('"'):
+                cleaned_args.append(arg[1:-1])
+            else:
+                cleaned_args.append(arg)
+        cmd_args = cleaned_args
+    else:
+        if not command:
+            raise ValueError("Detached command is empty")
+        cmd_args = list(command)
+
     creation_flags = 0
     if is_windows():
         creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    
+    LOGGER.info("Spawning detached command: %s", cmd_args)
     subprocess.Popen(
-        command,
-        shell=True,
+        cmd_args,
+        shell=False,
         creationflags=creation_flags,
         close_fds=True,
         cwd=str(Path.cwd()),

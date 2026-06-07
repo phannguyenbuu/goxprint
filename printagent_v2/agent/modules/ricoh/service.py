@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,16 +51,37 @@ class RicohService(
         if self._config is None:
             return
         try:
-            added = 0
-            for site in self.share_manager.list_ftp_sites():
-                path = str(site.get("path", "") or "").strip()
-                if not path:
-                    continue
-                changed, _ = self._config.ensure_scan_dir(path)
-                if changed:
-                    added += 1
-            if added > 0:
-                LOGGER.info("Registered FTP scan roots into polling.scan_dirs: added=%s", added)
+            config_port_str = self._config.get_string("ftp_port", "").strip()
+            config_port = int(config_port_str) if (config_port_str and config_port_str.isdigit()) else None
+            
+            ftp_root_path = None
+            sites = self.share_manager.list_ftp_sites()
+            
+            if config_port is not None:
+                for site in sites:
+                    if int(site.get("port") or 0) == config_port:
+                        path_str = str(site.get("path", "") or "").strip()
+                        if path_str:
+                            ftp_root_path = Path(path_str)
+                            break
+            
+            if ftp_root_path is None:
+                for site in sites:
+                    if site.get("name") == "goxprint":
+                        path_str = str(site.get("path", "") or "").strip()
+                        if path_str:
+                            ftp_root_path = Path(path_str)
+                            break
+
+            new_items = []
+            if ftp_root_path and ftp_root_path.is_dir():
+                for sub in ftp_root_path.iterdir():
+                    if sub.is_dir():
+                        new_items.append(str(sub))
+            
+            self._config.set_value("polling.scan_dirs", ";".join(new_items))
+            LOGGER.info("Cleared scan_dirs and synced with FTP subfolders for port %s: registered %d subfolders.", 
+                        config_port or "default", len(new_items))
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Failed to register existing FTP scan roots: %s", exc)
 

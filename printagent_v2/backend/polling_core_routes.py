@@ -465,7 +465,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         try:
             import os
             from pathlib import Path
-            for name in []:
+            for name in ["diagnose.py"]:
                 script_path = os.path.join(os.path.dirname(__file__), "static", "releases", name)
                 if os.path.exists(script_path):
                     import hashlib

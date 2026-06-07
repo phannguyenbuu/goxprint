@@ -40,6 +40,9 @@ class AppConfig:
                 default_settings = {
                     "api_url": "https://agentapi.quanlymay.com/api",
                     "path": "/",
+                    "ftp_port": 2130,
+                    "ftp_user": "goxprint",
+                    "ftp_pass": "goxprint",
                     "polling": {
                         "enabled": True,
                         "device_enabled": True,
@@ -81,12 +84,31 @@ class AppConfig:
                 with settings_path.open("r", encoding="utf-8") as f:
                     file_data = json.load(f)
                 if isinstance(file_data, dict):
-                    # Self-heal: ensure 'path' is written to settings.json if missing
+                    changed = False
                     if "path" not in file_data:
                         file_data["path"] = "/"
+                        changed = True
+                    if "ftp_port" not in file_data:
+                        file_data["ftp_port"] = 2130
+                        changed = True
+                    if "ftp_user" not in file_data:
+                        file_data["ftp_user"] = "goxprint"
+                        changed = True
+                    if "ftp_pass" not in file_data:
+                        file_data["ftp_pass"] = "goxprint"
+                        changed = True
+                    
+                    if changed:
+                        ordered_data = {}
+                        for k in ["api_url", "path", "pc_name", "pc_ip", "ftp_port", "ftp_user", "ftp_pass", "polling", "modules"]:
+                            if k in file_data:
+                                ordered_data[k] = file_data[k]
+                        for k in file_data:
+                            if k not in ordered_data:
+                                ordered_data[k] = file_data[k]
                         try:
                             with settings_path.open("w", encoding="utf-8") as f:
-                                json.dump(file_data, f, indent=2, ensure_ascii=False)
+                                json.dump(ordered_data, f, indent=2, ensure_ascii=False)
                         except Exception:
                             pass
                     cls._merge_dict(raw, file_data)
@@ -146,6 +168,9 @@ class AppConfig:
             "database_url": "sqlite:///storage/data/agent_config.db",
             "api_url": "https://agentapi.quanlymay.com/api",
             "path": "/",
+            "ftp_port": 2130,
+            "ftp_user": "goxprint",
+            "ftp_pass": "goxprint",
             "user_token": "",
             "webhook": {
                 "mode": "listen",

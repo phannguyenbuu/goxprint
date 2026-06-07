@@ -555,12 +555,12 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         if source_relative_parts:
             sync_mode = "mirror"
             dest_name = source_relative_parts[-1]
-            target_dir = SCAN_UPLOAD_ROOT / _safe_path_token(lead_valid) / lan_uid / agent_uid / source_root_label
+            target_dir = SCAN_UPLOAD_ROOT / _safe_path_token(lead_valid) / lan_uid / agent_uid
             for part in source_relative_parts[:-1]:
                 target_dir = target_dir / part
             target_dir.mkdir(parents=True, exist_ok=True)
             dest_path = target_dir / dest_name
-            drive_remote_parts = [_safe_path_token(lead_valid), lan_uid, agent_uid, source_root_label, *source_relative_parts]
+            drive_remote_parts = [_safe_path_token(lead_valid), lan_uid, agent_uid, *source_relative_parts]
         else:
             sync_mode = "append"
             date_folder = event_time.astimezone(UI_TZ).strftime("%Y%m%d")

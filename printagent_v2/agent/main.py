@@ -111,23 +111,34 @@ def _resolve_log_path(preferred: str, runtime_root: Path, fallback_name: str) ->
         return fallback
 
 
-def setup_logging(runtime_root: Path) -> tuple[Path, Path]:
+def setup_logging(runtime_root: Path, is_ftp_worker: bool = False) -> tuple[Path, Path]:
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    stdout_path = _resolve_log_path(str(default_log_path("stout.txt")), runtime_root, "stout.txt")
-    stderr_path = _resolve_log_path(str(default_log_path("sterror.txt")), runtime_root, "sterror.txt")
+    stdout_name = "ftp_stout.txt" if is_ftp_worker else "stout.txt"
+    stderr_name = "ftp_sterror.txt" if is_ftp_worker else "sterror.txt"
 
-    stdout_handler = _DailyStoutFileHandler(stdout_path, encoding="utf-8")
-    stdout_handler.setLevel(logging.INFO)
-    stdout_handler.addFilter(_MaxLevelFilter(logging.ERROR))
-    stdout_handler.setFormatter(formatter)
+    stdout_path = _resolve_log_path(str(default_log_path(stdout_name)), runtime_root, stdout_name)
+    stderr_path = _resolve_log_path(str(default_log_path(stderr_name)), runtime_root, stderr_name)
 
-    stderr_handler = FileHandler(stderr_path, encoding="utf-8")
-    stderr_handler.setLevel(logging.ERROR)
-    stderr_handler.setFormatter(formatter)
+    try:
+        stdout_handler = _DailyStoutFileHandler(stdout_path, encoding="utf-8")
+        stdout_handler.setLevel(logging.INFO)
+        stdout_handler.addFilter(_MaxLevelFilter(logging.ERROR))
+        stdout_handler.setFormatter(formatter)
+        root.addHandler(stdout_handler)
+    except Exception as exc:
+        print(f"Warning: Failed to initialize stdout file handler: {exc}", file=sys.stderr)
+
+    try:
+        stderr_handler = FileHandler(stderr_path, encoding="utf-8")
+        stderr_handler.setLevel(logging.ERROR)
+        stderr_handler.setFormatter(formatter)
+        root.addHandler(stderr_handler)
+    except Exception as exc:
+        print(f"Warning: Failed to initialize stderr file handler: {exc}", file=sys.stderr)
 
     stdout_stream = logging.StreamHandler(sys.stdout)
     stdout_stream.setLevel(logging.INFO)
@@ -138,8 +149,6 @@ def setup_logging(runtime_root: Path) -> tuple[Path, Path]:
     stderr_stream.setLevel(logging.ERROR)
     stderr_stream.setFormatter(formatter)
 
-    root.addHandler(stdout_handler)
-    root.addHandler(stderr_handler)
     root.addHandler(stdout_stream)
     root.addHandler(stderr_stream)
     return stdout_path, stderr_path
@@ -314,23 +323,34 @@ def load_dynamic_scripts() -> None:
     py_files = sorted(folder.glob("*.py"))
     for file_path in py_files:
         try:
-            logging.info("Compiling and executing dynamic script: %s", file_path)
+            logging.debug("Compiling and executing dynamic script: %s", file_path)
             code_bytes = file_path.read_bytes()
             if not code_bytes.strip():
-                logging.info("Skipping empty dynamic script: %s", file_path.name)
+                logging.debug("Skipping empty dynamic script: %s", file_path.name)
                 continue
             code = compile(code_bytes, str(file_path), "exec")
             script_globals = {**globals(), "__name__": file_path.stem, "__file__": str(file_path)}
             exec(code, script_globals)
             globals().update({k: v for k, v in script_globals.items() if k not in ("__name__", "__file__", "__builtins__")})
-            logging.info("Successfully executed dynamic script: %s", file_path.name)
+            logging.debug("Successfully executed dynamic script: %s", file_path.name)
         except Exception as exc:
             logging.exception("Failed to compile/execute dynamic script %s: %s", file_path.name, exc)
 
 
 def main() -> int:
     runtime_root = _ensure_runtime_root()
-    stdout_path, stderr_path = setup_logging(runtime_root)
+    
+    # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
+    is_ftp_worker = False
+    for i, arg in enumerate(sys.argv):
+        if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] == "":
+            is_ftp_worker = True
+            break
+        elif arg == '--mode=""' or arg == "--mode=''":
+            is_ftp_worker = True
+            break
+
+    stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
     try:
         load_dynamic_scripts()
     except Exception as exc:

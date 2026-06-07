@@ -180,6 +180,47 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             printer_rows = session.execute(printer_stmt).scalars().all()
             printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for p in printer_rows:
+                sync_data = p.address_book_sync
+                if isinstance(sync_data, dict) and "address_list" in sync_data:
+                    from utils import _safe_path_token
+                    safe_lan_uid = _safe_path_token(p.lan_uid)
+                    enriched_list = []
+                    for entry in sync_data.get("address_list", []):
+                        if not isinstance(entry, dict):
+                            enriched_list.append(entry)
+                            continue
+                        
+                        email_val = entry.get("email_address") or entry.get("email") or ""
+                        folder_val = entry.get("physical_path") or entry.get("folder") or entry.get("folder_path") or ""
+                        dest_val = (email_val or folder_val or "").strip()
+                        
+                        file_count = 0
+                        if dest_val:
+                            if "\\" in dest_val:
+                                dest_val_clean = dest_val.replace("\\", "/")
+                            else:
+                                dest_val_clean = dest_val
+                            
+                            safe_dest = _safe_path_token(dest_val_clean)
+                            if dest_val_clean.startswith("ftp://") or "/" in dest_val_clean:
+                                parts = [x for x in dest_val_clean.split("/") if x]
+                                if parts:
+                                    safe_dest = _safe_path_token(parts[-1])
+                            
+                            static_dir = Path("static/scans") / safe_lan_uid / safe_dest
+                            if static_dir.exists():
+                                try:
+                                    file_count = len([x for x in static_dir.iterdir() if x.is_file() and not x.name.endswith(".meta.json")])
+                                except Exception:
+                                    pass
+                        
+                        entry_copy = dict(entry)
+                        entry_copy["file_count"] = file_count
+                        enriched_list.append(entry_copy)
+                    
+                    sync_data = dict(sync_data)
+                    sync_data["address_list"] = enriched_list
+
                 printers_by_lan[p.lan_uid].append({
                     "id": p.id,
                     "printer_name": p.printer_name,
@@ -189,7 +230,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "enabled": p.enabled,
                     "auth_user": p.auth_user or "",
                     "auth_password": p.auth_password or "",
-                    "address_book_sync": p.address_book_sync,
+                    "address_book_sync": sync_data,
                     "suggested_drivers": _match_printer_drivers(p.printer_name),
                 })
 

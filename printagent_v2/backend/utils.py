@@ -99,7 +99,10 @@ def _safe_path_token(value: str) -> str:
     text = _to_text(value)
     if not text:
         return "unknown"
-    cleaned = secure_filename(text)
+    import unicodedata
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    cleaned = re.sub(r'[^a-zA-Z0-9._@-]', '-', text)
+    cleaned = cleaned.strip(" -_.")
     return cleaned or "unknown"
 
 

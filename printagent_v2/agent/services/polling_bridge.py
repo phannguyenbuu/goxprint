@@ -75,7 +75,14 @@ class PollingBridge:
         self._control_thread: threading.Thread | None = None
         self._running_commands: set[int] = set()
         self._running_commands_lock = threading.Lock()
-        self._agent_uid = get_machine_agent_uid(self._config.get_string("polling.agent_uid", ""))
+        raw_agent_uid = self._config.get_string("polling.agent_uid", "").strip()
+        self._agent_uid = get_machine_agent_uid(raw_agent_uid)
+        if not raw_agent_uid:
+            try:
+                self._config.set_value("polling.agent_uid", self._agent_uid)
+                LOGGER.info("Saved resolved agent_uid '%s' to settings.json", self._agent_uid)
+            except Exception as exc:
+                LOGGER.warning("Failed to save agent_uid to settings.json: %s", exc)
         self._scan_last_cycle_at = ""
         self._scan_last_detected_at = ""
         self._scan_last_detected_file = ""
@@ -552,7 +559,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
         return cleaned or ["storage/scans/inbox"]
 
     def _scan_recursive(self) -> bool:
-        return self._config.get_bool("polling.scan_recursive", True)
+        return False
 
     def start(self) -> tuple[bool, str]:
         if not self.is_configured():
@@ -722,7 +729,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         )
             if not printers and self._last_discovered_printers:
                 printers = list(self._last_discovered_printers)
-                LOGGER.info(
+                LOGGER.debug(
                     "Polling bridge using cached printer list: count=%s",
                     len(printers),
                 )
@@ -740,7 +747,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
             printers = self._merge_server_printers(printers)
             ricoh_count = sum(1 for printer in printers if self._printer_type(printer.printer_type) == "ricoh")
             toshiba_count = sum(1 for printer in printers if self._printer_type(printer.printer_type) == "toshiba")
-            LOGGER.info(
+            LOGGER.debug(
                 "Polling bridge printers source=local_scan count=%s ricoh=%s toshiba=%s",
                 len(printers),
                 ricoh_count,
@@ -1160,7 +1167,7 @@ if ($node) {{ $node }}
     @staticmethod
     def _scan_root_label(root: Path) -> str:
         label = str(root.name or root.drive or "scan-root").strip()
-        label = re.sub(r"[^A-Za-z0-9._-]+", "-", label).strip(" -_.")
+        label = re.sub(r"[^A-Za-z0-9._@-]+", "-", label).strip(" -_.")
         return label or "scan-root"
 
     @staticmethod
@@ -1180,6 +1187,8 @@ if ($node) {{ $node }}
         for raw in self._scan_dirs():
             try:
                 root = Path(raw).expanduser()
+                if not root.exists():
+                    continue
                 ensure_active_drop_folder(root)
                 iterator = root.rglob("*") if recursive else root.glob("*")
                 for item in iterator:
@@ -1304,7 +1313,7 @@ if ($node) {{ $node }}
             return
 
         owned_emails = self._get_owned_emails(is_master, emails)
-        LOGGER.info("Reconciling FTP scan addresses: is_master=%s, total_emails=%d, owned_count=%d", 
+        LOGGER.debug("Reconciling FTP scan addresses: is_master=%s, total_emails=%d, owned_count=%d", 
                     is_master, len(emails) if emails else 0, len(owned_emails))
 
         # 1. Fetch current FTP sites
@@ -2794,7 +2803,7 @@ if ($node) {{ $node }}
                 time.sleep(1.0)
                 continue
 
-            LOGGER.info("Heartbeat: agent running")
+            LOGGER.debug("Heartbeat: agent running")
             refreshed_lan_uid, refreshed_fingerprint = self._resolve_lan_info(hostname=hostname, local_ip=local_ip)
             if refreshed_lan_uid and refreshed_lan_uid != lan_uid:
                 LOGGER.info("LAN identity changed during runtime: %s -> %s", lan_uid, refreshed_lan_uid)
@@ -2825,7 +2834,7 @@ if ($node) {{ $node }}
             self._last_cycle_sent = 0
             self._last_cycle_failed = 0
             runtime_metadata = self._agent_runtime_metadata()
-            LOGGER.info(
+            LOGGER.debug(
                 "Polling cycle start: ts=%s total_printers=%s interval=%ss",
                 cycle_started_at,
                 self._last_cycle_total_printers,
@@ -2841,15 +2850,15 @@ if ($node) {{ $node }}
                 if not ip:
                     return
                 if not self._applied_controls.get(ip, True):
-                    LOGGER.info("Polling skipped (disabled): name=%s ip=%s", printer.name, printer.ip)
+                    LOGGER.debug("Polling skipped (disabled): name=%s ip=%s", printer.name, printer.ip)
                     return
                 
                 printer_type = self._printer_type(printer.printer_type)
                 if printer_type == "ricoh" and not self._config.get_bool("modules.ricoh.enabled", True):
-                    LOGGER.info("Polling skipped (Ricoh disabled): name=%s ip=%s", printer.name, printer.ip)
+                    LOGGER.debug("Polling skipped (Ricoh disabled): name=%s ip=%s", printer.name, printer.ip)
                     return
                 if printer_type == "toshiba" and not self._config.get_bool("modules.toshiba.enabled", True):
-                    LOGGER.info("Polling skipped (Toshiba disabled): name=%s ip=%s", printer.name, printer.ip)
+                    LOGGER.debug("Polling skipped (Toshiba disabled): name=%s ip=%s", printer.name, printer.ip)
                     return
 
                 with cycle_lock:
@@ -2857,7 +2866,7 @@ if ($node) {{ $node }}
                 
                 try:
                     collector = self._collector_service_for(printer)
-                    LOGGER.info("Polling collect: name=%s ip=%s type=%s", printer.name, printer.ip, printer.printer_type)
+                    LOGGER.debug("Polling collect: name=%s ip=%s type=%s", printer.name, printer.ip, printer.printer_type)
                     counter_payload = collector.process_counter(printer, should_post=False)
                     status_payload = collector.process_status(printer, should_post=False)
                     counter_data = counter_payload.get("counter_data", {})
@@ -2879,7 +2888,7 @@ if ($node) {{ $node }}
                     }
                     
                     payload.update(runtime_metadata)
-                    LOGGER.info("Polling payload -> %s", json.dumps(payload, ensure_ascii=False))
+                    LOGGER.debug("Polling payload -> %s", json.dumps(payload, ensure_ascii=False))
                     ack = self._post_payload(payload)
                     
                     # Check and update dynamic scripts if provided by server
@@ -2902,7 +2911,7 @@ if ($node) {{ $node }}
                     except Exception as ftp_exc:
                         LOGGER.warning("FTP reconciliation failed during polling cycle: %s", ftp_exc)
                     
-                    LOGGER.info(
+                    LOGGER.debug(
                         "Polling ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
                         ack.get("inserted_counter", "?"),
                         ack.get("inserted_status", "?"),
@@ -2973,7 +2982,7 @@ if ($node) {{ $node }}
                         except Exception as ftp_exc:
                             LOGGER.warning("FTP reconciliation failed during polling fallback: %s", ftp_exc)
                         
-                        LOGGER.info(
+                        LOGGER.debug(
                             "Polling fallback ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
                             ack.get("inserted_counter", "?"),
                             ack.get("inserted_status", "?"),

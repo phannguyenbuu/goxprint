@@ -105,20 +105,34 @@ def create_local_ftp_for_address(
         except Exception:
             pass
 
+    ftp_user = config.get_string("ftp_user", "goxprint")
+    ftp_pass = config.get_string("ftp_pass", "goxprint")
+
     result = ricoh_service.share_manager.create_ftp_site(
         site_name=ftp_name, 
         local_path=ftp_root, 
         port=actual_port,
-        ftp_user="goxprint",
-        ftp_password="goxprint"
+        ftp_user=ftp_user,
+        ftp_password=ftp_pass
     )
     ftp_ok = bool(result.get("ok"))
     ftp_port = int(result.get("port") or actual_port)
     ftp_url = f"ftp://{local_ip}:{ftp_port}/"
-    drop_folder = build_drop_folder_metadata(ftp_root, base_url=ftp_url)
+    
+    email_clean = str(address_name or "").strip()
     scan_sync: dict[str, Any] = {}
     if ftp_ok:
-        scan_sync = _register_scan_root(config, ftp_root)
+        if email_clean:
+            user_folder = ftp_root / email_clean
+            user_folder.mkdir(parents=True, exist_ok=True)
+            ftp_user_url = f"ftp://{local_ip}:{ftp_port}/{email_clean}/"
+            drop_folder = build_drop_folder_metadata(user_folder, base_url=ftp_user_url)
+            scan_sync = _register_scan_root(config, user_folder)
+        else:
+            drop_folder = build_drop_folder_metadata(ftp_root, base_url=ftp_url)
+            scan_sync = _register_scan_root(config, ftp_root)
+    else:
+        drop_folder = build_drop_folder_metadata(ftp_root, base_url=ftp_url)
     return {
         "ok": ftp_ok,
         "ftp_name": ftp_name,

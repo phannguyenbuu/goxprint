@@ -26,7 +26,7 @@ from agent.services.ftp_store import (
     remove_site,
 )
 from agent.services.scan_drop import build_drop_folder_metadata
-from agent.services.runtime import no_window_subprocess_kwargs, spawn_detached_command, startup_command_for_current_exe, ensure_startup_registration
+from agent.services.runtime import no_window_subprocess_kwargs, spawn_detached_command, startup_command_for_current_exe, startup_command_args, ensure_startup_registration
 from agent.services.ftp_store import now_iso
 
 LOGGER = logging.getLogger(__name__)
@@ -93,6 +93,10 @@ class ShareManager:
     def _worker_command() -> str:
         return startup_command_for_current_exe("")
 
+    @staticmethod
+    def _worker_command_args() -> list[str]:
+        return startup_command_args("")
+
     def _ensure_worker_registration(self) -> tuple[bool, str]:
         return ensure_startup_registration(app_name=self._worker_app_name(), command=self._worker_command())
 
@@ -116,7 +120,7 @@ class ShareManager:
                 return
             self._ensure_worker_registration()
             try:
-                spawn_detached_command(self._worker_command())
+                spawn_detached_command(self._worker_command_args())
                 LOGGER.info("FTP worker launch requested")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("FTP worker launch failed: %s", exc)
@@ -310,6 +314,14 @@ class ShareManager:
 
     def list_ftp_sites(self) -> list[dict[str, Any]]:
         config = load_config()
+        # Auto-start worker if config has enabled sites and worker is not live
+        has_enabled_sites = any(site.get("enabled", True) for site in config.get("sites", []))
+        if has_enabled_sites and not self._is_worker_live():
+            try:
+                self._ensure_worker_started()
+            except Exception as exc:
+                LOGGER.warning("Auto starting FTP worker failed in list_ftp_sites: %s", exc)
+
         state = load_state()
         merged = merge_runtime_with_config(config, state)
         return sorted(merged, key=lambda item: (int(item.get("port", 0) or 0), str(item.get("name", "") or "")))

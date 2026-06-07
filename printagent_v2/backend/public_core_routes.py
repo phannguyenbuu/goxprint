@@ -589,3 +589,20 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "machines": machines,
                 }
             )
+
+    @app.post("/api/public/agent-diagnostics")
+    def post_agent_diagnostics() -> Any:
+        import json
+        body = request.get_json(silent=True) or {}
+        agent_uid = _to_text(body.get("agent_uid", "unknown"))
+        LOGGER.info("Received diagnostics from agent: %s", agent_uid)
+        
+        dest = f"/tmp/diagnostics_{agent_uid}.json"
+        try:
+            with open(dest, "w", encoding="utf-8") as f:
+                json.dump(body, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            LOGGER.error("Failed to write agent diagnostics to file: %s", exc)
+            
+        return jsonify({"ok": True})
+
