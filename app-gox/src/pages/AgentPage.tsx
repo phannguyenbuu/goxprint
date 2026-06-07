@@ -835,16 +835,71 @@ export function AgentPage() {
                             </div>
                           </div>
 
-                          <div style={styles.cardActionWrapper}>
-                            <button
-                              style={{ ...styles.smallBtn, width: '100%', padding: '10px 12px', fontSize: '0.8rem', display: 'flex', justifyContent: 'center' }}
-                              onClick={() => {
-                                setPrivateFtpData({ lanUid: selectedLan.lan_uid, agentUid: agent.agent_uid, email: '' });
-                                setActiveModal('private_ftp');
-                              }}
-                            >
-                              + Đăng ký Private FTP
-                            </button>
+                          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-surface-light)' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '8px' }}>
+                              📂 Dịch vụ FTP đang chạy:
+                            </span>
+                            {(!agent.ftp_sites || agent.ftp_sites.length === 0) ? (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', padding: '6px' }}>
+                                Không có FTP site nào hoạt động.
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {agent.ftp_sites.map((site: any, sIdx: number) => {
+                                  const isRunning = site.running;
+                                  return (
+                                    <div
+                                      key={sIdx}
+                                      style={{
+                                        background: 'var(--color-inset-bg)',
+                                        border: '1px solid var(--color-surface-light)',
+                                        borderRadius: '8px',
+                                        padding: '8px 10px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '4px'
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span
+                                            style={{
+                                              display: 'inline-block',
+                                              width: '8px',
+                                              height: '8px',
+                                              borderRadius: '50%',
+                                              backgroundColor: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                              boxShadow: isRunning ? '0 0 8px var(--color-status-online)' : 'none'
+                                            }}
+                                          />
+                                          <strong style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>Port {site.port}</strong>
+                                        </div>
+                                        <span
+                                          style={{
+                                            fontSize: '0.7rem',
+                                            fontWeight: 600,
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            backgroundColor: isRunning ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
+                                            color: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)'
+                                          }}
+                                        >
+                                          {isRunning ? 'RUNNING' : 'ERROR'}
+                                        </span>
+                                      </div>
+                                      {site.error && (
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--color-error)', marginTop: '2px' }}>
+                                          Lỗi: {site.error}
+                                        </div>
+                                      )}
+                                      <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '2px' }}>
+                                        {site.path}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </GlowCard>
                       );
