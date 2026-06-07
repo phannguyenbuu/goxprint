@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlowCard } from '../components/ui/GlowCard';
 import { AnimatedList } from '../components/ui/AnimatedList';
@@ -140,7 +140,9 @@ export function AgentPage() {
   const [infoDetailData, setInfoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
 
   // Scroll and tracking references
-  const hasScrolledRef = useRef(false);
+  const [initialLastViewedId] = useState<string>(() => {
+    return localStorage.getItem('goxprint_last_viewed_copier_id') || '';
+  });
 
   // ── LOCAL STORAGE SYNC ──
   useEffect(() => {
@@ -197,10 +199,10 @@ export function AgentPage() {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
 
-  // Filter out offline and Unknown Printers
+  // Filter out offline and Unknown Printers, and sort the last viewed one to the top
   const filteredPrinters = useMemo(() => {
     if (!selectedLan) return [];
-    return (selectedLan.printers || []).filter((p: any) => {
+    const filtered = (selectedLan.printers || []).filter((p: any) => {
       // 1. Không show các máy in offline
       if (!p.is_online) return false;
       
@@ -221,39 +223,23 @@ export function AgentPage() {
 
       return true;
     });
-  }, [selectedLan]);
 
-  // ── SCROLL TO LAST VIEWED COPIER ──
-  const scrollToCopier = useCallback((printerId: string | number, behavior: ScrollBehavior = 'smooth') => {
-    const element = document.getElementById(`copier-card-${printerId}`);
-    if (element) {
-      const elementPosition = element.getBoundingClientRect().top + window.scrollY;
-      const offsetPosition = elementPosition - 188; // offsets fixed header height (176px + some margin)
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: behavior
+    if (initialLastViewedId) {
+      return [...filtered].sort((a, b) => {
+        const aMatch = String(a.id) === initialLastViewedId;
+        const bMatch = String(b.id) === initialLastViewedId;
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
       });
     }
-  }, []);
+
+    return filtered;
+  }, [selectedLan, initialLastViewedId]);
 
   const handleCopierClick = (printerId: string) => {
     localStorage.setItem('goxprint_last_viewed_copier_id', printerId);
   };
-
-  useEffect(() => {
-    if (activeTab === 'copiers' && !lanSitesLoading && filteredPrinters.length > 0) {
-      if (!hasScrolledRef.current) {
-        hasScrolledRef.current = true;
-        const lastViewedId = localStorage.getItem('goxprint_last_viewed_copier_id');
-        if (lastViewedId) {
-          const timer = setTimeout(() => {
-            scrollToCopier(lastViewedId, 'auto');
-          }, 150);
-          return () => clearTimeout(timer);
-        }
-      }
-    }
-  }, [activeTab, lanSitesLoading, filteredPrinters.length, scrollToCopier]);
 
   // Pre-fill target agent and credentials maps when selectedLan changes
   useEffect(() => {
