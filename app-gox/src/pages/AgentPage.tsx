@@ -108,7 +108,8 @@ export function AgentPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals
-  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | null>(null);
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | null>(null);
+  const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
   
   // Custom Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -851,6 +852,10 @@ export function AgentPage() {
                                     <div
                                       key={sIdx}
                                       title={`Port: ${site.port}\nThư mục: ${site.path}${site.error ? `\nLỗi: ${site.error}` : ''}`}
+                                      onClick={() => {
+                                        setFtpDetailData({ port: site.port, path: site.path, error: site.error });
+                                        setActiveModal('ftp_detail');
+                                      }}
                                       style={{
                                         background: 'var(--color-inset-bg)',
                                         border: `1px solid ${isRunning ? 'var(--color-surface-light)' : 'rgba(255, 68, 102, 0.4)'}`,
@@ -862,6 +867,7 @@ export function AgentPage() {
                                         justifyContent: 'center',
                                         gap: '6px',
                                         minWidth: 0,
+                                        cursor: 'pointer',
                                         boxShadow: isRunning ? 'none' : '0 0 8px rgba(255, 68, 102, 0.15)',
                                       }}
                                     >
@@ -1590,6 +1596,88 @@ export function AgentPage() {
                     <button
                       style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
                       onClick={() => setActiveModal(null)}
+                    >
+                      Đóng cửa sổ
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 4.5. FTP Detail Modal */}
+              {activeModal === 'ftp_detail' && ftpDetailData && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <div>
+                      <h3 style={styles.modalTitle}>📂 Chi tiết dịch vụ FTP</h3>
+                      <div style={styles.modalSubtitle}>Cổng Port: {ftpDetailData.port}</div>
+                    </div>
+                    <button
+                      style={styles.modalCloseBtn}
+                      onClick={() => {
+                        setActiveModal(null);
+                        setFtpDetailData(null);
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={styles.modalBody}>
+                    <div style={styles.modalDetailsList}>
+                      <div style={styles.detailRow}>
+                        <span style={styles.detailLabel}>Cổng Port:</span>
+                        <span style={{ ...styles.detailValue, fontWeight: 700, color: 'var(--color-primary)' }}>
+                          {ftpDetailData.port}
+                        </span>
+                      </div>
+                      <div style={styles.detailRow}>
+                        <span style={styles.detailLabel}>Trạng thái:</span>
+                        <span
+                          style={{
+                            ...styles.detailValue,
+                            fontWeight: 700,
+                            color: !ftpDetailData.error ? 'var(--color-success)' : 'var(--color-error)'
+                          }}
+                        >
+                          {!ftpDetailData.error ? 'Đang hoạt động (RUNNING)' : 'Lỗi khởi chạy (ERROR)'}
+                        </span>
+                      </div>
+                      {ftpDetailData.error && (
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Chi tiết lỗi:</span>
+                          <span style={{ ...styles.detailValue, color: 'var(--color-error)' }}>
+                            {ftpDetailData.error}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ marginTop: '12px' }}>
+                        <span style={{ ...styles.detailLabel, display: 'block', marginBottom: '4px' }}>Thư mục lưu trữ:</span>
+                        <div
+                          style={{
+                            fontFamily: 'monospace',
+                            fontSize: '0.72rem',
+                            color: 'var(--color-text)',
+                            background: 'var(--color-inset-bg)',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--color-surface-light)',
+                            wordBreak: 'break-all',
+                            lineHeight: 1.4
+                          }}
+                        >
+                          {ftpDetailData.path}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={() => {
+                        setActiveModal(null);
+                        setFtpDetailData(null);
+                      }}
                     >
                       Đóng cửa sổ
                     </button>
