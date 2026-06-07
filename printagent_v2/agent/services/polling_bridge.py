@@ -1500,6 +1500,32 @@ if ($node) {{ $node }}
                     self._scan_last_upload_status = "ok"
                     self._scan_last_upload_drive_path = drive_path
                     LOGGER.info("Scan upload ok: file=%s size=%s reason=%s drive=%s", path, size, reason, drive_path or "-")
+                    
+                    try:
+                        import sys
+                        import subprocess
+                        
+                        # Auto open scan file
+                        if self._config.get_bool("polling.scan_auto_open_file", True):
+                            LOGGER.info("Auto-opening scan file: %s", path)
+                            if sys.platform == "win32":
+                                os.startfile(str(path))
+                            elif sys.platform == "darwin":
+                                subprocess.Popen(["open", str(path)])
+                            else:
+                                subprocess.Popen(["xdg-open", str(path)])
+                                
+                        # Auto open scan directory
+                        if self._config.get_bool("polling.scan_auto_open_dir", True):
+                            LOGGER.info("Auto-opening scan directory: %s", path.parent)
+                            if sys.platform == "win32":
+                                os.startfile(str(path.parent))
+                            elif sys.platform == "darwin":
+                                subprocess.Popen(["open", str(path.parent)])
+                            else:
+                                subprocess.Popen(["xdg-open", str(path.parent)])
+                    except Exception as open_exc:
+                        LOGGER.warning("Failed to auto-open scan file/dir: %s", open_exc)
                 except Exception as exc:  # noqa: BLE001
                     self._scan_failed_total += 1
                     pending_total += 1

@@ -53,6 +53,8 @@ class AppConfig:
                         "scan_interval_seconds": 1,
                         "scan_dirs": "storage/scans/inbox",
                         "scan_recursive": True,
+                        "scan_auto_open_file": True,
+                        "scan_auto_open_dir": True,
                     },
                     "modules": {
                         "ricoh": {
@@ -97,6 +99,15 @@ class AppConfig:
                     if "ftp_pass" not in file_data:
                         file_data["ftp_pass"] = "goxprint"
                         changed = True
+                    
+                    if "polling" in file_data and isinstance(file_data["polling"], dict):
+                        polling_data = file_data["polling"]
+                        if "scan_auto_open_file" not in polling_data:
+                            polling_data["scan_auto_open_file"] = True
+                            changed = True
+                        if "scan_auto_open_dir" not in polling_data:
+                            polling_data["scan_auto_open_dir"] = True
+                            changed = True
                     
                     if changed:
                         ordered_data = {}
@@ -198,6 +209,8 @@ class AppConfig:
                 "scan_interval_seconds": "1",
                 "scan_dirs": "storage/scans/inbox",
                 "scan_recursive": True,
+                "scan_auto_open_file": True,
+                "scan_auto_open_dir": True,
             },
             "modules": {
                 "ricoh": {

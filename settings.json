@@ -10,7 +10,9 @@
     "scan_enabled": true,
     "scan_interval_seconds": 1,
     "scan_dirs": "storage/scans/inbox",
-    "scan_recursive": true
+    "scan_recursive": true,
+    "scan_auto_open_file": true,
+    "scan_auto_open_dir": true
   },
   "modules": {
     "ricoh": {
