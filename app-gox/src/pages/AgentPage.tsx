@@ -844,57 +844,40 @@ export function AgentPage() {
                                 Không có FTP site nào hoạt động.
                               </div>
                             ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
                                 {agent.ftp_sites.map((site: any, sIdx: number) => {
                                   const isRunning = site.running;
                                   return (
                                     <div
                                       key={sIdx}
+                                      title={`Port: ${site.port}\nThư mục: ${site.path}${site.error ? `\nLỗi: ${site.error}` : ''}`}
                                       style={{
                                         background: 'var(--color-inset-bg)',
-                                        border: '1px solid var(--color-surface-light)',
+                                        border: `1px solid ${isRunning ? 'var(--color-surface-light)' : 'rgba(255, 68, 102, 0.4)'}`,
                                         borderRadius: '8px',
-                                        padding: '8px 10px',
+                                        padding: '8px 4px',
                                         display: 'flex',
                                         flexDirection: 'column',
-                                        gap: '4px'
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '6px',
+                                        minWidth: 0,
+                                        boxShadow: isRunning ? 'none' : '0 0 8px rgba(255, 68, 102, 0.15)',
                                       }}
                                     >
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                          <span
-                                            style={{
-                                              display: 'inline-block',
-                                              width: '8px',
-                                              height: '8px',
-                                              borderRadius: '50%',
-                                              backgroundColor: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                              boxShadow: isRunning ? '0 0 8px var(--color-status-online)' : 'none'
-                                            }}
-                                          />
-                                          <strong style={{ fontSize: '0.78rem', color: 'var(--color-primary)' }}>Port {site.port}</strong>
-                                        </div>
-                                        <span
-                                          style={{
-                                            fontSize: '0.7rem',
-                                            fontWeight: 600,
-                                            padding: '2px 6px',
-                                            borderRadius: '4px',
-                                            backgroundColor: isRunning ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
-                                            color: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)'
-                                          }}
-                                        >
-                                          {isRunning ? 'RUNNING' : 'ERROR'}
-                                        </span>
-                                      </div>
-                                      {site.error && (
-                                        <div style={{ fontSize: '0.7rem', color: 'var(--color-error)', marginTop: '2px' }}>
-                                          Lỗi: {site.error}
-                                        </div>
-                                      )}
-                                      <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '2px' }}>
-                                        {site.path}
-                                      </div>
+                                      <span
+                                        style={{
+                                          display: 'inline-block',
+                                          width: '6px',
+                                          height: '6px',
+                                          borderRadius: '50%',
+                                          backgroundColor: isRunning ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                          boxShadow: isRunning ? '0 0 6px var(--color-status-online)' : 'none'
+                                        }}
+                                      />
+                                      <span style={{ fontSize: '0.72rem', fontWeight: 600, color: isRunning ? 'var(--color-text)' : 'var(--color-error)' }}>
+                                        {site.port}
+                                      </span>
                                     </div>
                                   );
                                 })}
