@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
+import re
+from pathlib import Path
 from collections import defaultdict
 from typing import Any
 
@@ -13,6 +16,134 @@ from app_helpers import _serialize_audit_payload_iso
 from models import LanSite, AgentNode, LanEmail, Printer
 
 LOGGER = logging.getLogger(__name__)
+
+DRIVERS_CATALOG_ROOT = Path("storage/drivers")
+_DRIVERS_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+def _clean_tokens(name: str) -> list[str]:
+    return re.findall(r'[a-zA-Z0-9]+', name.lower())
+
+def _load_driver_catalog(brand: str) -> list[dict[str, Any]]:
+    brand_clean = brand.lower().strip()
+    if brand_clean in _DRIVERS_CACHE:
+        return _DRIVERS_CACHE[brand_clean]
+    catalog_file = DRIVERS_CATALOG_ROOT / f"{brand_clean}.json"
+    if not catalog_file.exists():
+        return []
+    try:
+        with open(catalog_file, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            _DRIVERS_CACHE[brand_clean] = data
+            return data
+    except Exception as e:
+        LOGGER.error("Failed to load catalog for brand=%s: %s", brand_clean, e)
+    return []
+
+def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
+    query_tokens = _clean_tokens(printer_name)
+    if not query_tokens:
+        return []
+        
+    name_lower = printer_name.lower()
+    brands_to_search = []
+    
+    is_ricoh = any(k in name_lower for k in ["ricoh", "aficio", "savin", "gestetner", "lanier", "infotec", "mp ", "im ", "pro "])
+    is_toshiba = any(k in name_lower for k in ["toshiba", "e-studio"])
+    is_fuji = any(k in name_lower for k in ["fujifilm", "fuji", "xerox", "apeos", "docucentre", "docuprint"])
+    
+    if is_ricoh:
+        brands_to_search.append(("ricoh", _load_driver_catalog("ricoh")))
+    if is_toshiba:
+        brands_to_search.append(("toshiba", _load_driver_catalog("toshiba")))
+    if is_fuji:
+        brands_to_search.append(("fujifilm", _load_driver_catalog("fujifilm")))
+        
+    if not brands_to_search:
+        brands_to_search = [
+            ("ricoh", _load_driver_catalog("ricoh")),
+            ("toshiba", _load_driver_catalog("toshiba")),
+            ("fujifilm", _load_driver_catalog("fujifilm")),
+        ]
+        
+    matches = []
+    query_numbers = [t for t in query_tokens if t.isdigit() or (any(c.isdigit() for c in t) and len(t) >= 2)]
+    
+    for brand, catalog in brands_to_search:
+        for item in catalog:
+            model_name = item.get("model") or item.get("name") or ""
+            if not model_name:
+                continue
+                
+            model_tokens = _clean_tokens(model_name)
+            score = 0
+            
+            # Intersection bonus
+            intersection = set(query_tokens) & set(model_tokens)
+            score += len(intersection) * 10
+            
+            # Substring bonus
+            model_lower = model_name.lower()
+            if name_lower in model_lower or model_lower in name_lower:
+                score += 30
+                
+            # Numeric token matching
+            numeric_match = True
+            for q_num in query_numbers:
+                matched_num = False
+                for m_tok in model_tokens:
+                    if q_num in m_tok or m_tok in q_num:
+                        matched_num = True
+                        break
+                if not matched_num:
+                    numeric_match = False
+                    break
+                    
+            if numeric_match and query_numbers:
+                score += 100
+            elif query_numbers and not numeric_match:
+                score -= 50
+                
+            # Length penalty
+            score -= abs(len(printer_name) - len(model_name)) * 0.5
+            
+            # Extract drivers list
+            drivers_list = []
+            if brand == "ricoh":
+                drivers_field = item.get("drivers", {})
+                for k, v in drivers_field.items():
+                    drivers_list.append({"name": k, "url": v})
+                support_url = item.get("support_url", "")
+            elif brand == "toshiba":
+                drivers_field = item.get("drivers", [])
+                for d in drivers_field:
+                    drivers_list.append({"name": d.get("name") or d.get("description") or "Driver", "url": d.get("download_url") or ""})
+                support_url = f"https://business.toshiba.com/product/{item.get('slug', '')}#downloads" if item.get('slug') else ""
+            else: # fujifilm
+                links = item.get("all_links", [])
+                for url in links:
+                    fn = url.split('/')[-1]
+                    name_label = fn
+                    if "easysetup" in fn.lower():
+                        name_label = "Easy Setup"
+                    elif "pcl6" in fn.lower():
+                        name_label = "PCL6 Driver"
+                    elif "ps" in fn.lower() and not fn.lower().startswith("easysetup"):
+                        name_label = "PS Driver"
+                    drivers_list.append({"name": name_label, "url": url})
+                support_url = "https://support-fb.fujifilm.com/"
+                
+            matches.append({
+                "brand": brand,
+                "model": model_name,
+                "score": score,
+                "support_url": support_url,
+                "drivers": drivers_list[:5]
+            })
+            
+    valid_matches = [m for m in matches if m["score"] > 0]
+    valid_matches.sort(key=lambda x: x["score"], reverse=True)
+    return valid_matches[:5]
 
 
 def register_lan_routes(app: Flask, session_factory: Any) -> None:
@@ -59,6 +190,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "auth_user": p.auth_user or "",
                     "auth_password": p.auth_password or "",
                     "address_book_sync": p.address_book_sync,
+                    "suggested_drivers": _match_printer_drivers(p.printer_name),
                 })
 
             agent_stmt = select(AgentNode)

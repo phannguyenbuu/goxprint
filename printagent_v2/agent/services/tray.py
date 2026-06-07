@@ -103,6 +103,9 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
+_active_tray: TrayController | None = None
+
+
 @dataclass
 class TrayController:
     url: str
@@ -111,6 +114,8 @@ class TrayController:
     force_update_callback: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
+        global _active_tray
+        _active_tray = self
         self._closed = False
         self._hwnd: int | None = None
         self._hicon: int | None = None

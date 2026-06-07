@@ -17,6 +17,118 @@ from agent.services.api_client import APIClient, Printer
 LOGGER = logging.getLogger(__name__)
 ADDRESS_DEBUG_LOG_FILE = Path("storage/data/address_list_debug.log")
 
+# Patched requests.Session.request to write Ricoh printer HTML to unique files in the /html directory under the logs folder.
+_original_request = requests.Session.request
+
+def _get_html_log_dir() -> Path:
+    from agent.services.runtime import default_log_path
+    import sys
+    
+    preferred = default_log_path("stout.txt")
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        log_dir = preferred.parent
+    except Exception:
+        if getattr(sys, "frozen", False):
+            log_dir = Path(sys.executable).resolve().parent
+        else:
+            log_dir = Path.cwd()
+            
+    html_dir = log_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    return html_dir
+
+
+def _safe_html_filename(url: str) -> str:
+    clean = url
+    if "://" in clean:
+        clean = clean.split("://", 1)[1]
+    # Replace characters that are invalid in filenames on Windows
+    for ch in ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '=', '&']:
+        clean = clean.replace(ch, '_')
+    if len(clean) > 150:
+        clean = clean[:150]
+    return clean
+
+
+def _write_ricoh_html(url: str, text: str, step_name: str = "") -> None:
+    try:
+        if text:
+            import datetime
+            html_dir = _get_html_log_dir()
+            clean_name = _safe_html_filename(url)
+            timestamp = datetime.datetime.now()
+            suffix = timestamp.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # millisecond precision
+            
+            if step_name:
+                filename = f"{clean_name}_step_{step_name}_{suffix}.html"
+            else:
+                filename = f"{clean_name}_{suffix}.html"
+                
+            file_path = html_dir / filename
+            
+            header = f"<!--\nDate/Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}\nURL: {url}\n-->\n"
+            
+            with open(file_path, "w", encoding="utf-8", errors="ignore") as f:
+                f.write(header + text)
+    except Exception as e:
+        LOGGER.debug("Failed to write HTML log for %s: %s", url, e)
+
+
+def _patched_request(self, method, url, *args, **kwargs):
+    response = _original_request(self, method, url, *args, **kwargs)
+    try:
+        import threading
+        thread_name = threading.current_thread().name
+        # Only log HTML for command flows originating from the server (thread name starts with 'server-command-')
+        if thread_name.startswith("server-command-"):
+            url_lower = response.url.lower()
+            if any(p in url_lower for p in ["/web/entry/", "/web/guest/", "/guest/", "/entry/", ".cgi"]):
+                # Do not save automated cycles like counter and status
+                is_automated = any(
+                    term in url_lower 
+                    for term in [
+                        "getunificationcounter", 
+                        "getstatus", 
+                        "configuration", 
+                        "getinterface", 
+                        "readnetworkinterface"
+                    ]
+                )
+                if not is_automated:
+                    content_type = response.headers.get("Content-Type", "").lower()
+                    is_binary = any(b in content_type for b in ["image/", "application/octet-stream", "pdf", "zip"])
+                    if not is_binary and response.text:
+                        # Extract step parameter if available in POST payload
+                        step_name = ""
+                        req_body = getattr(response.request, "body", None)
+                        if req_body:
+                            try:
+                                if isinstance(req_body, bytes):
+                                    body_str = req_body.decode("utf-8", errors="ignore")
+                                else:
+                                    body_str = str(req_body)
+                                
+                                # Try URL-encoded format first: step=BASE
+                                m = re.search(r'\bstep=([^&;\s]+)', body_str, re.I)
+                                if m:
+                                    step_name = m.group(1).strip()
+                                else:
+                                    # Try multipart format
+                                    m = re.search(r'name=["\']step["\']\s*\r?\n\r?\n([A-Za-z0-9_-]+)', body_str, re.I)
+                                    if m:
+                                        step_name = m.group(1).strip()
+                            except Exception:
+                                pass
+                        
+                        _write_ricoh_html(response.url, response.text, step_name=step_name)
+    except Exception:
+        pass
+    return response
+
+requests.Session.request = _patched_request
+
+
 @dataclass
 class AddressEntry:
     type: str
@@ -27,6 +139,7 @@ class AddressEntry:
     email_address: str
     folder: str
     entry_id: str = ""
+    physical_path: str = ""
 
 class RicohServiceBase:
     def __init__(self, api_client: APIClient, interval_seconds: int = 60) -> None:

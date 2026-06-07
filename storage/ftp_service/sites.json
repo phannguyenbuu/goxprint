@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-29T18:00:42.366321+00:00",
+  "updated_at": "2026-06-07T00:04:06.786209+00:00",
   "sites": [
     {
       "name": "ftp_CRUD_Test_User",
@@ -8,6 +8,14 @@
       "port": 2121,
       "ftp_user": "ftp_ftp_CRUD_Test_User",
       "ftp_password": "",
+      "enabled": true
+    },
+    {
+      "name": "goxprint",
+      "path": "C:\\Users\\nguyenbuu.DESKTOP-TOEFTR1\\AppData\\Local\\Temp\\GoPrinxAgent\\ftp",
+      "port": 2130,
+      "ftp_user": "goxprint",
+      "ftp_password": "goxprint",
       "enabled": true
     }
   ]

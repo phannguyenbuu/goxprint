@@ -190,6 +190,38 @@ class Printer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
 
 
+class ScanEmailAlias(Base):
+    """Maps a full email address to the DOS-style short name used on the copier FTP address book.
+
+    Created/updated each time agent completes an add_scan_email_dest command.
+    Allows the web UI and admin to trace which email owns which copier entry.
+    """
+    __tablename__ = "ScanEmailAlias"
+    __table_args__ = (
+        UniqueConstraint("lead", "printer_id", "short_name", name="uq_scanalias_lead_printer_shortname"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead: Mapped[str] = mapped_column(String(64), index=True)
+    printer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Full email address
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    # DOS-style short name stored on copier (≤ 12 chars)
+    short_name: Mapped[str] = mapped_column(String(32), index=True)
+    # Ricoh address book registration number
+    registration_no: Mapped[str] = mapped_column(String(16), default="")
+    # Display name written to copier
+    entry_name: Mapped[str] = mapped_column(String(64), default="")
+    # FTP connection details
+    ftp_host: Mapped[str] = mapped_column(String(128), default="")
+    ftp_port: Mapped[int] = mapped_column(Integer, default=2121)
+    ftp_url: Mapped[str] = mapped_column(String(512), default="")
+    ftp_upload_url: Mapped[str] = mapped_column(String(512), default="")
+    ftp_upload_path: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+
+
 class DeviceInfor(Base):
     __tablename__ = "DeviceInfor"
     __table_args__ = (
@@ -278,9 +310,11 @@ class PrinterControlCommand(Base):
     driver_model: Mapped[str] = mapped_column(String(128), default="")
     driver_name: Mapped[str] = mapped_column(String(255), default="")
     driver_url: Mapped[str] = mapped_column(Text, default="")
+    command_params: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     error_message: Mapped[str] = mapped_column(Text, default="")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)

@@ -164,6 +164,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     except Exception:
                         pass
                     return resp.text
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, RuntimeError) as stop_exc:
+                LOGGER.error("[RicohWizard] Wizard open stopped immediately for %s: %s", printer.ip, stop_exc)
+                raise
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("[RicohWizard] Wizard open attempt (%s) failed for %s: %s", method, printer.ip, exc)
                 last_error = exc
@@ -194,6 +197,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 candidates.append(("wizard", initial_html))
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("[RicohWizard] _open_wizard exception in _fetch_wim_token for %s: %s", printer.ip, exc)
+            raise
 
         LOGGER.info("[RicohWizard] Found %d candidate HTMLs for token extraction", len(candidates))
         for source, html in candidates:
@@ -216,7 +220,16 @@ class RicohAddressWizardMixin(RicohServiceBase):
         parsed = urlparse(raw if "://" in raw else f"ftp://{raw}")
         host = parsed.hostname or parsed.netloc or ""
         port = int(parsed.port or 21)
+        
         path = parsed.path or "/"
+        try:
+            if hasattr(self, "api_client") and self.api_client is not None and hasattr(self.api_client, "config"):
+                path_override = self.api_client.config.get_string("path").strip()
+                if path_override:
+                    path = path_override
+        except Exception as exc:
+            LOGGER.warning("[RicohWizard] Failed to read path override from config: %s", exc)
+
         if not path.startswith("/"):
             path = f"/{path}"
         return host, port, path
@@ -246,6 +259,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
                         reg = re.sub(r"\D", "", entry.registration_no)
                         if reg:
                             occupied.add(int(reg))
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, RuntimeError) as stop_exc:
+            LOGGER.error("[RicohWizard] Failed to fetch existing registration numbers due to critical error: %s", stop_exc)
+            raise
         except Exception as e:
             LOGGER.warning("[RicohWizard] Failed to fetch existing registration numbers: %s", e)
 
@@ -261,20 +277,53 @@ class RicohAddressWizardMixin(RicohServiceBase):
             
         LOGGER.info("[RicohWizard] Found next vacant registration number: %05d", vacant)
         return f"{vacant:05d}"
-
-
-
     @staticmethod
     def _extract_created_registration_no(html: str) -> str:
+        """Extract the registration number that Ricoh assigned to the newly created entry.
+
+        Ricoh firmwares return the confirmed entry index in various HTML formats:
+        - As a <span> with id='span_entryIndexIn'
+        - As a hidden/display <input name='entryIndexIn'>
+        - Inline text inside a <td> labelled with entryIndexIn
+        - As part of a JS variable assignment
+        We try all known patterns before giving up.
+        """
         patterns = [
-            r'span_entryIndexIn">(\d{1,10})<',
+            # Explicit span with id
+            r'id=["\']?span_entryIndexIn["\']?[^>]*>\s*(\d{1,10})\s*<',
+            r'span_entryIndexIn["\']?\s*>\s*(\d{1,10})\s*<',
+            # Hidden / display input field (exact name match)
+            r'<input[^>]+name=["\']entryIndexIn["\'][^>]+value=["\']([\d]{1,10})["\']',
+            r'<input[^>]+value=["\']([\d]{1,10})["\'][^>]+name=["\']entryIndexIn["\']',
+            # JS variable or inline text assignment
+            r'entryIndexIn["\']?\s*[=:,]\s*["\']?(\d{1,10})["\']?',
+            # Generic: any element whose text content is a 1-5 digit number near entryIndexIn
+            r'entryIndexIn[^<>]*?>\s*(\d{1,10})\s*<',
+            # Value attribute anywhere near the text entryIndex
+            r'entryIndex[^>]*value=["\']([\d]{1,10})["\']',
+            # Broader fallback – any td/span/div right after the label row
+            r'<td[^>]*>\s*(\d{1,5})\s*</td>\s*</tr>\s*<tr[^>]*>\s*<td[^>]*>[^<]*(?:Address|Entry|Number)',
+            # Original patterns kept as final fallback
             r'name="entryIndexIn"\s+value="(\d{1,10})"',
-            r'entryIndexIn[">=]\s*(\d{1,10})',
+            r'entryIndexIn[">= ]\s*(\d{1,10})',
         ]
         for pattern in patterns:
             match = re.search(pattern, html, re.I | re.S)
             if match:
-                return match.group(1).zfill(5)[-5:]
+                val = re.sub(r'\D', '', match.group(1))
+                if val:
+                    return val.zfill(5)[-5:]
+        
+        # Log failure if nothing found for debugging
+        try:
+            import os
+            debug_dir = os.path.join("storage", "logs")
+            os.makedirs(debug_dir, exist_ok=True)
+            with open(os.path.join(debug_dir, "last_confirm_html.html"), "w", encoding="utf-8") as f:
+                f.write(html)
+        except Exception:
+            pass
+            
         return ""
 
     def _verify_address_entry(
@@ -284,18 +333,33 @@ class RicohAddressWizardMixin(RicohServiceBase):
         registration_no: str,
         name: str,
         folder: str,
-    ) -> bool:
+    ) -> str | None:
         candidates: list[Any] = []
+        success = False
+        last_exc: Exception | None = None
         try:
             raw = self.get_address_list_ajax_with_client(session, printer)
             candidates.extend(self.parse_ajax_address_list(raw))
+            success = True
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, RuntimeError) as stop_exc:
+            LOGGER.error("[RicohWizard] get_address_list_ajax failed during verification due to critical error: %s", stop_exc)
+            raise
         except Exception as e:  # noqa: BLE001
             LOGGER.warning("[RicohWizard] get_address_list_ajax failed during verification: %s", e)
+            last_exc = e
         try:
             raw = self.read_address_list_with_client(session, printer)
             candidates.extend(self.parse_address_list(raw))
+            success = True
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, RuntimeError) as stop_exc:
+            LOGGER.error("[RicohWizard] read_address_list failed during verification due to critical error: %s", stop_exc)
+            raise
         except Exception as e:  # noqa: BLE001
             LOGGER.warning("[RicohWizard] read_address_list failed during verification: %s", e)
+            last_exc = e
+
+        if not success and last_exc is not None:
+            raise last_exc
 
         seen_ids: set[tuple[str, str, str]] = set()
         normalized_name = self._clean_text(name).lower()
@@ -320,21 +384,23 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 return False
             if act == exp:
                 return True
-            if len(act) >= 20 and exp.startswith(act):
+            # Ricoh display name limits to 16 or 20 characters, so long emails will be truncated
+            # We allow prefix matching if the actual name has at least 8 characters
+            if len(act) >= 8 and exp.startswith(act):
                 return True
             if "@" in exp:
                 username = exp.split("@")[0]
-                if act == username:
+                if act == username or (len(act) >= 5 and username.startswith(act)):
                     return True
             if "@" in act:
                 username = act.split("@")[0]
-                if exp == username:
+                if exp == username or (len(exp) >= 5 and username.startswith(exp)):
                     return True
             return False
 
         expected_host = extract_host(normalized_folder)
         
-        verified = False
+        verified_reg: str | None = None
         for entry in candidates:
             reg = self._normalize_registration_no(entry.registration_no)
             key = (reg, self._clean_text(entry.name).lower(), self._clean_text(entry.folder).lower())
@@ -345,12 +411,12 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 if normalized_name:
                     actual_name = self._clean_text(entry.name).lower()
                     if names_match(actual_name, normalized_name):
-                        verified = True
+                        verified_reg = reg
                         break
                     else:
                         LOGGER.warning("[RicohWizard] Reg no matches %s, but name '%s' does not match expected '%s'", reg, entry.name, name)
                 else:
-                    verified = True
+                    verified_reg = reg
                     break
             if normalized_name:
                 actual_name = self._clean_text(entry.name).lower()
@@ -360,10 +426,10 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     if (not normalized_folder or 
                         normalized_folder == actual_folder or 
                         (expected_host and expected_host == actual_host)):
-                        verified = True
+                        verified_reg = reg
                         break
 
-        if not verified:
+        if not verified_reg:
             # Write detailed debug log of verification failure to Dropbox for easy sync
             try:
                 import os
@@ -387,7 +453,8 @@ class RicohAddressWizardMixin(RicohServiceBase):
             except Exception as log_exc:
                 LOGGER.warning("[RicohWizard] Failed to write verification failure log: %s", log_exc)
                 
-        return verified
+        self._last_verification_candidates = candidates
+        return verified_reg
 
     def create_address_user_wizard(
         self,
@@ -436,17 +503,17 @@ class RicohAddressWizardMixin(RicohServiceBase):
         )
         fields = dict(fields or {})
 
-        wim_token, wim_source = self._fetch_wim_token(session, printer)
-        if not wim_token:
-            LOGGER.error("[RicohWizard] Token not found for IP: %s", printer.ip)
-            raise RuntimeError("Ricoh wizard token not found")
-        LOGGER.info("[RicohWizard] Ricoh wizard token source: ip=%s source=%s, token=%s...", printer.ip, wim_source or "unknown", wim_token[:8])
-
         registration_no = self._normalize_registration_no(desired_registration_no or "")
         if not registration_no:
             LOGGER.info("[RicohWizard] Registration no not provided, calculating next registration no...")
             registration_no = self._next_registration_no(session, printer)
         LOGGER.info("[RicohWizard] Using registration number: %s", registration_no)
+
+        wim_token, wim_source = self._fetch_wim_token(session, printer)
+        if not wim_token:
+            LOGGER.error("[RicohWizard] Token not found for IP: %s", printer.ip)
+            raise RuntimeError("Ricoh wizard token not found")
+        LOGGER.info("[RicohWizard] Ricoh wizard token source: ip=%s source=%s, token=%s...", printer.ip, wim_source or "unknown", wim_token[:8])
 
         entry_display_name = self._clean_text(
             self._field_text(fields, "entryDisplayNameIn", "entryDisplayName", default=name)
@@ -505,6 +572,11 @@ class RicohAddressWizardMixin(RicohServiceBase):
                     "folderPasswordConfirm",
                     default="",
                 )
+            if not folder_password:
+                folder_auth_user = ""
+
+            import base64
+            encoded_password = base64.b64encode(folder_password.encode("utf-8")).decode("utf-8") if folder_password else ""
 
             folder_items: list[tuple[str, str]] = [
                 ("mode", "ADDUSER"),
@@ -515,10 +587,10 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 ("folderServerNameIn", folder_server_name),
                 ("folderPathNameIn", folder_path),
                 ("folderAuthUserNameIn", folder_auth_user),
-                ("wk_folderPasswordIn", folder_password),
-                ("folderPasswordIn", folder_password),
-                ("wk_folderPasswordConfirmIn", folder_password),
-                ("folderPasswordConfirmIn", folder_password),
+                ("wk_folderPasswordIn", ""),
+                ("folderPasswordIn", encoded_password),
+                ("wk_folderPasswordConfirmIn", ""),
+                ("folderPasswordConfirmIn", encoded_password),
             ]
             LOGGER.info("[RicohWizard] Submitting FOLDER step...")
             folder_html = self._post_wizard_step(session, printer, folder_items)
@@ -536,8 +608,29 @@ class RicohAddressWizardMixin(RicohServiceBase):
         ])
         LOGGER.info("[RicohWizard] Submitting CONFIRM step...")
         confirm_html = self._post_wizard_step(session, printer, confirm_items)
-        created_registration_no = self._extract_created_registration_no(confirm_html) or registration_no
-        LOGGER.info("[RicohWizard] CONFIRM step complete. Created registration no: %s", created_registration_no)
+        extracted_no = self._extract_created_registration_no(confirm_html)
+        if extracted_no:
+            created_registration_no = extracted_no
+            LOGGER.info("[RicohWizard] CONFIRM step complete. Extracted registration_no=%s from HTML.", created_registration_no)
+        else:
+            created_registration_no = registration_no
+            LOGGER.warning(
+                "[RicohWizard] CONFIRM step complete but could NOT extract registration_no from HTML. "
+                "Falling back to pre-calculated no=%s. HTML snippet: %s",
+                created_registration_no,
+                (confirm_html or "")[:500].replace("\n", " "),
+            )
+            # Save full CONFIRM HTML for offline debugging on this PC
+            try:
+                import os as _os
+                _debug_dir = _os.path.join("storage", "logs")
+                _os.makedirs(_debug_dir, exist_ok=True)
+                _debug_path = _os.path.join(_debug_dir, f"last_step_CONFIRM_debug_{printer.ip.replace('.', '_')}.html")
+                with open(_debug_path, "w", encoding="utf-8") as _f:
+                    _f.write(confirm_html or "")
+                LOGGER.info("[RicohWizard] Saved CONFIRM HTML to %s for debugging.", _debug_path)
+            except Exception as _save_exc:
+                LOGGER.debug("[RicohWizard] Failed to save CONFIRM HTML debug file: %s", _save_exc)
 
         # Simulate clicking "To Address List" / "Back" to cleanly commit the wizard session and return to the main list
         try:
@@ -547,19 +640,35 @@ class RicohAddressWizardMixin(RicohServiceBase):
         except Exception as list_exc:
             LOGGER.debug("[RicohWizard] Failed to load address list after wizard CONFIRM: %s", list_exc)
 
-        verified = False
+        # Reset and re-login to commit transaction on copier before verification
+        try:
+            LOGGER.info("[RicohWizard] Resetting session and logging in again to commit transaction...")
+            self._reset_web_session(session, printer)
+            self._login(session, printer)
+        except Exception as reset_exc:
+            LOGGER.warning("[RicohWizard] Failed to reset/re-login session before verification: %s", reset_exc)
+
+        # Give copier extra time to commit new entry to address book flash storage
+        LOGGER.info("[RicohWizard] Waiting 3s for copier to commit entry before verification...")
+        time.sleep(3.0)
+
+        verified_reg_no = None
         for attempt in range(4):
             if attempt > 0:
-                time.sleep(1.0)
+                LOGGER.info("[RicohWizard] Waiting 3s before retry verify attempt %d/4...", attempt + 1)
+                time.sleep(3.0)
             LOGGER.info("[RicohWizard] Verifying created entry on printer (attempt %d/4)...", attempt + 1)
-            verified = self._verify_address_entry(session, printer, created_registration_no, name, folder)
-            if verified:
+            verified_reg_no = self._verify_address_entry(session, printer, created_registration_no, name, folder)
+            if verified_reg_no:
                 break
-        if not verified:
+        if not verified_reg_no:
             LOGGER.error("[RicohWizard] Verification failed after creation for registration_no=%s, name=%s", created_registration_no, name)
+            candidates = getattr(self, "_last_verification_candidates", [])
+            candidates_str = ", ".join([f"(reg={c.registration_no}, name={c.name}, folder={c.folder})" for c in candidates])
             raise RuntimeError(
-                f"Ricoh address entry not verified after create: registration_no={created_registration_no} name={name}"
+                f"Ricoh address entry not verified after create: registration_no={created_registration_no} name={name}. Found candidates: [{candidates_str}]"
             )
+        created_registration_no = verified_reg_no
         LOGGER.info("[RicohWizard] Verification successful for registration_no=%s", created_registration_no)
 
         if created_registration_no.isdigit():

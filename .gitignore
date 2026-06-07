@@ -9,6 +9,9 @@ printagent_v2/.env
 printagent_v2/*.log
 printagent_v2/.build-venv/
 printagent_v2/agent_core.zip
+printagent_v2/scratch/
+printagent_v2/scratch_*
+printagent_v2/vps_journal_dump.txt
 
 # general ignores
 .env

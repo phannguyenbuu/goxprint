@@ -296,6 +296,17 @@ def load_dynamic_scripts() -> None:
         logging.warning("Failed to create scripts directory %s: %s", folder, exc)
         return
 
+    # Clean up any legacy scripts once and for all at startup before loading
+    legacy_files = ["scan_ricoh.py", "ricoh_wizard.py", "ricoh_address_book.py", "ricoh_web_scan.py"]
+    for name in legacy_files:
+        fpath = folder / name
+        if fpath.exists():
+            try:
+                fpath.unlink()
+                logging.info("Cleaned up legacy script remnant: %s", name)
+            except Exception as e:
+                logging.warning("Failed to clean legacy script remnant %s at startup: %s", name, e)
+
     folder_str = str(folder.resolve())
     if folder_str not in sys.path:
         sys.path.insert(0, folder_str)
@@ -305,6 +316,9 @@ def load_dynamic_scripts() -> None:
         try:
             logging.info("Compiling and executing dynamic script: %s", file_path)
             code_bytes = file_path.read_bytes()
+            if not code_bytes.strip():
+                logging.info("Skipping empty dynamic script: %s", file_path.name)
+                continue
             code = compile(code_bytes, str(file_path), "exec")
             script_globals = {**globals(), "__name__": file_path.stem, "__file__": str(file_path)}
             exec(code, script_globals)

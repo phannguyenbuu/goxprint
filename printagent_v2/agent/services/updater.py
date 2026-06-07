@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "1.4.15"
+DEFAULT_APP_VERSION = "1.4.63"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -365,26 +365,33 @@ class AutoUpdater:
             relaunch_command = subprocess.list2cmdline([str(current_binary), *self._current_args])
             helper_lines = [
                 "@echo off",
-                "rem Wait for the main agent process to exit completely",
-                "ping 127.0.0.1 -n 6 > nul",
-                "",
-                ":retry",
-                f'if exist "{str(backup_binary)}" del /f /q "{str(backup_binary)}"',
+                "rem Rename current running binary to backup immediately",
+                ":retry_rename",
                 f'if exist "{str(current_binary)}" (',
                 f'    rename "{str(current_binary)}" "{backup_binary.name}"',
                 "    if errorlevel 1 (",
                 "        ping 127.0.0.1 -n 2 > nul",
-                "        goto retry",
+                "        goto retry_rename",
                 "    )",
                 ")",
                 f'if exist "{str(staged_binary)}" (',
                 f'    rename "{str(staged_binary)}" "{current_binary.name}"',
                 "    if errorlevel 1 (",
-                f'        if exist "{str(backup_binary)}" rename "{str(backup_binary)}" "{current_binary.name}"',
                 "        ping 127.0.0.1 -n 2 > nul",
-                "        goto retry",
+                "        goto retry_rename",
                 "    )",
                 ")",
+                "",
+                ":wait_exit",
+                "rem Wait for the old process to fully release the file lock on backup",
+                f'if exist "{str(backup_binary)}" (',
+                f'    del /f /q "{str(backup_binary)}" >nul 2>&1',
+                f'    if exist "{str(backup_binary)}" (',
+                "        ping 127.0.0.1 -n 2 > nul",
+                "        goto wait_exit",
+                "    )",
+                ")",
+                "",
                 "rem Launch the new agent completely detached in the background",
                 f'start /B "" {relaunch_command}',
                 "rem Self delete this batch script cleanly",

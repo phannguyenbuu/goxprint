@@ -51,6 +51,7 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
             api_markdown=markdown_text,
         )
 
+    @app.get("/lan-network")
     @app.get("/lan-sites")
     def lan_sites_page() -> Any:
         return render_template("lan_sites.html", active_tab="lan_sites", page_title="Lan Network")

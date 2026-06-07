@@ -21,9 +21,9 @@ from agent.modules.toshiba.service import ToshibaService
 from agent.services.api_client import APIClient, Printer
 from agent.services.scan_drop import ensure_active_drop_folder
 from agent.services.updater import AutoUpdater
-from agent.services.runtime import get_machine_agent_uid, no_window_subprocess_kwargs
+from agent.services.runtime import get_machine_agent_uid, no_window_subprocess_kwargs, user_temp_root
 from agent.utils.scanner import SubnetScanner
-from agent.services.ftp_store import normalize_site_name
+from agent.services.ftp_store import load_config, find_site_by_port, find_site_by_name, normalize_site_name
 
 
 LOGGER = logging.getLogger(__name__)
@@ -104,6 +104,7 @@ class PollingBridge:
         self._load_scan_upload_state()
         self._recent_commands = []
         self._recent_commands_lock = threading.Lock()
+        self._update_staged = False
 
     @staticmethod
     def _printer_type(value: str) -> str:
@@ -819,14 +820,22 @@ Get-NetNeighbor -AddressFamily IPv4 |
             
         # Clean up local scripts that are not present in remote_scripts
         updated_any = False
-        try:
-            for item in scripts_dir.glob("*.py"):
-                if item.name not in remote_scripts:
+        for item in scripts_dir.glob("*.py"):
+            if item.name not in remote_scripts:
+                try:
                     LOGGER.info("Deleting obsolete local script: %s", item.name)
                     item.unlink()
                     updated_any = True
-        except Exception as del_exc:
-            LOGGER.warning("Failed to clean obsolete scripts: %s", del_exc)
+                except Exception as del_exc:
+                    LOGGER.warning("Failed to delete obsolete script %s: %s", item.name, del_exc)
+                    # If file is locked, try to truncate it to 0 bytes so it becomes empty/inactive
+                    try:
+                        with open(item, "w") as f:
+                            pass
+                        LOGGER.info("Successfully truncated obsolete local script: %s", item.name)
+                        updated_any = True
+                    except Exception as trunc_exc:
+                        LOGGER.warning("Failed to truncate obsolete script %s: %s", item.name, trunc_exc)
 
         base_url = self._polling_base_url()
         if not base_url:
@@ -1077,6 +1086,16 @@ if ($node) {{ $node }}
             self._release_last_error = message
             LOGGER.warning("Agent release check failed: %s", message)
         if restart_required:
+            self._update_staged = True
+            # Wait for all currently running commands to finish before shutting down
+            while True:
+                with self._running_commands_lock:
+                    running_count = len(self._running_commands)
+                if running_count == 0:
+                    break
+                LOGGER.info("Delaying agent restart for update: waiting for %d running copier commands to finish...", running_count)
+                time.sleep(1.0)
+
             if self._restart_callback is not None:
                 try:
                     self._restart_callback()
@@ -1295,66 +1314,92 @@ if ($node) {{ $node }}
             LOGGER.warning("Failed to list FTP sites: %s", exc)
             current_sites = []
 
-        # 2. Determine target sites
-        target_site_names = set()
-        target_ports = set()
-        
-        if owned_emails:
-            for em in owned_emails:
-                email = str(em.get("email") or "").strip()
-                port = int(em.get("email_number") or 0)
-                if not email or port <= 0:
-                    continue
-                site_name = normalize_site_name(f"gox_scan_{email}")
-                target_site_names.add(site_name)
-                target_ports.add(port)
-
-                # Ensure local directory C:/Scangox/{email} exists
-                local_dir = Path("C:/Scangox") / email
-                try:
-                    if not local_dir.exists():
-                        local_dir.mkdir(parents=True, exist_ok=True)
-                        LOGGER.info("Created scan address folder: %s", local_dir)
-                except Exception as exc:
-                    LOGGER.error("Failed to create scan folder %s: %s", local_dir, exc)
-                
-                # Check if this FTP site is already configured and matches
-                existing = next((s for s in current_sites if str(s.get("name")) == site_name), None)
-                if existing:
-                    existing_port = int(existing.get("port") or 0)
-                    existing_path = str(existing.get("path") or "")
-                    if existing_port != port or Path(existing_path).resolve() != local_dir.resolve():
-                        LOGGER.info("FTP site %s matches but has different configuration (port %s->%s, path %s->%s). Updating.",
-                                    site_name, existing_port, port, existing_path, local_dir)
-                        try:
-                            share_manager.update_ftp_site(
-                                site_name,
-                                local_path=local_dir,
-                                port=port
-                            )
-                        except Exception as exc:
-                            LOGGER.warning("Failed to update FTP site %s: %s", site_name, exc)
-                else:
-                    LOGGER.info("Creating new FTP site %s on port %d pointing to %s", site_name, port, local_dir)
-                    try:
-                        share_manager.create_ftp_site(
-                            site_name=site_name,
-                            local_path=local_dir,
-                            port=port
-                        )
-                    except Exception as exc:
-                        LOGGER.warning("Failed to create FTP site %s: %s", site_name, exc)
-
-        # 3. Clean up any FTP sites starting with "gox_scan_" that are no longer owned by this agent
+        # 1.5. Clean up any obsolete FTP sites starting with "gox_scan_" first
+        # so that their ports are freed in the configuration before we search for a new port.
         for site in current_sites:
             name = str(site.get("name") or "")
             if name.startswith("gox_scan_"):
-                if name not in target_site_names:
-                    LOGGER.info("Deleting obsolete/inactive FTP site: %s", name)
+                LOGGER.info("Deleting obsolete/inactive FTP site: %s", name)
+                try:
+                    share_manager.delete_ftp_site(name)
+                except Exception as exc:
+                    LOGGER.warning("Failed to delete FTP site %s: %s", name, exc)
+
+        # 2. Get or select single FTP port for 'goxprint'
+        ftp_name = "goxprint"
+        config_data = load_config()
+        
+        config_port = None
+        val = self._config.get_string("ftp_port")
+        if val and val.isdigit():
+            config_port = int(val)
+                
+        if config_port is not None:
+            actual_port = config_port
+        else:
+            # Scan starting from 2130
+            actual_port = 2130
+            while True:
+                existing_by_port = find_site_by_port(config_data, actual_port)
+                is_assigned_elsewhere = False
+                if existing_by_port:
+                    if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                        is_assigned_elsewhere = True
+                
+                is_physically_bound = False
+                if not is_assigned_elsewhere:
+                    import socket
                     try:
-                        share_manager.delete_ftp_site(name)
-                    except Exception as exc:
-                        LOGGER.warning("Failed to delete FTP site %s: %s", name, exc)
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.bind(('0.0.0.0', actual_port))
+                    except Exception:
+                        is_physically_bound = True
+                
+                if not is_assigned_elsewhere and not is_physically_bound:
+                    break
+                actual_port += 1
+            
+            # Save port to config
+            try:
+                self._config.set_value("ftp_port", actual_port)
+            except Exception:
+                pass
+
+        # Ensure local directory %TEMP%/GoPrinxAgent/ftp exists
+        local_dir = user_temp_root() / "ftp"
+        try:
+            if not local_dir.exists():
+                local_dir.mkdir(parents=True, exist_ok=True)
+                LOGGER.info("Created scan folder: %s", local_dir)
+        except Exception as exc:
+            LOGGER.error("Failed to create scan folder %s: %s", local_dir, exc)
+
+        # 3. Ensure single 'goxprint' FTP site exists and points to local_dir
+        existing = find_site_by_name(config_data, ftp_name)
+        if existing:
+            existing_port = int(existing.get("port") or 0)
+            existing_path = str(existing.get("path") or "")
+            if existing_port != actual_port or Path(existing_path).resolve() != local_dir.resolve():
+                LOGGER.info("FTP site %s matches but has different configuration (port %s->%s, path %s->%s). Updating.",
+                            ftp_name, existing_port, actual_port, existing_path, local_dir)
+                try:
+                    share_manager.update_ftp_site(
+                        ftp_name,
+                        local_path=local_dir,
+                        port=actual_port
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Failed to update FTP site %s: %s", ftp_name, exc)
+        else:
+            LOGGER.info("Creating new FTP site %s on port %d pointing to %s", ftp_name, actual_port, local_dir)
+            try:
+                share_manager.create_ftp_site(
+                    site_name=ftp_name,
+                    local_path=local_dir,
+                    port=actual_port
+                )
+            except Exception as exc:
+                LOGGER.warning("Failed to create FTP site %s: %s", ftp_name, exc)
 
     @staticmethod
     def _safe_int(value: object) -> int:
@@ -1579,14 +1624,29 @@ if ($node) {{ $node }}
             )
             raise
 
-    def _post_control_result(self, command_id: int, ok: bool, error: str = "", address_book_data: dict[str, Any] | None = None) -> None:
+    def _post_control_result(
+        self,
+        command_id: int,
+        ok: bool,
+        error: str = "",
+        address_book_data: dict[str, Any] | None = None,
+        ftp_host: str = "",
+        ftp_port: int | None = None,
+        ftp_url: str = "",
+        ftp_upload_url: str = "",
+        ftp_upload_path: str = "",
+        short_name: str = "",
+        registration_no: str = "",
+        entry_name: str = "",
+        source_email: str = "",
+    ) -> None:
         base_url = self._polling_base_url()
         if not base_url:
             return
         token = self._config.get_string("polling.token").strip()
         lead = self._config.get_string("polling.lead").strip()
         url = f"{base_url}/api/polling/control-result"
-        payload = {
+        payload: dict[str, Any] = {
             "lead": lead,
             "command_id": int(command_id),
             "ok": bool(ok),
@@ -1594,9 +1654,97 @@ if ($node) {{ $node }}
         }
         if address_book_data:
             payload["address_book_data"] = address_book_data
+        # Enriched FTP metadata so VPS can persist accurate folder details
+        if ftp_host:
+            payload["ftp_host"] = str(ftp_host)
+        if ftp_port is not None:
+            payload["ftp_port"] = int(ftp_port)
+        if ftp_url:
+            payload["ftp_url"] = str(ftp_url)
+        if ftp_upload_url:
+            payload["ftp_upload_url"] = str(ftp_upload_url)
+        if ftp_upload_path:
+            payload["ftp_upload_path"] = str(ftp_upload_path)
+        if short_name:
+            payload["short_name"] = str(short_name)
+        if registration_no:
+            payload["registration_no"] = str(registration_no)
+        if entry_name:
+            payload["entry_name"] = str(entry_name)
+        if source_email:
+            payload["source_email"] = str(source_email)
         headers = {"Content-Type": "application/json", "X-Lead-Token": token}
         response = self._api_client.session.post(url, json=payload, headers=headers, timeout=20)
         response.raise_for_status()
+
+    def _make_ftp_short_name(self, email: str) -> str:
+        """Generate a short name from an email prefix using config helper."""
+        return self._config.get_or_create_short_name(email)
+
+    def _record_ftp_name_mapping(self, short_name: str, email: str) -> None:
+        """Persist short_name→email into settings.json using config helper."""
+        self._config.record_ftp_name_mapping(short_name, email)
+
+    def _enrich_address_book_entry(
+        self,
+        addr_result: dict[str, Any],
+        registration_no: str,
+        ftp_host: str,
+        ftp_port: int,
+        ftp_url: str,
+        ftp_path: str,
+    ) -> None:
+        """Overwrite folder fields for the newly created entry in addr_result.
+
+        Ricoh AJAX often returns an empty folder string for a newly registered
+        FTP destination — this patches the entry in-place using the exact data
+        the wizard used, so VPS can store accurate folder_port_no / protocol.
+        """
+        try:
+            address_list = addr_result.get("address_list")
+            if not isinstance(address_list, list):
+                return
+            norm_reg = registration_no.lstrip("0") if registration_no else ""
+            for entry in address_list:
+                if not isinstance(entry, dict):
+                    continue
+                entry_reg = str(entry.get("registration_no", "") or "").lstrip("0")
+                if entry_reg and entry_reg == norm_reg:
+                    # Patch folder fields
+                    entry["folder"] = ftp_url
+                    entry["folder_path"] = ftp_url
+                    LOGGER.info(
+                        "[PollingBridge] Enriched address entry reg_no=%s with ftp_host=%s ftp_port=%s path=%s",
+                        registration_no, ftp_host, ftp_port, ftp_path,
+                    )
+                    return
+            LOGGER.debug(
+                "[PollingBridge] _enrich_address_book_entry: reg_no=%s not found in %d entries",
+                registration_no, len(address_list),
+            )
+        except Exception as exc:
+            LOGGER.warning("[PollingBridge] _enrich_address_book_entry failed: %s", exc)
+
+    def _post_command_ack(self, command_id: int) -> None:
+
+        base_url = self._polling_base_url()
+        if not base_url:
+            return
+        token = self._config.get_string("polling.token").strip()
+        lead = self._config.get_string("polling.lead").strip()
+        url = f"{base_url}/api/polling/command-ack"
+        payload = {
+            "lead": lead,
+            "command_id": int(command_id),
+        }
+        headers = {"Content-Type": "application/json", "X-Lead-Token": token}
+        try:
+            response = self._api_client.session.post(url, json=payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            LOGGER.info("[PollingBridge] Sent command ACK for ID=%s", command_id)
+        except Exception as ack_exc:
+            LOGGER.warning("[PollingBridge] Failed to send command ACK for ID=%s: %s", command_id, ack_exc)
+
     def _resolve_ftp_target_printer(self, command: FtpControlCommand, site_name: str) -> tuple[Printer, str]:
         fallback = Printer(
             id=0,
@@ -1676,6 +1824,7 @@ if ($node) {{ $node }}
                 ftp_port=port,
                 ftp_user=command.ftp_user,
                 ftp_password=command.ftp_password,
+                email=site_name if "@" in site_name else "",
             )
         elif action == "update":
             result = share_manager.update_ftp_site(
@@ -1692,6 +1841,8 @@ if ($node) {{ $node }}
             raise RuntimeError(f"Unsupported ftp action: {action}")
         if not bool(result.get("ok", False)):
             raise RuntimeError(str(result.get("error", "FTP command failed")) or "FTP command failed")
+        if action == "create" and not result.get("printer_setup_ok", False):
+            raise RuntimeError(result.get("printer_error") or "Printer setup failed")
         warning = str(result.get("warning", "") or "").strip()
         if warning:
             result_warning_parts.append(warning)
@@ -1718,13 +1869,133 @@ if ($node) {{ $node }}
                         c["error"] = error
                     break
 
+    def _show_command_popup(self, printer: Printer, command_type: str, command: dict[str, object]) -> None:
+        import json as _json
+        import tkinter as tk
+        from tkinter import messagebox
+        import threading
+
+        cmd_translations = {
+            "install_driver": "Cài đặt Driver",
+            "fetch_address_book": "Lấy danh sách Address Book (Lấy danh sách người dùng)",
+            "delete_scan_email_dest": "Xóa đích quét Email (Xóa người dùng)",
+            "add_scan_email_dest": "Thêm đích quét Email (Thêm người dùng)"
+        }
+        cmd_vn = cmd_translations.get(command_type, command_type)
+
+        params = {}
+        try:
+            params_str = str(command.get("command_params", "") or "").strip()
+            if params_str:
+                params = _json.loads(params_str)
+        except Exception:
+            pass
+
+        msg_lines = [
+            f"Lệnh: {cmd_vn}",
+            f"Máy in: {printer.name} ({printer.ip})"
+        ]
+
+        if command_type == "add_scan_email_dest" and "email" in params:
+            msg_lines.append(f"Email thêm: {params['email']}")
+        elif command_type == "delete_scan_email_dest" and "registration_no" in params:
+            msg_lines.append(f"Registration No. xóa: {params['registration_no']}")
+            if "entry_id" in params and params["entry_id"]:
+                msg_lines.append(f"Entry ID: {params['entry_id']}")
+        elif command_type == "install_driver":
+            if "driver_name" in params:
+                msg_lines.append(f"Driver Name: {params['driver_name']}")
+
+        message = "\n".join(msg_lines)
+        title = "Thông báo Lệnh từ Server"
+
+        # Try balloon notification first
+        try:
+            from agent.services.tray import _active_tray
+            if _active_tray is not None:
+                _active_tray._show_balloon(title, message)
+        except Exception as tray_exc:
+            LOGGER.debug("Failed to show tray balloon: %s", tray_exc)
+
+        # Safely show Tkinter premium auto-closing toast notification if GUI window is open
+        try:
+            from agent.services.gui import _gui_root
+            if _gui_root is not None:
+                def _show_toplevel():
+                    try:
+                        import tkinter as tk
+                        # Create Toplevel window instead of new tk.Tk()
+                        toast = tk.Toplevel(_gui_root)
+                        toast.withdraw()  # Hide initially to calculate layout
+                        toast.overrideredirect(True)  # Borderless window
+                        toast.attributes("-topmost", True)
+                        toast.attributes("-alpha", 0.95)  # Soft alpha transparency
+
+                        bg_color = "#1e293b"  # Slate dark 800
+                        text_color = "#f8fafc"  # Slate light 50
+                        accent_color = "#3b82f6"  # Blue 500
+
+                        frame = tk.Frame(toast, bg=bg_color, highlightbackground=accent_color, highlightthickness=2, bd=0)
+                        frame.pack(fill="both", expand=True)
+
+                        # Title block
+                        lbl_title = tk.Label(
+                            frame,
+                            text="GoPrinx - Lệnh từ Server",
+                            font=("Segoe UI", 10, "bold"),
+                            bg=bg_color,
+                            fg=accent_color,
+                            anchor="w"
+                        )
+                        lbl_title.pack(padx=14, pady=(10, 4), fill="x")
+
+                        # Message block
+                        lbl_msg = tk.Label(
+                            frame,
+                            text=message,
+                            font=("Segoe UI", 9),
+                            bg=bg_color,
+                            fg=text_color,
+                            justify="left",
+                            anchor="w"
+                        )
+                        lbl_msg.pack(padx=14, pady=(0, 10), fill="x")
+
+                        toast.update_idletasks()
+                        w = max(330, lbl_msg.winfo_reqwidth() + 28)
+                        h = lbl_title.winfo_reqheight() + lbl_msg.winfo_reqheight() + 24
+
+                        # Position bottom-right corner
+                        screen_width = toast.winfo_screenwidth()
+                        screen_height = toast.winfo_screenheight()
+                        x = screen_width - w - 20
+                        y = screen_height - h - 60
+
+                        toast.geometry(f"{w}x{h}+{x}+{y}")
+                        toast.deiconify()  # Show the window
+
+                        # Auto-close after 3.5 seconds
+                        toast.after(3500, toast.destroy)
+                    except Exception as tk_exc:
+                        LOGGER.warning("Failed to show Tkinter toast: %s", tk_exc)
+
+                _gui_root.after(0, _show_toplevel)
+        except Exception as gui_exc:
+            LOGGER.warning("Failed to schedule Tkinter toast: %s", gui_exc)
+
     def _apply_command(self, printer: Printer, command: dict[str, object]) -> None:
         command_id = int(command.get("id", 0) or 0)
         desired_enabled = bool(command.get("desired_enabled", True))
         command_type = str(command.get("command_type", "enable_disable")).strip().lower()
         if command_id <= 0:
             return
+        
+        try:
+            self._show_command_popup(printer, command_type, command)
+        except Exception as pop_exc:
+            LOGGER.warning("Failed to invoke command popup: %s", pop_exc)
         self._update_recent_command_status(command_id, "processing")
+        self._post_command_ack(command_id)
         auth_user = str(command.get("auth_user", "") or "").strip()
         auth_password = str(command.get("auth_password", "") or "").strip()
         if auth_user:
@@ -1758,64 +2029,7 @@ if ($node) {{ $node }}
             import socket
             LOGGER.info("[PollingBridge] === START fetch_address_book command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
             try:
-                # 1. On-demand sync of emails first
-                result_dict = {}
-                latest_emails = []
-                try:
-                    base_url = self._polling_base_url()
-                    if base_url:
-                        token = self._config.get_string("polling.token").strip()
-                        lead = self._config.get_string("polling.lead").strip()
-                        lan_uid = printer.lan_uid or getattr(self, "_resolved_lan_uid", "")
-                        headers = {"Accept": "application/json", "X-Lead-Token": token}
-                        url = f"{base_url}/api/lan-emails"
-                        LOGGER.info("[PollingBridge] Fetching latest emails from %s for on-demand reconciliation...", url)
-                        resp = self._api_client.session.get(
-                            url,
-                            params={"lead": lead, "lan_uid": lan_uid, "agent_uid": self._agent_uid},
-                            headers=headers,
-                            timeout=15
-                        )
-                        if resp.ok:
-                            emails_data = resp.json()
-                            latest_emails = emails_data.get("rows", [])
-                            self._emails = latest_emails
-                            if "is_master" in emails_data:
-                                self._is_master = bool(emails_data["is_master"])
-                            LOGGER.info("[PollingBridge] Successfully fetched %d latest emails from server for on-demand reconciliation (is_master=%s).", len(latest_emails), self._is_master)
-                        else:
-                            LOGGER.warning("[PollingBridge] Failed to fetch latest emails from server, status=%s", resp.status_code)
-                except Exception as fetch_exc:
-                    LOGGER.warning("[PollingBridge] Exception fetching latest emails: %s", fetch_exc)
-
-                emails_list = latest_emails or getattr(self, "_emails", None) or []
-                if emails_list:
-                    local_ip = self._resolve_local_ip()
-                    my_hostname = socket.gethostname().strip().lower()
-                    LOGGER.info("[PollingBridge] Processing %d emails for on-demand reconciliation. Hostname: %s, Local IP: %s", len(emails_list), my_hostname, local_ip)
-                    for em in emails_list:
-                        etype = str(em.get("email_type") or "common").strip().lower()
-                        email = str(em.get("email") or "").strip().lower()
-                        port = int(em.get("email_number") or 0)
-                        if not email or port <= 0:
-                            continue
-                        if etype == "common":
-                            # For on-demand reconciliation via command execution, we bypass the strict self._is_master check to ensure immediate synchronization.
-                            result_dict[email] = (local_ip, port)
-                        elif etype == "private":
-                            pc_name = str(em.get("pc_name") or "").strip().lower()
-                            if pc_name == my_hostname:
-                                result_dict[email] = (local_ip, port)
-                LOGGER.info("[PollingBridge] Emails filtered for on-demand reconciliation: %s", list(result_dict.keys()))
-                if result_dict:
-                    try:
-                        LOGGER.info("[PollingBridge] Calling _reconcile_single_printer_address_book for %s...", printer.ip)
-                        reconcile_res = self._reconcile_single_printer_address_book(printer, result_dict)
-                        LOGGER.info("[PollingBridge] _reconcile_single_printer_address_book finished: %s", reconcile_res)
-                    except Exception as rec_exc:
-                        LOGGER.warning("[PollingBridge] On-demand reconciliation failed for printer %s: %s", printer.ip, rec_exc)
-
-                # 2. Fetch the entire address book of the Ricoh machine
+                # Fetch the entire address book of the Ricoh machine (without auto-reconciliation)
                 LOGGER.info("[PollingBridge] Calling process_address_list for %s...", printer.ip)
                 result = self._ricoh_service.process_address_list(printer)
                 LOGGER.info("[PollingBridge] process_address_list returned %d items", len(result.get("address_list", []) if isinstance(result, dict) else []))
@@ -1828,6 +2042,139 @@ if ($node) {{ $node }}
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
                 self._update_recent_command_status(command_id, "failed", str(exc))
                 raise
+            return
+
+        if command_type == "delete_scan_email_dest":
+            import json as _json
+            LOGGER.info("[PollingBridge] === START delete_scan_email_dest command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
+            try:
+                params = {}
+                try:
+                    params_str = str(command.get("command_params", "") or "").strip()
+                    if params_str:
+                        params = _json.loads(params_str)
+                except Exception as parse_exc:
+                    LOGGER.warning("[PollingBridge] Failed to parse command_params: %s", parse_exc)
+
+                reg_no = str(params.get("registration_no", "") or "").strip()
+                entry_id = str(params.get("entry_id", "") or "").strip()
+                if not reg_no:
+                    raise ValueError(f"Missing registration_no in command_params: {params!r}")
+
+                LOGGER.info("[PollingBridge] Deleting scan destination reg_no=%s entry_id=%s on printer=%s", reg_no, entry_id, printer.ip)
+
+                # Delete on copier
+                self._ricoh_service.delete_address_entries(
+                    printer=printer,
+                    registration_numbers=[reg_no],
+                    entry_ids=[entry_id] if entry_id else None,
+                    verify=True,
+                )
+
+                # Fetch address book after delete so UI can refresh
+                addr_result = None
+                try:
+                    addr_result = self._ricoh_service.process_address_list(printer)
+                except Exception as addr_exc:
+                    LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email delete: %s", addr_exc)
+
+                self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=addr_result)
+                self._update_recent_command_status(command_id, "success")
+                LOGGER.info("[PollingBridge] === FINISH delete_scan_email_dest command: ID=%s Success ===", command_id)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("[PollingBridge] Failed to delete email dest for printer %s: %s", printer.ip, exc, exc_info=True)
+                self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                self._update_recent_command_status(command_id, "failed", str(exc))
+            return
+
+
+        if command_type == "add_scan_email_dest":
+            import json as _json
+            LOGGER.info("[PollingBridge] === START add_scan_email_dest command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
+            try:
+                params = {}
+                try:
+                    params_str = str(command.get("command_params", "") or "").strip()
+                    if params_str:
+                        params = _json.loads(params_str)
+                except Exception as parse_exc:
+                    LOGGER.warning("[PollingBridge] Failed to parse command_params: %s", parse_exc)
+
+                email = str(params.get("email", "") or "").strip().lower()
+                if not email or "@" not in email:
+                    raise ValueError(f"Invalid or missing email in command_params: {params!r}")
+
+                # Generate DOS-style short name and store mapping in settings.json
+                short_name = self._make_ftp_short_name(email)
+                LOGGER.info("[PollingBridge] Adding scan destination for email=%s short_name=%s on printer=%s", email, short_name, printer.ip)
+
+                # Create FTP site + register address book entry on copier
+                result = self._ricoh_service.setup_scan_destination(
+                    printer=printer,
+                    username=email,
+                    ftp_site_name=short_name,
+                    email=email,
+                )
+                if not result.get("ok"):
+                    raise RuntimeError(result.get("error") or "setup_scan_destination failed")
+                if not result.get("printer_setup_ok"):
+                    raise RuntimeError(result.get("printer_error") or "Printer setup failed")
+
+                wizard_res = result.get("printer") or {}
+                created_reg_no = str(wizard_res.get("created_registration_no", "") or "")
+                entry_name_val = str(wizard_res.get("entry_name", "") or short_name)
+                ftp_host_val = str(result.get("ftp_host_ip", "") or "")
+                ftp_res = result.get("ftp") or {}
+                ftp_port_val = int(ftp_res.get("port") or result.get("ftp_port") or 2121)
+                ftp_url_val = str(result.get("ftp_url", "") or "")
+                ftp_upload_url_val = str(result.get("ftp_upload_url", "") or ftp_url_val)
+                ftp_upload_path_val = str(result.get("ftp_upload_path", "") or "")
+
+                LOGGER.info(
+                    "[PollingBridge] setup_scan_destination ok for %s: reg_no=%s ftp=%s:%s path=%s",
+                    email, created_reg_no, ftp_host_val, ftp_port_val, ftp_upload_path_val
+                )
+
+                # Fetch address book after add so UI can refresh
+                addr_result = None
+                try:
+                    addr_result = self._ricoh_service.process_address_list(printer)
+                except Exception as addr_exc:
+                    LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email add: %s", addr_exc)
+
+                # Enrich the newly created entry in addr_result with accurate wizard data
+                # (Ricoh AJAX often returns empty folder fields for newly created entries)
+                if addr_result and created_reg_no and ftp_host_val:
+                    self._enrich_address_book_entry(
+                        addr_result,
+                        registration_no=created_reg_no,
+                        ftp_host=ftp_host_val,
+                        ftp_port=ftp_port_val,
+                        ftp_url=ftp_upload_url_val,
+                        ftp_path=ftp_upload_path_val,
+                    )
+
+                self._post_control_result(
+                    command_id=command_id,
+                    ok=True,
+                    error="",
+                    address_book_data=addr_result,
+                    ftp_host=ftp_host_val,
+                    ftp_port=ftp_port_val,
+                    ftp_url=ftp_url_val,
+                    ftp_upload_url=ftp_upload_url_val,
+                    ftp_upload_path=ftp_upload_path_val,
+                    short_name=short_name,
+                    registration_no=created_reg_no,
+                    entry_name=entry_name_val,
+                    source_email=email,
+                )
+                self._update_recent_command_status(command_id, "success")
+                LOGGER.info("[PollingBridge] === FINISH add_scan_email_dest command: ID=%s Success ===", command_id)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("[PollingBridge] Failed to add email dest for printer %s: %s", printer.ip, exc, exc_info=True)
+                self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                self._update_recent_command_status(command_id, "failed", str(exc))
             return
 
         try:
@@ -2099,9 +2446,10 @@ if ($node) {{ $node }}
         LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Starting address book reconciliation for Ricoh copier: %s (IP: %s)", printer.name, printer.ip)
         details = []
         has_error = False
+        session = None
         
         try:
-            # Create an authenticated session to read the address book
+            # Create a single authenticated session to read/write/delete address book entries
             LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Creating authenticated HTTP client...")
             session = self._ricoh_service.create_http_client(printer, authenticated=True)
             
@@ -2117,92 +2465,23 @@ if ($node) {{ $node }}
                 entries = self._ricoh_service.parse_address_list(html)
                 LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] HTML read success, parsed %d entries", len(entries))
 
-            # Close the authenticated session used for reading
-            try:
-                session.close()
-                LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Authenticated session closed.")
-            except Exception as close_exc:
-                LOGGER.warning("[PollingBridge] [_reconcile_single_printer_address_book] Failed to close session: %s", close_exc)
+            # We have the list of current entries. Now compare and sync each email in result_dict!
+            for email, (agent_ip, port) in result_dict.items():
+                expected_folder = f"ftp://{agent_ip}:{port}/"
+                LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Processing email '%s', expected folder: %s", email, expected_folder)
                 
-        except Exception as read_exc:
-            LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to read address book from printer %s: %s", printer.ip, read_exc, exc_info=True)
-            return {
-                "status": "error",
-                "error": f"Failed to read address book: {read_exc}",
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-        # We have the list of current entries. Now compare and sync each email in result_dict!
-        for email, (agent_ip, port) in result_dict.items():
-            expected_folder = f"ftp://{agent_ip}:{port}/"
-            LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Processing email '%s', expected folder: %s", email, expected_folder)
-            
-            # Find a matching entry by email address (case-insensitive)
-            matched_entry = None
-            for e in entries:
-                e_email = getattr(e, "email_address", "") or ""
-                if e_email.strip().lower() == email:
-                    matched_entry = e
-                    break
-            
-            if matched_entry is None:
-                # Missing entry, let's create it!
-                LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Target email not found in address book, creating scan destination entry for %s on printer %s", email, printer.ip)
-                try:
-                    # Lookup FTP credentials from share_manager for this port
-                    ftp_user = ""
-                    ftp_password = ""
-                    try:
-                        share_manager = getattr(self._ricoh_service, "share_manager", None)
-                        if share_manager is not None and hasattr(share_manager, "list_ftp_sites"):
-                            for site in share_manager.list_ftp_sites():
-                                if int(site.get("port", 0) or 0) == port:
-                                    ftp_user = str(site.get("ftp_user", "") or "")
-                                    ftp_password = str(site.get("ftp_password", "") or "")
-                                    break
-                    except Exception as lookup_exc:
-                        LOGGER.warning("[PollingBridge] Failed to lookup FTP credentials for port %d: %s", port, lookup_exc)
-
-                    fields = {"entryTypeIn": "1"}
-                    if ftp_user:
-                        fields["folderAuthUserNameIn"] = ftp_user
-                        fields["folderAuthUserName"] = ftp_user
-                    if ftp_password:
-                        fields["folderPasswordIn"] = ftp_password
-                        fields["wk_folderPasswordIn"] = ftp_password
-                        fields["folderPasswordConfirmIn"] = ftp_password
-                        fields["wk_folderPasswordConfirmIn"] = ftp_password
-
-                    self._ricoh_service.create_address_user_wizard(
-                        printer=printer,
-                        name=email,
-                        email=email,
-                        folder=expected_folder,
-                        user_code="",
-                        fields=fields,
-                    )
-                    details.append({
-                        "email": email,
-                        "action": "create",
-                        "status": "success",
-                        "folder": expected_folder,
-                    })
-                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Successfully created scan destination entry for %s", email)
-                except Exception as create_exc:
-                    LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to create scan destination for %s on %s: %s", email, printer.ip, create_exc, exc_info=True)
-                    details.append({
-                        "email": email,
-                        "action": "create",
-                        "status": "error",
-                        "error": str(create_exc),
-                    })
-                    has_error = True
-            else:
-                # Entry exists, check if destination needs update
-                current_folder = getattr(matched_entry, "folder", "") or ""
-                LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Match found: registration_no=%s, current folder=%s", matched_entry.registration_no, current_folder)
-                if current_folder.strip().lower() != expected_folder.lower():
-                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Folders mismatch! Updating existing scan destination for %s on printer %s to %s", email, printer.ip, expected_folder)
+                # Find a matching entry by email address or name (case-insensitive)
+                matched_entry = None
+                for e in entries:
+                    e_email = getattr(e, "email_address", "") or ""
+                    e_name = getattr(e, "name", "") or ""
+                    if e_email.strip().lower() == email or e_name.strip().lower() == email:
+                        matched_entry = e
+                        break
+                
+                if matched_entry is None:
+                    # Missing entry, let's create it!
+                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Target email not found in address book, creating scan destination entry for %s on printer %s", email, printer.ip)
                     try:
                         # Lookup FTP credentials from share_manager for this port
                         ftp_user = ""
@@ -2228,41 +2507,154 @@ if ($node) {{ $node }}
                             fields["folderPasswordConfirmIn"] = ftp_password
                             fields["wk_folderPasswordConfirmIn"] = ftp_password
 
-                        self._ricoh_service.modify_address_user_wizard(
+                        # NOTE: We do NOT pass the shared session here.
+                        # The wizard does a reset+re-login internally which would corrupt
+                        # the shared session used for the initial address-book read.
+                        self._ricoh_service.create_address_user_wizard(
                             printer=printer,
-                            registration_no=matched_entry.registration_no,
                             name=email,
-                            email=email,
+                            email="",  # Pass empty string to skip the MAIL wizard step (matching GUI & Web API behavior)
                             folder=expected_folder,
-                            user_code=getattr(matched_entry, "user_code", "") or "",
+                            user_code="",
                             fields=fields,
                         )
                         details.append({
                             "email": email,
-                            "action": "update",
+                            "action": "create",
                             "status": "success",
                             "folder": expected_folder,
                         })
-                        LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Successfully updated scan destination entry for %s", email)
-                    except Exception as update_exc:
-                        LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to update scan destination for %s on %s: %s", email, printer.ip, update_exc, exc_info=True)
+                        LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Successfully created scan destination entry for %s", email)
+                    except Exception as create_exc:
+                        LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to create scan destination for %s on %s: %s", email, printer.ip, create_exc, exc_info=True)
                         details.append({
                             "email": email,
-                            "action": "update",
+                            "action": "create",
                             "status": "error",
-                            "error": str(update_exc),
+                            "error": str(create_exc),
                         })
                         has_error = True
-
                 else:
-                    # Up to date!
-                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Scan destination for %s is already up to date (%s)", email, expected_folder)
-                    details.append({
-                        "email": email,
-                        "action": "none",
-                        "status": "success",
-                        "folder": expected_folder,
-                    })
+                    # Entry exists, check if destination needs update
+                    current_folder = getattr(matched_entry, "folder", "") or ""
+                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Match found: registration_no=%s, current folder=%s", matched_entry.registration_no, current_folder)
+                    if current_folder.strip().lower() != expected_folder.lower():
+                        LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Folders mismatch! Updating existing scan destination for %s on printer %s to %s", email, printer.ip, expected_folder)
+                        try:
+                            # Lookup FTP credentials from share_manager for this port
+                            ftp_user = ""
+                            ftp_password = ""
+                            try:
+                                share_manager = getattr(self._ricoh_service, "share_manager", None)
+                                if share_manager is not None and hasattr(share_manager, "list_ftp_sites"):
+                                    for site in share_manager.list_ftp_sites():
+                                        if int(site.get("port", 0) or 0) == port:
+                                            ftp_user = str(site.get("ftp_user", "") or "")
+                                            ftp_password = str(site.get("ftp_password", "") or "")
+                                            break
+                            except Exception as lookup_exc:
+                                LOGGER.warning("[PollingBridge] Failed to lookup FTP credentials for port %d: %s", port, lookup_exc)
+
+                            fields = {"entryTypeIn": "1"}
+                            if ftp_user:
+                                fields["folderAuthUserNameIn"] = ftp_user
+                                fields["folderAuthUserName"] = ftp_user
+                            if ftp_password:
+                                fields["folderPasswordIn"] = ftp_password
+                                fields["wk_folderPasswordIn"] = ftp_password
+                                fields["folderPasswordConfirmIn"] = ftp_password
+                                fields["wk_folderPasswordConfirmIn"] = ftp_password
+
+                            # NOTE: We do NOT pass the shared session here (same reason as create above).
+                            self._ricoh_service.modify_address_user_wizard(
+                                printer=printer,
+                                registration_no=matched_entry.registration_no,
+                                name=email,
+                                email="",  # Pass empty string to skip the MAIL wizard step (matching GUI & Web API behavior)
+                                folder=expected_folder,
+                                user_code=getattr(matched_entry, "user_code", "") or "",
+                                fields=fields,
+                            )
+                            details.append({
+                                "email": email,
+                                "action": "update",
+                                "status": "success",
+                                "folder": expected_folder,
+                            })
+                            LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Successfully updated scan destination entry for %s", email)
+                        except Exception as update_exc:
+                            LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to update scan destination for %s on %s: %s", email, printer.ip, update_exc, exc_info=True)
+                            details.append({
+                                "email": email,
+                                "action": "update",
+                                "status": "error",
+                                "error": str(update_exc),
+                            })
+                            has_error = True
+
+                    else:
+                        # Up to date!
+                        LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Scan destination for %s is already up to date (%s)", email, expected_folder)
+                        details.append({
+                            "email": email,
+                            "action": "none",
+                            "status": "success",
+                            "folder": expected_folder,
+                        })
+
+            # Obsolete address entry cleanup logic
+            try:
+                active_emails = {k.lower().strip() for k in result_dict.keys()}
+                local_ip = self._resolve_local_ip()
+                to_delete_regs = []
+                to_delete_entry_ids = []
+                
+                for e in entries:
+                    e_email = (getattr(e, "email_address", "") or "").strip().lower()
+                    e_folder = (getattr(e, "folder", "") or "").strip().lower()
+                    if not e_email:
+                        continue
+                    
+                    # Check if this entry points to our agent
+                    points_to_us = False
+                    if agent_ip and f"ftp://{agent_ip.lower()}:" in e_folder:
+                        points_to_us = True
+                    elif local_ip and f"ftp://{local_ip.lower()}:" in e_folder:
+                        points_to_us = True
+                        
+                    if points_to_us and e_email not in active_emails:
+                        LOGGER.info("[PollingBridge] Obsolete scan entry found on copier: reg_no=%s, email=%s, folder=%s. Triggering deletion.", e.registration_no, e_email, e_folder)
+                        to_delete_regs.append(e.registration_no)
+                        if getattr(e, "entry_id", None):
+                            to_delete_entry_ids.append(e.entry_id)
+                
+                if to_delete_regs:
+                    LOGGER.info("[PollingBridge] Deleting %d obsolete scan entries from copier...", len(to_delete_regs))
+                    self._ricoh_service.delete_address_entries(
+                        printer,
+                        to_delete_regs,
+                        entry_ids=to_delete_entry_ids if to_delete_entry_ids else None,
+                        session=session,
+                    )
+                    LOGGER.info("[PollingBridge] Obsolete entries deletion complete.")
+            except Exception as del_exc:
+                LOGGER.warning("[PollingBridge] Failed to scan/clean obsolete entries from copier: %s", del_exc)
+
+        except Exception as read_exc:
+            LOGGER.error("[PollingBridge] [_reconcile_single_printer_address_book] Failed to read address book from printer %s: %s", printer.ip, read_exc, exc_info=True)
+            return {
+                "status": "error",
+                "error": f"Failed to read address book: {read_exc}",
+                "synced_at": datetime.now(timezone.utc).isoformat(),
+            }
+        finally:
+            if session:
+                try:
+                    self._ricoh_service._reset_web_session(session, printer)
+                    session.close()
+                    LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Shared authenticated session closed.")
+                except Exception as close_exc:
+                    LOGGER.warning("[PollingBridge] [_reconcile_single_printer_address_book] Failed to close shared session: %s", close_exc)
 
         LOGGER.info("[PollingBridge] [_reconcile_single_printer_address_book] Completed address book reconciliation for Ricoh copier: %s, status: %s", printer.ip, "error" if has_error else "success")
         return {
@@ -2278,6 +2670,10 @@ if ($node) {{ $node }}
                 self._config.reload()
             except Exception:
                 pass
+
+            if self._update_staged:
+                time.sleep(1.0)
+                continue
 
             if not self._config.get_bool("polling.enabled", False) or not self._config.get_bool("polling.control_enabled", True):
                 time.sleep(1.0)
@@ -2351,7 +2747,11 @@ if ($node) {{ $node }}
                                     with self._running_commands_lock:
                                         self._running_commands.discard(cid)
                         
-                        threading.Thread(target=_run_async_command, daemon=True).start()
+                        threading.Thread(
+                            target=_run_async_command,
+                            daemon=True,
+                            name=f"server-command-{command_id}"
+                        ).start()
                         LOGGER.info("Control loop started async thread to apply command for printer %s", ip)
             time.sleep(self.control_interval_seconds())
         LOGGER.info("Polling control worker loop stopped")
@@ -2511,6 +2911,16 @@ if ($node) {{ $node }}
                     )
                     status_data = status_payload.get("status_data", {})
                     sys_status = status_data.get("system_status") or status_data.get("printer_status") or "OK"
+                    
+                    # Append status messages if present and not redundant
+                    status_json = status_data.get("status_json")
+                    if isinstance(status_json, dict):
+                        alert_data = status_json.get("alert")
+                        if isinstance(alert_data, dict):
+                            messages = (alert_data.get("messages") or "").strip()
+                            if messages and messages.lower() not in sys_status.lower():
+                                sys_status = f"{sys_status} - {messages}"
+                                
                     self._printer_physical_statuses[printer.ip] = sys_status
                     self._printer_online_states[printer.ip] = True
                 except Exception as exc:  # noqa: BLE001

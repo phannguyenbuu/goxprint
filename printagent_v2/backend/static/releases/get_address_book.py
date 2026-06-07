@@ -41,6 +41,7 @@ class AddressEntry:
     email_address: str
     folder: str
     entry_id: str = ""
+    physical_path: str = ""
 
 class RicohStandaloneExtractor:
     def __init__(self, ip: str, username: str = "admin", password: str = "") -> None:
@@ -306,8 +307,7 @@ class RicohStandaloneExtractor:
                 current = []
             else:
                 current.append(char)
-        if current:
-            fields.append("".join(current).strip())
+        fields.append("".join(current).strip())
         return fields
 
     def parse_ajax_address_list(self, data: str) -> list[AddressEntry]:

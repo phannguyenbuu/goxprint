@@ -58,13 +58,16 @@ def main():
         rf'\g<1>{new_version}\g<2>'
     )
     
-    # 3. Package and build
-    print("\n--- Running pack_agent_core.py ---")
     python_exe = sys.executable
-    subprocess.run([python_exe, str(root / "pack_agent_core.py")], cwd=str(root), check=True)
-    
-    print("\n--- Compiling loader with PyInstaller ---")
-    print("Skipping PyInstaller compilation because we already built it manually.")
+    # 3. Package and build
+    print("\n--- Compiling loader and packing core with PyInstaller ---")
+    try:
+        subprocess.run(["powershell", "-File", "build_agent_loader_exe.ps1"], cwd=str(root), check=True)
+    except Exception as build_err:
+        print(f"Error compiling loader via PowerShell: {build_err}")
+        print("Falling back to manual packaging and existing exe...")
+        python_exe = sys.executable
+        subprocess.run([python_exe, str(root / "pack_agent_core.py")], cwd=str(root), check=True)
         
     # Copy loader printagent.exe to backend static releases and update manifest
     print("\n--- Copying printagent.exe and updating agent_release.json ---")

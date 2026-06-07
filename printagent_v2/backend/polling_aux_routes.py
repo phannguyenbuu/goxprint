@@ -33,11 +33,50 @@ from serializers import (
     _upsert_printer_from_polling,
     _apply_printer_enabled_state,
 )
-from models import Printer, PrinterControlCommand
+from models import Printer, PrinterControlCommand, ScanEmailAlias
 
 LOGGER = logging.getLogger(__name__)
 
 SCAN_UPLOAD_ROOT = Path("storage/uploads/scans")
+
+
+def parse_folder_str(folder_str: str) -> dict[str, str]:
+    if not folder_str:
+        return {"protocol": "", "server": "", "port": "", "path": ""}
+    proto = ""
+    server = ""
+    port = ""
+    path = ""
+    if folder_str.startswith("ftp://"):
+        proto = "FTP"
+        import re
+        match = re.match(r"ftp://([^:/]+)(?::(\d+))?(.*)", folder_str)
+        if match:
+            server = match.group(1)
+            port = match.group(2) or "21"
+            path = match.group(3) or "/"
+    elif folder_str.startswith("\\\\"):
+        proto = "SMB"
+        import re
+        match = re.match(r"\\\\([^\\]+)\\(.*)", folder_str)
+        if match:
+            server = match.group(1)
+            path = "\\" + match.group(2)
+            port = "445"
+        else:
+            server = folder_str[2:]
+            path = "\\"
+            port = "445"
+    elif folder_str and folder_str not in ("—", "-"):
+        server = folder_str
+        port = ""
+        path = ""
+    return {
+        "protocol": proto,
+        "server": server,
+        "port": port,
+        "path": path
+    }
 
 
 def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str], drive_sync: Any, cfg: Any) -> None:
@@ -63,19 +102,36 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "gateway_mac": _to_text(request.args.get("gateway_mac")),
                 },
             )
+            from sqlalchemy import or_
+
             stmt = select(Printer).where(Printer.lead == lead_valid, Printer.lan_uid == lan_uid).order_by(Printer.id.asc())
             if agent_uid:
-                stmt = stmt.where(Printer.agent_uid == agent_uid)
-            rows = session.execute(stmt).scalars().all()
-            pending_cmds = session.execute(
-                select(PrinterControlCommand)
-                .where(
-                    PrinterControlCommand.lead == lead_valid,
-                    PrinterControlCommand.lan_uid == lan_uid,
-                    PrinterControlCommand.status == "pending",
+                cmd_subq = (
+                    select(PrinterControlCommand.printer_id)
+                    .where(
+                        PrinterControlCommand.lead == lead_valid,
+                        PrinterControlCommand.lan_uid == lan_uid,
+                        PrinterControlCommand.agent_uid == agent_uid,
+                        PrinterControlCommand.status == "pending",
+                    )
                 )
-                .order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
-            ).scalars().all()
+                stmt = stmt.where(
+                    or_(
+                        Printer.agent_uid == agent_uid,
+                        Printer.id.in_(cmd_subq)
+                    )
+                )
+            rows = session.execute(stmt).scalars().all()
+            
+            pending_cmds_stmt = select(PrinterControlCommand).where(
+                PrinterControlCommand.lead == lead_valid,
+                PrinterControlCommand.lan_uid == lan_uid,
+                PrinterControlCommand.status == "pending",
+            )
+            if agent_uid:
+                pending_cmds_stmt = pending_cmds_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+            pending_cmds_stmt = pending_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
+            pending_cmds = session.execute(pending_cmds_stmt).scalars().all()
             pending_by_printer: dict[int, PrinterControlCommand] = {}
             for cmd in pending_cmds:
                 if cmd.printer_id in pending_by_printer:
@@ -105,6 +161,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 "driver_model": pending_by_printer[int(r.id)].driver_model or "",
                                 "driver_name": pending_by_printer[int(r.id)].driver_name or "",
                                 "driver_url": pending_by_printer[int(r.id)].driver_url or "",
+                                "command_params": pending_by_printer[int(r.id)].command_params or "",
                             }
                             if int(r.id) in pending_by_printer
                             else None
@@ -149,21 +206,124 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 session.commit()
                 return jsonify({"ok": False, "error": "Printer not found"}), 404
 
-            if command.command_type == "fetch_address_book":
+            if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest"):
                 if ok_value:
                     command.status = "success"
                     command.error_message = ""
                     command.responded_at = responded_at
                     address_book_data = body.get("address_book_data")
+
+                    # Enriched FTP metadata sent by agent from wizard result
+                    wizard_ftp_host = _to_text(body.get("ftp_host"))
+                    wizard_ftp_port = int(body.get("ftp_port") or 0) or None
+                    wizard_ftp_url = _to_text(body.get("ftp_url"))
+                    wizard_ftp_upload_url = _to_text(body.get("ftp_upload_url"))
+                    wizard_ftp_upload_path = _to_text(body.get("ftp_upload_path"))
+                    wizard_short_name = _to_text(body.get("short_name"))
+                    wizard_reg_no = _to_text(body.get("registration_no"))
+                    wizard_entry_name = _to_text(body.get("entry_name"))
+                    wizard_source_email = _to_text(body.get("source_email"))
+
                     if isinstance(address_book_data, dict):
+                        raw_list = address_book_data.get("address_list") or []
+                        enriched_list = []
+                        for entry in raw_list:
+                            if isinstance(entry, dict):
+                                # For the newly created FTP entry: prefer wizard data over AJAX data
+                                is_new_entry = (
+                                    wizard_reg_no
+                                    and str(entry.get("registration_no", "") or "").lstrip("0")
+                                    == str(wizard_reg_no).lstrip("0")
+                                )
+                                if is_new_entry and wizard_ftp_host:
+                                    # Build canonical FTP URL from wizard data
+                                    ftp_url_for_parse = wizard_ftp_upload_url or wizard_ftp_url or ""
+                                    if not ftp_url_for_parse and wizard_ftp_host and wizard_ftp_port:
+                                        ftp_url_for_parse = f"ftp://{wizard_ftp_host}:{wizard_ftp_port}/"
+                                    parsed = parse_folder_str(ftp_url_for_parse)
+                                    entry["protocol"] = parsed["protocol"] or "FTP"
+                                    entry["server_host"] = parsed["server"] or wizard_ftp_host
+                                    entry["folder_port_no"] = parsed["port"] or str(wizard_ftp_port or 21)
+                                    entry["path_on_folder"] = parsed["path"] or wizard_ftp_upload_path or "/"
+                                    LOGGER.info(
+                                        "[polling_control_result] Enriched new entry reg_no=%s with wizard ftp data: %s:%s%s",
+                                        wizard_reg_no, entry["server_host"], entry["folder_port_no"], entry["path_on_folder"],
+                                    )
+                                else:
+                                    folder_str = entry.get("folder_path") or entry.get("folder") or ""
+                                    parsed = parse_folder_str(folder_str)
+                                    entry["protocol"] = parsed["protocol"]
+                                    entry["server_host"] = parsed["server"]
+                                    entry["folder_port_no"] = parsed["port"]
+                                    entry["path_on_folder"] = parsed["path"]
+                            enriched_list.append(entry)
                         printer.address_book_sync = {
                             "status": "success",
                             "timestamp": responded_at.isoformat(),
-                            "address_list": address_book_data.get("address_list") or [],
+                            "address_list": enriched_list,
                         }
+
+                    # Upsert ScanEmailAlias for add_scan_email_dest
+                    if command.command_type == "add_scan_email_dest" and wizard_short_name and wizard_source_email:
+                        try:
+                            import json as _json
+                            # Extract email from command_params as fallback
+                            email_for_alias = wizard_source_email
+                            if not email_for_alias:
+                                try:
+                                    cp = _json.loads(command.command_params or "{}")
+                                    email_for_alias = str(cp.get("email", "") or "").lower()
+                                except Exception:
+                                    pass
+
+                            if email_for_alias and wizard_short_name:
+                                existing_alias = session.execute(
+                                    select(ScanEmailAlias).where(
+                                        ScanEmailAlias.lead == lead,
+                                        ScanEmailAlias.printer_id == int(command.printer_id),
+                                        ScanEmailAlias.short_name == wizard_short_name,
+                                    )
+                                ).scalar_one_or_none()
+                                if existing_alias is None:
+                                    alias = ScanEmailAlias(
+                                        lead=lead,
+                                        printer_id=int(command.printer_id),
+                                        email=email_for_alias,
+                                        short_name=wizard_short_name,
+                                        registration_no=wizard_reg_no or "",
+                                        entry_name=wizard_entry_name or "",
+                                        ftp_host=wizard_ftp_host or "",
+                                        ftp_port=wizard_ftp_port or 2121,
+                                        ftp_url=wizard_ftp_url or "",
+                                        ftp_upload_url=wizard_ftp_upload_url or "",
+                                        ftp_upload_path=wizard_ftp_upload_path or "",
+                                    )
+                                    session.add(alias)
+                                else:
+                                    # Update existing record
+                                    existing_alias.email = email_for_alias
+                                    existing_alias.registration_no = wizard_reg_no or existing_alias.registration_no
+                                    existing_alias.entry_name = wizard_entry_name or existing_alias.entry_name
+                                    if wizard_ftp_host:
+                                        existing_alias.ftp_host = wizard_ftp_host
+                                    if wizard_ftp_port:
+                                        existing_alias.ftp_port = wizard_ftp_port
+                                    if wizard_ftp_url:
+                                        existing_alias.ftp_url = wizard_ftp_url
+                                    if wizard_ftp_upload_url:
+                                        existing_alias.ftp_upload_url = wizard_ftp_upload_url
+                                    if wizard_ftp_upload_path:
+                                        existing_alias.ftp_upload_path = wizard_ftp_upload_path
+                                LOGGER.info(
+                                    "[polling_control_result] Upserted ScanEmailAlias: lead=%s printer=%s email=%s short_name=%s ftp=%s:%s",
+                                    lead, command.printer_id, email_for_alias, wizard_short_name,
+                                    wizard_ftp_host, wizard_ftp_port,
+                                )
+                        except Exception as alias_exc:
+                            LOGGER.warning("[polling_control_result] Failed to upsert ScanEmailAlias: %s", alias_exc)
                 else:
                     command.status = "failed"
-                    command.error_message = error_message or "Fetch address book failed"
+                    command.error_message = error_message or "Command failed"
                     command.responded_at = responded_at
                     printer.address_book_sync = {
                         "status": "error",
@@ -190,6 +350,40 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 "responded_at": responded_at.isoformat(),
             }
         )
+
+
+    @app.post("/api/polling/command-ack")
+    def polling_command_ack() -> Any:
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
+        sent_token = _request_api_token()
+        ok_auth, lead, auth_error = _validate_polling_auth(body, lead_key_map, sent_token)
+        if not ok_auth:
+            return auth_error
+
+        command_id = _to_int(body.get("command_id"))
+        if command_id is None or command_id <= 0:
+            return jsonify({"ok": False, "error": "Missing command_id"}), 400
+
+        with session_factory() as session:
+            command = session.get(PrinterControlCommand, int(command_id))
+            if command is None:
+                return jsonify({"ok": False, "error": "Command not found"}), 404
+            if command.lead != lead:
+                return jsonify({"ok": False, "error": "Lead mismatch"}), 400
+            
+            if command.status == "pending" and command.received_at is None:
+                command.received_at = datetime.now(timezone.utc)
+                session.commit()
+
+            return jsonify(
+                {
+                    "ok": True,
+                    "id": int(command_id),
+                    "received_at": command.received_at.isoformat() if command.received_at else None,
+                }
+            )
 
     @app.post("/api/polling/inventory")
     def ingest_inventory() -> Any:

@@ -58,7 +58,7 @@ def register_email_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "email_type": r.email_type,
                     "pc_name": r.pc_name or "",
                     "ftp_user": "goxprint",
-                    "ftp_password": "gox918721",
+                    "ftp_password": "goxprint",
                     "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
                 }
                 for r in rows

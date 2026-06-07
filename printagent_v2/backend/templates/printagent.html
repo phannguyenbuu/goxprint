@@ -972,7 +972,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const name = entry.name || '—';
                 const key = entry.key || entry.registration_no || '—';
                 const email = entry.email || entry.email_address || '—';
-                const folder = entry.folder_path || entry.folder || '—';
+                const folder = entry.physical_path || entry.folder_path || entry.folder || '—';
                 const userCode = entry.user_code || '—';
                 const lastUsed = entry.date_last_used || '—';
 

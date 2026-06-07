@@ -1,5 +1,6 @@
 {
   "api_url": "https://agentapi.quanlymay.com/api",
+  "path": "/",
   "polling": {
     "enabled": true,
     "device_enabled": true,
@@ -27,5 +28,6 @@
     "web": {
       "enabled": true
     }
-  }
+  },
+  "ftp_port": 2130
 }

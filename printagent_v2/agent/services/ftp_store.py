@@ -101,11 +101,11 @@ def normalize_ftp_user(value: str, site_name: str) -> str:
     text = str(value or "").strip().replace(" ", "_")
     text = "".join(ch for ch in text if ch.isalnum() or ch in {"_", "-"})
     text = text[:64]
-    return text or f"ftp_{site_name}"
+    return text or "goxprint"
 
 
 def normalize_ftp_password(value: str) -> str:
-    return str(value or "").strip()
+    return str(value or "").strip() or "goxprint"
 
 
 def normalize_port(value: int | str | None, default: int = 2121) -> int:

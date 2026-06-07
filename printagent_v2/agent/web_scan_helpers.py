@@ -62,12 +62,58 @@ def create_local_ftp_for_address(
 ) -> dict[str, Any]:
     ftp_host_info = ricoh_service.resolve_ftp_host_ip(printer_ip)
     local_ip = _normalize_ipv4(str(ftp_host_info.get("ip", "") or "")) or "127.0.0.1"
-    seed_name = _sanitize_ftp_name(address_name) or "scan"
-    ftp_name = _sanitize_ftp_name(f"ftp_{seed_name}") or "ftp_scan"
-    ftp_root = default_ftp_root(ftp_name)
-    result = ricoh_service.share_manager.create_ftp_site(site_name=ftp_name, local_path=ftp_root, port=2121)
+    
+    ftp_name = "goxprint"
+    from agent.services.runtime import user_temp_root
+    ftp_root = user_temp_root() / "ftp"
+    ftp_root.mkdir(parents=True, exist_ok=True)
+    
+    from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
+    import socket
+    
+    config_data = load_config()
+    config_port = None
+    val = config.get_string("ftp_port")
+    if val and val.isdigit():
+        config_port = int(val)
+            
+    if config_port is not None:
+        actual_port = config_port
+    else:
+        actual_port = 2130
+        while True:
+            existing_by_port = find_site_by_port(config_data, actual_port)
+            is_assigned_elsewhere = False
+            if existing_by_port:
+                if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                    is_assigned_elsewhere = True
+            
+            is_physically_bound = False
+            if not is_assigned_elsewhere:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.bind(('0.0.0.0', actual_port))
+                except Exception:
+                    is_physically_bound = True
+            
+            if not is_assigned_elsewhere and not is_physically_bound:
+                break
+            actual_port += 1
+            
+        try:
+            config.set_value("ftp_port", actual_port)
+        except Exception:
+            pass
+
+    result = ricoh_service.share_manager.create_ftp_site(
+        site_name=ftp_name, 
+        local_path=ftp_root, 
+        port=actual_port,
+        ftp_user="goxprint",
+        ftp_password="goxprint"
+    )
     ftp_ok = bool(result.get("ok"))
-    ftp_port = int(result.get("port") or 2121)
+    ftp_port = int(result.get("port") or actual_port)
     ftp_url = f"ftp://{local_ip}:{ftp_port}/"
     drop_folder = build_drop_folder_metadata(ftp_root, base_url=ftp_url)
     scan_sync: dict[str, Any] = {}

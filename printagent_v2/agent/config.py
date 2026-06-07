@@ -39,6 +39,7 @@ class AppConfig:
                 import json
                 default_settings = {
                     "api_url": "https://agentapi.quanlymay.com/api",
+                    "path": "/",
                     "polling": {
                         "enabled": True,
                         "device_enabled": True,
@@ -80,6 +81,14 @@ class AppConfig:
                 with settings_path.open("r", encoding="utf-8") as f:
                     file_data = json.load(f)
                 if isinstance(file_data, dict):
+                    # Self-heal: ensure 'path' is written to settings.json if missing
+                    if "path" not in file_data:
+                        file_data["path"] = "/"
+                        try:
+                            with settings_path.open("w", encoding="utf-8") as f:
+                                json.dump(file_data, f, indent=2, ensure_ascii=False)
+                        except Exception:
+                            pass
                     cls._merge_dict(raw, file_data)
             except Exception:
                 pass
@@ -136,6 +145,7 @@ class AppConfig:
         return {
             "database_url": "sqlite:///storage/data/agent_config.db",
             "api_url": "https://agentapi.quanlymay.com/api",
+            "path": "/",
             "user_token": "",
             "webhook": {
                 "mode": "listen",
@@ -321,3 +331,45 @@ class AppConfig:
     @property
     def user_token(self) -> str:
         return self.get_string("user_token", "")
+
+    def get_or_create_short_name(self, email: str) -> str:
+        import re as _re
+        prefix = str(email or "").split("@")[0].strip()
+        # Sanitize: keep only alphanumeric + underscore
+        prefix = _re.sub(r"[^A-Za-z0-9_]", "", prefix) or "scan"
+
+        if len(prefix) <= 10:
+            self.record_ftp_name_mapping(prefix, email)
+            return prefix
+
+        existing_map = self._get("ftp_name_map") or {}
+        if not isinstance(existing_map, dict):
+            existing_map = {}
+
+        # Check if there is already a mapping for this exact email
+        for sname, mapped_email in existing_map.items():
+            if str(mapped_email or "").lower() == email.lower():
+                return sname
+
+        # Find next available suffix (candidate will always be exactly 10 characters)
+        for n in range(1, 100):
+            suffix = f"~{n}"
+            base_len = 10 - len(suffix)
+            base_part = prefix[:base_len]
+            candidate = f"{base_part}{suffix}"
+            if candidate not in existing_map:
+                self.record_ftp_name_mapping(candidate, email)
+                return candidate
+
+        return prefix[:10]
+
+    def record_ftp_name_mapping(self, short_name: str, email: str) -> None:
+        try:
+            existing = self._get("ftp_name_map") or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            if existing.get(short_name, "").lower() != email.lower():
+                existing[short_name] = email
+                self.set_value("ftp_name_map", existing)
+        except Exception:
+            pass

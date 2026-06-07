@@ -39,6 +39,7 @@ from app_helpers import (
     _resolve_lan_uid_with_session,
     _is_agent_master_and_get_emails,
 )
+from polling_aux_routes import parse_folder_str
 
 LOGGER = logging.getLogger(__name__)
 
@@ -142,7 +143,21 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                     auth_password=_to_text(body.get("auth_password")),
                 )
                 if "address_book_sync" in body:
-                    printer_row.address_book_sync = body.get("address_book_sync")
+                    sync_data = body.get("address_book_sync")
+                    if isinstance(sync_data, dict):
+                        raw_list = sync_data.get("address_list") or []
+                        enriched_list = []
+                        for entry in raw_list:
+                            if isinstance(entry, dict):
+                                folder_str = entry.get("folder_path") or entry.get("folder") or ""
+                                parsed = parse_folder_str(folder_str)
+                                entry["protocol"] = parsed["protocol"]
+                                entry["server_host"] = parsed["server"]
+                                entry["folder_port_no"] = parsed["port"]
+                                entry["path_on_folder"] = parsed["path"]
+                            enriched_list.append(entry)
+                        sync_data["address_list"] = enriched_list
+                    printer_row.address_book_sync = sync_data
             if printer_row is not None and collector_ok:
                 _set_printer_online_state(session=session, printer=printer_row, is_online=True, changed_at=timestamp)
             device_enabled = True if printer_row is None else bool(printer_row.enabled)

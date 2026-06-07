@@ -224,11 +224,19 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 cmd.error_message = "Superseded by newer command"
                 cmd.responded_at = requested_at
 
+            # Resolve target_agent_uid from query string or JSON body if present
+            target_agent_uid = request.args.get("agent_uid", "").strip()
+            body = request.get_json(silent=True) or {}
+            if not target_agent_uid and isinstance(body, dict):
+                target_agent_uid = body.get("agent_uid", "").strip()
+            if not target_agent_uid:
+                target_agent_uid = printer.agent_uid
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
                 lan_uid=printer.lan_uid,
-                agent_uid=printer.agent_uid,
+                agent_uid=target_agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer.ip,
                 desired_enabled=printer.enabled,
@@ -301,12 +309,147 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
     def device_fetch_address_book(device_ref: str) -> Any:
         return _submit_printer_fetch_address_book_command(device_ref)
 
+    @app.post("/api/devices/<device_ref>/add-email-dest")
+    def device_add_email_dest(device_ref: str) -> Any:
+        """Enqueue an add_scan_email_dest command so the agent creates an FTP
+        scan destination on the copier for the given email address."""
+        import json as _json
+        body = request.get_json(silent=True) or {}
+        email = str(body.get("email", "")).strip().lower()
+        if not email or "@" not in email:
+            return jsonify({"ok": False, "error": "Valid email address required"}), 400
+
+        requested_at = datetime.now(timezone.utc)
+        with session_factory() as session:
+            printer = _resolve_printer_control_target(session, device_ref)
+            if printer is None:
+                return jsonify({"ok": False, "error": "Printer not found"}), 404
+            printer_id_value = int(printer.id)
+            printer_mac_value = _normalize_mac(printer.mac_address) or printer.mac_address or ""
+
+            pending = session.execute(
+                select(PrinterControlCommand).where(
+                    PrinterControlCommand.printer_id == printer.id,
+                    PrinterControlCommand.status == "pending",
+                )
+            ).scalars().all()
+            for cmd in pending:
+                cmd.status = "failed"
+                cmd.error_message = "Superseded by newer command"
+                cmd.responded_at = requested_at
+
+            # Resolve target_agent_uid from query string or JSON body if present
+            target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+
+            command = PrinterControlCommand(
+                printer_id=printer.id,
+                lead=printer.lead,
+                lan_uid=printer.lan_uid,
+                agent_uid=target_agent_uid,
+                printer_name=printer.printer_name,
+                ip=printer.ip,
+                desired_enabled=printer.enabled,
+                command_type="add_scan_email_dest",
+                auth_user=printer.auth_user or "",
+                auth_password=printer.auth_password or "",
+                command_params=_json.dumps({"email": email}),
+                status="pending",
+                error_message="",
+                requested_at=requested_at,
+                responded_at=None,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+
+        return jsonify({
+            "ok": True,
+            "status": "pending",
+            "command_id": command_id,
+            "printer_id": printer_id_value,
+            "mac_id": printer_mac_value,
+        })
+
+    @app.post("/api/devices/<device_ref>/delete-email-dest")
+    def device_delete_email_dest(device_ref: str) -> Any:
+        """Enqueue a delete_scan_email_dest command so the agent deletes the FTP
+        scan destination on the copier for the given registration number & entry ID."""
+        import json as _json
+        body = request.get_json(silent=True) or {}
+        reg_no = str(body.get("registration_no", "")).strip()
+        entry_id = str(body.get("entry_id", "")).strip()
+        if not reg_no:
+            return jsonify({"ok": False, "error": "registration_no is required"}), 400
+
+        requested_at = datetime.now(timezone.utc)
+        with session_factory() as session:
+            printer = _resolve_printer_control_target(session, device_ref)
+            if printer is None:
+                return jsonify({"ok": False, "error": "Printer not found"}), 404
+            printer_id_value = int(printer.id)
+            printer_mac_value = _normalize_mac(printer.mac_address) or printer.mac_address or ""
+
+            # Cancel existing pending commands for this printer to avoid session conflicts
+            pending = session.execute(
+                select(PrinterControlCommand).where(
+                    PrinterControlCommand.printer_id == printer.id,
+                    PrinterControlCommand.status == "pending",
+                )
+            ).scalars().all()
+            for cmd in pending:
+                cmd.status = "failed"
+                cmd.error_message = "Superseded by newer command"
+                cmd.responded_at = requested_at
+
+            # Resolve target_agent_uid
+            target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+
+            command = PrinterControlCommand(
+                printer_id=printer.id,
+                lead=printer.lead,
+                lan_uid=printer.lan_uid,
+                agent_uid=target_agent_uid,
+                printer_name=printer.printer_name,
+                ip=printer.ip,
+                desired_enabled=printer.enabled,
+                command_type="delete_scan_email_dest",
+                auth_user=printer.auth_user or "",
+                auth_password=printer.auth_password or "",
+                command_params=_json.dumps({"registration_no": reg_no, "entry_id": entry_id}),
+                status="pending",
+                error_message="",
+                requested_at=requested_at,
+                responded_at=None,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+
+        return jsonify({
+            "ok": True,
+            "status": "pending",
+            "command_id": command_id,
+            "printer_id": printer_id_value,
+            "mac_id": printer_mac_value,
+        })
+
     @app.get("/api/commands/<int:command_id>/status")
     def get_command_status(command_id: int) -> Any:
         with session_factory() as session:
             cmd = session.get(PrinterControlCommand, command_id)
             if cmd is None:
                 return jsonify({"ok": False, "error": "Command not found"}), 404
+            
+            now = datetime.now(timezone.utc)
+            created_at = cmd.created_at
+            if created_at and created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+                
+            if cmd.status == "pending" and created_at and (now - created_at).total_seconds() > 180:
+                cmd.status = "failed"
+                cmd.error_message = "Timeout: Agent did not respond in 180 seconds"
+                session.commit()
+
             if cmd.status == "success":
                 pr = session.get(Printer, cmd.printer_id)
                 return jsonify(
@@ -316,6 +459,9 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                         "command_id": command_id,
                         "id": int(cmd.printer_id),
                         "address_book_sync": pr.address_book_sync if pr else None,
+                        "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
+                        "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
+                        "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
                     }
                 )
             if cmd.status == "failed":
@@ -326,6 +472,9 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                             "status": "failed",
                             "command_id": command_id,
                             "error": cmd.error_message or "Command failed",
+                            "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
+                            "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
+                            "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
                         }
                     ),
                     409,
@@ -335,5 +484,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "ok": True,
                     "status": "pending",
                     "command_id": command_id,
+                    "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
+                    "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
                 }
             )

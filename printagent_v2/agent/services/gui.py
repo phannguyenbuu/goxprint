@@ -940,13 +940,13 @@ class PrintAgentGui:
             if addr.get("type") == "Summary":
                 continue
             name = addr.get("name", "")
-            email = addr.get("email_address", "")
-            folder = addr.get("folder", "")
+            email = str(addr.get("email_address" if "email_address" in addr else "email", "") or "").strip()
+            folder = str(addr.get("folder", "") or "").strip()
             reg_no = addr.get("registration_no", "")
             
             dest_type = ""
             dest_val = ""
-            if folder:
+            if folder and folder not in ("-", "—", ""):
                 if folder.startswith("ftp://"):
                     dest_type = "FTP"
                 elif folder.startswith("\\\\"):
@@ -954,33 +954,43 @@ class PrintAgentGui:
                 else:
                     dest_type = "Folder"
                 dest_val = folder
-            elif email:
+            elif email and email not in ("-", "—", ""):
                 dest_type = "Email"
                 dest_val = email
+            else:
+                dest_type = "—"
+                dest_val = "—"
                 
-            if dest_type:
-                has_valid_dest = True
-                parent_values = self.printer_tree.item(node_id, "values")
-                printer_ip = parent_values[0] if parent_values else ""
-                entry_id = addr.get("entry_id", "")
-                item_iid = f"dest_{printer_ip.lower()}_{reg_no}_{entry_id}"
-                
-                if dest_type == "Email":
-                    self.printer_tree.insert(
-                        node_id,
-                        tk.END,
-                        iid=item_iid,
-                        text=f"[{dest_type}] {name}",
-                        values=(dest_val, "", "", "", "")
-                    )
-                else:
-                    self.printer_tree.insert(
-                        node_id,
-                        tk.END,
-                        iid=item_iid,
-                        text=f"[{dest_type}] {name}",
-                        values=("", dest_val, "", "", "")
-                    )
+            has_valid_dest = True
+            parent_values = self.printer_tree.item(node_id, "values")
+            printer_ip = parent_values[0] if parent_values else ""
+            entry_id = addr.get("entry_id", "")
+            item_iid = f"dest_{printer_ip.lower()}_{reg_no}_{entry_id}"
+            
+            if dest_type == "Email":
+                self.printer_tree.insert(
+                    node_id,
+                    tk.END,
+                    iid=item_iid,
+                    text=f"[{dest_type}] {name}",
+                    values=(dest_val, "", "", "", "")
+                )
+            elif dest_type in ("FTP", "SMB", "Folder"):
+                self.printer_tree.insert(
+                    node_id,
+                    tk.END,
+                    iid=item_iid,
+                    text=f"[{dest_type}] {name}",
+                    values=("", dest_val, "", "", "")
+                )
+            else:
+                self.printer_tree.insert(
+                    node_id,
+                    tk.END,
+                    iid=item_iid,
+                    text=f"[{dest_type}] {name}",
+                    values=("—", "—", "", "", "")
+                )
                     
         if not has_valid_dest:
             self.printer_tree.insert(
@@ -1151,9 +1161,9 @@ class PrintAgentGui:
                         ftp_user = details.get("folder_auth_user", "")
                         
                         if folder_server:
-                            if proto == "FTP_O":
+                            if proto in ("FTP_O", "FTP"):
                                 folder = f"ftp://{folder_server}:{folder_port}{folder_path}"
-                            elif proto == "SMB":
+                            elif proto in ("SMB", "SMB_O"):
                                 norm_path = folder_path.replace("/", "\\")
                                 if not norm_path.startswith("\\") and norm_path:
                                     norm_path = f"\\{norm_path}"
@@ -1306,9 +1316,33 @@ class PrintAgentGui:
                     port = details.get("folder_port", 21)
                     path = details.get("folder_path", "")
                     
+                    proto_display = "SMB" if proto in ("SMB", "SMB_O") else ("FTP" if proto in ("FTP", "FTP_O") else proto)
+                    
+                    # Extract server name from path if it is a UNC path and srv is empty
+                    if proto_display == "SMB" and not srv:
+                        if path.startswith("\\\\"):
+                            parts_unc = path.lstrip("\\").split("\\")
+                            if parts_unc:
+                                srv = parts_unc[0]
+                                path = "\\".join(parts_unc[1:])
+
+                    # For SMB, port is not used
+                    port_display = "—" if proto_display == "SMB" else port
+
+                    # Build full path for display
+                    if proto_display == "SMB":
+                        clean_srv = srv.strip().strip("\\").strip("/")
+                        clean_path = path.strip().strip("\\").strip("/")
+                        if clean_srv:
+                            path_display = f"\\\\{clean_srv}\\{clean_path}"
+                        else:
+                            path_display = path
+                    else:
+                        path_display = path
+
                     physical_path = ""
                     
-                    if proto == "FTP_O":
+                    if proto_display == "FTP":
                         try:
                             from agent.services.ftp_store import load_config
                             config_data = load_config()
@@ -1318,7 +1352,7 @@ class PrintAgentGui:
                                     break
                         except Exception:
                             pass
-                    elif proto == "SMB":
+                    elif proto_display == "SMB":
                         import socket
                         local_host = socket.gethostname().strip().lower()
                         is_local = False
@@ -1352,13 +1386,13 @@ class PrintAgentGui:
                                     pass
                                     
                     if not physical_path:
-                        physical_path = f"Remote / Not found on this PC ({srv})"
+                        physical_path = f"Remote / Not found on this PC ({srv or 'Unknown'})"
                         
                     info_msg = (
                         f"Name (Tên hiển thị): {self.printer_tree.item(selected, 'text')}\r\n"
-                        f"Protocol (Giao thức): {'FTP' if proto == 'FTP_O' else proto}\r\n"
-                        f"Folder Port No. (Cổng): {port}\r\n"
-                        f"Path on Copier (Đường dẫn WIM): {path}\r\n"
+                        f"Protocol (Giao thức): {proto_display}\r\n"
+                        f"Folder Port No. (Cổng): {port_display}\r\n"
+                        f"Path on Copier (Đường dẫn WIM): {path_display}\r\n"
                         f"Path to Source Folder (Thư mục vật lý trên PC): {physical_path}"
                     )
                     messagebox.showinfo("Destination Information", info_msg)
@@ -1491,7 +1525,6 @@ class PrintAgentGui:
             return
             
         username = email.split("@")[0]
-        name = f"Scan to {username}"
         
         progress = ProgressDialog(self.root, "Connecting to Copier", "Adding email destination on Ricoh printer...")
         
@@ -1509,8 +1542,9 @@ class PrintAgentGui:
                 
                 setup_res = ricoh_service.setup_scan_destination(
                     printer=None,
-                    username=username,
-                    session=session
+                    username=email,
+                    session=session,
+                    email=email,
                 )
                 
                 ftp_upload_url = ""
@@ -1534,7 +1568,7 @@ class PrintAgentGui:
 
                 res = ricoh_service.create_address_user_wizard(
                     printer=printer,
-                    name=email, # Set name to the full email address
+                    name=email,
                     email="", # Pass empty string for email to skip MAIL wizard step
                     folder=ftp_upload_url,
                     fields=fields,
@@ -1588,6 +1622,34 @@ def show_gui_window(app_version: str) -> None:
             global _gui_root
             try:
                 root = tk.Tk()
+                
+                # Make root.after thread-safe when called from background threads
+                import queue
+                gui_thread_id = threading.get_ident()
+                gui_queue = queue.Queue()
+                original_after = root.after
+
+                def thread_safe_after(ms, func=None, *args):
+                    current_thread = threading.get_ident()
+                    if current_thread == gui_thread_id:
+                        return original_after(ms, func, *args)
+                    else:
+                        if func is not None:
+                            gui_queue.put((ms, lambda: func(*args)))
+                        return None
+
+                root.after = thread_safe_after
+
+                def process_gui_queue():
+                    while True:
+                        try:
+                            ms, cb = gui_queue.get_nowait()
+                            original_after(ms, cb)
+                        except queue.Empty:
+                            break
+                    original_after(100, process_gui_queue)
+
+                original_after(100, process_gui_queue)
                 
                 # Check for window close event to clean up properly
                 def on_close() -> None:

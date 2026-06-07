@@ -14,7 +14,7 @@ import requests
 
 from agent.modules.ricoh.base import RicohServiceBase, AddressEntry, ADDRESS_DEBUG_LOG_FILE
 from agent.services.api_client import Printer
-from agent.services.runtime import default_ftp_root, no_window_subprocess_kwargs
+from agent.services.runtime import default_ftp_root, no_window_subprocess_kwargs, user_temp_root
 from agent.services.scan_drop import build_drop_folder_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -303,8 +303,6 @@ Get-NetIPAddress -AddressFamily IPv4 |
         }
         if ids:
             joined = ",".join(ids)
-            if joined and not joined.endswith(","):
-                joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
             form["regiNoListIn"] = joined
@@ -312,8 +310,6 @@ Get-NetIPAddress -AddressFamily IPv4 |
             form["deleteListIn"] = joined
         else:
             joined = ",".join(norm_regs)
-            if joined and not joined.endswith(","):
-                joined = f"{joined},"
             form["entryIndex"] = joined
             form["entryIndexIn"] = joined
             form["regiNoListIn"] = joined
@@ -528,8 +524,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 current = []
             else:
                 current.append(char)
-        if current:
-            fields.append("".join(current).strip())
+        fields.append("".join(current).strip())
         return fields
 
     def parse_ajax_address_list(self, data: str) -> list[AddressEntry]:
@@ -666,6 +661,51 @@ Get-NetIPAddress -AddressFamily IPv4 |
         # Bypassed detailed config fetch loop because it executes slow sequential HTTP requests for every entry,
         # causing the GUI to hang when the address book contains multiple entries.
         # The main list HTML and AJAX response already contain the resolved email and folder destinations.
+
+        # Resolve local physical path for FTP scan destinations
+        try:
+            # Get local IPs of the agent PC
+            local_ips = {socket.gethostname().lower(), socket.gethostbyname(socket.gethostname()), "127.0.0.1", "localhost", "0.0.0.0"}
+            try:
+                for info in socket.getaddrinfo(socket.gethostname(), None):
+                    local_ips.add(info[4][0])
+            except Exception:
+                pass
+                
+            # Get the goxprint FTP root path
+            ftp_root = user_temp_root() / "ftp"
+
+            # Parse each entry's folder to check if it's on our local FTP site
+            for entry in entries:
+                if entry.folder and entry.folder not in ("—", "-"):
+                    raw_folder = str(entry.folder).strip()
+                    proto = ""
+                    host = ""
+                    path_part = ""
+                    if raw_folder.startswith("ftp://"):
+                        match = re.match(r"ftp://([^:/]+)(?::\d+)?(.*)", raw_folder)
+                        if match:
+                            proto = "FTP"
+                            host = match.group(1)
+                            path_part = match.group(2)
+                    elif raw_folder.startswith("\\\\"):
+                        proto = "SMB"
+                    else:
+                        if ":" in raw_folder:
+                            parts = raw_folder.split(":", 1)
+                            proto = "FTP"
+                            host = parts[0]
+                            path_part = parts[1]
+                    
+                    if proto == "FTP" and (host.lower() in local_ips or host == printer.ip):
+                        subfolder = path_part.strip("/\\")
+                        if subfolder:
+                            physical_path = ftp_root / subfolder
+                            entry.physical_path = str(physical_path)
+                            LOGGER.info("[RicohAddressBook] Resolved local physical path for %s -> %s", entry.name, entry.physical_path)
+        except Exception as resolve_exc:
+            LOGGER.warning("[RicohAddressBook] Failed to resolve physical paths: %s", resolve_exc)
+
         elapsed = time.time() - start_time
         LOGGER.info("[RicohAddressBook] === FINISH process_address_list: IP: %s, Total Entries: %d, Elapsed: %.2fs ===", 
                     printer.ip, len(entries), elapsed)
@@ -697,36 +737,76 @@ Get-NetIPAddress -AddressFamily IPv4 |
         ftp_user: str = "",
         ftp_password: str = "",
         session: requests.Session | None = None,
+        email: str = "",
     ) -> dict[str, Any]:
-        safe_username = re.sub(r"[^A-Za-z0-9_-]", "", str(username or "").strip().replace(" ", "_"))[:48] or "scan"
-        ftp_name = self._sanitize_ftp_site_name(ftp_site_name or f"ftp_{safe_username}") or f"ftp_{safe_username}"
-        ftp_root_path = Path(ftp_root) if ftp_root is not None else default_ftp_root(ftp_name)
+        username_str = str(username or "").strip()
+        raw_username = username_str
+
+        safe_username = re.sub(r"[^A-Za-z0-9_-]", "", username_str.replace(" ", "_"))[:48] or "scan"
+        # Always use "goxprint" as the FTP site name and folder name on the machine
+        ftp_name = "goxprint"
+        goxprint_base = user_temp_root() / "ftp"
+        ftp_root_path = goxprint_base  # FTP site serves the /ftp/ root
+
+        # Use the single FTP folder, no subfolders
+        folder_name = ""
+        subfolder_path = goxprint_base
+        try:
+            subfolder_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Override dynamic/empty credentials with "goxprint"
+        if not ftp_user or ftp_user.startswith("ftp_"):
+            ftp_user = "goxprint"
+        if not ftp_password:
+            ftp_password = "goxprint"
 
         # Dynamic port selection to prevent conflict in multi-site setup
         import socket
         from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
         
-        actual_port = int(ftp_port or 2121)
-        while True:
-            config_data = load_config()
-            existing_by_port = find_site_by_port(config_data, actual_port)
-            is_assigned_elsewhere = False
-            if existing_by_port:
-                # If it's assigned to another site, it's a conflict!
-                if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
-                    is_assigned_elsewhere = True
+        app_config = getattr(self, "_config", None)
+        config_port = None
+        
+        if app_config is not None:
+            try:
+                val = app_config.get_string("ftp_port")
+                if val and val.isdigit():
+                    config_port = int(val)
+            except Exception:
+                pass
+
+        if config_port is not None:
+            actual_port = config_port
+        else:
+            # Scenario B: Scan starting from 2130
+            actual_port = 2130
+            while True:
+                config_data = load_config()
+                existing_by_port = find_site_by_port(config_data, actual_port)
+                is_assigned_elsewhere = False
+                if existing_by_port:
+                    if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                        is_assigned_elsewhere = True
+                
+                is_physically_bound = False
+                if not is_assigned_elsewhere:
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.bind(('0.0.0.0', actual_port))
+                    except Exception:
+                        is_physically_bound = True
+                
+                if not is_assigned_elsewhere and not is_physically_bound:
+                    break
+                actual_port += 1
             
-            is_physically_bound = False
-            if not is_assigned_elsewhere:
+            if app_config is not None:
                 try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.bind(('0.0.0.0', actual_port))
+                    app_config.set_value("ftp_port", actual_port)
                 except Exception:
-                    is_physically_bound = True
-            
-            if not is_assigned_elsewhere and not is_physically_bound:
-                break
-            actual_port += 1
+                    pass
 
         ftp_res = self.share_manager.create_ftp_site(
             site_name=ftp_name,
@@ -742,10 +822,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
         ftp_password = str(ftp_res.get("ftp_password", "") or "")
         scan_dir_added = False
         scan_dirs: list[str] = []
-        app_config = getattr(self, "_config", None)
         if app_config is not None and hasattr(app_config, "ensure_scan_dir"):
             try:
-                scan_dir_added, scan_dirs = app_config.ensure_scan_dir(ftp_root_path)
+                scan_dir_added, scan_dirs = app_config.ensure_scan_dir(subfolder_path)
             except Exception:  # noqa: BLE001
                 scan_dir_added = False
                 scan_dirs = []
@@ -754,8 +833,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
         local_ip = str(ftp_host_info.get("ip", "") or "127.0.0.1")
         ftp_ip_warning = str(ftp_host_info.get("warning", "") or "").strip()
         ftp_port_value = int(ftp_res.get("port") or ftp_port or 2121)
+        # Path On Folder = / (single shared folder)
         ftp_url = f"ftp://{local_ip}:{ftp_port_value}/"
-        drop_folder = build_drop_folder_metadata(ftp_root_path, base_url=ftp_url)
+        drop_folder = build_drop_folder_metadata(subfolder_path, base_url=ftp_url)
         ftp_upload_url = str(drop_folder.get("upload_url", "") or ftp_url)
 
         if printer is None or not str(getattr(printer, "ip", "") or "").strip():
@@ -791,7 +871,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 merged_fields["wk_folderPasswordConfirmIn"] = ftp_password
             wizard_res = self.create_address_user_wizard(
                 printer=printer,
-                name=f"Scan to {username}",
+                name=username_str,
                 folder=ftp_upload_url,
                 fields=merged_fields,
                 session=session,
@@ -1081,10 +1161,31 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     details["folder_port"] = int(port_m.group(1)) if port_m else 21
                     
                     # 2. folderProtocolIn
-                    proto_m = re.search(r'name=["\']folderProtocolIn["\'][^>]*value=["\']([^"\']+)["\']', html, re.I)
-                    if not proto_m:
+                    proto = ""
+                    # Try radio buttons first: find all <input> tags for folderProtocolIn
+                    inputs = re.findall(r'<input[^>]*name=["\']folderProtocolIn["\'][^>]*>', html, re.I)
+                    if not inputs:
+                        inputs = re.findall(r'<input[^>]*value=["\'][^"\']*["\'][^>]*name=["\']folderProtocolIn["\'][^>]*>', html, re.I)
+                    
+                    for inp in inputs:
+                        if "checked" in inp.lower():
+                            val_m = re.search(r'value=["\']([^"\']+)["\']', inp, re.I)
+                            if val_m:
+                                proto = val_m.group(1).strip()
+                                break
+                                
+                    if not proto:
+                        # Fallback to dropdown select
                         proto_m = re.search(r'<select[^>]*name=["\']folderProtocolIn["\'][^>]*>.*?<option[^>]*value=["\']([^"\']+)["\'][^>]*selected.*?</select>', html, re.I | re.S)
-                    details["folder_protocol"] = proto_m.group(1).strip() if proto_m else ""
+                        if proto_m:
+                            proto = proto_m.group(1).strip()
+                        else:
+                            # Fallback to first occurrence search
+                            proto_m = re.search(r'name=["\']folderProtocolIn["\'][^>]*value=["\']([^"\']+)["\']', html, re.I)
+                            if proto_m:
+                                proto = proto_m.group(1).strip()
+                    
+                    details["folder_protocol"] = proto
                     
                     # 3. folderServerNameIn
                     server_m = re.search(r'name=["\']folderServerNameIn["\'][^>]*value=["\']([^"\']*)["\']', html, re.I)

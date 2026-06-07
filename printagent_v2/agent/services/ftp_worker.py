@@ -22,7 +22,7 @@ except Exception:  # noqa: BLE001
 
 # Fixed FTP credentials shared by all scan sites
 FTP_FIXED_USER = "goxprint"
-FTP_FIXED_PASSWORD = "gox918721"
+FTP_FIXED_PASSWORD = "goxprint"
 
 from agent.services.ftp_store import (
     find_site_by_port,

@@ -71,6 +71,11 @@ for local_file, remote_file in files_to_copy:
 
 sftp.close()
 
+print("Running database migrations on remote VPS...")
+_, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/init_db.py')
+print("Migration STDOUT:", out.read().decode('utf-8'))
+print("Migration STDERR:", err.read().decode('utf-8'))
+
 print("Restarting printagent service on remote VPS...")
 _, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
 print("Restart STDOUT:", out.read().decode('utf-8'))

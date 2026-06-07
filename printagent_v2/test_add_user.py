@@ -154,8 +154,7 @@ def parse_javascript_array_fields(data):
             current = []
         else:
             current.append(char)
-    if current:
-        fields.append("".join(current).strip())
+    fields.append("".join(current).strip())
     return fields
 
 

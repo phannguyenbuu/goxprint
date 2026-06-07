@@ -13,6 +13,7 @@ from agent.services.runtime import default_ftp_root
 from agent.services.scan_drop import build_drop_folder_metadata
 from agent.web_discovery import _normalize_ipv4
 from agent.web_scan_support import _register_scan_root, _sanitize_ftp_name
+from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,8 +76,45 @@ def register_ftp_routes(app):
                 }
             )
 
+        # Resolve single FTP port if not explicitly provided
+        config_data = load_config()
+        config_port = None
+        val = config.get_string("ftp_port")
+        if val and val.isdigit():
+            config_port = int(val)
+                
+        if not ftp_port:
+            if config_port is not None:
+                ftp_port = config_port
+            else:
+                # Scan starting from 2130
+                actual_port = 2130
+                while True:
+                    existing_by_port = find_site_by_port(config_data, actual_port)
+                    is_assigned_elsewhere = False
+                    if existing_by_port:
+                        if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                            is_assigned_elsewhere = True
+                    
+                    is_physically_bound = False
+                    if not is_assigned_elsewhere:
+                        try:
+                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                                s.bind(('0.0.0.0', actual_port))
+                        except Exception:
+                            is_physically_bound = True
+                    
+                    if not is_assigned_elsewhere and not is_physically_bound:
+                        break
+                    actual_port += 1
+                ftp_port = actual_port
+                try:
+                    config.set_value("ftp_port", ftp_port)
+                except Exception:
+                    pass
+
         ftp_root = Path(ftp_path_raw).expanduser() if ftp_path_raw else default_ftp_root(ftp_name)
-        result = ricoh_service.share_manager.create_ftp_site(site_name=ftp_name, local_path=ftp_root, port=ftp_port or 2121)
+        result = ricoh_service.share_manager.create_ftp_site(site_name=ftp_name, local_path=ftp_root, port=ftp_port)
         ftp_port_value = int(result.get("port") or ftp_port or 2121)
         ftp_url = f"ftp://{local_ip}:{ftp_port_value}/"
         drop_folder = build_drop_folder_metadata(ftp_root, base_url=ftp_url)

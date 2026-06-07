@@ -142,12 +142,20 @@ def register_scan_misc_routes(app):
             return jsonify({"ok": False, "error": "Missing ip or username"}), 400
 
         target = resolve_target_printer(config, api_client, ip=ip)
-        res = ricoh_service.setup_scan_destination(target, username, fields=fields)
+        res = ricoh_service.setup_scan_destination(
+            target,
+            username,
+            fields=fields,
+            email=username if "@" in username else "",
+        )
         
-        if res.get("ok"):
+        if res.get("ok") and res.get("printer_setup_ok", True):
             LOGGER.info("Auto-scan setup success: ip=%s username=%s", ip, username)
         else:
-            LOGGER.warning("Auto-scan setup failed: ip=%s username=%s error=%s", ip, username, res.get("error"))
+            err = res.get("error") or res.get("printer_error") or "Printer setup failed"
+            LOGGER.warning("Auto-scan setup failed: ip=%s username=%s error=%s", ip, username, err)
+            res["ok"] = False
+            res["error"] = err
             
         return jsonify(res)
 
