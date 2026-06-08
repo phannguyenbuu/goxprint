@@ -126,6 +126,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             pending_cmds_stmt = select(PrinterControlCommand).where(
                 PrinterControlCommand.lead == lead_valid,
                 PrinterControlCommand.lan_uid == lan_uid,
+                PrinterControlCommand.printer_id != 0,
                 PrinterControlCommand.status == "pending",
             )
             if agent_uid:
@@ -137,12 +138,35 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 if cmd.printer_id in pending_by_printer:
                     continue
                 pending_by_printer[int(cmd.printer_id)] = cmd
+
+            pending_agent_cmds_stmt = select(PrinterControlCommand).where(
+                PrinterControlCommand.lead == lead_valid,
+                PrinterControlCommand.lan_uid == lan_uid,
+                PrinterControlCommand.printer_id == 0,
+                PrinterControlCommand.status == "pending",
+            )
+            if agent_uid:
+                pending_agent_cmds_stmt = pending_agent_cmds_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+            pending_agent_cmds_stmt = pending_agent_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
+            pending_agent_cmds = session.execute(pending_agent_cmds_stmt).scalars().all()
+
+            agent_commands_serialized = [
+                {
+                    "id": int(cmd.id),
+                    "command_type": cmd.command_type,
+                    "command_params": cmd.command_params or "",
+                    "requested_at": cmd.requested_at.isoformat() if cmd.requested_at else "",
+                }
+                for cmd in pending_agent_cmds
+            ]
+
         return jsonify(
             {
                 "ok": True,
                 "lead": lead_valid,
                 "lan_uid": lan_uid,
                 "agent_uid": agent_uid,
+                "agent_commands": agent_commands_serialized,
                 "rows": [
                     {
                         "id": int(r.id),
@@ -198,13 +222,15 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             if command.status != "pending":
                 return jsonify({"ok": True, "status": command.status, "id": int(command.id)})
 
-            printer = session.get(Printer, int(command.printer_id))
-            if printer is None:
-                command.status = "failed"
-                command.error_message = "Printer not found"
-                command.responded_at = responded_at
-                session.commit()
-                return jsonify({"ok": False, "error": "Printer not found"}), 404
+            printer = None
+            if int(command.printer_id) != 0:
+                printer = session.get(Printer, int(command.printer_id))
+                if printer is None:
+                    command.status = "failed"
+                    command.error_message = "Printer not found"
+                    command.responded_at = responded_at
+                    session.commit()
+                    return jsonify({"ok": False, "error": "Printer not found"}), 404
 
             if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest"):
                 if ok_value:
@@ -325,20 +351,22 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     command.status = "failed"
                     command.error_message = error_message or "Command failed"
                     command.responded_at = responded_at
-                    printer.address_book_sync = {
-                        "status": "error",
-                        "timestamp": responded_at.isoformat(),
-                        "error": command.error_message,
-                    }
+                    if printer is not None:
+                        printer.address_book_sync = {
+                            "status": "error",
+                            "timestamp": responded_at.isoformat(),
+                            "error": command.error_message,
+                        }
             else:
                 if ok_value:
                     command.status = "success"
                     command.error_message = ""
                     command.responded_at = responded_at
-                    _apply_printer_enabled_state(session, printer, bool(command.desired_enabled), responded_at)
+                    if printer is not None:
+                        _apply_printer_enabled_state(session, printer, bool(command.desired_enabled), responded_at)
                 else:
                     command.status = "failed"
-                    command.error_message = error_message or "Agent lock/unlock failed"
+                    command.error_message = error_message or "Agent command failed"
                     command.responded_at = responded_at
             session.commit()
 

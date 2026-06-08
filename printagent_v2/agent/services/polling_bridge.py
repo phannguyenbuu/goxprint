@@ -316,6 +316,8 @@ class PollingBridge:
             "subnet_cidr": self._subnet_hint(local_ip),
             "ftp_ports": ",".join(ftp_ports),
             "ftp_sites": ftp_sites,
+            "scan_auto_open_file": self._config.get_bool("polling.scan_auto_open_file", True),
+            "scan_auto_open_dir": self._config.get_bool("polling.scan_auto_open_dir", True),
         }
 
     def is_configured(self) -> bool:
@@ -1544,10 +1546,10 @@ if ($node) {{ $node }}
         finally:
             self._scan_lock.release()
 
-    def _pull_device_controls(self, lan_uid: str) -> dict[str, dict[str, object]]:
+    def _pull_device_controls(self, lan_uid: str) -> dict[str, Any]:
         base_url = self._polling_base_url()
         if not base_url:
-            return {}
+            return {"printer_controls": {}, "agent_commands": []}
         token = self._config.get_string("polling.token").strip()
         lead = self._config.get_string("polling.lead").strip()
         params = {"lead": lead, "lan_uid": lan_uid, "agent_uid": self._agent_uid}
@@ -1572,7 +1574,10 @@ if ($node) {{ $node }}
                 }
         self._last_control_pull_at = self._now_iso()
         self._last_control_total = len(mapping)
-        return mapping
+        return {
+            "printer_controls": mapping,
+            "agent_commands": payload.get("agent_commands", []) if isinstance(payload, dict) else [],
+        }
 
     def _push_inventory(self, printers: list[Printer], hostname: str, local_ip: str, lan_uid: str, fingerprint: str = "") -> None:
         base_url = self._polling_base_url()
@@ -2221,6 +2226,84 @@ if ($node) {{ $node }}
             self._update_recent_command_status(command_id, "failed", str(exc))
             raise
 
+    def _apply_agent_command(self, command: dict[str, object]) -> None:
+        command_id = int(command.get("id", 0) or 0)
+        command_type = str(command.get("command_type", "")).strip()
+        if command_id <= 0:
+            return
+            
+        self._update_recent_command_status(command_id, "processing")
+        self._post_command_ack(command_id)
+        
+        try:
+            import json as _json
+            params = {}
+            params_str = str(command.get("command_params", "") or "").strip()
+            if params_str:
+                try:
+                    params = _json.loads(params_str)
+                except Exception as parse_exc:
+                    LOGGER.warning("[PollingBridge] Failed to parse agent command_params: %s", parse_exc)
+
+            if command_type == "general_settings":
+                scan_auto_open_file = params.get("scan_auto_open_file")
+                scan_auto_open_dir = params.get("scan_auto_open_dir")
+                
+                if scan_auto_open_file is not None:
+                    self._config.set_value("polling.scan_auto_open_file", bool(scan_auto_open_file))
+                if scan_auto_open_dir is not None:
+                    self._config.set_value("polling.scan_auto_open_dir", bool(scan_auto_open_dir))
+                    
+                LOGGER.info("[PollingBridge] Applied general settings: file=%s dir=%s", scan_auto_open_file, scan_auto_open_dir)
+                self._post_control_result(command_id=command_id, ok=True, error="")
+                self._update_recent_command_status(command_id, "success")
+                
+            elif command_type == "trigger_utility":
+                action = str(params.get("action", "")).strip()
+                import sys
+                import subprocess
+                
+                if action == "devices_and_printers":
+                    if sys.platform == "win32":
+                        subprocess.Popen(["control.exe", "printers"])
+                    else:
+                        raise RuntimeError(f"Devices and Printers is only supported on Windows, got platform {sys.platform}")
+                        
+                elif action == "open_scan_folder":
+                    scan_dir = self._config.get_string("polling.scan_dirs", "storage/scans/inbox").strip()
+                    from pathlib import Path
+                    scan_path = Path(scan_dir)
+                    if not scan_path.is_absolute():
+                        scan_path = Path.cwd() / scan_path
+                    if not scan_path.exists():
+                        scan_path.mkdir(parents=True, exist_ok=True)
+                        
+                    if sys.platform == "win32":
+                        os.startfile(str(scan_path))
+                    elif sys.platform == "darwin":
+                        subprocess.Popen(["open", str(scan_path)])
+                    else:
+                        subprocess.Popen(["xdg-open", str(scan_path)])
+                        
+                elif action == "dxdiag":
+                    if sys.platform == "win32":
+                        subprocess.Popen(["dxdiag.exe"])
+                    else:
+                        raise RuntimeError(f"dxdiag is only supported on Windows, got platform {sys.platform}")
+                else:
+                    raise ValueError(f"Unknown utility action: {action}")
+                    
+                LOGGER.info("[PollingBridge] Executed utility action: %s", action)
+                self._post_control_result(command_id=command_id, ok=True, error="")
+                self._update_recent_command_status(command_id, "success")
+            else:
+                raise ValueError(f"Unknown agent command type: {command_type}")
+                
+        except Exception as exc:
+            LOGGER.error("[PollingBridge] Failed to apply agent command: %s", exc, exc_info=True)
+            self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+            self._update_recent_command_status(command_id, "failed", str(exc))
+
     def _handle_install_driver(self, printer_ip: str, brand: str, model: str, driver_name: str, driver_url: str) -> None:
         import urllib.request
         import zipfile
@@ -2718,18 +2801,52 @@ if ($node) {{ $node }}
             if not lan_uid:
                 time.sleep(0.5)
                 continue
-            controls: dict[str, dict[str, object]] = {}
+            controls_payload = {}
             try:
-                controls = self._pull_device_controls(lan_uid=lan_uid)
+                controls_payload = self._pull_device_controls(lan_uid=lan_uid)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.debug("Control loop pull failed: %s", exc)
-                controls = {}
-            if controls:
+                controls_payload = {}
+            
+            printer_controls = {}
+            agent_commands = []
+            if isinstance(controls_payload, dict):
+                printer_controls = controls_payload.get("printer_controls", {})
+                agent_commands = controls_payload.get("agent_commands", [])
+
+            if agent_commands:
+                for command in agent_commands:
+                    if not isinstance(command, dict):
+                        continue
+                    command_id = int(command.get("id", 0) or 0)
+                    if command_id > 0:
+                        with self._running_commands_lock:
+                            if command_id in self._running_commands:
+                                continue
+                            self._running_commands.add(command_id)
+                        
+                        def _run_async_agent_command(c=command, cid=command_id):
+                            try:
+                                self._apply_agent_command(c)
+                            except Exception as async_exc:
+                                LOGGER.warning("Async control apply failed for agent command %s: %s", cid, async_exc)
+                            finally:
+                                if cid > 0:
+                                    with self._running_commands_lock:
+                                        self._running_commands.discard(cid)
+                        
+                        threading.Thread(
+                            target=_run_async_agent_command,
+                            daemon=True,
+                            name=f"agent-command-{command_id}"
+                        ).start()
+
+            if printer_controls:
                 try:
                     printers = list(self._last_discovered_printers)
                 except Exception:
                     printers = []
-                for ip_key, control_info in controls.items():
+                for ip_key, control_info in printer_controls.items():
                     ip = str(ip_key).strip()
                     if not ip:
                         continue

@@ -940,176 +940,180 @@ def create_app() -> Flask:
     session_factory = create_session_factory(cfg)
     drive_sync = GoogleDriveSync(cfg)
     Base.metadata.create_all(bind=session_factory.kw["bind"])
-    with session_factory() as session:
-        # Self-heal schema drift for older deployments (PostgreSQL).
-        _safe_alter_table(session, "Printer", "auth_user", "VARCHAR(128) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "Printer", "auth_password", "VARCHAR(255) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "Printer", "is_online", "BOOLEAN NOT NULL DEFAULT TRUE")
-        _safe_alter_table(session, "Printer", "online_changed_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "Printer", "mac_address", "VARCHAR(64) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "Printer", "address_book_sync", "JSONB")
-        
-        # Self-heal UserAccount table
-        _safe_alter_table(session, "UserAccount", "password", "VARCHAR(128) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "UserAccount", "user_type", "VARCHAR(32) NOT NULL DEFAULT 'support'")
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_useraccount_user_type ON "UserAccount" (user_type);'))
-        _safe_alter_table(session, "Lead", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "Lead" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
-        _safe_alter_table(session, "Workspace", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "Workspace" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
-        _safe_alter_table(session, "Location", "room", "VARCHAR(128)")
-        _safe_alter_table(session, "Location", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "Location" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
-        _safe_alter_table(session, "Material", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "Material" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
-        session.execute(text(
-            """
-            UPDATE "UserAccount"
-            SET user_type = CASE
-                WHEN LOWER(COALESCE(role, '')) IN ('tech', 'technician', 'worker') THEN 'tech'
-                ELSE 'support'
-            END
-            WHERE COALESCE(user_type, '') = ''
-               OR LOWER(COALESCE(user_type, '')) NOT IN ('tech', 'support')
-            """
-        ))
-        session.execute(text(
-            """
-            UPDATE "UserAccount"
-            SET role = CASE
-                WHEN LOWER(COALESCE(user_type, '')) = 'tech' THEN 'tech'
-                ELSE 'support'
-            END
-            WHERE LOWER(COALESCE(role, '')) NOT IN ('tech', 'support')
-            """
-        ))
-        session.execute(text('CREATE TABLE IF NOT EXISTS "UserWorkspace" ('
-                             'id SERIAL PRIMARY KEY,'
-                             'user_id INTEGER NOT NULL REFERENCES "UserAccount"(id) ON DELETE CASCADE,'
-                             'workspace_id VARCHAR(64) NOT NULL REFERENCES "Workspace"(id) ON DELETE CASCADE,'
-                             'created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
-                             'updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
-                             'CONSTRAINT uq_userworkspace_user_workspace UNIQUE (user_id, workspace_id)'
-                             ');'))
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_userworkspace_user_id ON "UserWorkspace" (user_id);'))
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_userworkspace_workspace_id ON "UserWorkspace" (workspace_id);'))
-        
-        # Self-heal LanSite table
-        _safe_alter_table(session, "LanSite", "fingerprint_signature", "TEXT")
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_lansite_fingerprint ON "LanSite" (lead, fingerprint_signature);'))
-        
-        # Self-heal AgentNode table
-        _safe_alter_table(session, "AgentNode", "last_seen_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "AgentNode", "app_version", "VARCHAR(64) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "AgentNode", "run_mode", "VARCHAR(32) NOT NULL DEFAULT 'web'")
-        _safe_alter_table(session, "AgentNode", "web_port", "INTEGER NOT NULL DEFAULT 9173")
-        _safe_alter_table(session, "AgentNode", "ftp_ports", "TEXT NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "AgentNode", "is_online", "BOOLEAN NOT NULL DEFAULT TRUE")
-        _safe_alter_table(session, "AgentNode", "online_changed_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "AgentNode", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "AgentNode" SET updated_at = COALESCE(last_seen_at, created_at, updated_at, NOW());'))
-        _safe_alter_table(session, "AgentPresenceLog", "ftp_ports", "TEXT NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "AgentPresenceLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "AgentPresenceLog" SET updated_at = COALESCE(changed_at, last_seen_at, created_at, updated_at, NOW());'))
-        session.execute(text('UPDATE "FtpControlCommand" SET created_at = COALESCE(requested_at, created_at, NOW()), updated_at = COALESCE(responded_at, requested_at, updated_at, NOW());'))
-        _safe_alter_table(session, "PrinterEnableLog", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "PrinterEnableLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "PrinterEnableLog" SET created_at = COALESCE(changed_at, created_at, NOW()), updated_at = COALESCE(changed_at, updated_at, NOW());'))
-        _safe_alter_table(session, "PrinterOnlineLog", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "PrinterOnlineLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('UPDATE "PrinterOnlineLog" SET created_at = COALESCE(changed_at, created_at, NOW()), updated_at = COALESCE(changed_at, updated_at, NOW());'))
-        _safe_alter_table(session, "PrinterControlCommand", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "PrinterControlCommand", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "PrinterControlCommand", "command_type", "VARCHAR(64) NOT NULL DEFAULT 'enable_disable'")
-        _safe_alter_table(session, "PrinterControlCommand", "driver_brand", "VARCHAR(64) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "PrinterControlCommand", "driver_model", "VARCHAR(128) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "PrinterControlCommand", "driver_name", "VARCHAR(255) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "PrinterControlCommand", "driver_url", "TEXT NOT NULL DEFAULT ''")
-        session.execute(text('UPDATE "PrinterControlCommand" SET created_at = COALESCE(requested_at, created_at, NOW()), updated_at = COALESCE(responded_at, requested_at, updated_at, NOW());'))
-        # Self-heal CounterInfor / StatusInfor for dedupe + touch-updated flow
-        _safe_alter_table(session, "CounterInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "CounterInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        _safe_alter_table(session, "StatusInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
-        _safe_alter_table(session, "StatusInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_counterinfor_lead_lan_agent_ip_mac ON "CounterInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_statusinfor_lead_lan_agent_ip_mac ON "StatusInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
-        session.execute(text('CREATE INDEX IF NOT EXISTS idx_deviceinfor_lead_lan_mac ON "DeviceInfor" (lead, lan_uid, mac_id);'))
-
-        # Seed demo user-workspace links for existing sample accounts so the
-        # login workspace picker has data on fresh deployments.
-        user_workspace_count = session.execute(select(func.count()).select_from(UserWorkspace)).scalar_one()
-        if int(user_workspace_count or 0) == 0:
-            demo_links = {
-                "supplier1": ["ws-1"],
-                "supplier2": ["ws-1", "ws-4"],
-                "supplier3": ["ws-4", "ws-5", "ws-1"],
-                "tech1": ["ws-1", "ws-2", "ws-3"],
-                "tech2": ["ws-1", "ws-2"],
-            }
-            usernames = list(demo_links.keys())
-            users = {
-                row.username: row
-                for row in session.execute(
-                    select(UserAccount).where(UserAccount.lead == "default", UserAccount.username.in_(usernames))
-                ).scalars().all()
-            }
-            workspace_ids = sorted({workspace_id for values in demo_links.values() for workspace_id in values})
-            workspaces = {
-                row.id: row
-                for row in session.execute(
-                    select(Workspace).where(Workspace.id.in_(workspace_ids))
-                ).scalars().all()
-            }
-            for username, linked_workspace_ids in demo_links.items():
-                user = users.get(username)
-                if not user:
-                    continue
-                for workspace_id in linked_workspace_ids:
-                    if workspace_id not in workspaces:
+    try:
+        with session_factory() as session:
+            # Self-heal schema drift for older deployments (PostgreSQL).
+            _safe_alter_table(session, "Printer", "auth_user", "VARCHAR(128) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "Printer", "auth_password", "VARCHAR(255) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "Printer", "is_online", "BOOLEAN NOT NULL DEFAULT TRUE")
+            _safe_alter_table(session, "Printer", "online_changed_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "Printer", "mac_address", "VARCHAR(64) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "Printer", "address_book_sync", "JSONB")
+            
+            # Self-heal UserAccount table
+            _safe_alter_table(session, "UserAccount", "password", "VARCHAR(128) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "UserAccount", "user_type", "VARCHAR(32) NOT NULL DEFAULT 'support'")
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_useraccount_user_type ON "UserAccount" (user_type);'))
+            _safe_alter_table(session, "Lead", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "Lead" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
+            _safe_alter_table(session, "Workspace", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "Workspace" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
+            _safe_alter_table(session, "Location", "room", "VARCHAR(128)")
+            _safe_alter_table(session, "Location", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "Location" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
+            _safe_alter_table(session, "Material", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "Material" SET updated_at = COALESCE(updated_at, created_at, NOW());'))
+            session.execute(text(
+                """
+                UPDATE "UserAccount"
+                SET user_type = CASE
+                    WHEN LOWER(COALESCE(role, '')) IN ('tech', 'technician', 'worker') THEN 'tech'
+                    ELSE 'support'
+                END
+                WHERE COALESCE(user_type, '') = ''
+                   OR LOWER(COALESCE(user_type, '')) NOT IN ('tech', 'support')
+                """
+            ))
+            session.execute(text(
+                """
+                UPDATE "UserAccount"
+                SET role = CASE
+                    WHEN LOWER(COALESCE(user_type, '')) = 'tech' THEN 'tech'
+                    ELSE 'support'
+                END
+                WHERE LOWER(COALESCE(role, '')) NOT IN ('tech', 'support')
+                """
+            ))
+            session.execute(text('CREATE TABLE IF NOT EXISTS "UserWorkspace" ('
+                                 'id SERIAL PRIMARY KEY,'
+                                 'user_id INTEGER NOT NULL REFERENCES "UserAccount"(id) ON DELETE CASCADE,'
+                                 'workspace_id VARCHAR(64) NOT NULL REFERENCES "Workspace"(id) ON DELETE CASCADE,'
+                                 'created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
+                                 'updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
+                                 'CONSTRAINT uq_userworkspace_user_workspace UNIQUE (user_id, workspace_id)'
+                                 ');'))
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_userworkspace_user_id ON "UserWorkspace" (user_id);'))
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_userworkspace_workspace_id ON "UserWorkspace" (workspace_id);'))
+            
+            # Self-heal LanSite table
+            _safe_alter_table(session, "LanSite", "fingerprint_signature", "TEXT")
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_lansite_fingerprint ON "LanSite" (lead, fingerprint_signature);'))
+            
+            # Self-heal AgentNode table
+            _safe_alter_table(session, "AgentNode", "last_seen_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "AgentNode", "app_version", "VARCHAR(64) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "AgentNode", "run_mode", "VARCHAR(32) NOT NULL DEFAULT 'web'")
+            _safe_alter_table(session, "AgentNode", "web_port", "INTEGER NOT NULL DEFAULT 9173")
+            _safe_alter_table(session, "AgentNode", "ftp_ports", "TEXT NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "AgentNode", "is_online", "BOOLEAN NOT NULL DEFAULT TRUE")
+            _safe_alter_table(session, "AgentNode", "online_changed_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "AgentNode", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "AgentNode" SET updated_at = COALESCE(last_seen_at, created_at, updated_at, NOW());'))
+            _safe_alter_table(session, "AgentPresenceLog", "ftp_ports", "TEXT NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "AgentPresenceLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "AgentPresenceLog" SET updated_at = COALESCE(changed_at, last_seen_at, created_at, updated_at, NOW());'))
+            session.execute(text('UPDATE "FtpControlCommand" SET created_at = COALESCE(requested_at, created_at, NOW()), updated_at = COALESCE(responded_at, requested_at, updated_at, NOW());'))
+            _safe_alter_table(session, "PrinterEnableLog", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "PrinterEnableLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "PrinterEnableLog" SET created_at = COALESCE(changed_at, created_at, NOW()), updated_at = COALESCE(changed_at, updated_at, NOW());'))
+            _safe_alter_table(session, "PrinterOnlineLog", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "PrinterOnlineLog", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('UPDATE "PrinterOnlineLog" SET created_at = COALESCE(changed_at, created_at, NOW()), updated_at = COALESCE(changed_at, updated_at, NOW());'))
+            _safe_alter_table(session, "PrinterControlCommand", "created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "PrinterControlCommand", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "PrinterControlCommand", "command_type", "VARCHAR(64) NOT NULL DEFAULT 'enable_disable'")
+            _safe_alter_table(session, "PrinterControlCommand", "driver_brand", "VARCHAR(64) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "PrinterControlCommand", "driver_model", "VARCHAR(128) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "PrinterControlCommand", "driver_name", "VARCHAR(255) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "PrinterControlCommand", "driver_url", "TEXT NOT NULL DEFAULT ''")
+            session.execute(text('UPDATE "PrinterControlCommand" SET created_at = COALESCE(requested_at, created_at, NOW()), updated_at = COALESCE(responded_at, requested_at, updated_at, NOW());'))
+            # Self-heal CounterInfor / StatusInfor for dedupe + touch-updated flow
+            _safe_alter_table(session, "CounterInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "CounterInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            _safe_alter_table(session, "StatusInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
+            _safe_alter_table(session, "StatusInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_counterinfor_lead_lan_agent_ip_mac ON "CounterInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_statusinfor_lead_lan_agent_ip_mac ON "StatusInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
+            session.execute(text('CREATE INDEX IF NOT EXISTS idx_deviceinfor_lead_lan_mac ON "DeviceInfor" (lead, lan_uid, mac_id);'))
+    
+            # Seed demo user-workspace links for existing sample accounts so the
+            # login workspace picker has data on fresh deployments.
+            user_workspace_count = session.execute(select(func.count()).select_from(UserWorkspace)).scalar_one()
+            if int(user_workspace_count or 0) == 0:
+                demo_links = {
+                    "supplier1": ["ws-1"],
+                    "supplier2": ["ws-1", "ws-4"],
+                    "supplier3": ["ws-4", "ws-5", "ws-1"],
+                    "tech1": ["ws-1", "ws-2", "ws-3"],
+                    "tech2": ["ws-1", "ws-2"],
+                }
+                usernames = list(demo_links.keys())
+                users = {
+                    row.username: row
+                    for row in session.execute(
+                        select(UserAccount).where(UserAccount.lead == "default", UserAccount.username.in_(usernames))
+                    ).scalars().all()
+                }
+                workspace_ids = sorted({workspace_id for values in demo_links.values() for workspace_id in values})
+                workspaces = {
+                    row.id: row
+                    for row in session.execute(
+                        select(Workspace).where(Workspace.id.in_(workspace_ids))
+                    ).scalars().all()
+                }
+                for username, linked_workspace_ids in demo_links.items():
+                    user = users.get(username)
+                    if not user:
                         continue
-                    session.add(UserWorkspace(user_id=user.id, workspace_id=workspace_id))
-            session.commit()
-
-        # Backfill presence history once for existing AgentNode rows so the
-        # backend has a baseline history even before the first new heartbeat.
-        stale_before = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_STALE_SECONDS)
-        existing_presence_keys = {
-            (lead, lan_uid, agent_uid)
-            for lead, lan_uid, agent_uid in session.execute(
-                select(AgentPresenceLog.lead, AgentPresenceLog.lan_uid, AgentPresenceLog.agent_uid)
-            ).all()
-        }
-        agent_rows = session.execute(select(AgentNode)).scalars().all()
-        now = datetime.now(timezone.utc)
-        for agent in agent_rows:
-            key = (_to_text(agent.lead), _to_text(agent.lan_uid), _to_text(agent.agent_uid))
-            if key in existing_presence_keys:
-                continue
-            seen_at = agent.last_seen_at if agent.last_seen_at and agent.last_seen_at.tzinfo else (
-                agent.last_seen_at.replace(tzinfo=timezone.utc) if agent.last_seen_at else None
-            )
-            current_online = bool(seen_at and seen_at >= stale_before)
-            change_at = seen_at if current_online and seen_at else now
-            agent.is_online = current_online
-            agent.online_changed_at = change_at
-            session.add(
-                AgentPresenceLog(
-                    lead=agent.lead,
-                    lan_uid=agent.lan_uid,
-                    agent_uid=agent.agent_uid,
-                    hostname=agent.hostname or "",
-                    local_ip=agent.local_ip or "",
-                    local_mac=agent.local_mac or "",
-                    app_version=agent.app_version or "",
-                    run_mode=agent.run_mode or "web",
-                    web_port=int(agent.web_port or 9173),
-                    is_online=current_online,
-                    ftp_sites=list(agent.ftp_sites or []),
-                    changed_at=change_at,
-                    last_seen_at=seen_at or now,
+                    for workspace_id in linked_workspace_ids:
+                        if workspace_id not in workspaces:
+                            continue
+                        session.add(UserWorkspace(user_id=user.id, workspace_id=workspace_id))
+                session.commit()
+    
+            # Backfill presence history once for existing AgentNode rows so the
+            # backend has a baseline history even before the first new heartbeat.
+            stale_before = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_STALE_SECONDS)
+            existing_presence_keys = {
+                (lead, lan_uid, agent_uid)
+                for lead, lan_uid, agent_uid in session.execute(
+                    select(AgentPresenceLog.lead, AgentPresenceLog.lan_uid, AgentPresenceLog.agent_uid)
+                ).all()
+            }
+            agent_rows = session.execute(select(AgentNode)).scalars().all()
+            now = datetime.now(timezone.utc)
+            for agent in agent_rows:
+                key = (_to_text(agent.lead), _to_text(agent.lan_uid), _to_text(agent.agent_uid))
+                if key in existing_presence_keys:
+                    continue
+                seen_at = agent.last_seen_at if agent.last_seen_at and agent.last_seen_at.tzinfo else (
+                    agent.last_seen_at.replace(tzinfo=timezone.utc) if agent.last_seen_at else None
                 )
-            )
-        session.commit()
+                current_online = bool(seen_at and seen_at >= stale_before)
+                change_at = seen_at if current_online and seen_at else now
+                agent.is_online = current_online
+                agent.online_changed_at = change_at
+                session.add(
+                    AgentPresenceLog(
+                        lead=agent.lead,
+                        lan_uid=agent.lan_uid,
+                        agent_uid=agent.agent_uid,
+                        hostname=agent.hostname or "",
+                        local_ip=agent.local_ip or "",
+                        local_mac=agent.local_mac or "",
+                        app_version=agent.app_version or "",
+                        run_mode=agent.run_mode or "web",
+                        web_port=int(agent.web_port or 9173),
+                        is_online=current_online,
+                        ftp_sites=list(agent.ftp_sites or []),
+                        changed_at=change_at,
+                        last_seen_at=seen_at or now,
+                    )
+                )
+            session.commit()
+    except Exception as exc:
+        LOGGER.warning("Schema self-heal failed or database transient error: %s", exc, exc_info=True)
+
 
     lead_key_map = cfg.lead_keys()
 

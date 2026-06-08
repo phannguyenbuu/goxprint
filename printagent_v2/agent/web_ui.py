@@ -102,3 +102,71 @@ def register_ui_routes(app):
             return jsonify({"ok": False, "error": "Missing text"}), 400
         ok, message = updater.handle_text_message(text, source="webhook")
         return jsonify({"ok": ok, "message": message, "status": updater.status()})
+
+    @app.get("/utilities")
+    def utilities_page() -> Any:
+        return render_template("utilities.html", active_tab="utilities", page_title="Utilities")
+
+    @app.post("/api/utilities/printers")
+    def trigger_printers() -> Any:
+        try:
+            from agent.utilities import open_devices_and_printers
+            open_devices_and_printers()
+            return jsonify({"ok": True, "message": "Opened Devices and Printers Control Panel"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/utilities/scan")
+    def trigger_scan() -> Any:
+        try:
+            from agent.utilities import open_scan_folder
+            open_scan_folder()
+            return jsonify({"ok": True, "message": "Opened local Scanned Documents folder"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/utilities/dxdiag")
+    def trigger_dxdiag() -> Any:
+        try:
+            from agent.utilities import open_dxdiag
+            open_dxdiag()
+            return jsonify({"ok": True, "message": "Opened dxdiag DirectX Diagnostic Tool"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.get("/api/utilities/ip")
+    def trigger_ip() -> Any:
+        try:
+            from agent.utilities import get_public_ip
+            ip = get_public_ip()
+            return jsonify({"ok": True, "ip": ip or "Failed to retrieve"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.get("/api/utilities/settings")
+    def get_utilities_settings() -> Any:
+        try:
+            return jsonify({
+                "ok": True,
+                "scan_auto_open_file": config.get_bool("polling.scan_auto_open_file", True),
+                "scan_auto_open_dir": config.get_bool("polling.scan_auto_open_dir", True),
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/utilities/settings")
+    def update_utilities_settings() -> Any:
+        try:
+            body = request.get_json(silent=True) or {}
+            if "scan_auto_open_file" in body:
+                config.set_value("polling.scan_auto_open_file", bool(body["scan_auto_open_file"]))
+            if "scan_auto_open_dir" in body:
+                config.set_value("polling.scan_auto_open_dir", bool(body["scan_auto_open_dir"]))
+            return jsonify({
+                "ok": True,
+                "message": "Cài đặt tự động mở file/thư mục đã được cập nhật.",
+                "scan_auto_open_file": config.get_bool("polling.scan_auto_open_file", True),
+                "scan_auto_open_dir": config.get_bool("polling.scan_auto_open_dir", True),
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500

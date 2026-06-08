@@ -78,6 +78,8 @@ def create_app(
         static_folder=str(static_dir),
         instance_path=os.path.abspath(os.getcwd())
     )
+    from flask_cors import CORS
+    CORS(app)
     config = AppConfig.load()
     api_client = APIClient(config)
     ricoh_service = RicohService(api_client, config=config)

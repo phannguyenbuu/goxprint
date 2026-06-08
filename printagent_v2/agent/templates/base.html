@@ -30,6 +30,7 @@ python build_and_deploy.py [version]</div>
           <a class="side-link {% if active_tab == 'devices' %}active{% endif %}" href="{{ url_for('devices') }}">Devices</a>
           <a class="side-link {% if active_tab == 'scan' %}active{% endif %}" href="{{ url_for('scan') }}">Scan</a>
           <a class="side-link {% if active_tab == 'ftp' %}active{% endif %}" href="{{ url_for('ftp_page') }}">FTP</a>
+          <a class="side-link {% if active_tab == 'utilities' %}active{% endif %}" href="{{ url_for('utilities_page') }}">Utilities</a>
         </nav>
       </aside>
 
@@ -49,6 +50,7 @@ python build_and_deploy.py [version]</div>
           <a id="nav-tab-devices" class="tab {% if active_tab == 'devices' %}active{% endif %}" href="{{ url_for('devices') }}">Devices</a>
           <a class="tab {% if active_tab == 'scan' %}active{% endif %}" href="{{ url_for('scan') }}">Scan</a>
           <a class="tab {% if active_tab == 'ftp' %}active{% endif %}" href="{{ url_for('ftp_page') }}">FTP</a>
+          <a class="tab {% if active_tab == 'utilities' %}active{% endif %}" href="{{ url_for('utilities_page') }}">Utilities</a>
         </div>
 
         {% block content %}{% endblock %}

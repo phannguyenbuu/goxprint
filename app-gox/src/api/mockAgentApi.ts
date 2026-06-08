@@ -269,3 +269,20 @@ export async function installDriverOnAgent(printerId: string, brand: string, mod
     body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl })
   });
 }
+
+export async function getAgentSettings(agentUid: string): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/settings?lead=default`);
+}
+
+export async function updateAgentSettings(agentUid: string, settings: { scan_auto_open_file?: boolean; scan_auto_open_dir?: boolean }): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/settings?lead=default`, {
+    method: 'POST',
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function triggerAgentUtility(agentUid: string, action: string): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/utility/${action}?lead=default`, {
+    method: 'POST',
+  });
+}

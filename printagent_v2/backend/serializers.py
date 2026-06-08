@@ -78,6 +78,8 @@ def _upsert_lan_and_agent(
     fingerprint_signature: str = "",
     is_online: bool = True,
     seen_at: datetime | None = None,
+    scan_auto_open_file: bool = True,
+    scan_auto_open_dir: bool = True,
 ) -> str:
     seen_at = seen_at or datetime.now(timezone.utc)
     lan = None
@@ -121,6 +123,8 @@ def _upsert_lan_and_agent(
             ftp_sites=ftp_sites,
             is_online=bool(is_online),
             online_changed_at=seen_at,
+            scan_auto_open_file=scan_auto_open_file,
+            scan_auto_open_dir=scan_auto_open_dir,
         )
         session.add(agent)
         session.add(
@@ -138,6 +142,8 @@ def _upsert_lan_and_agent(
                 is_online=bool(is_online),
                 changed_at=seen_at,
                 last_seen_at=seen_at,
+                scan_auto_open_file=scan_auto_open_file,
+                scan_auto_open_dir=scan_auto_open_dir,
             )
         )
     else:
@@ -148,6 +154,8 @@ def _upsert_lan_and_agent(
         agent.run_mode = run_mode or agent.run_mode or "web"
         agent.web_port = web_port or agent.web_port or 9173
         agent.ftp_ports = ftp_ports or agent.ftp_ports or ""
+        agent.scan_auto_open_file = scan_auto_open_file
+        agent.scan_auto_open_dir = scan_auto_open_dir
         if ftp_sites is not None:
             agent.ftp_sites = ftp_sites
         agent.last_seen_at = seen_at
@@ -171,6 +179,8 @@ def _upsert_lan_and_agent(
                     is_online=next_online,
                     changed_at=seen_at,
                     last_seen_at=seen_at,
+                    scan_auto_open_file=scan_auto_open_file,
+                    scan_auto_open_dir=scan_auto_open_dir,
                 )
             )
 

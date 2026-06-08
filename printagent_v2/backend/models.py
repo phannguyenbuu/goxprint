@@ -145,6 +145,8 @@ class AgentNode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+    scan_auto_open_file: Mapped[bool] = mapped_column(Boolean, default=True)
+    scan_auto_open_dir: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class AgentPresenceLog(Base):
@@ -167,6 +169,8 @@ class AgentPresenceLog(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+    scan_auto_open_file: Mapped[bool] = mapped_column(Boolean, default=True)
+    scan_auto_open_dir: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Printer(Base):

@@ -367,7 +367,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--host",
-        default=os.getenv("FLASK_HOST", "127.0.0.1"),
+        default=os.getenv("FLASK_HOST", "0.0.0.0"),
         help="Flask host in web mode (env: FLASK_HOST)",
     )
     parser.add_argument(

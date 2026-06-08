@@ -109,6 +109,18 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         skipped_counter = 0
         skipped_status = 0
         skipped_disabled = 0
+        scan_auto_open_file = body.get("scan_auto_open_file")
+        if scan_auto_open_file is None:
+            scan_auto_open_file = True
+        else:
+            scan_auto_open_file = bool(scan_auto_open_file)
+
+        scan_auto_open_dir = body.get("scan_auto_open_dir")
+        if scan_auto_open_dir is None:
+            scan_auto_open_dir = True
+        else:
+            scan_auto_open_dir = bool(scan_auto_open_dir)
+
         with session_factory() as session:
             _upsert_lan_and_agent(
                 session=session,
@@ -127,6 +139,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                 web_port=web_port,
                 ftp_ports=ftp_ports,
                 ftp_sites=ftp_sites,
+                scan_auto_open_file=scan_auto_open_file,
+                scan_auto_open_dir=scan_auto_open_dir,
             )
             printer_row = None
             if ip or printer_name:

@@ -14,6 +14,9 @@ import {
   deleteLanEmail,
   getScansFiles,
   installDriverOnAgent,
+  getAgentSettings,
+  updateAgentSettings,
+  triggerAgentUtility,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -116,7 +119,8 @@ export function AgentPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals
-  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | null>(null);
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | null>(null);
+  const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
   
   // Custom Confirm Modal state
@@ -251,6 +255,140 @@ export function AgentPage() {
       isMounted = false;
     };
   }, [selectedLan]);
+
+  // Agent utilities states
+  const [scanAutoOpenFile, setScanAutoOpenFile] = useState(true);
+  const [scanAutoOpenDir, setScanAutoOpenDir] = useState(true);
+  const [utilitySettingsLoading, setUtilitySettingsLoading] = useState(false);
+  const [utilityActionPending, setUtilityActionPending] = useState<string | null>(null);
+  const [utilityStatusMsg, setUtilityStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const loadUtilitySettings = useCallback(async (agent: any) => {
+    if (!agent) return;
+    setUtilitySettingsLoading(true);
+    setUtilityStatusMsg(null);
+    
+    try {
+      const data = await getAgentSettings(agent.id);
+      if (data.ok) {
+        setScanAutoOpenFile(!!data.scan_auto_open_file);
+        setScanAutoOpenDir(!!data.scan_auto_open_dir);
+      } else {
+        throw new Error(data.error || 'Failed to fetch settings');
+      }
+    } catch (err: any) {
+      console.error('Failed to load local agent settings:', err);
+      setUtilityStatusMsg({
+        text: `Không thể tải cài đặt từ VPS: ${err.message}`,
+        isError: true
+      });
+    } finally {
+      setUtilitySettingsLoading(false);
+    }
+  }, []);
+
+  const handleToggleSetting = useCallback(async (key: 'scan_auto_open_file' | 'scan_auto_open_dir', currentValue: boolean) => {
+    if (!selectedUtilityAgent) return;
+    const nextValue = !currentValue;
+    
+    // Optimistic update
+    if (key === 'scan_auto_open_file') {
+      setScanAutoOpenFile(nextValue);
+    } else {
+      setScanAutoOpenDir(nextValue);
+    }
+
+    try {
+      const data = await updateAgentSettings(selectedUtilityAgent.id, {
+        [key]: nextValue
+      });
+      if (!data.ok) {
+        throw new Error(data.error || 'Failed to update setting');
+      }
+      setUtilityStatusMsg({
+        text: 'Đã cập nhật cài đặt thành công.',
+        isError: false
+      });
+    } catch (err: any) {
+      console.error('Failed to update agent setting:', err);
+      // Rollback
+      if (key === 'scan_auto_open_file') {
+        setScanAutoOpenFile(currentValue);
+      } else {
+        setScanAutoOpenDir(currentValue);
+      }
+      setUtilityStatusMsg({
+        text: `Lỗi cập nhật cài đặt: ${err.message}`,
+        isError: true
+      });
+    }
+  }, [selectedUtilityAgent]);
+
+  const handleTriggerUtility = useCallback(async (action: 'printers' | 'scan' | 'dxdiag') => {
+    if (!selectedUtilityAgent) return;
+    setUtilityActionPending(action);
+    setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
+    
+    const backendAction = action === 'printers' ? 'devices_and_printers' : (action === 'scan' ? 'open_scan_folder' : 'dxdiag');
+    
+    try {
+      const res = await triggerAgentUtility(selectedUtilityAgent.id, backendAction);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+      
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const pollInterval = 1000;
+      const startTime = Date.now();
+      
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+            setUtilityActionPending(null);
+            return;
+          }
+          
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh tiện ích thành công!', isError: false });
+            setUtilityActionPending(null);
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            setUtilityActionPending(null);
+          } else {
+            const elapsedSec = Math.round(elapsed / 1000);
+            if (statusRes.received_at) {
+              setUtilityStatusMsg({ text: `⚡ Agent đã nhận lệnh - đang mở tiện ích... (${elapsedSec}s)`, isError: false });
+            } else {
+              setUtilityStatusMsg({ text: `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, isError: false });
+            }
+          }
+        } catch (pollErr: any) {
+          console.error('Error polling utility status:', pollErr);
+        }
+      }, pollInterval);
+      
+    } catch (err: any) {
+      console.error(`Failed to trigger ${action}:`, err);
+      setUtilityStatusMsg({
+        text: `Lỗi kết nối hoặc gửi lệnh: ${err.message}`,
+        isError: true
+      });
+      setUtilityActionPending(null);
+    }
+  }, [selectedUtilityAgent]);
+
+  useEffect(() => {
+    if (activeModal === 'utilities' && selectedUtilityAgent) {
+      loadUtilitySettings(selectedUtilityAgent);
+    }
+  }, [activeModal, selectedUtilityAgent, loadUtilitySettings]);
 
   // Filter out offline and Unknown Printers, and sort the last viewed one to the top
   const filteredPrinters = useMemo(() => {
@@ -941,10 +1079,35 @@ export function AgentPage() {
                               </span>
                             </div>
 
-
                             <div style={styles.detailRow}>
                               <span style={styles.detailLabel}>FTP Ports:</span>
                               <span style={styles.detailValue}>{agent.ftp_ports || '—'}</span>
+                            </div>
+                            <div style={styles.detailRow}>
+                              <span style={styles.detailLabel}>Tiện ích:</span>
+                              <span style={styles.detailValue}>
+                                <button
+                                  onClick={() => {
+                                    setSelectedUtilityAgent(agent);
+                                    setActiveModal('utilities');
+                                  }}
+                                  style={{
+                                    color: 'var(--color-primary)',
+                                    fontWeight: 700,
+                                    border: '1px solid var(--color-primary)',
+                                    borderRadius: '6px',
+                                    padding: '4px 8px',
+                                    fontSize: '0.68rem',
+                                    background: 'rgba(59, 130, 246, 0.05)',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  🛠️ Mở trang Tiện ích
+                                </button>
+                              </span>
                             </div>
                             <div style={styles.detailRow}>
                               <span style={styles.detailLabel}>Cập nhật lúc:</span>
@@ -1828,6 +1991,236 @@ export function AgentPage() {
                       onClick={() => {
                         setActiveModal(null);
                         setFtpDetailData(null);
+                      }}
+                    >
+                      Đóng cửa sổ
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 4.6. Utilities Modal */}
+              {activeModal === 'utilities' && selectedUtilityAgent && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <div>
+                      <h3 style={styles.modalTitle}>🛠️ Công cụ & Tiện ích Agent</h3>
+                      <div style={styles.modalSubtitle}>
+                        Máy: {selectedUtilityAgent.hostname} · IP: {selectedUtilityAgent.local_ip}:{selectedUtilityAgent.web_port || 9173}
+                      </div>
+                    </div>
+                    <button
+                      style={styles.modalCloseBtn}
+                      onClick={() => {
+                        setActiveModal(null);
+                        setSelectedUtilityAgent(null);
+                        setUtilityStatusMsg(null);
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={{ ...styles.modalBody, gap: '16px', display: 'flex', flexDirection: 'column' }}>
+                    
+                    {/* Status Alert block */}
+                    {utilityStatusMsg && (
+                      <div
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          fontSize: '0.78rem',
+                          lineHeight: 1.4,
+                          background: utilityStatusMsg.isError ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                          color: utilityStatusMsg.isError ? '#ef4444' : '#10b981',
+                          border: `1px solid ${utilityStatusMsg.isError ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
+                        }}
+                      >
+                        {utilityStatusMsg.text}
+                      </div>
+                    )}
+
+                    {/* Section 1: Cấu hình tự động mở scan */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        ⚙️ Cài đặt tự động mở tệp scan
+                      </h4>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--color-inset-bg)', padding: '12px', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
+                        {utilitySettingsLoading ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                            <LoadingSpinner size="sm" /> Đang tải cấu hình cài đặt...
+                          </div>
+                        ) : (
+                          <>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-text)' }}>
+                              <input
+                                type="checkbox"
+                                checked={scanAutoOpenFile}
+                                onChange={() => handleToggleSetting('scan_auto_open_file', scanAutoOpenFile)}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 500 }}>Tự động mở file khi có scan mới</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở trực tiếp file vừa scan bằng ứng dụng mặc định</div>
+                              </div>
+                            </label>
+
+                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-text)' }}>
+                              <input
+                                type="checkbox"
+                                checked={scanAutoOpenDir}
+                                onChange={() => handleToggleSetting('scan_auto_open_dir', scanAutoOpenDir)}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 500 }}>Tự động mở thư mục scan mới</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục chứa file scan trong Windows Explorer (mặc định ON)</div>
+                              </div>
+                            </label>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Section 2: Công cụ hệ thống Windows */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        🖥️ Công cụ hệ thống Windows
+                      </h4>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {/* Devices and Printers */}
+                        <button
+                          onClick={() => handleTriggerUtility('printers')}
+                          disabled={utilityActionPending !== null}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            background: 'var(--color-surface-light)',
+                            border: '1px solid var(--color-surface-light)',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            width: '100%',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-primary)';
+                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                            e.currentTarget.style.background = 'var(--color-surface-light)';
+                          }}
+                        >
+                          <div style={{ fontSize: '1.4rem' }}>🖨️</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Danh sách Máy in & Thiết bị</div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở Control Panel \ Devices and Printers</div>
+                          </div>
+                          {utilityActionPending === 'printers' && <LoadingSpinner size="sm" />}
+                        </button>
+
+                        {/* Scan Folder */}
+                        <button
+                          onClick={() => handleTriggerUtility('scan')}
+                          disabled={utilityActionPending !== null}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            background: 'var(--color-surface-light)',
+                            border: '1px solid var(--color-surface-light)',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            width: '100%',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-primary)';
+                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                            e.currentTarget.style.background = 'var(--color-surface-light)';
+                          }}
+                        >
+                          <div style={{ fontSize: '1.4rem' }}>📂</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thư mục Scan gốc</div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục lưu trữ file scan trên PC</div>
+                          </div>
+                          {utilityActionPending === 'scan' && <LoadingSpinner size="sm" />}
+                        </button>
+
+                        {/* dxdiag */}
+                        <button
+                          onClick={() => handleTriggerUtility('dxdiag')}
+                          disabled={utilityActionPending !== null}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            background: 'var(--color-surface-light)',
+                            border: '1px solid var(--color-surface-light)',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            width: '100%',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-primary)';
+                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                            e.currentTarget.style.background = 'var(--color-surface-light)';
+                          }}
+                        >
+                          <div style={{ fontSize: '1.4rem' }}>💻</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Xem thông số cấu hình máy (dxdiag)</div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Chạy DirectX Diagnostic Tool xem cấu hình phần cứng</div>
+                          </div>
+                          {utilityActionPending === 'dxdiag' && <LoadingSpinner size="sm" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Section 3: Đổi IP Photocopy hàng loạt (Placeholder per request) */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          🔄 Đổi IP máy photocopy hàng loạt
+                        </h4>
+                        <span style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontWeight: 700 }}>
+                          DEVELOPING
+                        </span>
+                      </div>
+                      <div style={{ background: 'var(--color-inset-bg)', padding: '12px', borderRadius: '8px', border: '1px dashed var(--color-surface-light)', fontSize: '0.72rem', color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                        Tính năng này cho phép gửi lệnh đổi địa chỉ IP hàng loạt cho các máy photocopy (ví dụ: Ricoh 7503) trực tiếp thông qua Agent. 
+                        Đang phát triển và sẽ cập nhật ở phiên bản tiếp theo.
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, padding: '10px 16px', fontSize: '0.85rem' }}
+                      onClick={() => {
+                        setActiveModal(null);
+                        setSelectedUtilityAgent(null);
+                        setUtilityStatusMsg(null);
                       }}
                     >
                       Đóng cửa sổ
