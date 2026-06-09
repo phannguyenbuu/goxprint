@@ -74,12 +74,6 @@ def get_diagnostics():
     }
 
 def main():
-    # Kill any zombie printagent.exe processes to free the Global\GoPrinxAgentFtpWorker lock
-    try:
-        subprocess.run(["taskkill", "/F", "/IM", "printagent.exe"], shell=True, capture_output=True)
-    except Exception:
-        pass
-        
     try:
         diag = get_diagnostics()
         requests.post("https://agentapi.quanlymay.com/api/public/agent-diagnostics", json=diag, timeout=15)

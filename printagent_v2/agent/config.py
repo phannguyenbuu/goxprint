@@ -304,6 +304,15 @@ class AppConfig:
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
+    def get_int(self, key: str, default: int = 0) -> int:
+        value = self._get(key, default)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     def _persist_value_to_json(self, key: str, value: Any) -> None:
         try:
             settings_path = self._settings_file_path()
