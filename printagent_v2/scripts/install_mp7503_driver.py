@@ -24,7 +24,7 @@ from pathlib import Path
 
 DRIVER_URL = "https://support.ricoh.com/bb/pub_e/dr_ut_e/0001343/0001343268/V3200/z05906L16.exe"
 PRINTER_MODEL = "MP 7503"
-SCAN_TIMEOUT = 2  # seconds per host
+SCAN_TIMEOUT = 5  # seconds per host
 
 
 def get_all_subnets():
@@ -59,6 +59,22 @@ def get_all_subnets():
 
 def check_ricoh_printer(ip):
     """Check if IP is a Ricoh printer, return (ip, name) or (None, None)"""
+    # Quick TCP check: port 9100 (printing) or 80 (web)
+    reachable = False
+    for port in (9100, 80):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect((ip, port))
+            s.close()
+            reachable = True
+            break
+        except Exception:
+            pass
+    if not reachable:
+        return None, None
+
+    # HTTP check: is it a Ricoh?
     try:
         url = f"http://{ip}/web/guest/en/websys/status/getUnificationCounter.cgi"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -96,7 +112,7 @@ def scan_subnet_for_printers(subnet):
     found = []
     ips = [f"{subnet}.{i}" for i in range(1, 255)]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(check_ricoh_printer, ip): ip for ip in ips}
         for future in concurrent.futures.as_completed(futures):
             ip, name = future.result()
