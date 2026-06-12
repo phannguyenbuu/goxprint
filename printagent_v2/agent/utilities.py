@@ -5,9 +5,9 @@ import sys
 
 def open_devices_and_printers():
     """
-    Mở trang danh sách máy in: Control Panel > Devices and Printers (Classic UI)
-    - Win 10 (build < 22000): control.exe /name Microsoft.DevicesAndPrinters
-    - Win 11 (build >= 22000): thử nhiều cách, dùng full Control Panel path
+    Mở trang quản lý máy in:
+    - Win 11 (build >= 22000): Settings > Printers & scanners (ms-settings:printers)
+    - Win 10 trở xuống: Control Panel > Devices and Printers (Classic UI)
     """
     import platform
 
@@ -21,38 +21,17 @@ def open_devices_and_printers():
 
     IS_WIN11 = build >= 22000
 
-    # GUIDs:
-    # {26EE0668-A00A-44D7-9371-BEB064C98683} = Control Panel (All Items)
-    # {A8A91A10-75D1-4155-929E-88F47E7D1df3} = Devices and Printers
-    GUID_DEVICES = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
-    GUID_CPANEL  = "{26EE0668-A00A-44D7-9371-BEB064C98683}"
-
     if IS_WIN11:
-        # Thử các cách theo thứ tự từ đáng tin cậy nhất
-        attempts = [
-            # Cách 1: Full path Control Panel → Devices and Printers (bypass redirect tốt nhất)
-            ['explorer.exe', f'shell:::{GUID_CPANEL}\\0\\::{GUID_DEVICES}'],
-            # Cách 2: GUID trực tiếp
-            ['explorer.exe', f'shell:::{GUID_DEVICES}'],
-            # Cách 3: rundll32 PrintersFolder
-            ['rundll32.exe', 'shell32.dll,SHHelpShortcuts_RunDLL', 'PrintersFolder'],
-            # Cách 4: control printers (Win 10 style, có thể redirect nhưng thử)
-            ['control.exe', 'printers'],
-        ]
-        for cmd in attempts:
-            try:
-                subprocess.Popen(cmd, shell=False)
-                return
-            except Exception:
-                continue
-        # Cuối cùng: Settings > Printers (chấp nhận UI mới)
+        # Win 11: Classic Devices and Printers bị xóa → mở Settings > Printers & scanners
         subprocess.Popen(['explorer.exe', 'ms-settings:printers'], shell=False)
     else:
-        # Win 10 trở xuống
+        # Win 10 trở xuống: Classic Control Panel
+        GUID = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
         try:
             subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
         except Exception:
-            subprocess.Popen(['explorer.exe', f'shell:::{GUID_DEVICES}'], shell=False)
+            subprocess.Popen(['explorer.exe', f'shell:::{GUID}'], shell=False)
+
 
 def open_scan_folder():
     """
