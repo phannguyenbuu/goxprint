@@ -2820,42 +2820,126 @@ Write-Output 'INSTALLED'
             if not exe_files:
                 raise Exception("Không tìm thấy file EXE nào sau khi giải nén")
 
-            # ── Step 3: Pick and run the best EXE ──
-            # Prefer setup.exe, install.exe, or the largest EXE
-            target_exe = exe_files[0]
-            for exe in exe_files:
-                name_lower = exe.name.lower()
-                if name_lower in ("setup.exe", "install.exe", "setup64.exe", "install64.exe"):
-                    target_exe = exe
-                    break
+            # ── Step 3: Install driver via pnputil (no wizard) ──
+            inf_files = list(extract_dir.glob("**/*.inf"))
+            if inf_files:
+                _progress(f"📌 Tìm thấy {len(inf_files)} file .inf — cài vào Driver Store...")
+                for inf in inf_files:
+                    try:
+                        result = subprocess.run(
+                            ["pnputil", "/add-driver", str(inf), "/install"],
+                            capture_output=True, text=True, timeout=120,
+                        )
+                        if result.returncode == 0:
+                            _progress(f"✅ pnputil: {inf.name} — OK")
+                        else:
+                            _progress(f"⚠️ pnputil: {inf.name} — exit {result.returncode}: {(result.stderr or result.stdout or '').strip()[:200]}")
+                    except Exception as pnp_exc:
+                        _progress(f"❌ pnputil: {inf.name} — {pnp_exc}")
             else:
-                # Pick the largest EXE as fallback
-                target_exe = max(exe_files, key=lambda f: f.stat().st_size)
+                _progress("⚠️ Không tìm thấy .inf — thử chạy installer EXE...")
+                # Fallback: run best EXE if no .inf found
+                target_exe = exe_files[0]
+                for exe in exe_files:
+                    name_lower = exe.name.lower()
+                    if name_lower in ("setup.exe", "install.exe", "setup64.exe", "install64.exe", "rv_setup.exe"):
+                        target_exe = exe
+                        break
+                else:
+                    target_exe = max(exe_files, key=lambda f: f.stat().st_size)
+                subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent))
+                _progress(f"🚀 Đã mở {target_exe.name} — vui lòng thao tác trên PC.")
 
-            _progress(f"🚀 Đang mở installer: {target_exe.name}...")
-
-            # Launch installer VISIBLE (no hidden window) so user can interact
-            # Don't wait for it — installer may need user clicks
+            # ── Step 4: Detect installed driver name ──
+            _progress("🔍 Tìm driver trong Windows Driver Store...")
+            installed_driver_name = None
             try:
-                subprocess.Popen(
-                    [str(target_exe)],
-                    cwd=str(target_exe.parent),
-                )
-                _progress(f"✅ Đã mở {target_exe.name} — vui lòng thao tác trên PC để hoàn tất cài đặt.")
-            except Exception as launch_exc:
-                raise Exception(f"Không thể mở installer {target_exe.name}: {launch_exc}")
+                # Search by model number tokens
+                model_numbers = [t for t in model.split() if any(c.isdigit() for c in t)]
+                search_pattern = model_numbers[0] if model_numbers else model.split()[-1] if model.split() else ""
+                if search_pattern:
+                    check = subprocess.run(
+                        ["powershell", "-Command",
+                         f"Get-PrinterDriver | Where-Object {{ $_.Name -like '*{search_pattern}*' }} | Select-Object -ExpandProperty Name"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    drivers_found = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
+                    if drivers_found:
+                        # Prefer PCL6 driver
+                        pcl6 = [d for d in drivers_found if "pcl" in d.lower() and "6" in d]
+                        installed_driver_name = pcl6[0] if pcl6 else drivers_found[0]
+            except Exception as drv_exc:
+                LOGGER.warning("Failed to detect driver name: %s", drv_exc)
 
-            LOGGER.info("Driver installer launched for %s (user interaction required)", printer_ip)
+            if not installed_driver_name and driver_name:
+                installed_driver_name = driver_name
+
+            if installed_driver_name:
+                _progress(f"✅ Driver: {installed_driver_name}")
+            else:
+                _progress("⚠️ Không tìm thấy driver name — bỏ qua tạo máy in")
+
+            # ── Step 5: Create Printer Port + Queue ──
+            if installed_driver_name and printer_ip:
+                port_name = f"IP_{printer_ip}"
+                printer_queue_name = f"{brand.upper()} {model} ({printer_ip})"
+
+                # Create port
+                _progress(f"📌 Tạo port: {port_name} → {printer_ip}")
+                try:
+                    port_check = subprocess.run(
+                        ["powershell", "-Command",
+                         f"Get-PrinterPort -Name '{port_name}' -ErrorAction SilentlyContinue"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    if port_name not in port_check.stdout:
+                        port_result = subprocess.run(
+                            ["powershell", "-Command",
+                             f"Add-PrinterPort -Name '{port_name}' -PrinterHostAddress '{printer_ip}'"],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        if port_result.returncode != 0:
+                            _progress(f"❌ Lỗi tạo port: {port_result.stderr.strip()[:200]}")
+                        else:
+                            _progress(f"✅ Port {port_name} đã tạo")
+                    else:
+                        _progress(f"✅ Port {port_name} đã tồn tại")
+                except Exception as port_exc:
+                    _progress(f"❌ Lỗi tạo port: {port_exc}")
+
+                # Create printer
+                _progress(f"🖨️ Tạo máy in: {printer_queue_name}")
+                try:
+                    printer_check = subprocess.run(
+                        ["powershell", "-Command",
+                         f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    if printer_queue_name not in printer_check.stdout:
+                        add_result = subprocess.run(
+                            ["powershell", "-Command",
+                             f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        if add_result.returncode != 0:
+                            _progress(f"❌ Lỗi tạo máy in: {add_result.stderr.strip()[:200]}")
+                        else:
+                            _progress(f"✅ Đã thêm máy in thành công!")
+                    else:
+                        _progress(f"✅ Máy in đã tồn tại")
+                except Exception as add_exc:
+                    _progress(f"❌ Lỗi tạo máy in: {add_exc}")
+
+            LOGGER.info("Driver installation completed for %s", printer_ip)
 
         except Exception:
-            # On error, clean up immediately
             try:
                 shutil.rmtree(temp_dir)
             except Exception:
                 pass
             raise
         else:
-            # On success, delay cleanup 10 min so installer can use extracted files
+            # Delay cleanup 10 min so pnputil can still reference extracted files
             def _delayed_cleanup():
                 import time as _time
                 _time.sleep(600)
