@@ -2725,6 +2725,9 @@ Write-Output 'INSTALLED'
         LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
 
+        _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
+        step_results: list[str] = []
+
         def _progress(text: str) -> None:
             LOGGER.info("[DriverInstall] %s", text)
             try:
@@ -2732,14 +2735,14 @@ Write-Output 'INSTALLED'
             except Exception:
                 pass
 
-        # ── Step 1: Download ──
         urls = [u.strip() for u in driver_url.split(";") if u.strip()]
         if not urls:
             raise Exception("No driver URLs provided")
 
         temp_dir = Path(tempfile.mkdtemp(prefix="printagent_driver_"))
         try:
-            _progress(f"⬇️ Đang tải driver {driver_name}...")
+            # ── BƯỚC 1/5: Download ──
+            _progress(f"[1/5] ⬇️ Tải driver cho {brand} {model} (IP: {printer_ip})...")
 
             download_path = None
             filename = None
@@ -2777,7 +2780,8 @@ Write-Output 'INSTALLED'
                         continue
 
                     size_mb = file_size / (1024 * 1024)
-                    _progress(f"✅ Tải xong: {curr_filename} ({size_mb:.1f} MB)")
+                    _progress(f"[1/5] ✅ Tải xong: {curr_filename} ({size_mb:.1f} MB)")
+                    step_results.append(f"Download: {curr_filename} ({size_mb:.1f} MB)")
                     download_path = curr_download_path
                     filename = curr_filename
                     break
@@ -2792,40 +2796,41 @@ Write-Output 'INSTALLED'
             if download_path is None:
                 raise Exception(f"All {len(urls)} download URLs failed. Last error: {last_err}")
 
-            # ── Step 2: Extract if ZIP ──
+            # ── BƯỚC 2/5: Extract ──
+            _progress(f"[2/5] 📦 Giải nén {filename}...")
             extract_dir = temp_dir / "extracted"
             extract_dir.mkdir(exist_ok=True)
             exe_files: list[Path] = []
 
             if filename.lower().endswith(".zip"):
-                _progress(f"📦 Đang giải nén {filename}...")
                 with zipfile.ZipFile(download_path, "r") as zip_ref:
                     zip_ref.extractall(extract_dir)
                 exe_files = list(extract_dir.glob("**/*.exe"))
-                file_list = [f.name for f in exe_files]
-                _progress(f"📂 Giải nén xong — tìm thấy {len(exe_files)} file EXE: {', '.join(file_list)}")
+                _progress(f"[2/5] ✅ Giải nén ZIP — {len(exe_files)} file EXE")
             elif filename.lower().endswith(".exe"):
-                # Check if EXE is actually a self-extracting ZIP
                 try:
                     with zipfile.ZipFile(download_path, "r") as zip_ref:
                         zip_ref.extractall(extract_dir)
                     exe_files = list(extract_dir.glob("**/*.exe"))
-                    file_list = [f.name for f in exe_files]
-                    _progress(f"📂 Giải nén SFX xong — tìm thấy {len(exe_files)} file EXE: {', '.join(file_list)}")
+                    _progress(f"[2/5] ✅ Giải nén SFX — {len(exe_files)} file EXE")
                 except Exception:
-                    # Not a ZIP, treat as standalone EXE
                     exe_files = [download_path]
-                    _progress(f"📄 File EXE độc lập: {filename}")
+                    _progress(f"[2/5] 📄 EXE độc lập (không phải SFX)")
 
-            if not exe_files:
-                raise Exception("Không tìm thấy file EXE nào sau khi giải nén")
-
-            # ── Step 3: Install driver via pnputil (no wizard) ──
-            _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
             inf_files = list(extract_dir.glob("**/*.inf"))
+            _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")
+            step_results.append(f"Extract: {len(inf_files)} .inf, {len(exe_files)} .exe")
+
+            if not exe_files and not inf_files:
+                raise Exception("Không tìm thấy .inf hoặc .exe nào")
+
+            # ── BƯỚC 3/5: pnputil install ──
+            _progress(f"[3/5] 📌 Cài driver vào Windows Driver Store...")
+            pnp_ok = 0
+            pnp_fail = 0
             if inf_files:
-                _progress(f"📌 Tìm thấy {len(inf_files)} file .inf — cài vào Driver Store...")
-                for inf in inf_files:
+                for i, inf in enumerate(inf_files, 1):
+                    _progress(f"[3/5] pnputil ({i}/{len(inf_files)}): {inf.name}")
                     try:
                         result = subprocess.run(
                             ["pnputil", "/add-driver", str(inf), "/install"],
@@ -2833,32 +2838,37 @@ Write-Output 'INSTALLED'
                             creationflags=_NO_WINDOW,
                         )
                         if result.returncode == 0:
-                            _progress(f"✅ pnputil: {inf.name} — OK")
+                            pnp_ok += 1
+                            _progress(f"[3/5] ✅ {inf.name} — OK")
                         else:
-                            _progress(f"⚠️ pnputil: {inf.name} — exit {result.returncode}: {(result.stderr or result.stdout or '').strip()[:200]}")
+                            pnp_fail += 1
+                            err_msg = (result.stderr or result.stdout or '').strip()[:200]
+                            _progress(f"[3/5] ⚠️ {inf.name} — exit {result.returncode}: {err_msg}")
                     except Exception as pnp_exc:
-                        _progress(f"❌ pnputil: {inf.name} — {pnp_exc}")
+                        pnp_fail += 1
+                        _progress(f"[3/5] ❌ {inf.name} — {pnp_exc}")
+                _progress(f"[3/5] 📊 pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
             else:
-                _progress("⚠️ Không tìm thấy .inf — thử chạy installer EXE...")
-                # Fallback: run best EXE if no .inf found
-                target_exe = exe_files[0]
-                for exe in exe_files:
-                    name_lower = exe.name.lower()
-                    if name_lower in ("setup.exe", "install.exe", "setup64.exe", "install64.exe", "rv_setup.exe"):
-                        target_exe = exe
-                        break
-                else:
-                    target_exe = max(exe_files, key=lambda f: f.stat().st_size)
-                subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), creationflags=_NO_WINDOW)
-                _progress(f"🚀 Đã mở {target_exe.name} — vui lòng thao tác trên PC.")
+                _progress("[3/5] ⚠️ Không có .inf — chạy EXE fallback...")
+                if exe_files:
+                    target_exe = exe_files[0]
+                    for exe in exe_files:
+                        if exe.name.lower() in ("setup.exe", "install.exe", "setup64.exe", "install64.exe", "rv_setup.exe"):
+                            target_exe = exe
+                            break
+                    else:
+                        target_exe = max(exe_files, key=lambda f: f.stat().st_size)
+                    subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), creationflags=_NO_WINDOW)
+                    _progress(f"[3/5] 🚀 Đã mở {target_exe.name}")
+            step_results.append(f"pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
 
-            # ── Step 4: Detect installed driver name ──
-            _progress("🔍 Tìm driver trong Windows Driver Store...")
+            # ── BƯỚC 4/5: Detect driver name ──
+            _progress(f"[4/5] 🔍 Tìm driver '{model}' trong Windows...")
             installed_driver_name = None
             try:
-                # Search by model number tokens
                 model_numbers = [t for t in model.split() if any(c.isdigit() for c in t)]
                 search_pattern = model_numbers[0] if model_numbers else model.split()[-1] if model.split() else ""
+                _progress(f"[4/5] 🔍 Keyword: '{search_pattern}'")
                 if search_pattern:
                     check = subprocess.run(
                         ["powershell", "-Command",
@@ -2868,76 +2878,96 @@ Write-Output 'INSTALLED'
                     )
                     drivers_found = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
                     if drivers_found:
-                        # Prefer PCL6 driver
+                        _progress(f"[4/5] 📋 Tìm thấy {len(drivers_found)} driver: {', '.join(drivers_found[:5])}")
                         pcl6 = [d for d in drivers_found if "pcl" in d.lower() and "6" in d]
                         installed_driver_name = pcl6[0] if pcl6 else drivers_found[0]
+                    else:
+                        _progress(f"[4/5] ⚠️ Không tìm thấy driver với keyword '{search_pattern}'")
             except Exception as drv_exc:
-                LOGGER.warning("Failed to detect driver name: %s", drv_exc)
+                _progress(f"[4/5] ❌ Lỗi: {drv_exc}")
 
             if not installed_driver_name and driver_name:
                 installed_driver_name = driver_name
+                _progress(f"[4/5] 📌 Dùng tên từ catalog: {driver_name}")
 
             if installed_driver_name:
-                _progress(f"✅ Driver: {installed_driver_name}")
+                _progress(f"[4/5] ✅ Driver: {installed_driver_name}")
+                step_results.append(f"Driver: {installed_driver_name}")
             else:
-                _progress("⚠️ Không tìm thấy driver name — bỏ qua tạo máy in")
+                _progress("[4/5] ❌ Không tìm thấy driver")
+                step_results.append("Driver: KHÔNG TÌM THẤY")
 
-            # ── Step 5: Create Printer Port + Queue ──
+            # ── BƯỚC 5/5: Add-PrinterPort + Add-Printer ──
             if installed_driver_name and printer_ip:
                 port_name = f"IP_{printer_ip}"
                 printer_queue_name = f"{brand.upper()} {model} ({printer_ip})"
+                _progress(f"[5/5] 🖨️ Thêm máy in: {printer_queue_name}")
 
-                # Create port
-                _progress(f"📌 Tạo port: {port_name} → {printer_ip}")
+                # 5a: Port
+                _progress(f"[5/5] 📌 Tạo TCP/IP port: {port_name} → {printer_ip}")
+                port_ok = False
                 try:
                     port_check = subprocess.run(
                         ["powershell", "-Command",
                          f"Get-PrinterPort -Name '{port_name}' -ErrorAction SilentlyContinue"],
-                        capture_output=True, text=True, timeout=15,
-                        creationflags=_NO_WINDOW,
+                        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
                     )
-                    if port_name not in port_check.stdout:
+                    if port_name in port_check.stdout:
+                        _progress(f"[5/5] ✅ Port {port_name} đã tồn tại")
+                        port_ok = True
+                    else:
                         port_result = subprocess.run(
                             ["powershell", "-Command",
                              f"Add-PrinterPort -Name '{port_name}' -PrinterHostAddress '{printer_ip}'"],
-                            capture_output=True, text=True, timeout=30,
-                            creationflags=_NO_WINDOW,
+                            capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
                         )
-                        if port_result.returncode != 0:
-                            _progress(f"❌ Lỗi tạo port: {port_result.stderr.strip()[:200]}")
+                        if port_result.returncode == 0:
+                            _progress(f"[5/5] ✅ Port {port_name} tạo thành công")
+                            port_ok = True
                         else:
-                            _progress(f"✅ Port {port_name} đã tạo")
-                    else:
-                        _progress(f"✅ Port {port_name} đã tồn tại")
+                            _progress(f"[5/5] ❌ Lỗi tạo port: {port_result.stderr.strip()[:200]}")
                 except Exception as port_exc:
-                    _progress(f"❌ Lỗi tạo port: {port_exc}")
+                    _progress(f"[5/5] ❌ Lỗi port: {port_exc}")
 
-                # Create printer
-                _progress(f"🖨️ Tạo máy in: {printer_queue_name}")
-                try:
-                    printer_check = subprocess.run(
-                        ["powershell", "-Command",
-                         f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
-                        capture_output=True, text=True, timeout=15,
-                        creationflags=_NO_WINDOW,
-                    )
-                    if printer_queue_name not in printer_check.stdout:
-                        add_result = subprocess.run(
+                # 5b: Printer Queue
+                if port_ok:
+                    _progress(f"[5/5] 🖨️ Add-Printer: {printer_queue_name}")
+                    try:
+                        printer_check = subprocess.run(
                             ["powershell", "-Command",
-                             f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
-                            capture_output=True, text=True, timeout=30,
-                            creationflags=_NO_WINDOW,
+                             f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
+                            capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
                         )
-                        if add_result.returncode != 0:
-                            _progress(f"❌ Lỗi tạo máy in: {add_result.stderr.strip()[:200]}")
+                        if printer_queue_name in printer_check.stdout:
+                            _progress(f"[5/5] ✅ Máy in đã tồn tại")
+                            step_results.append("Printer: đã tồn tại")
                         else:
-                            _progress(f"✅ Đã thêm máy in thành công!")
-                    else:
-                        _progress(f"✅ Máy in đã tồn tại")
-                except Exception as add_exc:
-                    _progress(f"❌ Lỗi tạo máy in: {add_exc}")
+                            add_result = subprocess.run(
+                                ["powershell", "-Command",
+                                 f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
+                                capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
+                            )
+                            if add_result.returncode == 0:
+                                _progress(f"[5/5] ✅ Thêm máy in thành công!")
+                                step_results.append(f"Printer: {printer_queue_name} ✅")
+                            else:
+                                err = add_result.stderr.strip()[:200]
+                                _progress(f"[5/5] ❌ Lỗi Add-Printer: {err}")
+                                step_results.append("Printer: LỖI")
+                    except Exception as add_exc:
+                        _progress(f"[5/5] ❌ Lỗi: {add_exc}")
+                        step_results.append("Printer: LỖI")
+                else:
+                    _progress("[5/5] ⚠️ Bỏ qua Add-Printer vì port lỗi")
+                    step_results.append("Printer: BỎ QUA (port lỗi)")
+            elif not printer_ip:
+                _progress("[5/5] ⚠️ Không có IP — bỏ qua")
+                step_results.append("Printer: BỎ QUA (không IP)")
 
-            LOGGER.info("Driver installation completed for %s", printer_ip)
+            # ── Summary ──
+            summary = " | ".join(step_results)
+            _progress(f"🏁 HOÀN TẤT: {brand} {model} @ {printer_ip} — {summary}")
+            LOGGER.info("Driver installation completed for %s: %s", printer_ip, summary)
 
         except Exception:
             try:
