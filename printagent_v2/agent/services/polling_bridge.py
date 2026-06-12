@@ -2821,6 +2821,7 @@ Write-Output 'INSTALLED'
                 raise Exception("Không tìm thấy file EXE nào sau khi giải nén")
 
             # ── Step 3: Install driver via pnputil (no wizard) ──
+            _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
             inf_files = list(extract_dir.glob("**/*.inf"))
             if inf_files:
                 _progress(f"📌 Tìm thấy {len(inf_files)} file .inf — cài vào Driver Store...")
@@ -2829,6 +2830,7 @@ Write-Output 'INSTALLED'
                         result = subprocess.run(
                             ["pnputil", "/add-driver", str(inf), "/install"],
                             capture_output=True, text=True, timeout=120,
+                            creationflags=_NO_WINDOW,
                         )
                         if result.returncode == 0:
                             _progress(f"✅ pnputil: {inf.name} — OK")
@@ -2847,7 +2849,7 @@ Write-Output 'INSTALLED'
                         break
                 else:
                     target_exe = max(exe_files, key=lambda f: f.stat().st_size)
-                subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent))
+                subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), creationflags=_NO_WINDOW)
                 _progress(f"🚀 Đã mở {target_exe.name} — vui lòng thao tác trên PC.")
 
             # ── Step 4: Detect installed driver name ──
@@ -2862,6 +2864,7 @@ Write-Output 'INSTALLED'
                         ["powershell", "-Command",
                          f"Get-PrinterDriver | Where-Object {{ $_.Name -like '*{search_pattern}*' }} | Select-Object -ExpandProperty Name"],
                         capture_output=True, text=True, timeout=30,
+                        creationflags=_NO_WINDOW,
                     )
                     drivers_found = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
                     if drivers_found:
@@ -2891,12 +2894,14 @@ Write-Output 'INSTALLED'
                         ["powershell", "-Command",
                          f"Get-PrinterPort -Name '{port_name}' -ErrorAction SilentlyContinue"],
                         capture_output=True, text=True, timeout=15,
+                        creationflags=_NO_WINDOW,
                     )
                     if port_name not in port_check.stdout:
                         port_result = subprocess.run(
                             ["powershell", "-Command",
                              f"Add-PrinterPort -Name '{port_name}' -PrinterHostAddress '{printer_ip}'"],
                             capture_output=True, text=True, timeout=30,
+                            creationflags=_NO_WINDOW,
                         )
                         if port_result.returncode != 0:
                             _progress(f"❌ Lỗi tạo port: {port_result.stderr.strip()[:200]}")
@@ -2914,12 +2919,14 @@ Write-Output 'INSTALLED'
                         ["powershell", "-Command",
                          f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
                         capture_output=True, text=True, timeout=15,
+                        creationflags=_NO_WINDOW,
                     )
                     if printer_queue_name not in printer_check.stdout:
                         add_result = subprocess.run(
                             ["powershell", "-Command",
                              f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
                             capture_output=True, text=True, timeout=30,
+                            creationflags=_NO_WINDOW,
                         )
                         if add_result.returncode != 0:
                             _progress(f"❌ Lỗi tạo máy in: {add_result.stderr.strip()[:200]}")
