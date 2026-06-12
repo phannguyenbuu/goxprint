@@ -28,20 +28,39 @@ PRINTER_MODEL = "MP 7503"
 SCAN_TIMEOUT = 2  # seconds per host
 
 
-def get_local_subnet():
-    """Detect local IP and return subnet as x.x.x"""
+def get_all_subnets():
+    """Detect ALL local subnets from all network interfaces"""
+    subnets = set()
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-        parts = local_ip.split(".")
-        subnet = ".".join(parts[:3])
-        print(f"   Mạng LAN: {subnet}.0/24 (IP máy này: {local_ip})")
-        return subnet
-    except Exception as e:
-        print(f"   ❌ Không xác định được mạng LAN: {e}")
-        return None
+        # Use ipconfig to find all IPv4 addresses
+        result = subprocess.run(
+            ["ipconfig"], capture_output=True, text=True, encoding="cp437", errors="ignore"
+        )
+        for line in result.stdout.splitlines():
+            # Match IPv4 Address lines
+            match = re.search(r'IPv4.*?:\s*(\d+\.\d+\.\d+\.\d+)', line)
+            if match:
+                ip = match.group(1)
+                if ip.startswith("127."):
+                    continue
+                parts = ip.split(".")
+                subnet = ".".join(parts[:3])
+                subnets.add(subnet)
+    except Exception:
+        pass
+
+    # Fallback: detect via socket
+    if not subnets:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            subnets.add(".".join(local_ip.split(".")[:3]))
+        except Exception:
+            pass
+
+    return sorted(subnets)
 
 
 def check_ricoh_printer(ip, model_keyword):
@@ -206,10 +225,13 @@ def main():
         print(f"   ✅ Installer đã đóng (exit code: {proc.returncode})")
         print()
 
-        # ── Step 3: Scan LAN ──
-        print("🔍 BƯỚC 3: Quét mạng LAN tìm máy in Ricoh")
-        subnet = get_local_subnet()
-        if not subnet:
+        # ── Step 3: Scan ALL LANs ──
+        print("🔍 BƯỚC 3: Quét tất cả mạng LAN tìm máy in Ricoh")
+        subnets = get_all_subnets()
+        printers = []
+
+        if not subnets:
+            print("   ⚠️  Không xác định được mạng LAN nào.")
             ip = input("   Nhập IP máy in thủ công (VD: 192.168.1.226): ").strip()
             if ip:
                 printers = [(ip, f"RICOH {PRINTER_MODEL}")]
@@ -217,10 +239,14 @@ def main():
                 print("   ❌ Không có IP, bỏ qua tạo máy in.")
                 return 0
         else:
-            printers = scan_subnet_for_printers(subnet, PRINTER_MODEL.lower())
+            print(f"   Tìm thấy {len(subnets)} mạng: {', '.join(s + '.0/24' for s in subnets)}")
+            print()
+            for subnet in subnets:
+                found = scan_subnet_for_printers(subnet, PRINTER_MODEL.lower())
+                printers.extend(found)
 
         if not printers:
-            print("   ⚠️  Không tìm thấy máy in Ricoh nào trên mạng.")
+            print("   ⚠️  Không tìm thấy máy in Ricoh nào trên tất cả các mạng.")
             ip = input("   Nhập IP thủ công (hoặc Enter để bỏ qua): ").strip()
             if ip:
                 printers = [(ip, f"RICOH {PRINTER_MODEL}")]
