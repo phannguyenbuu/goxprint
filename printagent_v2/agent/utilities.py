@@ -5,32 +5,10 @@ import sys
 
 def open_devices_and_printers():
     """
-    Mở trang quản lý máy in:
-    - Win 11 (build >= 22000): Settings > Printers & scanners (ms-settings:printers)
-    - Win 10 trở xuống: Control Panel > Devices and Printers (Classic UI)
+    Mở Printers & Scanners dùng explorer shell:PrintersFolder.
+    Hoạt động đúng trên mọi phiên bản Windows (Win 10, Win 11, ...).
     """
-    import platform
-
-    build = 0
-    try:
-        if platform.system() == 'Windows':
-            parts = platform.version().split('.')
-            build = int(parts[2]) if len(parts) >= 3 else 0
-    except Exception:
-        build = 0
-
-    IS_WIN11 = build >= 22000
-
-    if IS_WIN11:
-        # Win 11: Classic Devices and Printers bị xóa → mở Settings > Printers & scanners
-        subprocess.Popen(['explorer.exe', 'ms-settings:printers'], shell=False)
-    else:
-        # Win 10 trở xuống: Classic Control Panel
-        GUID = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
-        try:
-            subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
-        except Exception:
-            subprocess.Popen(['explorer.exe', f'shell:::{GUID}'], shell=False)
+    subprocess.Popen(["explorer.exe", "shell:PrintersFolder"])
 
 
 def open_scan_folder():
