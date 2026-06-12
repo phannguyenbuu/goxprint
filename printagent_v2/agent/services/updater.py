@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "1.5.8"
+DEFAULT_APP_VERSION = "1.5.9"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -363,38 +363,77 @@ class AutoUpdater:
                 backup_binary.unlink()
 
             relaunch_command = subprocess.list2cmdline([str(current_binary), *self._current_args])
+            current_pid = os.getpid()
             helper_lines = [
                 "@echo off",
-                "rem Rename current running binary to backup immediately",
+                f"set OLD_PID={current_pid}",
+                "set /a RETRIES=0",
+                "set /a MAX_RETRIES=60",
+                "",
+                "rem ── Phase 1: Wait for old process (PID) to fully exit ──",
+                ":wait_old_exit",
+                'tasklist /FI "PID eq %OLD_PID%" 2>nul | find /I "%OLD_PID%" >nul',
+                "if not errorlevel 1 (",
+                "    set /a RETRIES+=1",
+                "    if %RETRIES% GEQ %MAX_RETRIES% goto force_continue",
+                "    ping 127.0.0.1 -n 2 > nul",
+                "    goto wait_old_exit",
+                ")",
+                "",
+                "rem Extra delay for Win 11 Defender/AV to release file lock",
+                "ping 127.0.0.1 -n 4 > nul",
+                "",
+                "rem ── Phase 2: Delete old .bak if exists ──",
+                f'if exist "{str(backup_binary)}" (',
+                f'    del /f /q "{str(backup_binary)}" >nul 2>&1',
+                ")",
+                "",
+                ":force_continue",
+                "set /a RETRIES=0",
+                "",
+                "rem ── Phase 3: Rename current exe → .bak ──",
                 ":retry_rename",
                 f'if exist "{str(current_binary)}" (',
                 f'    rename "{str(current_binary)}" "{backup_binary.name}"',
                 "    if errorlevel 1 (",
+                "        set /a RETRIES+=1",
+                "        if %RETRIES% GEQ %MAX_RETRIES% goto rename_failed",
                 "        ping 127.0.0.1 -n 2 > nul",
                 "        goto retry_rename",
                 "    )",
                 ")",
+                "",
+                "rem ── Phase 4: Rename .new.tmp → current exe ──",
+                ":retry_stage",
                 f'if exist "{str(staged_binary)}" (',
                 f'    rename "{str(staged_binary)}" "{current_binary.name}"',
                 "    if errorlevel 1 (",
+                "        set /a RETRIES+=1",
+                "        if %RETRIES% GEQ %MAX_RETRIES% goto rename_failed",
                 "        ping 127.0.0.1 -n 2 > nul",
-                "        goto retry_rename",
+                "        goto retry_stage",
                 "    )",
                 ")",
                 "",
-                ":wait_exit",
-                "rem Wait for the old process to fully release the file lock on backup",
-                f'if exist "{str(backup_binary)}" (',
-                f'    del /f /q "{str(backup_binary)}" >nul 2>&1',
-                f'    if exist "{str(backup_binary)}" (',
-                "        ping 127.0.0.1 -n 2 > nul",
-                "        goto wait_exit",
-                "    )",
-                ")",
-                "",
-                "rem Launch the new agent completely detached in the background",
+                "rem ── Phase 5: Launch new agent FIRST, then cleanup ──",
                 f'start /B "" {relaunch_command}',
-                "rem Self delete this batch script cleanly",
+                "",
+                "rem Try to delete .bak in background (non-blocking)",
+                "ping 127.0.0.1 -n 3 > nul",
+                f'del /f /q "{str(backup_binary)}" >nul 2>&1',
+                'del "%~f0"',
+                "goto :eof",
+                "",
+                ":rename_failed",
+                "rem Rename failed after max retries - try to launch whatever is available",
+                f'if exist "{str(current_binary)}" (',
+                f'    start /B "" {relaunch_command}',
+                ") else (",
+                f'    if exist "{str(staged_binary)}" (',
+                f'        rename "{str(staged_binary)}" "{current_binary.name}"',
+                f'        start /B "" {relaunch_command}',
+                "    )",
+                ")",
                 'del "%~f0"',
             ]
             helper_script.write_text("\r\n".join(helper_lines) + "\r\n", encoding="utf-8")
@@ -416,6 +455,7 @@ class AutoUpdater:
                 creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 env=fresh_pyinstaller_env(),
             )
+
 
             with self._lock:
                 self.state.last_success_at = _utc_now()
