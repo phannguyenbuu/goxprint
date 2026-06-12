@@ -1706,39 +1706,90 @@ document.addEventListener('click', () => {
 
 async function installDriverOnAgent(event, printerId, brand, model, driverName, driverUrl) {
     event.stopPropagation();
-    if (!confirm(`Do you want to remotely install driver "${driverName}" on this printer's client PC?`)) return;
-    
+    if (!confirm(`Cài driver "${driverName}" cho máy in ${model}?\\nAgent sẽ tự cài trên máy tính của khách.`)) return;
+
     const btn = event.currentTarget;
     const origText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Installing...';
-    
+    btn.textContent = '⏳ Đang gửi...';
+
     try {
         const res = await fetch(`/api/devices/${printerId}/install-driver`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                brand: brand,
-                model: model,
-                driver_name: driverName,
-                driver_url: driverUrl
-            })
+            body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl })
         });
         const result = await res.json();
-        if (res.ok) {
-            btn.textContent = 'Queued ✔';
-            btn.style.color = '#34d399';
-            alert(`Driver installation queued on client PC!\nCommand ID: ${result.command_id}\nYou can monitor status in the agent or commands log.`);
-            setTimeout(() => {
-                btn.textContent = origText;
-                btn.disabled = false;
-                btn.style.color = '';
-            }, 3000);
-        } else {
-            throw new Error(result.error || 'Server error');
+        const commandId = result.command_id;
+
+        if (!res.ok && res.status !== 202) {
+            throw new Error(result.error || 'Lỗi server');
         }
+
+        if (result.status === 'success') {
+            // Backend waited and got success within 15s
+            showToast(`✔ Cài driver thành công: ${driverName}`, 'success', 0);
+            btn.textContent = '✔ Xong';
+            btn.style.color = '#34d399';
+            setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.color = ''; }, 4000);
+            return;
+        }
+
+        if (result.status === 'failed') {
+            showToast(`✗ Cài driver thất bại: ${result.error || 'Lỗi không xác định'}`, 'error', 0);
+            btn.disabled = false;
+            btn.textContent = origText;
+            return;
+        }
+
+        // status === 'pending' — agent đang xử lý, poll tiếp
+        btn.textContent = '⏳ Đang cài...';
+        showToast(`⌛ Đã gửi lệnh cài driver "${driverName}". Đang chờ agent xử lý...`, 'pending', 0);
+
+        if (!commandId) {
+            btn.disabled = false;
+            btn.textContent = origText;
+            return;
+        }
+
+        // Poll /api/commands/<id>/status mỗi 3s, tối đa 5 phút
+        const pollStart = Date.now();
+        const MAX_WAIT = 5 * 60 * 1000;
+        const INTERVAL = 3000;
+
+        const pollLoop = async () => {
+            if (Date.now() - pollStart > MAX_WAIT) {
+                showToast('⚠ Hết thời gian chờ cài driver. Kiểm tra log agent để biết kết quả.', 'error', 0);
+                btn.disabled = false;
+                btn.textContent = origText;
+                return;
+            }
+            try {
+                const pollRes = await fetch(`/api/commands/${commandId}/status`);
+                const pollData = await pollRes.json();
+                if (pollData.status === 'success') {
+                    showToast(`✔ Cài driver thành công: ${driverName}`, 'success', 0);
+                    btn.textContent = '✔ Xong';
+                    btn.style.color = '#34d399';
+                    setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.color = ''; }, 5000);
+                    return;
+                }
+                if (pollData.status === 'failed') {
+                    showToast(`✗ Cài driver thất bại: ${pollData.error || 'Lỗi không xác định'}`, 'error', 0);
+                    btn.disabled = false;
+                    btn.textContent = origText;
+                    return;
+                }
+                // Still pending
+                setTimeout(pollLoop, INTERVAL);
+            } catch (_) {
+                setTimeout(pollLoop, INTERVAL);
+            }
+        };
+        setTimeout(pollLoop, INTERVAL);
+
     } catch (err) {
-        alert('Failed to trigger driver installation: ' + err.message);
+        showToast('✗ Lỗi gửi lệnh cài driver: ' + err.message, 'error', 0);
         btn.disabled = false;
         btn.textContent = origText;
     }

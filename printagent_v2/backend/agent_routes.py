@@ -248,6 +248,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "online_changed_at": _format_agents_datetime_ui(online_changed_at),
                     "is_online": is_online,
                     "is_master": is_master,
+                    "gds_status": _to_text(getattr(agent, 'gds_status', 'unknown')) or 'unknown',
                     "localhost_url": f"http://127.0.0.1:{port}",
                     "ftp_page_url": f"http://127.0.0.1:{port}/ftp",
                     **_serialize_audit_payload_agents(agent.created_at, agent.updated_at),
@@ -578,8 +579,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 select(AgentNode).where(
                     AgentNode.lead == lead_valid,
                     AgentNode.agent_uid == agent_uid
-                )
-            ).scalar_one_or_none()
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
             
             if agent is None:
                 return jsonify({"ok": False, "error": "Agent not found"}), 404
@@ -610,8 +611,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 select(AgentNode).where(
                     AgentNode.lead == lead_valid,
                     AgentNode.agent_uid == agent_uid
-                )
-            ).scalar_one_or_none()
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
             if agent is None:
                 return jsonify({"ok": False, "error": "Agent not found"}), 404
             
@@ -661,7 +662,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.post("/api/agents/<agent_uid>/utility/<action>")
     def trigger_agent_utility(agent_uid: str, action: str) -> Any:
-        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag"}
+        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip"}
         if action not in valid_actions:
             return jsonify({"ok": False, "error": f"Invalid utility action: {action}"}), 400
             
@@ -677,15 +678,20 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 select(AgentNode).where(
                     AgentNode.lead == lead_valid,
                     AgentNode.agent_uid == agent_uid
-                )
-            ).scalar_one_or_none()
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
             if agent is None:
                 return jsonify({"ok": False, "error": "Agent not found"}), 404
             
             import json as _json
-            params_str = _json.dumps({
+            params = {
                 "action": action,
-            })
+            }
+            if body and isinstance(body, dict):
+                for k, v in body.items():
+                    if k != "action":
+                        params[k] = v
+            params_str = _json.dumps(params)
             
             command = PrinterControlCommand(
                 printer_id=0,

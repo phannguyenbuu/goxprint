@@ -107,3 +107,31 @@ def register_scan_routes(app: Flask, session_factory: Any) -> None:
                     "upload_completed_at": upload_completed_at
                 })
         return jsonify({"ok": True, "rows": rows})
+
+    @app.delete("/api/scans/file")
+    def delete_email_scan_file() -> Any:
+        body = request.get_json(silent=True) or {}
+        lan_uid = _to_text(body.get("lan_uid") or request.args.get("lan_uid"))
+        email = _to_text(body.get("email") or request.args.get("email"))
+        filename = _to_text(body.get("filename") or request.args.get("filename"))
+
+        if not lan_uid or not email or not filename:
+            return jsonify({"ok": False, "error": "Missing lan_uid, email, or filename"}), 400
+
+        lan_uid_safe = _safe_path_token(lan_uid)
+        email_safe = _safe_path_token(email)
+        filename_safe = _safe_path_token(filename)
+
+        file_path = Path("static/scans") / lan_uid_safe / email_safe / filename_safe
+        meta_path = file_path.with_name(f"{filename_safe}.meta.json")
+
+        if not file_path.exists() or not file_path.is_file():
+            return jsonify({"ok": False, "error": "File not found"}), 404
+
+        try:
+            file_path.unlink()
+            if meta_path.exists():
+                meta_path.unlink()
+            return jsonify({"ok": True, "message": f"Successfully deleted file {filename}"})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"Failed to delete file: {exc}"}), 500

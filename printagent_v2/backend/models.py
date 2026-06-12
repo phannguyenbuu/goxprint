@@ -147,6 +147,7 @@ class AgentNode(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
     scan_auto_open_file: Mapped[bool] = mapped_column(Boolean, default=True)
     scan_auto_open_dir: Mapped[bool] = mapped_column(Boolean, default=True)
+    gds_status: Mapped[str] = mapped_column(String(32), default="unknown")  # unknown | running | stopped | not_installed
 
 
 class AgentPresenceLog(Base):

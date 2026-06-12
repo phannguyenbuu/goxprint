@@ -85,9 +85,14 @@ class FtpWorker:
     def _port_in_use(port: int) -> bool:
         if port <= 0:
             return False
+        # Use bind instead of connect to avoid triggering FTP session log spam
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.2)
-            return sock.connect_ex(("127.0.0.1", port)) == 0
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+                return False  # Bind succeeded → port is free
+            except OSError:
+                return True   # Bind failed → port is in use
 
     @staticmethod
     def _force_release_port(port: int) -> bool:

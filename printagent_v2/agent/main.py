@@ -337,176 +337,238 @@ def load_dynamic_scripts() -> None:
             logging.exception("Failed to compile/execute dynamic script %s: %s", file_path.name, exc)
 
 
+def log_debug(msg: str) -> None:
+    try:
+        import os
+        from pathlib import Path
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            with open(Path(temp_dir) / "agent_loader_debug.txt", "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+                f.flush()
+    except Exception:
+        pass
+
 def main() -> int:
-    runtime_root = _ensure_runtime_root()
-    
-    # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
-    is_ftp_worker = False
-    for i, arg in enumerate(sys.argv):
-        if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] == "":
-            is_ftp_worker = True
-            break
-        elif arg == '--mode=""' or arg == "--mode=''":
-            is_ftp_worker = True
-            break
-
-    stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
+    log_debug("agent.main.main() entered.")
+    instance_lock = None
     try:
-        load_dynamic_scripts()
-    except Exception as exc:
-        logging.error("Failed loading dynamic scripts: %s", exc)
-
-    config = AppConfig.load()
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mode",
-        choices=["web", "service", "test", ""],
-        default="web",
-        help="Run mode: web (Flask UI), service (scheduler), test (interactive menu),  (persistent FTP host)",
-    )
-    parser.add_argument(
-        "--host",
-        default=os.getenv("FLASK_HOST", "0.0.0.0"),
-        help="Flask host in web mode (env: FLASK_HOST)",
-    )
-    parser.add_argument(
-        "--port",
-        default=int(os.getenv("FLASK_PORT", str(DEFAULT_WEB_PORT))),
-        type=int,
-        help="Flask port in web mode (env: FLASK_PORT)",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        default=os.getenv("FLASK_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"},
-        help="Enable Flask debug mode (env: FLASK_DEBUG=true/false)",
-    )
-    args = parser.parse_args()
-
-    # Check config overrides for run modes
-    if args.mode == "web" and not config.get_bool("modules.web.enabled", True):
-        logging.info("Web module disabled by configuration modules.web.enabled=false; switching to service mode")
-        args.mode = "service"
-
-    instance_name = "Global\\GoPrinxAgentFtpWorker" if args.mode == "" else "Global\\GoPrinxAgentMain"
-    instance_lock, is_primary = acquire_single_instance(instance_name)
-    if not is_primary:
-        logging.info("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
-        return 0
-
-    startup_ok = False
-    startup_note = "skipped"
-    ftp_enabled = config.get_bool("modules.ftp.enabled", True)
-    if args.mode == "":
-        if ftp_enabled:
-            worker_cmd = startup_command_for_current_exe("")
-            startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-        else:
-            logging.info("FTP worker is disabled; skipping startup registration")
-    else:
-        if args.mode == "web":
-            main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-        elif args.mode == "service":
-            main_cmd = startup_command_for_current_exe("service")
-        else:
-            main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-        startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
+        runtime_root = _ensure_runtime_root()
+        log_debug(f"runtime_root resolved to: {runtime_root}")
         
-        if ftp_enabled:
-            worker_cmd = startup_command_for_current_exe("")
-            worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-            logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
-        else:
-            logging.info("FTP worker is disabled; skipping FTP worker registration")
-            
-    logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
-    logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
- 
-    try:
-        updater_args: list[str]
-        if args.mode == "web":
-            updater_args = ["--mode", "web", "--host", args.host, "--port", str(args.port)]
-        elif args.mode == "service":
-            updater_args = ["--mode", "service"]
-        elif args.mode == "":
-            updater_args = ["--mode", ""]
-        else:
-            updater_args = ["--mode", "test"]
-        updater = AutoUpdater(project_root=Path(__file__).resolve().parents[1], current_args=updater_args)
- 
-        if args.mode == "web":
-            os.environ["APP_RUN_MODE"] = "web"
-            os.environ["APP_WEB_PORT"] = str(args.port)
-            current_args = ["--mode", "web", "--host", args.host, "--port", str(args.port)]
-            stop_event = threading.Event()
-            app = create_app(current_args=current_args, shutdown_event=stop_event)
-            server, server_thread = run_web_server(app, args.host, args.port)
-            def force_update_cb():
-                LOGGER.info("Force update callback triggered from Tray")
-                app_updater = app.config.get("UPDATER")
-                if app_updater is not None:
-                    app_updater.state.last_check_at = ""
-                else:
-                    updater.state.last_check_at = ""
-                app_bridge = app.config.get("POLLING_BRIDGE")
-                if app_bridge is not None:
-                    app_bridge.trigger_once()
-                else:
-                    LOGGER.error("PollingBridge not found in app config during force update callback")
+        # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
+        is_ftp_worker = False
+        for i, arg in enumerate(sys.argv):
+            if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] == "":
+                is_ftp_worker = True
+                break
+            elif arg == '--mode=""' or arg == "--mode=''":
+                is_ftp_worker = True
+                break
 
-            tray = TrayController(
-                f"http://127.0.0.1:{args.port}",
-                stop_event=stop_event,
-                app_version=updater.current_version,
-                force_update_callback=force_update_cb,
-            )
-            tray_thread = threading.Thread(target=tray.run, daemon=True, name="agent-tray")
-            tray_thread.start()
-            try:
-                while not stop_event.wait(0.5):
-                    if not tray_thread.is_alive():
-                        LOGGER.warning("Tray thread exited unexpectedly; keeping web server alive")
-                        tray_thread = threading.Thread(target=tray.run, daemon=True, name="agent-tray-restart")
-                        tray_thread.start()
-            finally:
-                stop_event.set()
-                shutdown_app_resources(app)
-                try:
-                    server.shutdown()
-                except Exception:
-                    pass
-                try:
-                    server.server_close()
-                except Exception:
-                    pass
-                if server_thread.is_alive():
-                    server_thread.join(timeout=5)
+        log_debug(f"is_ftp_worker: {is_ftp_worker}. Setting up logging...")
+        stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
+        log_debug(f"Logging setup complete. stdout_path: {stdout_path}, stderr_path: {stderr_path}")
+        
+        try:
+            log_debug("Loading dynamic scripts...")
+            load_dynamic_scripts()
+            log_debug("Dynamic scripts loaded successfully.")
+        except Exception as exc:
+            log_debug(f"Failed loading dynamic scripts: {exc}")
+            logging.error("Failed loading dynamic scripts: %s", exc)
+
+        log_debug("Loading configuration...")
+        config = AppConfig.load()
+        log_debug("Configuration loaded.")
+
+        log_debug("Parsing arguments...")
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--mode",
+            choices=["web", "service", "test", ""],
+            default="web",
+            help="Run mode: web (Flask UI), service (scheduler), test (interactive menu),  (persistent FTP host)",
+        )
+        parser.add_argument(
+            "--host",
+            default=os.getenv("FLASK_HOST", "0.0.0.0"),
+            help="Flask host in web mode (env: FLASK_HOST)",
+        )
+        parser.add_argument(
+            "--port",
+            default=int(os.getenv("FLASK_PORT", str(DEFAULT_WEB_PORT))),
+            type=int,
+            help="Flask port in web mode (env: FLASK_PORT)",
+        )
+        parser.add_argument(
+            "--debug",
+            action="store_true",
+            default=os.getenv("FLASK_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"},
+            help="Enable Flask debug mode (env: FLASK_DEBUG=true/false)",
+        )
+        args = parser.parse_args()
+        log_debug(f"Arguments parsed: mode={args.mode}, host={args.host}, port={args.port}, debug={args.debug}")
+
+        # Check config overrides for run modes
+        if args.mode == "web" and not config.get_bool("modules.web.enabled", True):
+            log_debug("Web module disabled by configuration; switching to service mode")
+            logging.info("Web module disabled by configuration modules.web.enabled=false; switching to service mode")
+            args.mode = "service"
+
+        instance_name = "Global\\GoPrinxAgentFtpWorker" if args.mode == "" else "Global\\GoPrinxAgentMain"
+        log_debug(f"Acquiring single instance lock for: {instance_name}...")
+        instance_lock, is_primary = acquire_single_instance(instance_name)
+        log_debug(f"Single instance lock acquisition complete: is_primary={is_primary}")
+        if not is_primary:
+            log_debug("Another GoPrinxAgent process is already running. Exiting main().")
+            logging.debug("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
             return 0
- 
+
+        log_debug("Performing startup registration...")
+        startup_ok = False
+        startup_note = "skipped"
+        ftp_enabled = config.get_bool("modules.ftp.enabled", True)
         if args.mode == "":
-            run_ftp_worker_mode(config)
-            return 0
- 
-        api_client = APIClient(config)
-        service = RicohService(api_client, config=config)
-        toshiba_service = ToshibaService(api_client)
-        if args.mode == "test":
-            run_test_mode(config, service)
+            if ftp_enabled:
+                worker_cmd = startup_command_for_current_exe("")
+                startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+            else:
+                log_debug("FTP worker is disabled; skipping startup registration")
+                logging.info("FTP worker is disabled; skipping startup registration")
         else:
-            os.environ["APP_RUN_MODE"] = "service"
-            os.environ["APP_WEB_PORT"] = "0"
-            run_normal_mode(service, toshiba_service, config, updater)
-        return 0
-    except Exception as err:
-        logging.exception("Unhandled error in main: %s", err)
-        print(f"CRITICAL ERROR: {err}", file=sys.stderr)
+            if args.mode == "web":
+                main_cmd = startup_command_for_current_exe("web", args.host, args.port)
+            elif args.mode == "service":
+                main_cmd = startup_command_for_current_exe("service")
+            else:
+                main_cmd = startup_command_for_current_exe("web", args.host, args.port)
+            startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
+            
+            if ftp_enabled:
+                worker_cmd = startup_command_for_current_exe("")
+                worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+                log_debug(f"FTP worker startup registration: {worker_ok} ({worker_note})")
+                logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
+            else:
+                log_debug("FTP worker is disabled; skipping FTP worker registration")
+                logging.info("FTP worker is disabled; skipping FTP worker registration")
+                
+        log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
+        logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
+        logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
+     
+        try:
+            log_debug("Initializing AutoUpdater...")
+            updater_args: list[str]
+            if args.mode == "web":
+                updater_args = ["--mode", "web", "--host", args.host, "--port", str(args.port)]
+            elif args.mode == "service":
+                updater_args = ["--mode", "service"]
+            elif args.mode == "":
+                updater_args = ["--mode", ""]
+            else:
+                updater_args = ["--mode", "test"]
+            updater = AutoUpdater(project_root=Path(__file__).resolve().parents[1], current_args=updater_args)
+            log_debug("AutoUpdater initialized successfully.")
+     
+            if args.mode == "web":
+                log_debug("Running in WEB mode...")
+                os.environ["APP_RUN_MODE"] = "web"
+                os.environ["APP_WEB_PORT"] = str(args.port)
+                current_args = ["--mode", "web", "--host", args.host, "--port", str(args.port)]
+                stop_event = threading.Event()
+                log_debug("Creating app (create_app)...")
+                app = create_app(current_args=current_args, shutdown_event=stop_event)
+                log_debug("App created successfully. Starting web server...")
+                server, server_thread = run_web_server(app, args.host, args.port)
+                log_debug("Web server started successfully. Launching Tray Controller...")
+                
+                def force_update_cb():
+                    LOGGER.info("Force update callback triggered from Tray")
+                    app_updater = app.config.get("UPDATER")
+                    if app_updater is not None:
+                        app_updater.state.last_check_at = ""
+                    else:
+                        updater.state.last_check_at = ""
+                    app_bridge = app.config.get("POLLING_BRIDGE")
+                    if app_bridge is not None:
+                        app_bridge.trigger_once()
+                    else:
+                        LOGGER.error("PollingBridge not found in app config during force update callback")
+    
+                tray = TrayController(
+                    f"http://127.0.0.1:{args.port}",
+                    stop_event=stop_event,
+                    app_version=updater.current_version,
+                    force_update_callback=force_update_cb,
+                )
+                tray_thread = threading.Thread(target=tray.run, daemon=True, name="agent-tray")
+                tray_thread.start()
+                log_debug("Tray thread started. Entering stop_event wait loop...")
+                try:
+                    while not stop_event.wait(0.5):
+                        if not tray_thread.is_alive():
+                            log_debug("Tray thread died! Restarting...")
+                            LOGGER.warning("Tray thread exited unexpectedly; keeping web server alive")
+                            tray_thread = threading.Thread(target=tray.run, daemon=True, name="agent-tray-restart")
+                            tray_thread.start()
+                finally:
+                    log_debug("Exiting stop_event loop, shutting down...")
+                    stop_event.set()
+                    shutdown_app_resources(app)
+                    try:
+                        server.shutdown()
+                    except Exception:
+                        pass
+                    try:
+                        server.server_close()
+                    except Exception:
+                        pass
+                    if server_thread.is_alive():
+                        server_thread.join(timeout=5)
+                return 0
+     
+            if args.mode == "":
+                log_debug("Running in FTP worker mode...")
+                run_ftp_worker_mode(config)
+                log_debug("FTP worker mode finished.")
+                return 0
+     
+            log_debug("Running in API client / Services mode...")
+            api_client = APIClient(config)
+            service = RicohService(api_client, config=config)
+            toshiba_service = ToshibaService(api_client)
+            if args.mode == "test":
+                log_debug("Running test mode...")
+                run_test_mode(config, service)
+            else:
+                log_debug("Running normal service mode...")
+                os.environ["APP_RUN_MODE"] = "service"
+                os.environ["APP_WEB_PORT"] = "0"
+                run_normal_mode(service, toshiba_service, config, updater)
+            log_debug("Normal mode finished.")
+            return 0
+        except BaseException as err:
+            import traceback
+            log_debug(f"Exception caught inside main running loop: {err}\n{traceback.format_exc()}")
+            logging.exception("Unhandled error in main: %s", err)
+            print(f"CRITICAL ERROR: {err}", file=sys.stderr)
+            traceback.print_exc()
+            return 1
+    except BaseException as outer_err:
         import traceback
-        traceback.print_exc()
+        log_debug(f"Exception caught in main outer block: {outer_err}\n{traceback.format_exc()}")
         return 1
     finally:
-        if instance_lock is not None:
-            instance_lock.release()
+        log_debug("Entering main finally block...")
+        try:
+            if instance_lock is not None:
+                instance_lock.release()
+                log_debug("Released instance lock successfully.")
+        except Exception as lock_err:
+            log_debug(f"Failed to release instance lock: {lock_err}")
+        log_debug("Exiting process via os._exit(0)")
         os._exit(0)
 
 

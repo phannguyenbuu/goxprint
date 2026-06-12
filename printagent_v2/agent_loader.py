@@ -2,67 +2,104 @@ import os
 import sys
 from pathlib import Path
 
-# Change CWD to the executable parent directory when frozen to prevent write errors in default CWD (like system32)
-# Hide console window and redirect stdout/stderr when frozen to prevent crashes and capture logs
-if getattr(sys, "frozen", False):
-    if sys.platform == "win32":
-        if not any(arg in sys.argv for arg in ["--debug", "test", "--console"]):
-            try:
-                import ctypes
-                hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-                if hwnd:
-                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 = SW_HIDE
-            except Exception:
-                pass
+def log_debug(msg):
     try:
-        exe_dir = Path(sys.executable).resolve().parent
-        os.chdir(exe_dir)
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            with open(Path(temp_dir) / "agent_loader_debug.txt", "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+                f.flush()
     except Exception:
         pass
-    try:
-        log_dir = Path("storage/logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        sys.stdout = open(log_dir / "loader.txt", "a", encoding="utf-8", buffering=1)
-        sys.stderr = sys.stdout
-    except Exception:
-        class DummyWriter:
-            def write(self, *args, **kwargs): pass
-            def flush(self, *args, **kwargs): pass
-        sys.stdout = DummyWriter()
-        sys.stderr = sys.stdout
 
-import json
-import sqlite3
-import hashlib
-import io
-import zipfile
-import requests
+# Initialize debug log
+try:
+    temp_dir = os.environ.get("TEMP")
+    if temp_dir:
+        with open(Path(temp_dir) / "agent_loader_debug.txt", "w", encoding="utf-8") as f:
+            f.write(f"Started agent_loader.py. Args: {sys.argv}\n")
+            f.flush()
+except Exception:
+    pass
 
-# Force PyInstaller to bundle these standard/dependency modules used by agent core
-import xml.etree.ElementTree
-import ipaddress
-import ftplib
-import winreg
-import ctypes
-import threading
-import time
-import uuid
-import csv
-import platform
-import re
-import shutil
-import traceback
-import urllib.request
-import urllib.parse
-import struct
-import select
-import pyftpdlib
-import pyftpdlib.authorizers
-import pyftpdlib.handlers
-import pyftpdlib.servers
-import unicodedata
+try:
+    log_debug("Starting initial CWD and console setup...")
+    # Change CWD to the executable parent directory when frozen to prevent write errors in default CWD (like system32)
+    # Hide console window and redirect stdout/stderr when frozen to prevent crashes and capture logs
+    if getattr(sys, "frozen", False):
+        if sys.platform == "win32":
+            if not any(arg in sys.argv for arg in ["--debug", "test", "--console"]):
+                try:
+                    import ctypes
+                    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                    if hwnd:
+                        ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 = SW_HIDE
+                except Exception as e:
+                    log_debug(f"Failed to hide console: {e}")
+        try:
+            exe_dir = Path(sys.executable).resolve().parent
+            os.chdir(exe_dir)
+            log_debug(f"Changed CWD to: {exe_dir}")
+        except Exception as e:
+            log_debug(f"Failed to change CWD: {e}")
+        if not any(arg in sys.argv for arg in ["--debug", "test", "--console"]):
+            try:
+                log_dir = Path("storage/logs")
+                log_dir.mkdir(parents=True, exist_ok=True)
+                sys.stdout = open(log_dir / "loader.txt", "a", encoding="utf-8", buffering=1)
+                sys.stderr = sys.stdout
+                log_debug("Redirected stdout/stderr to loader.txt")
+            except Exception as e:
+                log_debug(f"Failed to redirect stdout: {e}")
+                class DummyWriter:
+                    def write(self, *args, **kwargs): pass
+                    def flush(self, *args, **kwargs): pass
+                sys.stdout = DummyWriter()
+                sys.stderr = sys.stdout
+except Exception as e:
+    log_debug(f"Error during console/CWD setup: {e}")
 
-from importlib.machinery import ModuleSpec
+try:
+    log_debug("Importing standard libraries...")
+    import json
+    import sqlite3
+    import hashlib
+    import io
+    import zipfile
+    import requests
+    import flask_cors
+    log_debug("Standard libraries imported successfully.")
+
+    log_debug("Importing bundled/dynamic dependencies...")
+    import xml.etree.ElementTree
+    import ipaddress
+    import ftplib
+    import winreg
+    import ctypes
+    import threading
+    import time
+    import uuid
+    import csv
+    import platform
+    import re
+    import shutil
+    import traceback
+    import urllib.request
+    import urllib.parse
+    import struct
+    import select
+    import pyftpdlib
+    import pyftpdlib.authorizers
+    import pyftpdlib.handlers
+    import pyftpdlib.servers
+    import unicodedata
+    log_debug("Dependencies imported successfully.")
+
+    from importlib.machinery import ModuleSpec
+except Exception as e:
+    import traceback
+    log_debug(f"FATAL IMPORT ERROR: {e}\n{traceback.format_exc()}")
+    sys.exit(1)
 
 DEFAULT_VERSION = "0.0.0"
 CORE_ZIP_NAME = "agent_core.zip"
@@ -164,62 +201,80 @@ def _get_core_zip_path() -> Path:
         return Path("agent_core.zip")
 
 def main():
-    Path("storage/data").mkdir(parents=True, exist_ok=True)
-    
-    config = get_config()
-    base_url = config["url"].rstrip("/")
-
-
-
-    # Ensure dynamic scripts directory exists
-    temp_dir = os.environ.get("TEMP")
-    if temp_dir:
-        scripts_dir = Path(temp_dir) / "GoPrinxAgent" / "scripts"
-    else:
-        import tempfile
-        scripts_dir = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "scripts"
     try:
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+        log_debug("Entered main()")
+        Path("storage/data").mkdir(parents=True, exist_ok=True)
+        log_debug("Created storage/data directory.")
+        
+        log_debug("Loading configuration...")
+        config = get_config()
+        base_url = config["url"].rstrip("/")
+        log_debug(f"Configuration loaded. URL: {base_url}")
 
-
-
-    # 1. Try to load bundled agent_core.zip
-    import sys
-    if getattr(sys, "frozen", False):
-        base_path = Path(getattr(sys, "_MEIPASS", os.getcwd()))
-    else:
-        base_path = Path(__file__).resolve().parent
-
-    local_zip_path = base_path / "agent_core.zip"
-    zip_bytes = None
-
-    if local_zip_path.exists():
-        print(f"Loading bundled agent core from {local_zip_path}...")
+        # Ensure dynamic scripts directory exists
+        log_debug("Ensuring dynamic scripts directory exists...")
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            scripts_dir = Path(temp_dir) / "GoPrinxAgent" / "scripts"
+        else:
+            import tempfile
+            scripts_dir = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "scripts"
         try:
-            zip_bytes = local_zip_path.read_bytes()
-        except Exception as read_err:
-            print(f"Failed to read bundled agent core: {read_err}")
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            log_debug(f"Dynamic scripts directory set to: {scripts_dir}")
+        except Exception as scripts_err:
+            log_debug(f"Failed to create scripts directory: {scripts_err}")
 
-    if not zip_bytes:
-        print("Error: Could not find or read bundled agent_core.zip. Cannot start agent.")
-        safe_input("Press Enter to exit...")
-        sys.exit(1)
-        
-    print("Loading agent core in-memory...")
-    try:
-        importer = MemoryZipImporter(zip_bytes)
-        sys.meta_path.insert(0, importer)
-        
-        os.environ["AGENT_RUNNING_LOADER"] = "true"
-        
-        import agent.main
-        sys.exit(agent.main.main())
-    except Exception as run_exc:
-        print(f"Fatal error running agent core: {run_exc}")
-        traceback.print_exc()
-        safe_input("Press Enter to exit...")
+        # 1. Try to load bundled agent_core.zip
+        log_debug("Loading bundled agent_core.zip...")
+        import sys
+        if getattr(sys, "frozen", False):
+            base_path = Path(getattr(sys, "_MEIPASS", os.getcwd()))
+        else:
+            base_path = Path(__file__).resolve().parent
+
+        local_zip_path = base_path / "agent_core.zip"
+        zip_bytes = None
+
+        if local_zip_path.exists():
+            log_debug(f"Reading bundled agent core from {local_zip_path}...")
+            try:
+                zip_bytes = local_zip_path.read_bytes()
+                log_debug(f"Read {len(zip_bytes)} bytes from agent_core.zip.")
+            except Exception as read_err:
+                log_debug(f"Failed to read bundled agent core: {read_err}")
+
+        if not zip_bytes:
+            log_debug("Error: Could not find or read bundled agent_core.zip. Cannot start agent.")
+            safe_input("Press Enter to exit...")
+            sys.exit(1)
+            
+        log_debug("Loading agent core in-memory...")
+        try:
+            importer = MemoryZipImporter(zip_bytes)
+            sys.meta_path.insert(0, importer)
+            log_debug("MemoryZipImporter inserted into sys.meta_path.")
+            
+            os.environ["AGENT_RUNNING_LOADER"] = "true"
+            
+            log_debug("Importing agent.main...")
+            import agent.main
+            log_debug("Imported agent.main successfully. Calling main()...")
+            
+            sys.exit(agent.main.main())
+        except SystemExit as sys_exit:
+            log_debug(f"SystemExit raised with code: {sys_exit.code}")
+            sys.stdout.flush()
+            sys.exit(sys_exit.code)
+        except BaseException as run_exc:
+            import traceback
+            log_debug(f"Fatal error running agent core: {run_exc}\n{traceback.format_exc()}")
+            sys.stdout.flush()
+            safe_input("Press Enter to exit...")
+            sys.exit(1)
+    except BaseException as main_exc:
+        import traceback
+        log_debug(f"Fatal error in main: {main_exc}\n{traceback.format_exc()}")
         sys.exit(1)
 
 if __name__ == "__main__":

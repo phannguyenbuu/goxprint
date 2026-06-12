@@ -332,7 +332,7 @@ if __name__ == "__main__":
           <th>Machine Name</th>
           <th>Local IP</th>
           <th>Mode</th>
-          <th>Version</th>
+          <th>Version / Driver Svc</th>
           <th>FTP Sites</th>
           <th>Last Run (GMT+7)</th>
           <th>Actions</th>
@@ -750,7 +750,20 @@ document.addEventListener('DOMContentLoaded', () => {
           </td>
           <td>${safeText(row.local_ip)}</td>
           <td>${modeText}</td>
-          <td>${safeText(row.app_version || '-')}</td>
+          <td>
+            <div>${safeText(row.app_version || '-')}</div>
+            ${(function() {
+              const gds = row.gds_status || 'unknown';
+              const gdsMap = {
+                running:       { label: '✔ Driver Svc', bg: '#d1fae5', color: '#065f46', title: 'GoxDriverService đang chạy - cài driver không cần UAC' },
+                stopped:       { label: '⚠ Svc Stopped', bg: '#fef9c3', color: '#854d0e', title: 'GoxDriverService đã cài nhưng chưa chạy' },
+                not_installed: { label: '✗ Svc Missing', bg: '#fee2e2', color: '#991b1b', title: 'GoxDriverService chưa được cài đặt - cài driver sẽ hỏi UAC' },
+                unknown:       { label: '? Svc Unknown', bg: '#f1f5f9', color: '#475569', title: 'Không xác định trạng thái GoxDriverService (agent cũ hoặc offline)' },
+              };
+              const info = gdsMap[gds] || gdsMap.unknown;
+              return `<span title="${escapeHtml(info.title)}" style="display:inline-block;margin-top:4px;padding:2px 7px;border-radius:999px;background:${info.bg};color:${info.color};font-size:11px;font-weight:700;white-space:nowrap;">${info.label}</span>`;
+            })()}
+          </td>
         <td>${ftpSites}</td>
         <td>${safeText(row.last_seen_at || '-')}</td>
         <td>

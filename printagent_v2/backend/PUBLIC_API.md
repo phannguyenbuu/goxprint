@@ -650,3 +650,132 @@ All task activity materializes in `Task`, while user assignment metadata lives i
 - A user can belong to many workspaces, and a workspace can contain many users.
 - Login endpoints return `workspaceIds` so the frontend can show the workspace picker.
 - The read APIs below are the canonical lookup methods for the current membership model.
+
+## 17) Scan Email Destinations (CRUD)
+- **List:** `GET /api/lan-emails`
+  - Query params (optional):
+    - `lead`: filter by lead (e.g., `default`)
+    - `lan_uid`: filter by LAN UID
+    - `email`: search/filter by email address substring
+    - `agent_uid`: filter/determine master status
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "is_master": false,
+      "rows": [
+        {
+          "id": 1,
+          "lead": "default",
+          "lan_uid": "lan-1234",
+          "email": "user@example.com",
+          "email_number": 2130,
+          "email_type": "common",
+          "pc_name": "PC-01",
+          "ftp_user": "goxprint",
+          "ftp_password": "goxprint",
+          "created_at": "2026-06-11 07:00:00"
+        }
+      ]
+    }
+    ```
+- **Create:** `POST /api/lan-emails`
+  - Headers: `Content-Type: application/json`
+  - Body params (required):
+    - `lead`: lead name
+    - `lan_uid`: LAN UID
+    - `email`: email destination address
+  - Body params (optional):
+    - `email_type`: type of email (e.g., `common`, default: `common`)
+    - `pc_name`: target computer name
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "email": {
+        "id": 2,
+        "lead": "default",
+        "lan_uid": "lan-1234",
+        "email": "user2@example.com",
+        "email_number": 2131,
+        "email_type": "common",
+        "pc_name": "PC-02"
+      }
+    }
+    ```
+- **Delete:** `DELETE /api/lan-emails/<email_id>`
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "id": 2
+    }
+    ```
+
+## 18) VPS Scan Folders (List/Delete files)
+- **List Files:** `GET /api/scans/files`
+  - Query params (required):
+    - `lan_uid`: LAN UID of target network
+    - `email`: email folder to list scans from
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "rows": [
+        {
+          "name": "scan_20260611_070000.pdf",
+          "size": 1048576,
+          "mtime": "2026-06-11T00:00:00Z",
+          "url": "/static/scans/lan-1234/user_example_com/scan_20260611_070000.pdf",
+          "upload_duration": 4.2,
+          "upload_completed_at": "2026-06-11T00:00:04Z"
+        }
+      ]
+    }
+    ```
+- **Delete File:** `DELETE /api/scans/file`
+  - Query/Body params (required):
+    - `lan_uid`: LAN UID of target network
+    - `email`: email folder of the file
+    - `filename`: filename of the scan file to delete
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "message": "Successfully deleted file scan_20260611_070000.pdf"
+    }
+    ```
+
+## 19) Agent Settings & PC Utilities
+- **General Settings:** `POST /api/agents/<agent_uid>/settings`
+  - Headers: `Content-Type: application/json`
+  - Query/Body params (required):
+    - `lead`: lead name
+    - `scan_auto_open_file`: boolean (e.g. `true`)
+    - `scan_auto_open_dir`: boolean (e.g. `true`)
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "message": "Settings command queued",
+      "command_id": 456
+    }
+    ```
+- **Trigger Utility Action:** `POST /api/agents/<agent_uid>/utility/<action>`
+  - Action path parameter can be one of:
+    - `devices_and_printers`: open Devices and Printers control panel
+    - `open_scan_folder`: open the local scan directory in Explorer
+    - `dxdiag`: run DirectX Diagnostics for hardware info
+    - `change_ip`: configure IP address settings
+  - Body params (optional):
+    - `new_ip`: (required for `change_ip`) new IP address
+    - `subnet_mask`: (optional for `change_ip`) subnet mask
+    - `gateway`: (optional for `change_ip`) gateway address
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "message": "Utility action 'devices_and_printers' queued",
+      "command_id": 457
+    }
+    ```

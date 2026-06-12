@@ -5,14 +5,39 @@ import sys
 
 def open_devices_and_printers():
     """
-    1. Mở trang danh sách máy in: Control Panel\\Hardware and Sound\\Devices and Printers
+    Mở trang danh sách máy in: Control Panel > Devices and Printers (Classic UI)
+    - Win 10 (build < 22000): control.exe /name Microsoft.DevicesAndPrinters
+    - Win 11 (build >= 22000): explorer.exe shell:::{GUID} — bypass redirect sang Settings
     """
+    import platform
+
+    # Lấy build number: "10.0.22621" → 22621
+    build = 0
     try:
-        # Cách 1: Sử dụng control.exe với tên trang canonical
-        subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
+        if platform.system() == 'Windows':
+            parts = platform.version().split('.')
+            build = int(parts[2]) if len(parts) >= 3 else 0
     except Exception:
-        # Cách 2: Fallback sử dụng GUID của Devices and Printers trong explorer
-        subprocess.Popen('explorer.exe shell:::{A8A91A10-75D1-4155-929E-88F47E7D1df3}', shell=True)
+        build = 0
+
+    IS_WIN11 = build >= 22000  # Windows 11 bắt đầu từ build 22000
+
+    # GUID của "Devices and Printers" trong Classic Control Panel (bất biến mọi phiên bản)
+    GUID = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
+
+    try:
+        if IS_WIN11:
+            # Win 11: control.exe bị redirect → phải dùng shell::: GUID
+            subprocess.Popen(['explorer.exe', f'shell:::{GUID}'], shell=False)
+        else:
+            # Win 10 trở xuống: control.exe hoạt động bình thường
+            subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
+    except Exception:
+        # Fallback cho mọi phiên bản
+        try:
+            subprocess.Popen(f'explorer.exe shell:::{GUID}', shell=True)
+        except Exception:
+            pass
 
 def open_scan_folder():
     """

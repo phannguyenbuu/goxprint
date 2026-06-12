@@ -42,6 +42,13 @@ for py_file in local_backend.glob("*.py"):
     print(f"Uploading {py_file} to {remote_path}...")
     sftp.put(str(py_file), remote_path)
 
+# Upload PUBLIC_API.md
+local_api_md = local_backend / "PUBLIC_API.md"
+if local_api_md.exists():
+    remote_path = f"{remote_backend}/PUBLIC_API.md"
+    print(f"Uploading {local_api_md} to {remote_path}...")
+    sftp.put(str(local_api_md), remote_path)
+
 # HTML templates
 for html_file in local_backend.glob("templates/*.html"):
     remote_path = f"{remote_backend}/templates/{html_file.name}"
@@ -62,6 +69,8 @@ files_to_copy = [
     (str(local_backend / 'storage' / 'releases' / 'agent_core_release.json'), '/opt/printagent/storage/releases/agent_core_release.json'),
     (str(local_backend / 'static' / 'releases' / 'agent_core.zip'), '/opt/printagent/static/releases/agent_core.zip'),
     (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
+    (str(local_backend / 'static' / 'releases' / 'GoxDriverService.exe'), '/opt/printagent/static/releases/GoxDriverService.exe'),
+    (str(local_backend / 'static' / 'releases' / 'install_gox_driver_service.ps1'), '/opt/printagent/static/releases/install_gox_driver_service.ps1'),
     (str(local_backend / 'static' / 'releases' / 'diagnose.py'), '/opt/printagent/static/releases/diagnose.py')
 ]
 

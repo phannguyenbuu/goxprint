@@ -111,14 +111,14 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
             if catalog_file.exists():
                 with open(catalog_file, encoding="utf-8") as f:
                     catalog_data = json.load(f)
-                
+
                 model_obj = None
                 if isinstance(catalog_data, list):
                     for item in catalog_data:
                         if str(item.get("model", "")).strip().lower() == model.lower().strip():
                             model_obj = item
                             break
-                
+
                 if model_obj:
                     model_links = []
                     drivers_field = model_obj.get("drivers")
@@ -130,33 +130,31 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
                         for d in drivers_field:
                             if isinstance(d, dict) and "download_url" in d:
                                 model_links.append(str(d["download_url"]).strip())
-                    
+
                     if not model_links:
                         all_links_field = model_obj.get("all_links")
                         if isinstance(all_links_field, list):
                             for u in all_links_field:
                                 if isinstance(u, str):
                                     model_links.append(u.strip())
-                    
+
                     generic_keywords = [
-                        "diagnostic", "diagnostictool", "diagnostic_tool", "utility", 
-                        "webinstaller", "web_installer", "installer", "easysetup", 
+                        "diagnostic", "diagnostictool", "diagnostic_tool", "utility",
+                        "webinstaller", "web_installer", "installer", "easysetup",
                         "easy_setup", "opkpcl6", "opkps", "mmdspcl6", "mmd2pcl6", "xps"
                     ]
-                    
+
                     import os
                     for u in model_links:
                         if not u or u in all_urls:
                             continue
-                        
                         filename = os.path.basename(u.split("?")[0]).lower()
                         if any(k in filename for k in generic_keywords):
                             continue
-                            
                         all_urls.append(u)
         except Exception as e:
             LOGGER.warning("Failed to collect alternative driver URLs in device_install_driver: %s", e)
-            
+
         driver_url_combined = ";".join(all_urls)
 
         requested_at = datetime.now(timezone.utc)
@@ -164,7 +162,7 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
             printer = _resolve_printer_control_target(session, device_ref)
             if printer is None:
                 return jsonify({"ok": False, "error": "Printer not found"}), 404
-            
+
             pending = session.execute(
                 select(PrinterControlCommand).where(
                     PrinterControlCommand.printer_id == printer.id,
@@ -228,3 +226,19 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
             "message": "Driver installation command queued. Check back for results.",
             "command_id": command_id,
         }), 202
+
+    @app.get("/api/commands/<int:command_id>/status")
+    def get_printer_command_status(command_id: int) -> Any:
+        """Poll the status of a PrinterControlCommand by ID."""
+        with session_factory() as session:
+            command = session.get(PrinterControlCommand, command_id)
+            if command is None:
+                return jsonify({"ok": False, "error": "Command not found"}), 404
+            return jsonify({
+                "ok": True,
+                "id": command_id,
+                "status": command.status,
+                "command_type": command.command_type,
+                "error": command.error_message or "",
+                "responded_at": command.responded_at.isoformat() if command.responded_at else None,
+            })

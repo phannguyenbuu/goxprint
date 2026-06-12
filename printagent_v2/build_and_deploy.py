@@ -32,16 +32,8 @@ def main():
     if len(sys.argv) > 1:
         new_version = sys.argv[1].strip()
     else:
-        # Auto increment patch
-        parts = current_version.split(".")
-        if len(parts) == 3:
-            try:
-                parts[2] = str(int(parts[2]) + 1)
-                new_version = ".".join(parts)
-            except ValueError:
-                new_version = current_version + ".1"
-        else:
-            new_version = current_version + ".1"
+        # Keep current version as-is (no auto-increment)
+        new_version = current_version
             
     print(f"Updating version from {current_version} to {new_version}...")
     

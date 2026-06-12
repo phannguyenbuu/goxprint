@@ -318,7 +318,38 @@ class PollingBridge:
             "ftp_sites": ftp_sites,
             "scan_auto_open_file": self._config.get_bool("polling.scan_auto_open_file", True),
             "scan_auto_open_dir": self._config.get_bool("polling.scan_auto_open_dir", True),
+            "gds_status": self._get_gds_status(),
         }
+
+    def _get_gds_status(self) -> str:
+        """Check GoxDriverService status: running | stopped | not_installed | unknown"""
+        try:
+            import win32file as _w32f
+            import pywintypes as _pwt
+            PIPE_NAME = r"\\.\pipe\GoxDriverService"
+            try:
+                h = _w32f.CreateFile(PIPE_NAME, _w32f.GENERIC_READ | _w32f.GENERIC_WRITE,
+                                     0, None, _w32f.OPEN_EXISTING, 0, None)
+                _w32f.CloseHandle(h)
+                return "running"
+            except _pwt.error as e:
+                if e.winerror == 2:  # pipe not found
+                    # Check if service is installed but stopped
+                    import subprocess
+                    r = subprocess.run(
+                        ["sc", "query", "GoxDriverService"],
+                        capture_output=True, text=True,
+                        **no_window_subprocess_kwargs(),
+                    )
+                    if r.returncode == 0:
+                        return "stopped"
+                    return "not_installed"
+                return "unknown"
+        except ImportError:
+            return "unknown"
+        except Exception:
+            return "unknown"
+
 
     def is_configured(self) -> bool:
         return bool(self._config.get_string("polling.url").strip()) and bool(self._config.get_string("polling.lead").strip()) and bool(
@@ -1505,6 +1536,7 @@ if ($node) {{ $node }}
                     
                     try:
                         import sys
+                        import os
                         import subprocess
                         
                         # Auto open scan file
@@ -2023,6 +2055,115 @@ if ($node) {{ $node }}
         except Exception as gui_exc:
             LOGGER.warning("Failed to schedule Tkinter toast: %s", gui_exc)
 
+    def _show_agent_command_popup(self, command_type: str, params: dict) -> None:
+        import tkinter as tk
+        
+        title = "Thông báo Lệnh từ Server"
+        msg_lines = []
+        
+        if command_type == "general_settings":
+            msg_lines.append("Lệnh: Cập nhật cấu hình chung")
+            scan_auto_open_file = params.get("scan_auto_open_file")
+            scan_auto_open_dir = params.get("scan_auto_open_dir")
+            if scan_auto_open_file is not None:
+                msg_lines.append(f"- Tự động mở file scan: {'Bật' if scan_auto_open_file else 'Tắt'}")
+            if scan_auto_open_dir is not None:
+                msg_lines.append(f"- Tự động mở thư mục: {'Bật' if scan_auto_open_dir else 'Tắt'}")
+        elif command_type == "trigger_utility":
+            action = str(params.get("action", "")).strip()
+            utility_translations = {
+                "devices_and_printers": "Mở danh sách Máy in & Thiết bị",
+                "open_scan_folder": "Mở thư mục Scan gốc trên PC",
+                "dxdiag": "Xem thông số cấu hình máy (dxdiag)",
+                "change_ip": "Thay đổi địa chỉ IP máy PC",
+            }
+            action_vn = utility_translations.get(action, action)
+            msg_lines.append(f"Lệnh: {action_vn}")
+            
+            if action == "change_ip":
+                mode = str(params.get("mode", "dhcp")).strip().lower()
+                adapter = str(params.get("adapter_name", "Ethernet")).strip()
+                msg_lines.append(f"- Card mạng: {adapter}")
+                if mode == "dhcp":
+                    msg_lines.append("- Chế độ: Nhận IP tự động (DHCP)")
+                else:
+                    ip = str(params.get("ip_address", "")).strip()
+                    gateway = str(params.get("gateway", "")).strip()
+                    msg_lines.append(f"- Chế độ: IP Tĩnh ({ip})")
+                    if gateway:
+                        msg_lines.append(f"- Gateway: {gateway}")
+        else:
+            msg_lines.append(f"Lệnh: {command_type}")
+
+        message = "\n".join(msg_lines)
+
+        # 1. Try tray balloon
+        try:
+            from agent.services.tray import _active_tray
+            if _active_tray is not None:
+                _active_tray._show_balloon(title, message)
+        except Exception as tray_exc:
+            LOGGER.debug("Failed to show tray balloon: %s", tray_exc)
+
+        # 2. Try Tkinter premium auto-closing toast notification
+        try:
+            from agent.services.gui import _gui_root
+            if _gui_root is not None:
+                def _show_toplevel():
+                    try:
+                        toast = tk.Toplevel(_gui_root)
+                        toast.withdraw()
+                        toast.overrideredirect(True)
+                        toast.attributes("-topmost", True)
+                        toast.attributes("-alpha", 0.95)
+
+                        bg_color = "#1e293b"  # Slate dark 800
+                        text_color = "#f8fafc"  # Slate light 50
+                        accent_color = "#3b82f6"  # Blue 500
+
+                        frame = tk.Frame(toast, bg=bg_color, highlightbackground=accent_color, highlightthickness=2, bd=0)
+                        frame.pack(fill="both", expand=True)
+
+                        lbl_title = tk.Label(
+                            frame,
+                            text=title,
+                            font=("Segoe UI", 10, "bold"),
+                            bg=bg_color,
+                            fg=accent_color,
+                            anchor="w"
+                        )
+                        lbl_title.pack(padx=14, pady=(10, 4), fill="x")
+
+                        lbl_msg = tk.Label(
+                            frame,
+                            text=message,
+                            font=("Segoe UI", 9),
+                            bg=bg_color,
+                            fg=text_color,
+                            justify="left",
+                            anchor="w"
+                        )
+                        lbl_msg.pack(padx=14, pady=(0, 10), fill="x")
+
+                        toast.update_idletasks()
+                        w = max(330, lbl_msg.winfo_reqwidth() + 28)
+                        h = lbl_title.winfo_reqheight() + lbl_msg.winfo_reqheight() + 24
+
+                        screen_width = toast.winfo_screenwidth()
+                        screen_height = toast.winfo_screenheight()
+                        x = screen_width - w - 20
+                        y = screen_height - h - 60
+
+                        toast.geometry(f"{w}x{h}+{x}+{y}")
+                        toast.deiconify()
+                        toast.after(3500, toast.destroy)
+                    except Exception as tk_exc:
+                        LOGGER.warning("Failed to show Tkinter toast: %s", tk_exc)
+
+                _gui_root.after(0, _show_toplevel)
+        except Exception as gui_exc:
+            LOGGER.warning("Failed to schedule Tkinter toast: %s", gui_exc)
+
     def _apply_command(self, printer: Printer, command: dict[str, object]) -> None:
         command_id = int(command.get("id", 0) or 0)
         desired_enabled = bool(command.get("desired_enabled", True))
@@ -2226,6 +2367,35 @@ if ($node) {{ $node }}
             self._update_recent_command_status(command_id, "failed", str(exc))
             raise
 
+    def _launch_in_foreground(self, args: list[str] | None = None, is_startfile: bool = False, path_str: str | None = None) -> None:
+        import ctypes
+        import time
+        import threading
+        import subprocess
+        import os
+        
+        user32 = ctypes.windll.user32
+        SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
+        SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
+        
+        # 1. Get original timeout
+        orig_timeout = ctypes.c_uint()
+        user32.SystemParametersInfoW(SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(orig_timeout), 0)
+        
+        # 2. Set timeout to 0 (allow focus stealing)
+        user32.SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.c_void_p(0), 2)
+        
+        try:
+            if is_startfile and path_str:
+                os.startfile(path_str)
+            elif args:
+                subprocess.Popen(args)
+        finally:
+            def restore():
+                time.sleep(1.5)
+                user32.SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.c_void_p(orig_timeout.value), 2)
+            threading.Thread(target=restore, daemon=True).start()
+
     def _apply_agent_command(self, command: dict[str, object]) -> None:
         command_id = int(command.get("id", 0) or 0)
         command_type = str(command.get("command_type", "")).strip()
@@ -2245,6 +2415,11 @@ if ($node) {{ $node }}
                 except Exception as parse_exc:
                     LOGGER.warning("[PollingBridge] Failed to parse agent command_params: %s", parse_exc)
 
+            try:
+                self._show_agent_command_popup(command_type, params)
+            except Exception as pop_exc:
+                LOGGER.warning("Failed to invoke agent command popup: %s", pop_exc)
+
             if command_type == "general_settings":
                 scan_auto_open_file = params.get("scan_auto_open_file")
                 scan_auto_open_dir = params.get("scan_auto_open_dir")
@@ -2261,25 +2436,43 @@ if ($node) {{ $node }}
             elif command_type == "trigger_utility":
                 action = str(params.get("action", "")).strip()
                 import sys
+                import os
                 import subprocess
                 
                 if action == "devices_and_printers":
                     if sys.platform == "win32":
-                        subprocess.Popen(["control.exe", "printers"])
+                        self._launch_in_foreground(["control.exe", "printers"])
                     else:
                         raise RuntimeError(f"Devices and Printers is only supported on Windows, got platform {sys.platform}")
                         
                 elif action == "open_scan_folder":
-                    scan_dir = self._config.get_string("polling.scan_dirs", "storage/scans/inbox").strip()
+                    scan_dir = self._config.get_string("polling.scan_dirs", "").strip()
                     from pathlib import Path
-                    scan_path = Path(scan_dir)
-                    if not scan_path.is_absolute():
-                        scan_path = Path.cwd() / scan_path
+                    if not scan_dir:
+                        scan_path = user_temp_root() / "ftp"
+                    else:
+                        # scan_dirs may be semicolon-separated list of full paths
+                        # e.g. "C:\temp\ftp\user1;C:\temp\ftp\user2" → open parent "C:\temp\ftp"
+                        paths = [p.strip() for p in scan_dir.split(";") if p.strip()]
+                        if not paths:
+                            scan_path = user_temp_root() / "ftp"
+                        else:
+                            first_path = Path(paths[0])
+                            # If multiple paths, open their common parent directory
+                            if len(paths) > 1:
+                                scan_path = first_path.parent
+                            else:
+                                scan_path = first_path
+                            if not scan_path.is_absolute():
+                                scan_path = user_temp_root() / "ftp"
+                    # Ensure it's a valid single path (not semicolon-joined)
+                    if ";" in str(scan_path):
+                        scan_path = user_temp_root() / "ftp"
                     if not scan_path.exists():
                         scan_path.mkdir(parents=True, exist_ok=True)
                         
                     if sys.platform == "win32":
-                        os.startfile(str(scan_path))
+                        self._launch_in_foreground(is_startfile=True, path_str=str(scan_path))
                     elif sys.platform == "darwin":
                         subprocess.Popen(["open", str(scan_path)])
                     else:
@@ -2287,9 +2480,55 @@ if ($node) {{ $node }}
                         
                 elif action == "dxdiag":
                     if sys.platform == "win32":
-                        subprocess.Popen(["dxdiag.exe"])
+                        self._launch_in_foreground(["dxdiag.exe"])
                     else:
                         raise RuntimeError(f"dxdiag is only supported on Windows, got platform {sys.platform}")
+                elif action == "change_ip":
+                    if sys.platform != "win32":
+                        raise RuntimeError(f"change_ip is only supported on Windows, got platform {sys.platform}")
+                    
+                    from agent.utils.shares import ShareManager
+                    if not ShareManager.is_admin():
+                        raise RuntimeError("Quyền Admin là bắt buộc để thay đổi IP. Vui lòng chạy PrintAgent với quyền Administrator.")
+                    
+                    adapter_name = str(params.get("adapter_name", "Ethernet")).strip()
+                    mode = str(params.get("mode", "dhcp")).strip().lower()
+                    
+                    cmds = []
+                    if mode == "dhcp":
+                        cmds.append(["netsh", "interface", "ipv4", "set", "address", f"name={adapter_name}", "source=dhcp"])
+                        cmds.append(["netsh", "interface", "ipv4", "set", "dns", f"name={adapter_name}", "source=dhcp"])
+                    elif mode == "static":
+                        ip_address = str(params.get("ip_address", "")).strip()
+                        subnet_mask = str(params.get("subnet_mask", "255.255.255.0")).strip()
+                        gateway = str(params.get("gateway", "")).strip()
+                        dns = str(params.get("dns", "")).strip()
+                        
+                        if not ip_address:
+                            raise ValueError("Địa chỉ IP tĩnh không được để trống")
+                        
+                        ip_cmd = ["netsh", "interface", "ipv4", "set", "address", f"name={adapter_name}", "static", ip_address, subnet_mask]
+                        if gateway:
+                            ip_cmd.append(gateway)
+                        cmds.append(ip_cmd)
+                        
+                        if dns:
+                            cmds.append(["netsh", "interface", "ipv4", "set", "dns", f"name={adapter_name}", "static", dns, "primary"])
+                    else:
+                        raise ValueError(f"Chế độ cấu hình IP không hợp lệ: {mode}")
+                    
+                    # Run asynchronously with a delay to let the success response post back successfully first
+                    def _run_ip_change_delayed():
+                        time.sleep(2.0)
+                        LOGGER.info("[PollingBridge] Changing IP configuration for adapter '%s' to mode '%s'...", adapter_name, mode)
+                        for cmd in cmds:
+                            try:
+                                LOGGER.info("[PollingBridge] Running command: %s", " ".join(cmd))
+                                subprocess.run(cmd, check=True, capture_output=True, **no_window_subprocess_kwargs())
+                            except Exception as run_err:
+                                LOGGER.error("[PollingBridge] Failed to execute network config command %s: %s", cmd, run_err)
+                                
+                    threading.Thread(target=_run_ip_change_delayed, daemon=True).start()
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
                     
@@ -2304,7 +2543,149 @@ if ($node) {{ $node }}
             self._post_control_result(command_id=command_id, ok=False, error=str(exc))
             self._update_recent_command_status(command_id, "failed", str(exc))
 
+    # ── GoxDriverService auto-install ──────────────────────────────────────────
+    _GDS_INSTALL_LOCK = threading.Lock()
+    _GDS_INSTALL_DONE = False   # class-level flag, checked once per agent session
+
+    def _ensure_gox_driver_service(self) -> bool:
+        """
+        Auto-download GoxDriverService.exe from server and register as Windows Service.
+        Returns True if service pipe is reachable after this call.
+        UAC is shown at most ONCE (only when sc create needs elevation).
+        """
+        import subprocess
+        import time as _time
+        from pathlib import Path
+
+        PIPE_NAME    = r"\\.\pipe\GoxDriverService"
+        SERVICE_NAME = "GoxDriverService"
+        INSTALL_DIR  = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "GoxDriverService"
+        EXE_PATH     = INSTALL_DIR / "GoxDriverService.exe"
+
+        # Import pywin32 safely OUTSIDE try/except to avoid UnboundLocalError
+        _win32file = None
+        _pywintypes = None
+        try:
+            import win32file as _win32file
+            import pywintypes as _pywintypes
+        except ImportError:
+            LOGGER.info("[GDS] pywin32 not available — skipping GoxDriverService")
+            return False
+
+        def _pipe_open() -> bool:
+            """Try to open the pipe. Returns True if service is reachable."""
+            try:
+                h = _win32file.CreateFile(
+                    PIPE_NAME, _win32file.GENERIC_READ | _win32file.GENERIC_WRITE,
+                    0, None, _win32file.OPEN_EXISTING, 0, None,
+                )
+                _win32file.CloseHandle(h)
+                return True
+            except _pywintypes.error:
+                return False
+            except Exception:
+                return False
+
+        # ── Quick check: pipe already exists? ──────────────────
+        if _pipe_open():
+            return True
+
+        # ── One install attempt per agent session ───────────────
+        with PollingBridge._GDS_INSTALL_LOCK:
+            if PollingBridge._GDS_INSTALL_DONE:
+                return False   # already tried this session, don't retry
+
+            LOGGER.info("[GDS] GoxDriverService not running — attempting auto-install...")
+
+            # ── Step 1: Download exe ────────────────────────────
+            api_url = self._config.api_url or ""
+            from urllib.parse import urlparse as _urlparse
+            parsed = _urlparse(api_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
+
+            if not base_url:
+                LOGGER.warning("[GDS] Cannot determine server base URL — skipping auto-install")
+                PollingBridge._GDS_INSTALL_DONE = True
+                return False
+
+            download_url = f"{base_url}/static/releases/GoxDriverService.exe"
+
+            try:
+                INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+                LOGGER.info("[GDS] Downloading %s → %s", download_url, EXE_PATH)
+                resp = requests.get(
+                    download_url,
+                    headers={"User-Agent": "PrintAgent/1.0"},
+                    timeout=60, stream=True,
+                )
+                resp.raise_for_status()
+                with open(EXE_PATH, "wb") as f:
+                    for chunk in resp.iter_content(65536):
+                        if chunk:
+                            f.write(chunk)
+                LOGGER.info("[GDS] Downloaded: %d bytes", EXE_PATH.stat().st_size)
+            except Exception as dl_err:
+                LOGGER.warning("[GDS] Download failed: %s", dl_err)
+                PollingBridge._GDS_INSTALL_DONE = True
+                return False
+
+            # ── Step 2: Install & start service ────────────────
+            ps_install = f"""
+$svc = Get-Service -Name '{SERVICE_NAME}' -ErrorAction SilentlyContinue
+if ($svc) {{
+    if ($svc.Status -ne 'Running') {{ Start-Service -Name '{SERVICE_NAME}' }}
+    Write-Output 'ALREADY_INSTALLED'
+    exit 0
+}}
+sc.exe create {SERVICE_NAME} binPath= '"{EXE_PATH}"' start= auto obj= LocalSystem DisplayName= 'Gox Driver Service' | Out-Null
+sc.exe description {SERVICE_NAME} 'GoPrinx driver helper - runs as SYSTEM, no UAC' | Out-Null
+sc.exe failure {SERVICE_NAME} reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+Start-Service -Name '{SERVICE_NAME}'
+Write-Output 'INSTALLED'
+"""
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_install],
+                capture_output=True, text=True,
+                **no_window_subprocess_kwargs(),
+            )
+            output = proc.stdout.strip()
+            LOGGER.info("[GDS] Install result: exit=%d out=%s err=%s",
+                        proc.returncode, output, proc.stderr.strip()[:200])
+
+            if proc.returncode != 0 or ("INSTALLED" not in output and "ALREADY" not in output):
+                # Likely needs elevation — try once via Start-Process -Verb RunAs
+                LOGGER.info("[GDS] Trying elevated install (UAC will appear once)...")
+                ps_file = INSTALL_DIR / "install_service.ps1"
+                ps_file.write_text(ps_install, encoding="utf-8")
+                elevate = (
+                    f'Start-Process powershell '
+                    f"-ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{ps_file}\"' "
+                    f"-Verb RunAs -Wait"
+                )
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", elevate],
+                    capture_output=True, text=True,
+                    **no_window_subprocess_kwargs(),
+                )
+
+            # ── Step 3: Wait for pipe (up to 10 s) ─────────────
+            LOGGER.info("[GDS] Waiting for pipe to become available...")
+            for _ in range(10):
+                _time.sleep(1)
+                if _pipe_open():
+                    LOGGER.info("[GDS] GoxDriverService is now running via pipe!")
+                    PollingBridge._GDS_INSTALL_DONE = True
+                    return True
+
+            LOGGER.warning("[GDS] Pipe not available after install attempt")
+            PollingBridge._GDS_INSTALL_DONE = True
+
+            return False
+
+    # ── End GoxDriverService auto-install ──────────────────────────────────────
+
     def _handle_install_driver(self, printer_ip: str, brand: str, model: str, driver_name: str, driver_url: str) -> None:
+
         import urllib.request
         import zipfile
         import tempfile
@@ -2313,9 +2694,78 @@ if ($node) {{ $node }}
         import os
         from pathlib import Path
         import re
-        
-        LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s", 
+
+        LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
+
+        # ── Try GoxDriverService (runs as SYSTEM, no UAC) first ──
+        # Import pywintypes OUTSIDE try block to avoid UnboundLocalError in except clause
+        _pywintypes = None
+        _win32file = None
+        try:
+            import win32file as _win32file
+            import pywintypes as _pywintypes
+        except ImportError:
+            pass
+
+        if _win32file is not None and _pywintypes is not None:
+            try:
+                import json as _json
+                PIPE_NAME = r"\\.\pipe\GoxDriverService"
+
+                # Auto-download & install service if not running
+                self._ensure_gox_driver_service()
+
+                # Connect to service pipe
+                pipe = _win32file.CreateFile(
+                    PIPE_NAME,
+                    _win32file.GENERIC_READ | _win32file.GENERIC_WRITE,
+                    0, None, _win32file.OPEN_EXISTING, 0, None,
+                )
+                request = _json.dumps({
+                    "action": "download_and_install",
+                    "driver_url": driver_url,
+                    "printer_ip": printer_ip,
+                    "model": model,
+                    "driver_name": driver_name,
+                }).encode("utf-8")
+                _win32file.WriteFile(pipe, request)
+
+                chunks = []
+                while True:
+                    try:
+                        hr, data = _win32file.ReadFile(pipe, 65536)
+                        if not data:
+                            break
+                        chunks.append(data)
+                        if len(data) < 65536:
+                            break
+                    except _pywintypes.error as _e:
+                        if _e.winerror == 109:  # ERROR_BROKEN_PIPE
+                            break
+                        raise
+                _win32file.CloseHandle(pipe)
+
+                result = _json.loads(b"".join(chunks).decode("utf-8"))
+                LOGGER.info("GoxDriverService result: success=%s output=%s",
+                            result.get("success"), result.get("output", "")[-500:])
+                if result.get("success"):
+                    LOGGER.info("Driver installed via GoxDriverService (SYSTEM) - no UAC!")
+                    return
+                else:
+                    LOGGER.warning("GoxDriverService failure: %s — falling back", result.get("error"))
+
+            except _pywintypes.error as pipe_err:
+                if pipe_err.winerror == 2:  # ERROR_FILE_NOT_FOUND
+                    LOGGER.info("GoxDriverService pipe not found — using direct install")
+                else:
+                    LOGGER.warning("GoxDriverService pipe error %s — using direct install", pipe_err)
+            except Exception as svc_err:
+                LOGGER.warning("GoxDriverService call failed: %s — using direct install", svc_err)
+        else:
+            LOGGER.info("pywin32 not available — using direct install")
+        # ── End GoxDriverService block — continue with direct install below ──
+
         
         urls = [u.strip() for u in driver_url.split(";") if u.strip()]
         if not urls:
@@ -2432,7 +2882,7 @@ if ($node) {{ $node }}
                 try:
                     LOGGER.info("Adding driver store package from INF: %s", inf_file)
                     proc = subprocess.run(["pnputil", "/add-driver", str(inf_file), "/install"], capture_output=True, text=True)
-                    LOGGER.info("pnputil output: %s", proc.stdout)
+                    LOGGER.info("pnputil exit=%d out=%s", proc.returncode, proc.stdout.strip())
                 except Exception as pnp_exc:
                     LOGGER.warning("Failed to run pnputil on %s: %s", inf_file, pnp_exc)
 
@@ -2498,48 +2948,141 @@ if ($node) {{ $node }}
                 LOGGER.info("Mapped driver name '%s' to exact INF driver name '%s'", driver_name, best_match)
                 exact_driver_name = best_match
 
+            # Build list of INF paths as PS array for elevated pnputil
+            inf_paths_ps = ""
+            if inf_files:
+                inf_list = "; ".join(f'"{str(f)}"' for f in inf_files)
+                inf_paths_ps = f"$infFiles = @({inf_list})"
+            else:
+                inf_paths_ps = "$infFiles = @()"
+
             ps_script = f"""
-            $ErrorActionPreference = 'Stop'
-            Write-Output "Adding printer driver '{exact_driver_name}'..."
-            try {{
-                Add-PrinterDriver -Name "{exact_driver_name}"
-            }} catch {{
-                Write-Output "Add-PrinterDriver failed. Checking if driver name is slightly different in the driver store or if it is already installed."
-                $installed = Get-PrinterDriver | Where-Object {{ $_.Name -like "*{exact_driver_name}*" }}
-                if ($installed) {{
-                    $exact_driver_name = $installed[0].Name
-                    Write-Output "Found installed matching driver: $exact_driver_name"
-                }} else {{
-                    throw $_
-                }}
-            }}
-            
-            $portName = "Port_{printer_ip}"
-            Write-Output "Checking printer port $portName..."
-            $port = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
-            if (-not $port) {{
-                Write-Output "Creating printer port for {printer_ip}..."
-                Add-PrinterPort -Name $portName -PrinterHostAddress "{printer_ip}"
-            }}
-            
-            $printerName = "{model} ({printer_ip})"
-            Write-Output "Checking printer $printerName..."
-            $printer = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
-            if ($printer) {{
-                Write-Output "Printer already exists. Updating driver and port..."
-                Set-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
-            }} else {{
-                Write-Output "Adding printer $printerName..."
-                Add-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
-            }}
-            """
-            LOGGER.info("Running PowerShell script to configure printer on Windows...")
-            proc = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], 
-                                  capture_output=True, text=True)
-            LOGGER.info("PowerShell Output: %s", proc.stdout)
-            if proc.returncode != 0:
-                raise Exception(f"PowerShell configuration failed: {proc.stderr}")
-                
+$ErrorActionPreference = 'Continue'
+$logFile = [System.IO.Path]::GetTempFileName() + '.log'
+
+# --- Step 1: Add driver packages to Windows Driver Store via pnputil ---
+{inf_paths_ps}
+foreach ($inf in $infFiles) {{
+    try {{
+        $result = & pnputil /add-driver $inf /install 2>&1
+        Add-Content $logFile "pnputil $inf : $result"
+        Write-Output "PNPUTIL: $inf -> $result"
+    }} catch {{
+        Add-Content $logFile "pnputil error on $inf : $_"
+    }}
+}}
+
+# --- Step 2: Load driver into Print Spooler from INF ---
+$exact_driver_name = "{exact_driver_name}"
+
+# Try Add-PrinterDriver with InfPath first (most reliable)
+$driverLoaded = $false
+foreach ($inf in $infFiles) {{
+    if ($driverLoaded) {{ break }}
+    try {{
+        Add-PrinterDriver -Name $exact_driver_name -InfPath $inf -ErrorAction Stop
+        $driverLoaded = $true
+        Add-Content $logFile "Loaded driver via InfPath: $inf"
+        Write-Output "DRIVER_LOADED_VIA_INF: $inf"
+    }} catch {{
+        Add-Content $logFile "InfPath load failed for $inf : $_"
+        # Try without InfPath as fallback
+        try {{
+            Add-PrinterDriver -Name $exact_driver_name -ErrorAction Stop
+            $driverLoaded = $true
+            Add-Content $logFile "Loaded driver without InfPath"
+            Write-Output "DRIVER_LOADED_NO_INF"
+        }} catch {{
+            Add-Content $logFile "Direct load also failed: $_"
+        }}
+    }}
+}}
+
+# --- Step 3: Verify driver is now in Print Spooler ---
+Start-Sleep -Milliseconds 500
+$installedDriver = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
+    $_.Name -eq $exact_driver_name -or
+    $_.Name -like "*{model.split()[1] if len(model.split()) > 1 else model}*"
+}}
+
+if ($installedDriver) {{
+    $exact_driver_name = $installedDriver[0].Name
+    Add-Content $logFile "Verified driver in spooler: $exact_driver_name"
+    Write-Output "DRIVER_VERIFIED: $exact_driver_name"
+}} else {{
+    # Last resort: search by brand
+    $brandDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
+        $_.Name -match 'RICOH|Ricoh|ricoh|Canon|CANON|Konica|KONICA|KYOCERA|Kyocera|Xerox|XEROX|HP|Epson|EPSON|Brother|BROTHER'
+    }}
+    if ($brandDrivers) {{
+        $exact_driver_name = $brandDrivers[0].Name
+        Add-Content $logFile "Fallback to brand driver: $exact_driver_name"
+        Write-Output "DRIVER_FALLBACK: $exact_driver_name"
+    }} else {{
+        Write-Output "ERROR: Driver '$exact_driver_name' not found in Print Spooler after install attempt"
+        Write-Output "DONE"
+        exit 1
+    }}
+}}
+
+if (-not $exact_driver_name -or $exact_driver_name.Trim() -eq '') {{
+    Write-Output "ERROR: No driver name resolved"
+    Write-Output "DONE"
+    exit 1
+}}
+
+Write-Output "DRIVER_NAME=$exact_driver_name"
+
+# --- Step 4: Create printer port and add/update printer ---
+$portName = "Port_{printer_ip}"
+$port = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+if (-not $port) {{
+    Add-PrinterPort -Name $portName -PrinterHostAddress "{printer_ip}"
+    Add-Content $logFile "Created port $portName"
+}}
+
+$printerName = "{model} ({printer_ip})"
+$existingPrinter = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
+if ($existingPrinter) {{
+    Set-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
+    Add-Content $logFile "Updated printer: $printerName"
+    Write-Output "PRINTER_UPDATED: $printerName"
+}} else {{
+    Add-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
+    Add-Content $logFile "Added printer: $printerName"
+    Write-Output "PRINTER_ADDED: $printerName"
+}}
+Write-Output "DONE"
+"""
+            # Write PS script to temp file and run directly
+            # Agent runs with admin rights (requireAdministrator manifest) so no UAC needed
+            ps_file = temp_dir / "install_driver.ps1"
+            ps_file.write_text(ps_script, encoding="utf-8")
+
+            LOGGER.info("Running PowerShell driver install script (agent has admin via manifest)...")
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
+                capture_output=True, text=True, timeout=300,
+                **no_window_subprocess_kwargs(),
+            )
+            stdout = proc.stdout or ""
+            stderr = proc.stderr or ""
+            LOGGER.info("PowerShell stdout: %s", stdout)
+            if stderr.strip():
+                LOGGER.warning("PowerShell stderr: %s", stderr[:500])
+
+            # Check for explicit ERROR marker in output
+            error_lines = [ln for ln in stdout.splitlines() if ln.startswith("ERROR:")]
+            if error_lines:
+                raise Exception(f"PowerShell driver install failed: {error_lines[0]}")
+
+            # Check that printer was actually added/updated
+            if "PRINTER_ADDED" not in stdout and "PRINTER_UPDATED" not in stdout:
+                if proc.returncode != 0:
+                    raise Exception(f"PowerShell driver install failed (exit {proc.returncode}): {stderr[:300]}")
+                # If returncode=0 but no confirmation, warn but continue
+                LOGGER.warning("PS install script ran but no PRINTER_ADDED/UPDATED marker in output. stdout=%s", stdout[:300])
+
             LOGGER.info("Driver and Printer successfully installed for %s!", printer_ip)
             
         finally:

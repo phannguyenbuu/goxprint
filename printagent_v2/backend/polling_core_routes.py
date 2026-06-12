@@ -121,6 +121,11 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         else:
             scan_auto_open_dir = bool(scan_auto_open_dir)
 
+        gds_status = _to_text(body.get("gds_status")) or "unknown"
+        # Normalize to valid values
+        if gds_status not in ("running", "stopped", "not_installed", "unknown"):
+            gds_status = "unknown"
+
         with session_factory() as session:
             _upsert_lan_and_agent(
                 session=session,
@@ -141,6 +146,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                 ftp_sites=ftp_sites,
                 scan_auto_open_file=scan_auto_open_file,
                 scan_auto_open_dir=scan_auto_open_dir,
+                gds_status=gds_status,
             )
             printer_row = None
             if ip or printer_name:

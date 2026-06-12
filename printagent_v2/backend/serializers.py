@@ -80,6 +80,7 @@ def _upsert_lan_and_agent(
     seen_at: datetime | None = None,
     scan_auto_open_file: bool = True,
     scan_auto_open_dir: bool = True,
+    gds_status: str = "unknown",
 ) -> str:
     seen_at = seen_at or datetime.now(timezone.utc)
     lan = None
@@ -125,6 +126,7 @@ def _upsert_lan_and_agent(
             online_changed_at=seen_at,
             scan_auto_open_file=scan_auto_open_file,
             scan_auto_open_dir=scan_auto_open_dir,
+            gds_status=gds_status or "unknown",
         )
         session.add(agent)
         session.add(
@@ -156,6 +158,8 @@ def _upsert_lan_and_agent(
         agent.ftp_ports = ftp_ports or agent.ftp_ports or ""
         agent.scan_auto_open_file = scan_auto_open_file
         agent.scan_auto_open_dir = scan_auto_open_dir
+        if gds_status and gds_status != "unknown":
+            agent.gds_status = gds_status
         if ftp_sites is not None:
             agent.ftp_sites = ftp_sites
         agent.last_seen_at = seen_at

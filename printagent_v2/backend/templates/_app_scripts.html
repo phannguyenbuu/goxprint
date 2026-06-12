@@ -1247,6 +1247,31 @@ function buildApiTestUrl(key, ctx) {
   }
   if (key === "lan-sites-list") return "/api/lan-sites";
 
+  if (key.startsWith("lan-emails-")) {
+    if (key === "lan-emails-list") {
+      return `/api/lan-emails?lead=${encodeURIComponent(ctx.lead || "default")}&lan_uid=${encodeURIComponent(ctx.lan_uid || "")}`;
+    }
+    if (key === "lan-emails-create") return "/api/lan-emails";
+    if (key === "lan-emails-delete") return "/api/lan-emails/0";
+  }
+  if (key.startsWith("scans-files-")) {
+    if (key === "scans-files-list") {
+      return `/api/scans/files?lan_uid=${encodeURIComponent(ctx.lan_uid || "")}&email=test-scan@example.com`;
+    }
+    if (key === "scans-files-delete") return "/api/scans/file";
+  }
+  if (key === "agent-settings") {
+    return ctx.agent_uid ? `/api/agents/${encodeURIComponent(ctx.agent_uid)}/settings?lead=${encodeURIComponent(ctx.lead || "default")}` : "";
+  }
+  if (key.startsWith("agent-utility-")) {
+    let action = "";
+    if (key === "agent-utility-devices") action = "devices_and_printers";
+    else if (key === "agent-utility-open-folder") action = "open_scan_folder";
+    else if (key === "agent-utility-dxdiag") action = "dxdiag";
+    else if (key === "agent-utility-change-ip") action = "change_ip";
+    return ctx.agent_uid ? `/api/agents/${encodeURIComponent(ctx.agent_uid)}/utility/${action}?lead=${encodeURIComponent(ctx.lead || "default")}` : "";
+  }
+
   if (key === "workspaces") return "/api/workspaces";
   if (key === "locations") return "/api/locations";
   if (key === "materials") return "/api/materials";
@@ -1373,6 +1398,103 @@ async function runApiTest(key, ctx) {
     url = `/api/tasks/${encodeURIComponent(String(seeded.task.id))}`;
     method = "DELETE";
     headers = buildApiTestHeaders(ctx, false, true);
+  } else if (key === "lan-emails-create") {
+    method = "POST";
+    body = {
+      lead: ctx.lead || "default",
+      lan_uid: ctx.lan_uid || "api-docs-test-lan",
+      email: `api-test-${Date.now()}@example.com`,
+      email_type: "common",
+      pc_name: "API-Test-PC",
+    };
+  } else if (key === "lan-emails-delete") {
+    const testEmail = `api-test-del-${Date.now()}@example.com`;
+    const seedRes = await fetch("/api/lan-emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lead: ctx.lead || "default",
+        lan_uid: ctx.lan_uid || "api-docs-test-lan",
+        email: testEmail,
+        email_type: "common",
+        pc_name: "API-Test-PC",
+      }),
+    });
+    const { data: seedJson } = await readApiDocsResponse(seedRes);
+    const createdId = seedJson?.email?.id;
+    if (!seedRes.ok || !createdId) {
+      return failSetup({ status: seedRes.status, text: JSON.stringify(seedJson) }, "email for DELETE");
+    }
+    url = `/api/lan-emails/${encodeURIComponent(String(createdId))}`;
+    method = "DELETE";
+  } else if (key === "scans-files-delete") {
+    const filename = window.prompt("Enter filename on VPS scan folder to delete:", "test-file.pdf");
+    if (!filename) {
+      setApiTestStatus(key, "idle", "Cancelled");
+      if (output) output.textContent = `[${key}] Cancelled.`;
+      return false;
+    }
+    method = "DELETE";
+    body = {
+      lan_uid: ctx.lan_uid || "api-docs-test-lan",
+      email: "test-scan@example.com",
+      filename: filename,
+    };
+  } else if (key === "agent-settings") {
+    if (!ctx.agent_uid) {
+      setApiTestStatus(key, "fail", "SETUP FAIL");
+      if (output) output.textContent = `[${key}] Could not find a sample agent_uid.`;
+      return false;
+    }
+    const proceed = window.confirm(`Queue a general settings command for agent ${ctx.agent_uid}?`);
+    if (!proceed) {
+      setApiTestStatus(key, "idle", "Cancelled");
+      if (output) output.textContent = `[${key}] Cancelled.`;
+      return false;
+    }
+    method = "POST";
+    body = {
+      lead: ctx.lead || "default",
+      scan_auto_open_file: true,
+      scan_auto_open_dir: true,
+    };
+  } else if (key.startsWith("agent-utility-")) {
+    if (!ctx.agent_uid) {
+      setApiTestStatus(key, "fail", "SETUP FAIL");
+      if (output) output.textContent = `[${key}] Could not find a sample agent_uid.`;
+      return false;
+    }
+    let actionLabel = "";
+    let actionName = "";
+    if (key === "agent-utility-devices") { actionLabel = "Devices and Printers"; actionName = "devices_and_printers"; }
+    else if (key === "agent-utility-open-folder") { actionLabel = "Open Scan Folder"; actionName = "open_scan_folder"; }
+    else if (key === "agent-utility-dxdiag") { actionLabel = "dxdiag Hardware Info"; actionName = "dxdiag"; }
+    else if (key === "agent-utility-change-ip") { actionLabel = "Change IP Address"; actionName = "change_ip"; }
+
+    let promptMsg = `Queue utility action '${actionLabel}' for agent ${ctx.agent_uid}?`;
+    let reqBody = { lead: ctx.lead || "default" };
+
+    if (actionName === "change_ip") {
+      const newIp = window.prompt("Enter new IP address for agent PC (leave empty to cancel):", "192.168.1.12");
+      if (!newIp) {
+        setApiTestStatus(key, "idle", "Cancelled");
+        if (output) output.textContent = `[${key}] Cancelled.`;
+        return false;
+      }
+      reqBody.new_ip = newIp;
+      reqBody.subnet_mask = "255.255.255.0";
+      reqBody.gateway = "192.168.1.1";
+      promptMsg = `Queue changing IP to ${newIp} for agent ${ctx.agent_uid}?`;
+    }
+
+    const proceed = window.confirm(promptMsg);
+    if (!proceed) {
+      setApiTestStatus(key, "idle", "Cancelled");
+      if (output) output.textContent = `[${key}] Cancelled.`;
+      return false;
+    }
+    method = "POST";
+    body = reqBody;
   } else if (key === "workspaces-create") {
     method = "POST";
     const slug = apiDocsUniqueSlug("ws");
@@ -1542,6 +1664,12 @@ async function runApiTest(key, ctx) {
         const cleanup = await deleteApiDocsSampleResource(`/api/users/${encodeURIComponent(String(createdId))}`);
         cleanupNote = cleanup.ok ? "\nCleanup: created user removed." : `\nCleanup: created user still exists (status ${cleanup.status}).`;
       }
+    } else if (res.ok && key === "lan-emails-create") {
+      const createdId = responseJson?.email?.id;
+      if (createdId) {
+        const cleanup = await deleteApiDocsSampleResource(`/api/lan-emails/${encodeURIComponent(String(createdId))}`);
+        cleanupNote = cleanup.ok ? "\nCleanup: created email destination removed." : `\nCleanup: created email destination still exists (status ${cleanup.status}).`;
+      }
     } else if (cleanupResourceUrl) {
       const cleanup = await deleteApiDocsSampleResource(cleanupResourceUrl);
       const noun = key.startsWith("workspaces-") ? "workspace" : key.startsWith("locations-") ? "location" : key.startsWith("materials-") ? "material" : "user";
@@ -1583,9 +1711,14 @@ async function initApiTests(resetStatuses = true) {
     "users-list", "users-create", "users-update", "users-delete",
     "user-workspaces-list", "workspace-users-list",
     "tasks-list", "tasks-create", "tasks-update", "tasks-delete",
-    "lan-sites-list"
+    "lan-sites-list", "lan-emails-list", "lan-emails-create", "lan-emails-delete",
+    "scans-files-list"
   ];
-  const manualOnlyKeys = ["devices-unlock", "devices-lock", "ftp-queue-create", "ftp-queue-update", "ftp-queue-delete"];
+  const manualOnlyKeys = [
+    "devices-unlock", "devices-lock", "ftp-queue-create", "ftp-queue-update", "ftp-queue-delete",
+    "scans-files-delete", "agent-settings", "agent-utility-devices", "agent-utility-open-folder",
+    "agent-utility-dxdiag", "agent-utility-change-ip"
+  ];
   if (resetStatuses) {
     [...keys, ...manualOnlyKeys].forEach((key) => setApiTestStatus(key, "idle", "-"));
     if (global) {

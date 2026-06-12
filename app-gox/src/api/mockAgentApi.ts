@@ -16,6 +16,7 @@ async function fetchApi(path: string, options: RequestInit = {}) {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'X-API-Token': 'change-me',
           ...options.headers,
         },
       });
@@ -281,8 +282,9 @@ export async function updateAgentSettings(agentUid: string, settings: { scan_aut
   });
 }
 
-export async function triggerAgentUtility(agentUid: string, action: string): Promise<any> {
+export async function triggerAgentUtility(agentUid: string, action: string, payload?: any): Promise<any> {
   return fetchApi(`/api/agents/${agentUid}/utility/${action}?lead=default`, {
     method: 'POST',
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 }
