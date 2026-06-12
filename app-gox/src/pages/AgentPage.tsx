@@ -179,6 +179,14 @@ export function AgentPage() {
     }
   }, []);
 
+  // Replace a toast by fixed ID — removes old one first, then adds new
+  const replaceToast = useCallback((fixedId: string, message: string, type: Toast['type'] = 'info') => {
+    setToasts((prev) => [
+      ...prev.filter((t) => t.id !== fixedId),
+      { id: fixedId, message, type }
+    ]);
+  }, []);
+
   // ── FETCH DATA ──
   const fetchLanSitesData = useCallback(async (showLoader = false) => {
     if (showLoader) setLanSitesLoading(true);
@@ -897,21 +905,21 @@ export function AgentPage() {
       message: `Bạn có chắc muốn gửi lệnh cài đặt driver "${drName}" từ xa lên PC đại diện?`,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        // Persistent toast — must click Close
-        showToast('⏳ Đang gửi lệnh cài đặt driver tới Agent...', 'info', 0);
+        const TOAST_ID = 'driver-install-progress';
+        replaceToast(TOAST_ID, '⏳ Đang gửi lệnh cài đặt driver tới Agent...', 'info');
         try {
           const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl);
           if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
 
           const commandId = res.command_id;
           if (!commandId) {
-            showToast('✅ Đã gửi lệnh cài đặt driver.', 'success', 0);
+            replaceToast(TOAST_ID, '✅ Đã gửi lệnh cài đặt driver.', 'success');
             return;
           }
 
           // Poll for progress — driver install can take up to 5 minutes
-          const maxPollMs = 300000; // 5 min
-          const pollInterval = 2000; // 2 sec
+          const maxPollMs = 300000;
+          const pollInterval = 2000;
           const startTime = Date.now();
           let lastProgressText = '';
 
@@ -920,29 +928,28 @@ export function AgentPage() {
               const elapsed = Date.now() - startTime;
               if (elapsed > maxPollMs) {
                 clearInterval(timer);
-                showToast('⏰ Quá thời gian chờ (5 phút). Kiểm tra trên PC đại diện.', 'info', 0);
+                replaceToast(TOAST_ID, '⏰ Quá thời gian chờ (5 phút). Kiểm tra trên PC đại diện.', 'info');
                 return;
               }
 
               const statusRes = await getCommandStatus(commandId);
               if (statusRes.status === 'success') {
                 clearInterval(timer);
-                showToast('✅ Cài đặt driver thành công!', 'success', 0);
+                replaceToast(TOAST_ID, '✅ Cài đặt driver thành công!', 'success');
               } else if (statusRes.status === 'failed' || !statusRes.ok) {
                 clearInterval(timer);
-                showToast(`❌ Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error', 0);
+                replaceToast(TOAST_ID, `❌ Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
               } else {
-                // Still pending — show progress text if available
                 const progressText = statusRes.progress_text || '';
                 if (progressText && progressText !== lastProgressText) {
                   lastProgressText = progressText;
-                  showToast(progressText, 'info', 0);
+                  replaceToast(TOAST_ID, progressText, 'info');
                 } else if (!progressText) {
                   const elapsedSec = Math.round(elapsed / 1000);
                   if (statusRes.received_at) {
-                    showToast(`⚡ Agent đã nhận lệnh - đang cài đặt driver... (${elapsedSec}s)`, 'info', 0);
+                    replaceToast(TOAST_ID, `⚡ Agent đã nhận lệnh - đang cài đặt driver... (${elapsedSec}s)`, 'info');
                   } else {
-                    showToast(`⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info', 0);
+                    replaceToast(TOAST_ID, `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info');
                   }
                 }
               }
@@ -951,7 +958,7 @@ export function AgentPage() {
             }
           }, pollInterval);
         } catch (err: any) {
-          showToast(`❌ Không thể cài driver: ${err.message}`, 'error', 0);
+          replaceToast(TOAST_ID, `❌ Không thể cài driver: ${err.message}`, 'error');
         }
       }
     });

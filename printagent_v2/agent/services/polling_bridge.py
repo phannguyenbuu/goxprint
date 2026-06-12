@@ -2832,53 +2832,39 @@ Write-Output 'INSTALLED'
                 # Pick the largest EXE as fallback
                 target_exe = max(exe_files, key=lambda f: f.stat().st_size)
 
-            _progress(f"🚀 Đang chạy installer: {target_exe.name}...")
+            _progress(f"🚀 Đang mở installer: {target_exe.name}...")
 
-            # Try multiple silent install flags
-            silent_flags_list = [
-                ["/s"],
-                ["/S"],
-                ["/quiet", "/norestart"],
-                ["/qn", "/norestart"],
-                ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-            ]
+            # Launch installer VISIBLE (no hidden window) so user can interact
+            # Don't wait for it — installer may need user clicks
+            try:
+                subprocess.Popen(
+                    [str(target_exe)],
+                    cwd=str(target_exe.parent),
+                )
+                _progress(f"✅ Đã mở {target_exe.name} — vui lòng thao tác trên PC để hoàn tất cài đặt.")
+            except Exception as launch_exc:
+                raise Exception(f"Không thể mở installer {target_exe.name}: {launch_exc}")
 
-            success = False
-            for flags in silent_flags_list:
-                try:
-                    proc = subprocess.run(
-                        [str(target_exe)] + flags,
-                        capture_output=True, text=True, timeout=300,
-                        **no_window_subprocess_kwargs(),
-                    )
-                    if proc.returncode == 0:
-                        _progress(f"✅ Cài đặt driver thành công! ({target_exe.name} {' '.join(flags)})")
-                        success = True
-                        break
-                except subprocess.TimeoutExpired:
-                    _progress(f"⏰ Timeout khi chạy {target_exe.name} với flags {flags}")
-                except Exception as run_exc:
-                    LOGGER.warning("Failed running %s with flags %s: %s", target_exe.name, flags, run_exc)
+            LOGGER.info("Driver installer launched for %s (user interaction required)", printer_ip)
 
-            if not success:
-                # Last resort: run without any flags (interactive)
-                try:
-                    proc = subprocess.run(
-                        [str(target_exe)],
-                        capture_output=True, text=True, timeout=300,
-                        **no_window_subprocess_kwargs(),
-                    )
-                    _progress(f"⚠️ Installer chạy xong (exit code: {proc.returncode}) — có thể cần xác nhận thủ công")
-                except Exception as last_exc:
-                    raise Exception(f"Không thể chạy installer {target_exe.name}: {last_exc}")
-
-            LOGGER.info("Driver installation completed for %s", printer_ip)
-
-        finally:
+        except Exception:
+            # On error, clean up immediately
             try:
                 shutil.rmtree(temp_dir)
-            except Exception as clean_exc:
-                LOGGER.warning("Failed to clean up temp dir %s: %s", temp_dir, clean_exc)
+            except Exception:
+                pass
+            raise
+        else:
+            # On success, delay cleanup 10 min so installer can use extracted files
+            def _delayed_cleanup():
+                import time as _time
+                _time.sleep(600)
+                try:
+                    shutil.rmtree(temp_dir)
+                    LOGGER.info("Cleaned up driver temp dir %s", temp_dir)
+                except Exception:
+                    pass
+            threading.Thread(target=_delayed_cleanup, daemon=True, name="driver-cleanup").start()
 
 
     def _reconcile_single_printer_address_book(
