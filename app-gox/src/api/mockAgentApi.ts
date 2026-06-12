@@ -288,3 +288,15 @@ export async function triggerAgentUtility(agentUid: string, action: string, payl
     body: payload ? JSON.stringify(payload) : undefined,
   });
 }
+
+export async function getAgentUtilityCommands(agentUid: string): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/utility-commands?lead=default`);
+}
+
+export async function triggerAgentUtilityExec(agentUid: string, command: string, commandContent: string): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/utility/exec?lead=default`, {
+    method: 'POST',
+    body: JSON.stringify({ command, command_content: commandContent }),
+  });
+}
+

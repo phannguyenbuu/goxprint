@@ -17,6 +17,8 @@ import {
   getAgentSettings,
   updateAgentSettings,
   triggerAgentUtility,
+  getAgentUtilityCommands,
+  triggerAgentUtilityExec,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -262,6 +264,8 @@ export function AgentPage() {
   const [utilitySettingsLoading, setUtilitySettingsLoading] = useState(false);
   const [utilityActionPending, setUtilityActionPending] = useState<string | null>(null);
   const [utilityStatusMsg, setUtilityStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [utilityCommands, setUtilityCommands] = useState<any[]>([]);
+  const [utilityCommandsLoading, setUtilityCommandsLoading] = useState(false);
 
   const loadUtilitySettings = useCallback(async (agent: any) => {
     if (!agent) return;
@@ -390,9 +394,64 @@ export function AgentPage() {
     }
   }, [selectedUtilityAgent]);
 
+  // Dynamic exec: gửi command_content từ JSON đến agent để exec()
+  const handleTriggerUtilityExec = useCallback(async (command: string, commandContent: string) => {
+    if (!selectedUtilityAgent) return;
+    setUtilityActionPending(command);
+    setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
+    try {
+      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, command, commandContent);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const startTime = Date.now();
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+            setUtilityActionPending(null);
+            return;
+          }
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+            setUtilityActionPending(null);
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            setUtilityActionPending(null);
+          } else {
+            const elapsedSec = Math.round(elapsed / 1000);
+            setUtilityStatusMsg({ text: `⌛ Đang xử lý... (${elapsedSec}s)`, isError: false });
+          }
+        } catch (pollErr: any) {
+          console.error('Poll error:', pollErr);
+        }
+      }, 1000);
+    } catch (err: any) {
+      setUtilityStatusMsg({ text: `Lỗi: ${err.message}`, isError: true });
+      setUtilityActionPending(null);
+    }
+  }, [selectedUtilityAgent]);
+
   useEffect(() => {
     if (activeModal === 'utilities' && selectedUtilityAgent) {
       loadUtilitySettings(selectedUtilityAgent);
+      // Fetch dynamic command list from backend JSON
+      setUtilityCommandsLoading(true);
+      getAgentUtilityCommands(selectedUtilityAgent.agent_uid)
+        .then((res: any) => {
+          if (res?.ok && Array.isArray(res.commands)) {
+            setUtilityCommands(res.commands);
+          }
+        })
+        .catch((err: any) => console.error('Failed to load utility commands:', err))
+        .finally(() => setUtilityCommandsLoading(false));
     }
   }, [activeModal, selectedUtilityAgent, loadUtilitySettings]);
 
@@ -2098,107 +2157,79 @@ export function AgentPage() {
                       </h4>
                       
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {/* Devices and Printers */}
-                        <button
-                          onClick={() => handleTriggerUtility('printers')}
-                          disabled={utilityActionPending !== null}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            background: 'var(--color-surface-light)',
-                            border: '1px solid var(--color-surface-light)',
-                            borderRadius: '8px',
-                            padding: '10px 12px',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            width: '100%',
-                            transition: 'all 0.2s',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-primary)';
-                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                            e.currentTarget.style.background = 'var(--color-surface-light)';
-                          }}
-                        >
-                          <div style={{ fontSize: '1.4rem' }}>🖨️</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Danh sách Máy in & Thiết bị</div>
-                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở Control Panel \ Devices and Printers</div>
+                        {/* Dynamic commands from JSON — thêm lệnh mới vào utility_commands.json trên VPS là xong */}
+                        {utilityCommandsLoading ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '8px 0' }}>
+                            <LoadingSpinner size="sm" /> Đang tải danh sách lệnh...
                           </div>
-                          {utilityActionPending === 'printers' && <LoadingSpinner size="sm" />}
-                        </button>
-
-                        {/* Scan Folder */}
-                        <button
-                          onClick={() => handleTriggerUtility('scan')}
-                          disabled={utilityActionPending !== null}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            background: 'var(--color-surface-light)',
-                            border: '1px solid var(--color-surface-light)',
-                            borderRadius: '8px',
-                            padding: '10px 12px',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            width: '100%',
-                            transition: 'all 0.2s',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-primary)';
-                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                            e.currentTarget.style.background = 'var(--color-surface-light)';
-                          }}
-                        >
-                          <div style={{ fontSize: '1.4rem' }}>📂</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thư mục Scan gốc</div>
-                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục lưu trữ file scan trên PC</div>
-                          </div>
-                          {utilityActionPending === 'scan' && <LoadingSpinner size="sm" />}
-                        </button>
-
-                        {/* dxdiag */}
-                        <button
-                          onClick={() => handleTriggerUtility('dxdiag')}
-                          disabled={utilityActionPending !== null}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            background: 'var(--color-surface-light)',
-                            border: '1px solid var(--color-surface-light)',
-                            borderRadius: '8px',
-                            padding: '10px 12px',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            width: '100%',
-                            transition: 'all 0.2s',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-primary)';
-                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                            e.currentTarget.style.background = 'var(--color-surface-light)';
-                          }}
-                        >
-                          <div style={{ fontSize: '1.4rem' }}>💻</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện run (dxdiag)</div>
-                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Chạy DirectX Diagnostic Tool xem cấu hình phần cứng</div>
-                          </div>
-                          {utilityActionPending === 'dxdiag' && <LoadingSpinner size="sm" />}
-                        </button>
+                        ) : utilityCommands.length > 0 ? (
+                          utilityCommands.map((cmd: any) => (
+                            <button
+                              key={cmd.command}
+                              onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
+                              disabled={utilityActionPending !== null}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                background: 'var(--color-surface-light)',
+                                border: '1px solid var(--color-surface-light)',
+                                borderRadius: '8px',
+                                padding: '10px 12px',
+                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                textAlign: 'left',
+                                width: '100%',
+                                transition: 'all 0.2s',
+                                opacity: utilityActionPending !== null ? 0.6 : 1,
+                              }}
+                              onMouseEnter={(e) => {
+                                if (utilityActionPending === null) {
+                                  e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                                e.currentTarget.style.background = 'var(--color-surface-light)';
+                              }}
+                            >
+                              <div style={{ fontSize: '1.4rem' }}>{cmd.icon || '🔧'}</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>{cmd.label}</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>{cmd.description}</div>
+                              </div>
+                              {utilityActionPending === cmd.command && <LoadingSpinner size="sm" />}
+                            </button>
+                          ))
+                        ) : (
+                          // Fallback: nếu chưa có JSON, dùng 3 lệnh cũ
+                          <>
+                            <button onClick={() => handleTriggerUtility('printers')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
+                              <div style={{ fontSize: '1.4rem' }}>🖨️</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Danh sách Máy in & Thiết bị</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở Control Panel \ Devices and Printers</div>
+                              </div>
+                              {utilityActionPending === 'printers' && <LoadingSpinner size="sm" />}
+                            </button>
+                            <button onClick={() => handleTriggerUtility('scan')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
+                              <div style={{ fontSize: '1.4rem' }}>📂</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thư mục Scan gốc</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục lưu trữ file scan trên PC</div>
+                              </div>
+                              {utilityActionPending === 'scan' && <LoadingSpinner size="sm" />}
+                            </button>
+                            <button onClick={() => handleTriggerUtility('dxdiag')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
+                              <div style={{ fontSize: '1.4rem' }}>💻</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện run (dxdiag)</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Chạy DirectX Diagnostic Tool xem cấu hình phần cứng</div>
+                              </div>
+                              {utilityActionPending === 'dxdiag' && <LoadingSpinner size="sm" />}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
 
