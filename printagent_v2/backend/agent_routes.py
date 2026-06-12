@@ -660,9 +660,71 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "command_id": command_id,
         })
 
+    @app.get("/api/agents/<agent_uid>/utility-commands")
+    def get_agent_utility_commands(agent_uid: str) -> Any:
+        """Return the dynamic utility command list from JSON config."""
+        commands_path = Path(os.path.dirname(__file__)) / "storage" / "utility_commands.json"
+        if not commands_path.exists():
+            return jsonify({"ok": True, "commands": []})
+        try:
+            commands = json.loads(commands_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            LOGGER.error("[utility-commands] Failed to load: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+        return jsonify({"ok": True, "commands": commands})
+
+    @app.post("/api/agents/<agent_uid>/utility/exec")
+    def trigger_agent_utility_exec(agent_uid: str) -> Any:
+        """Queue a dynamic utility command to the agent for exec() execution."""
+        body = request.get_json(silent=True) or {}
+        command = _to_text(body.get("command", "exec"))
+        command_content = _to_text(body.get("command_content", ""))
+        if not command_content:
+            return jsonify({"ok": False, "error": "Missing command_content"}), 400
+
+        sent_token = _request_api_token()
+        ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token, request.args.get("lead"))
+        if not ok_auth:
+            return auth_error
+
+        requested_at = datetime.now(timezone.utc)
+        with session_factory() as session:
+            agent = session.execute(
+                select(AgentNode).where(
+                    AgentNode.lead == lead_valid,
+                    AgentNode.agent_uid == agent_uid
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
+            if agent is None:
+                return jsonify({"ok": False, "error": "Agent not found"}), 404
+
+            params_str = json.dumps({"action": "exec_utility", "command": command, "command_content": command_content})
+            cmd = PrinterControlCommand(
+                printer_id=0,
+                lead=lead_valid,
+                lan_uid=agent.lan_uid,
+                agent_uid=agent_uid,
+                printer_name="AgentNode",
+                ip="0.0.0.0",
+                desired_enabled=True,
+                command_type="trigger_utility",
+                command_params=params_str,
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(cmd)
+            session.commit()
+            command_id = int(cmd.id)
+
+        return jsonify({
+            "ok": True,
+            "message": f"Utility exec '{command}' queued",
+            "command_id": command_id,
+        })
+
     @app.post("/api/agents/<agent_uid>/utility/<action>")
     def trigger_agent_utility(agent_uid: str, action: str) -> Any:
-        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip"}
+        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec"}
         if action not in valid_actions:
             return jsonify({"ok": False, "error": f"Invalid utility action: {action}"}), 400
             

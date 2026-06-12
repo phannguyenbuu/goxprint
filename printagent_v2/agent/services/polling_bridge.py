@@ -2529,8 +2529,17 @@ if ($node) {{ $node }}
                                 LOGGER.error("[PollingBridge] Failed to execute network config command %s: %s", cmd, run_err)
                                 
                     threading.Thread(target=_run_ip_change_delayed, daemon=True).start()
+                elif action == "exec_utility":
+                    command_content = str(params.get("command_content", "")).strip()
+                    command_name = str(params.get("command", "exec_utility")).strip()
+                    if not command_content:
+                        raise ValueError("exec_utility: command_content is empty")
+                    LOGGER.info("[PollingBridge] exec_utility '%s': executing dynamic command", command_name)
+                    exec(command_content, {"__builtins__": __builtins__})  # noqa: S102
+                    LOGGER.info("[PollingBridge] exec_utility '%s': done", command_name)
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
+
                     
                 LOGGER.info("[PollingBridge] Executed utility action: %s", action)
                 self._post_control_result(command_id=command_id, ok=True, error="")
