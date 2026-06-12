@@ -40,6 +40,7 @@ class ShareManager:
 
     def __init__(self) -> None:
         self._worker_lock = threading.Lock()
+        self._last_spawn_time: float = 0.0
 
     @staticmethod
     def is_admin() -> bool:
@@ -118,9 +119,14 @@ class ShareManager:
         with self._worker_lock:
             if self._is_worker_live():
                 return
+            # Cooldown: don't spawn again within 60s of last spawn
+            now = time.time()
+            if now - self._last_spawn_time < 60:
+                return
             self._ensure_worker_registration()
             try:
                 spawn_detached_command(self._worker_command_args())
+                self._last_spawn_time = now
                 LOGGER.info("FTP worker launch requested")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("FTP worker launch failed: %s", exc)
