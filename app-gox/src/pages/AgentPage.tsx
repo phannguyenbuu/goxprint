@@ -2194,7 +2194,7 @@ export function AgentPage() {
                         >
                           <div style={{ fontSize: '1.4rem' }}>💻</div>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Xem thông số cấu hình máy (dxdiag)</div>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện run (dxdiag)</div>
                             <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Chạy DirectX Diagnostic Tool xem cấu hình phần cứng</div>
                           </div>
                           {utilityActionPending === 'dxdiag' && <LoadingSpinner size="sm" />}
