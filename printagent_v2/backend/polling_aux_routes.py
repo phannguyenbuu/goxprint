@@ -413,6 +413,38 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 }
             )
 
+    @app.post("/api/polling/command-progress")
+    def polling_command_progress() -> Any:
+        """Agent sends intermediate progress text for a pending command.
+        Stored in error_message field while status is still 'pending'.
+        Frontend polls GET /api/commands/{id}/status and reads progress_text."""
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
+        sent_token = _request_api_token()
+        ok_auth, lead, auth_error = _validate_polling_auth(body, lead_key_map, sent_token)
+        if not ok_auth:
+            return auth_error
+
+        command_id = _to_int(body.get("command_id"))
+        if command_id is None or command_id <= 0:
+            return jsonify({"ok": False, "error": "Missing command_id"}), 400
+
+        progress_text = _to_text(body.get("progress_text"))
+
+        with session_factory() as session:
+            command = session.get(PrinterControlCommand, int(command_id))
+            if command is None:
+                return jsonify({"ok": False, "error": "Command not found"}), 404
+            if command.lead != lead:
+                return jsonify({"ok": False, "error": "Lead mismatch"}), 400
+
+            if command.status == "pending":
+                command.error_message = progress_text
+                session.commit()
+
+            return jsonify({"ok": True, "id": int(command_id), "progress_text": progress_text})
+
     @app.post("/api/polling/inventory")
     def ingest_inventory() -> Any:
         body = request.get_json(silent=True) or {}

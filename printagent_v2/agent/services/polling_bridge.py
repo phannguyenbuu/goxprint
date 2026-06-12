@@ -1817,6 +1817,25 @@ if ($node) {{ $node }}
         except Exception as ack_exc:
             LOGGER.warning("[PollingBridge] Failed to send command ACK for ID=%s: %s", command_id, ack_exc)
 
+    def _post_command_progress(self, command_id: int, progress_text: str) -> None:
+        """Send intermediate progress text for a pending command back to the server."""
+        base_url = self._polling_base_url()
+        if not base_url:
+            return
+        token = self._config.get_string("polling.token").strip()
+        lead = self._config.get_string("polling.lead").strip()
+        url = f"{base_url}/api/polling/command-progress"
+        payload = {
+            "lead": lead,
+            "command_id": int(command_id),
+            "progress_text": str(progress_text),
+        }
+        headers = {"Content-Type": "application/json", "X-Lead-Token": token}
+        try:
+            self._api_client.session.post(url, json=payload, headers=headers, timeout=10)
+        except Exception as exc:
+            LOGGER.warning("[PollingBridge] Failed to send progress for ID=%s: %s", command_id, exc)
+
     def _resolve_ftp_target_printer(self, command: FtpControlCommand, site_name: str) -> tuple[Printer, str]:
         fallback = Printer(
             id=0,
@@ -2192,6 +2211,7 @@ if ($node) {{ $node }}
                 driver_url = str(command.get("driver_url", "") or "").strip()
                 
                 self._handle_install_driver(
+                    command_id=command_id,
                     printer_ip=printer.ip,
                     brand=driver_brand,
                     model=driver_model,
@@ -2693,112 +2713,45 @@ Write-Output 'INSTALLED'
 
     # ── End GoxDriverService auto-install ──────────────────────────────────────
 
-    def _handle_install_driver(self, printer_ip: str, brand: str, model: str, driver_name: str, driver_url: str) -> None:
+    def _handle_install_driver(self, command_id: int, printer_ip: str, brand: str, model: str, driver_name: str, driver_url: str) -> None:
 
-        import urllib.request
         import zipfile
         import tempfile
         import shutil
         import subprocess
         import os
         from pathlib import Path
-        import re
 
         LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
 
-        # ── Try GoxDriverService (runs as SYSTEM, no UAC) first ──
-        # Import pywintypes OUTSIDE try block to avoid UnboundLocalError in except clause
-        _pywintypes = None
-        _win32file = None
-        try:
-            import win32file as _win32file
-            import pywintypes as _pywintypes
-        except ImportError:
-            pass
-
-        if _win32file is not None and _pywintypes is not None:
+        def _progress(text: str) -> None:
+            LOGGER.info("[DriverInstall] %s", text)
             try:
-                import json as _json
-                PIPE_NAME = r"\\.\pipe\GoxDriverService"
+                self._post_command_progress(command_id, text)
+            except Exception:
+                pass
 
-                # Auto-download & install service if not running
-                self._ensure_gox_driver_service()
-
-                # Connect to service pipe
-                pipe = _win32file.CreateFile(
-                    PIPE_NAME,
-                    _win32file.GENERIC_READ | _win32file.GENERIC_WRITE,
-                    0, None, _win32file.OPEN_EXISTING, 0, None,
-                )
-                request = _json.dumps({
-                    "action": "download_and_install",
-                    "driver_url": driver_url,
-                    "printer_ip": printer_ip,
-                    "model": model,
-                    "driver_name": driver_name,
-                }).encode("utf-8")
-                _win32file.WriteFile(pipe, request)
-
-                chunks = []
-                while True:
-                    try:
-                        hr, data = _win32file.ReadFile(pipe, 65536)
-                        if not data:
-                            break
-                        chunks.append(data)
-                        if len(data) < 65536:
-                            break
-                    except _pywintypes.error as _e:
-                        if _e.winerror == 109:  # ERROR_BROKEN_PIPE
-                            break
-                        raise
-                _win32file.CloseHandle(pipe)
-
-                result = _json.loads(b"".join(chunks).decode("utf-8"))
-                LOGGER.info("GoxDriverService result: success=%s output=%s",
-                            result.get("success"), result.get("output", "")[-500:])
-                if result.get("success"):
-                    LOGGER.info("Driver installed via GoxDriverService (SYSTEM) - no UAC!")
-                    return
-                else:
-                    LOGGER.warning("GoxDriverService failure: %s — falling back", result.get("error"))
-
-            except _pywintypes.error as pipe_err:
-                if pipe_err.winerror == 2:  # ERROR_FILE_NOT_FOUND
-                    LOGGER.info("GoxDriverService pipe not found — using direct install")
-                else:
-                    LOGGER.warning("GoxDriverService pipe error %s — using direct install", pipe_err)
-            except Exception as svc_err:
-                LOGGER.warning("GoxDriverService call failed: %s — using direct install", svc_err)
-        else:
-            LOGGER.info("pywin32 not available — using direct install")
-        # ── End GoxDriverService block — continue with direct install below ──
-
-        
+        # ── Step 1: Download ──
         urls = [u.strip() for u in driver_url.split(";") if u.strip()]
         if not urls:
             raise Exception("No driver URLs provided")
-            
+
         temp_dir = Path(tempfile.mkdtemp(prefix="printagent_driver_"))
         try:
+            _progress(f"⬇️ Đang tải driver {driver_name}...")
+
             download_path = None
             filename = None
-            
-            # 1. Try downloading each URL until one succeeds (real file, min 50KB)
-            download_success = False
             last_err = None
             for url in urls:
-                curr_download_path = None
                 try:
                     url_path = url.split("?")[0]
                     curr_filename = os.path.basename(url_path) or "driver_installer"
                     if not curr_filename.lower().endswith((".zip", ".exe")):
                         curr_filename = curr_filename + ".exe"
-                    
+
                     curr_download_path = temp_dir / curr_filename
-                    LOGGER.info("Attempting to download driver from %s → %s", url, curr_download_path)
-                    
                     resp = requests.get(
                         url,
                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
@@ -2807,298 +2760,126 @@ Write-Output 'INSTALLED'
                         allow_redirects=True,
                     )
                     resp.raise_for_status()
-                    
-                    # Check content type - reject HTML pages (error pages from server)
+
                     content_type = resp.headers.get("Content-Type", "").lower()
                     if "html" in content_type and "octet-stream" not in content_type:
-                        LOGGER.warning("URL %s returned HTML content-type, skipping (likely error page)", url)
                         last_err = Exception(f"URL returned HTML, not a binary file: {url}")
                         continue
-                    
-                    written = 0
+
                     with open(curr_download_path, "wb") as f:
                         for chunk in resp.iter_content(chunk_size=65536):
                             if chunk:
                                 f.write(chunk)
-                                written += len(chunk)
-                    
+
                     file_size = curr_download_path.stat().st_size
-                    if file_size < 50 * 1024:  # < 50 KB → likely an error page
-                        LOGGER.warning("Downloaded file too small (%d bytes) from %s, skipping", file_size, url)
-                        last_err = Exception(f"File too small ({file_size} bytes), likely not a real driver")
+                    if file_size < 50 * 1024:
+                        last_err = Exception(f"File too small ({file_size} bytes)")
                         continue
-                        
-                    LOGGER.info("Downloaded successfully from %s — size=%d bytes", url, file_size)
+
+                    size_mb = file_size / (1024 * 1024)
+                    _progress(f"✅ Tải xong: {curr_filename} ({size_mb:.1f} MB)")
                     download_path = curr_download_path
                     filename = curr_filename
-                    download_success = True
                     break
                 except Exception as e:
-                    LOGGER.warning("Failed to download from %s: %s", url, e)
                     last_err = e
                     if curr_download_path and curr_download_path.exists():
-                        try: curr_download_path.unlink()
-                        except Exception: pass
-            
-            if not download_success:
+                        try:
+                            curr_download_path.unlink()
+                        except Exception:
+                            pass
+
+            if download_path is None:
                 raise Exception(f"All {len(urls)} download URLs failed. Last error: {last_err}")
 
-                
+            # ── Step 2: Extract if ZIP ──
             extract_dir = temp_dir / "extracted"
             extract_dir.mkdir(exist_ok=True)
-            
-            is_zip = filename.lower().endswith(".zip")
-            is_exe = filename.lower().endswith(".exe")
-            extracted_successfully = False
-            
-            if is_zip:
-                LOGGER.info("Extracting ZIP file %s", download_path)
-                with zipfile.ZipFile(download_path, 'r') as zip_ref:
+            exe_files: list[Path] = []
+
+            if filename.lower().endswith(".zip"):
+                _progress(f"📦 Đang giải nén {filename}...")
+                with zipfile.ZipFile(download_path, "r") as zip_ref:
                     zip_ref.extractall(extract_dir)
-                extracted_successfully = True
-            elif is_exe:
-                LOGGER.info("Checking if EXE can be unzipped as ZIP SFX...")
+                exe_files = list(extract_dir.glob("**/*.exe"))
+                file_list = [f.name for f in exe_files]
+                _progress(f"📂 Giải nén xong — tìm thấy {len(exe_files)} file EXE: {', '.join(file_list)}")
+            elif filename.lower().endswith(".exe"):
+                # Check if EXE is actually a self-extracting ZIP
                 try:
-                    with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                    with zipfile.ZipFile(download_path, "r") as zip_ref:
                         zip_ref.extractall(extract_dir)
-                    LOGGER.info("Successfully unzipped EXE SFX using zipfile.")
-                    extracted_successfully = True
-                except Exception as zip_err:
-                    LOGGER.info("EXE is not a standard ZIP archive: %s. Proceeding to execute silently.", zip_err)
-            
-            if not extracted_successfully and is_exe:
-                LOGGER.info("Running silent install on EXE %s", download_path)
-                silent_switches = [
-                    ["/s"], ["/S"], ["/quiet", "/norestart"], ["/qn", "/norestart"], ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
-                ]
-                success = False
-                for flags in silent_switches:
-                    try:
-                        LOGGER.info("Trying installer with flags: %s", flags)
-                        proc = subprocess.run([str(download_path)] + flags, capture_output=True, text=True, timeout=120)
-                        if proc.returncode == 0:
-                            LOGGER.info("Installer exited successfully with flags %s", flags)
-                            success = True
-                            break
-                    except Exception as exe_exc:
-                        LOGGER.warning("Failed running installer with flags %s: %s", flags, exe_exc)
-                if not success:
-                    LOGGER.info("Silent installation finished. Searching for extracted infs...")
-            
-            inf_files = list(extract_dir.glob("**/*.inf"))
-            LOGGER.info("Found %d INF files in extracted archive", len(inf_files))
-            for inf_file in inf_files:
-                try:
-                    LOGGER.info("Adding driver store package from INF: %s", inf_file)
-                    proc = subprocess.run(["pnputil", "/add-driver", str(inf_file), "/install"], capture_output=True, text=True)
-                    LOGGER.info("pnputil exit=%d out=%s", proc.returncode, proc.stdout.strip())
-                except Exception as pnp_exc:
-                    LOGGER.warning("Failed to run pnputil on %s: %s", inf_file, pnp_exc)
+                    exe_files = list(extract_dir.glob("**/*.exe"))
+                    file_list = [f.name for f in exe_files]
+                    _progress(f"📂 Giải nén SFX xong — tìm thấy {len(exe_files)} file EXE: {', '.join(file_list)}")
+                except Exception:
+                    # Not a ZIP, treat as standalone EXE
+                    exe_files = [download_path]
+                    _progress(f"📄 File EXE độc lập: {filename}")
 
-            # Parse extracted INF files to find the exact driver name matching our model or driver name
-            exact_driver_name = driver_name
-            inf_driver_names = []
-            for inf_file in inf_files:
-                try:
-                    content = ""
-                    for encoding in ("utf-8", "utf-16", "windows-1252"):
-                        try:
-                            content = inf_file.read_text(encoding=encoding)
-                            break
-                        except Exception:
-                            continue
-                    
-                    if not content:
-                        continue
-                        
-                    for line in content.splitlines():
-                        line = line.strip()
-                        if not line or line.startswith(";"):
-                            continue
-                        
-                        # Match "Some Printer Name" = INSTALL_SECTION, HWID
-                        matches = re.findall(r'"([^"]+)"\s*=\s*\w+', line)
-                        for m in matches:
-                            if m not in inf_driver_names:
-                                inf_driver_names.append(m)
-                                
-                        # Also look for [Strings] section key=value where value is "Some Printer Name"
-                        if "=" in line:
-                            parts = line.split("=", 1)
-                            val = parts[1].strip()
-                            if val.startswith('"') and val.endswith('"'):
-                                m = val[1:-1].strip()
-                                if m and m not in inf_driver_names:
-                                    inf_driver_names.append(m)
-                except Exception as inf_err:
-                    LOGGER.warning("Failed to parse INF file %s for driver names: %s", inf_file, inf_err)
-            
-            LOGGER.info("Driver names found in INF files: %s", inf_driver_names)
-            best_match = None
-            if inf_driver_names:
-                for name in inf_driver_names:
-                    if name.lower().strip() == driver_name.lower().strip():
-                        best_match = name
-                        break
-                if not best_match:
-                    for name in inf_driver_names:
-                        if model.lower().strip() in name.lower():
-                            best_match = name
-                            break
-                if not best_match:
-                    for name in inf_driver_names:
-                        if driver_name.lower().strip() in name.lower() or name.lower() in driver_name.lower().strip():
-                            best_match = name
-                            break
-                if not best_match:
-                    best_match = inf_driver_names[0]
-            
-            if best_match:
-                LOGGER.info("Mapped driver name '%s' to exact INF driver name '%s'", driver_name, best_match)
-                exact_driver_name = best_match
+            if not exe_files:
+                raise Exception("Không tìm thấy file EXE nào sau khi giải nén")
 
-            # Build list of INF paths as PS array for elevated pnputil
-            inf_paths_ps = ""
-            if inf_files:
-                inf_list = "; ".join(f'"{str(f)}"' for f in inf_files)
-                inf_paths_ps = f"$infFiles = @({inf_list})"
+            # ── Step 3: Pick and run the best EXE ──
+            # Prefer setup.exe, install.exe, or the largest EXE
+            target_exe = exe_files[0]
+            for exe in exe_files:
+                name_lower = exe.name.lower()
+                if name_lower in ("setup.exe", "install.exe", "setup64.exe", "install64.exe"):
+                    target_exe = exe
+                    break
             else:
-                inf_paths_ps = "$infFiles = @()"
+                # Pick the largest EXE as fallback
+                target_exe = max(exe_files, key=lambda f: f.stat().st_size)
 
-            ps_script = f"""
-$ErrorActionPreference = 'Continue'
-$logFile = [System.IO.Path]::GetTempFileName() + '.log'
+            _progress(f"🚀 Đang chạy installer: {target_exe.name}...")
 
-# --- Step 1: Add driver packages to Windows Driver Store via pnputil ---
-{inf_paths_ps}
-foreach ($inf in $infFiles) {{
-    try {{
-        $result = & pnputil /add-driver $inf /install 2>&1
-        Add-Content $logFile "pnputil $inf : $result"
-        Write-Output "PNPUTIL: $inf -> $result"
-    }} catch {{
-        Add-Content $logFile "pnputil error on $inf : $_"
-    }}
-}}
+            # Try multiple silent install flags
+            silent_flags_list = [
+                ["/s"],
+                ["/S"],
+                ["/quiet", "/norestart"],
+                ["/qn", "/norestart"],
+                ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+            ]
 
-# --- Step 2: Load driver into Print Spooler from INF ---
-$exact_driver_name = "{exact_driver_name}"
+            success = False
+            for flags in silent_flags_list:
+                try:
+                    proc = subprocess.run(
+                        [str(target_exe)] + flags,
+                        capture_output=True, text=True, timeout=300,
+                        **no_window_subprocess_kwargs(),
+                    )
+                    if proc.returncode == 0:
+                        _progress(f"✅ Cài đặt driver thành công! ({target_exe.name} {' '.join(flags)})")
+                        success = True
+                        break
+                except subprocess.TimeoutExpired:
+                    _progress(f"⏰ Timeout khi chạy {target_exe.name} với flags {flags}")
+                except Exception as run_exc:
+                    LOGGER.warning("Failed running %s with flags %s: %s", target_exe.name, flags, run_exc)
 
-# Try Add-PrinterDriver with InfPath first (most reliable)
-$driverLoaded = $false
-foreach ($inf in $infFiles) {{
-    if ($driverLoaded) {{ break }}
-    try {{
-        Add-PrinterDriver -Name $exact_driver_name -InfPath $inf -ErrorAction Stop
-        $driverLoaded = $true
-        Add-Content $logFile "Loaded driver via InfPath: $inf"
-        Write-Output "DRIVER_LOADED_VIA_INF: $inf"
-    }} catch {{
-        Add-Content $logFile "InfPath load failed for $inf : $_"
-        # Try without InfPath as fallback
-        try {{
-            Add-PrinterDriver -Name $exact_driver_name -ErrorAction Stop
-            $driverLoaded = $true
-            Add-Content $logFile "Loaded driver without InfPath"
-            Write-Output "DRIVER_LOADED_NO_INF"
-        }} catch {{
-            Add-Content $logFile "Direct load also failed: $_"
-        }}
-    }}
-}}
+            if not success:
+                # Last resort: run without any flags (interactive)
+                try:
+                    proc = subprocess.run(
+                        [str(target_exe)],
+                        capture_output=True, text=True, timeout=300,
+                        **no_window_subprocess_kwargs(),
+                    )
+                    _progress(f"⚠️ Installer chạy xong (exit code: {proc.returncode}) — có thể cần xác nhận thủ công")
+                except Exception as last_exc:
+                    raise Exception(f"Không thể chạy installer {target_exe.name}: {last_exc}")
 
-# --- Step 3: Verify driver is now in Print Spooler ---
-Start-Sleep -Milliseconds 500
-$installedDriver = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
-    $_.Name -eq $exact_driver_name -or
-    $_.Name -like "*{model.split()[1] if len(model.split()) > 1 else model}*"
-}}
+            LOGGER.info("Driver installation completed for %s", printer_ip)
 
-if ($installedDriver) {{
-    $exact_driver_name = $installedDriver[0].Name
-    Add-Content $logFile "Verified driver in spooler: $exact_driver_name"
-    Write-Output "DRIVER_VERIFIED: $exact_driver_name"
-}} else {{
-    # Last resort: search by brand
-    $brandDrivers = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object {{
-        $_.Name -match 'RICOH|Ricoh|ricoh|Canon|CANON|Konica|KONICA|KYOCERA|Kyocera|Xerox|XEROX|HP|Epson|EPSON|Brother|BROTHER'
-    }}
-    if ($brandDrivers) {{
-        $exact_driver_name = $brandDrivers[0].Name
-        Add-Content $logFile "Fallback to brand driver: $exact_driver_name"
-        Write-Output "DRIVER_FALLBACK: $exact_driver_name"
-    }} else {{
-        Write-Output "ERROR: Driver '$exact_driver_name' not found in Print Spooler after install attempt"
-        Write-Output "DONE"
-        exit 1
-    }}
-}}
-
-if (-not $exact_driver_name -or $exact_driver_name.Trim() -eq '') {{
-    Write-Output "ERROR: No driver name resolved"
-    Write-Output "DONE"
-    exit 1
-}}
-
-Write-Output "DRIVER_NAME=$exact_driver_name"
-
-# --- Step 4: Create printer port and add/update printer ---
-$portName = "Port_{printer_ip}"
-$port = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
-if (-not $port) {{
-    Add-PrinterPort -Name $portName -PrinterHostAddress "{printer_ip}"
-    Add-Content $logFile "Created port $portName"
-}}
-
-$printerName = "{model} ({printer_ip})"
-$existingPrinter = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
-if ($existingPrinter) {{
-    Set-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
-    Add-Content $logFile "Updated printer: $printerName"
-    Write-Output "PRINTER_UPDATED: $printerName"
-}} else {{
-    Add-Printer -Name $printerName -DriverName $exact_driver_name -PortName $portName
-    Add-Content $logFile "Added printer: $printerName"
-    Write-Output "PRINTER_ADDED: $printerName"
-}}
-Write-Output "DONE"
-"""
-            # Write PS script to temp file and run directly
-            # Agent runs with admin rights (requireAdministrator manifest) so no UAC needed
-            ps_file = temp_dir / "install_driver.ps1"
-            ps_file.write_text(ps_script, encoding="utf-8")
-
-            LOGGER.info("Running PowerShell driver install script (agent has admin via manifest)...")
-            proc = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
-                capture_output=True, text=True, timeout=300,
-                **no_window_subprocess_kwargs(),
-            )
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-            LOGGER.info("PowerShell stdout: %s", stdout)
-            if stderr.strip():
-                LOGGER.warning("PowerShell stderr: %s", stderr[:500])
-
-            # Check for explicit ERROR marker in output
-            error_lines = [ln for ln in stdout.splitlines() if ln.startswith("ERROR:")]
-            if error_lines:
-                raise Exception(f"PowerShell driver install failed: {error_lines[0]}")
-
-            # Check that printer was actually added/updated
-            if "PRINTER_ADDED" not in stdout and "PRINTER_UPDATED" not in stdout:
-                if proc.returncode != 0:
-                    raise Exception(f"PowerShell driver install failed (exit {proc.returncode}): {stderr[:300]}")
-                # If returncode=0 but no confirmation, warn but continue
-                LOGGER.warning("PS install script ran but no PRINTER_ADDED/UPDATED marker in output. stdout=%s", stdout[:300])
-
-            LOGGER.info("Driver and Printer successfully installed for %s!", printer_ip)
-            
         finally:
             try:
                 shutil.rmtree(temp_dir)
             except Exception as clean_exc:
                 LOGGER.warning("Failed to clean up temp dir %s: %s", temp_dir, clean_exc)
+
 
     def _reconcile_single_printer_address_book(
         self,

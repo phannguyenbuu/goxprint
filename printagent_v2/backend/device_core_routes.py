@@ -486,5 +486,6 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "command_id": command_id,
                     "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
                     "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
+                    "progress_text": cmd.error_message or "",
                 }
             )

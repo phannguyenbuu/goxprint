@@ -897,16 +897,61 @@ export function AgentPage() {
       message: `Bạn có chắc muốn gửi lệnh cài đặt driver "${drName}" từ xa lên PC đại diện?`,
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        showToast('Đang gửi lệnh cài đặt driver tới Agent...', 'info', 3000);
+        // Persistent toast — must click Close
+        showToast('⏳ Đang gửi lệnh cài đặt driver tới Agent...', 'info', 0);
         try {
           const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl);
-          if (res.ok) {
-            showToast('Đã xếp hàng lệnh cài đặt driver thành công! Đang xử lý ở client.', 'success', 6000);
-          } else {
-            throw new Error(res.error || 'Server trả về lỗi');
+          if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
+
+          const commandId = res.command_id;
+          if (!commandId) {
+            showToast('✅ Đã gửi lệnh cài đặt driver.', 'success', 0);
+            return;
           }
+
+          // Poll for progress — driver install can take up to 5 minutes
+          const maxPollMs = 300000; // 5 min
+          const pollInterval = 2000; // 2 sec
+          const startTime = Date.now();
+          let lastProgressText = '';
+
+          const timer = setInterval(async () => {
+            try {
+              const elapsed = Date.now() - startTime;
+              if (elapsed > maxPollMs) {
+                clearInterval(timer);
+                showToast('⏰ Quá thời gian chờ (5 phút). Kiểm tra trên PC đại diện.', 'info', 0);
+                return;
+              }
+
+              const statusRes = await getCommandStatus(commandId);
+              if (statusRes.status === 'success') {
+                clearInterval(timer);
+                showToast('✅ Cài đặt driver thành công!', 'success', 0);
+              } else if (statusRes.status === 'failed' || !statusRes.ok) {
+                clearInterval(timer);
+                showToast(`❌ Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error', 0);
+              } else {
+                // Still pending — show progress text if available
+                const progressText = statusRes.progress_text || '';
+                if (progressText && progressText !== lastProgressText) {
+                  lastProgressText = progressText;
+                  showToast(progressText, 'info', 0);
+                } else if (!progressText) {
+                  const elapsedSec = Math.round(elapsed / 1000);
+                  if (statusRes.received_at) {
+                    showToast(`⚡ Agent đã nhận lệnh - đang cài đặt driver... (${elapsedSec}s)`, 'info', 0);
+                  } else {
+                    showToast(`⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info', 0);
+                  }
+                }
+              }
+            } catch (pollErr) {
+              // Silently continue polling on network errors
+            }
+          }, pollInterval);
         } catch (err: any) {
-          showToast(`Không thể cài driver: ${err.message}`, 'error');
+          showToast(`❌ Không thể cài driver: ${err.message}`, 'error', 0);
         }
       }
     });

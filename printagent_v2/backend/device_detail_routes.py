@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-import time as time_module
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any
 
 from flask import Flask, jsonify, request
@@ -198,32 +197,10 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
             session.commit()
             command_id = int(command.id)
 
-        deadline = datetime.now(timezone.utc) + timedelta(seconds=15)
-        while datetime.now(timezone.utc) < deadline:
-            with session_factory() as session:
-                current = session.get(PrinterControlCommand, command_id)
-                if current is None:
-                    break
-                if current.status == "success":
-                    return jsonify({
-                        "ok": True,
-                        "status": "success",
-                        "message": f"Successfully installed driver {driver_name}",
-                        "command_id": command_id,
-                    }), 200
-                if current.status == "failed":
-                    return jsonify({
-                        "ok": False,
-                        "status": "failed",
-                        "error": current.error_message or "Execution failed on agent",
-                        "command_id": command_id,
-                    }), 502
-            time_module.sleep(0.5)
-
         return jsonify({
             "ok": True,
             "status": "pending",
-            "message": "Driver installation command queued. Check back for results.",
+            "message": "Driver installation command queued.",
             "command_id": command_id,
         }), 202
 
@@ -240,5 +217,7 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
                 "status": command.status,
                 "command_type": command.command_type,
                 "error": command.error_message or "",
+                "received_at": command.received_at.isoformat() if command.received_at else None,
                 "responded_at": command.responded_at.isoformat() if command.responded_at else None,
+                "progress_text": command.error_message if command.status == "pending" else "",
             })
