@@ -180,6 +180,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                     printer_row.address_book_sync = sync_data
             if printer_row is not None and collector_ok:
                 _set_printer_online_state(session=session, printer=printer_row, is_online=True, changed_at=timestamp)
+            elif printer_row is not None and not collector_ok:
+                _set_printer_online_state(session=session, printer=printer_row, is_online=False, changed_at=timestamp)
             device_enabled = True if printer_row is None else bool(printer_row.enabled)
             if not device_enabled:
                 skipped_disabled = 1
