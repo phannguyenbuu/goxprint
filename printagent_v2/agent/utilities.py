@@ -7,11 +7,10 @@ def open_devices_and_printers():
     """
     Mở trang danh sách máy in: Control Panel > Devices and Printers (Classic UI)
     - Win 10 (build < 22000): control.exe /name Microsoft.DevicesAndPrinters
-    - Win 11 (build >= 22000): explorer.exe shell:::{GUID} — bypass redirect sang Settings
+    - Win 11 (build >= 22000): thử nhiều cách, dùng full Control Panel path
     """
     import platform
 
-    # Lấy build number: "10.0.22621" → 22621
     build = 0
     try:
         if platform.system() == 'Windows':
@@ -20,24 +19,40 @@ def open_devices_and_printers():
     except Exception:
         build = 0
 
-    IS_WIN11 = build >= 22000  # Windows 11 bắt đầu từ build 22000
+    IS_WIN11 = build >= 22000
 
-    # GUID của "Devices and Printers" trong Classic Control Panel (bất biến mọi phiên bản)
-    GUID = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
+    # GUIDs:
+    # {26EE0668-A00A-44D7-9371-BEB064C98683} = Control Panel (All Items)
+    # {A8A91A10-75D1-4155-929E-88F47E7D1df3} = Devices and Printers
+    GUID_DEVICES = "{A8A91A10-75D1-4155-929E-88F47E7D1df3}"
+    GUID_CPANEL  = "{26EE0668-A00A-44D7-9371-BEB064C98683}"
 
-    try:
-        if IS_WIN11:
-            # Win 11: control.exe bị redirect → phải dùng shell::: GUID
-            subprocess.Popen(['explorer.exe', f'shell:::{GUID}'], shell=False)
-        else:
-            # Win 10 trở xuống: control.exe hoạt động bình thường
-            subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
-    except Exception:
-        # Fallback cho mọi phiên bản
+    if IS_WIN11:
+        # Thử các cách theo thứ tự từ đáng tin cậy nhất
+        attempts = [
+            # Cách 1: Full path Control Panel → Devices and Printers (bypass redirect tốt nhất)
+            ['explorer.exe', f'shell:::{GUID_CPANEL}\\0\\::{GUID_DEVICES}'],
+            # Cách 2: GUID trực tiếp
+            ['explorer.exe', f'shell:::{GUID_DEVICES}'],
+            # Cách 3: rundll32 PrintersFolder
+            ['rundll32.exe', 'shell32.dll,SHHelpShortcuts_RunDLL', 'PrintersFolder'],
+            # Cách 4: control printers (Win 10 style, có thể redirect nhưng thử)
+            ['control.exe', 'printers'],
+        ]
+        for cmd in attempts:
+            try:
+                subprocess.Popen(cmd, shell=False)
+                return
+            except Exception:
+                continue
+        # Cuối cùng: Settings > Printers (chấp nhận UI mới)
+        subprocess.Popen(['explorer.exe', 'ms-settings:printers'], shell=False)
+    else:
+        # Win 10 trở xuống
         try:
-            subprocess.Popen(f'explorer.exe shell:::{GUID}', shell=True)
+            subprocess.Popen('control.exe /name Microsoft.DevicesAndPrinters', shell=True)
         except Exception:
-            pass
+            subprocess.Popen(['explorer.exe', f'shell:::{GUID_DEVICES}'], shell=False)
 
 def open_scan_folder():
     """
