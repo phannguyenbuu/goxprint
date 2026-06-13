@@ -88,17 +88,19 @@ class RicohAddressWizardMixin(RicohServiceBase):
             LOGGER.error("[RicohWizard] Step post failed for %s: %s", printer.ip, exc)
             raise
 
-    def _open_wizard(self, session: requests.Session, printer: Printer, wim_token: str = "") -> str:
-        LOGGER.info("[RicohWizard] Starting _open_wizard for IP: %s (wimToken: %s)", printer.ip, wim_token)
+    def _open_wizard(self, session: requests.Session, printer: Printer, wim_token: str = "", mode: str = "ADDUSER", entry_index: str = "") -> str:
+        LOGGER.info("[RicohWizard] Starting _open_wizard for IP: %s (mode: %s, wimToken: %s, entryIndex: %s)", printer.ip, mode, wim_token, entry_index)
         url = f"http://{printer.ip}{self._WIZARD_GET}"
         
         # Save wimsesid cookie before request
         saved_wimsesid = session.cookies.get("wimsesid", "")
         
         post_data = {
-            "mode": "ADDUSER",
+            "mode": mode,
             "outputSpecifyModeIn": "DEFAULT",
         }
+        if entry_index:
+            post_data["entryIndexIn"] = entry_index
         if wim_token:
             post_data["wimToken"] = wim_token
 
@@ -176,8 +178,8 @@ class RicohAddressWizardMixin(RicohServiceBase):
             raise last_error
         return ""
 
-    def _fetch_wim_token(self, session: requests.Session, printer: Printer) -> tuple[str, str]:
-        LOGGER.info("[RicohWizard] Fetching WIM token for IP: %s", printer.ip)
+    def _fetch_wim_token(self, session: requests.Session, printer: Printer, mode: str = "ADDUSER", entry_index: str = "") -> tuple[str, str]:
+        LOGGER.info("[RicohWizard] Fetching WIM token for IP: %s (mode: %s)", printer.ip, mode)
         
         # 1. Fetch address list page first to retrieve initial wimToken
         wim_token = ""
@@ -192,7 +194,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
         # 2. Try to open the wizard using the fetched token
         candidates: list[tuple[str, str]] = []
         try:
-            initial_html = self._open_wizard(session, printer, wim_token=wim_token)
+            initial_html = self._open_wizard(session, printer, wim_token=wim_token, mode=mode, entry_index=entry_index)
             if initial_html.strip():
                 candidates.append(("wizard", initial_html))
         except Exception as exc:  # noqa: BLE001
@@ -708,15 +710,190 @@ class RicohAddressWizardMixin(RicohServiceBase):
         entry_id: str | None = None,
         session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        self.delete_address_entries(printer, [registration_no], entry_ids=[entry_id] if entry_id else None, verify=False, session=session)
-        return self.create_address_user_wizard(
-            printer,
-            name=name,
-            email=email,
-            folder=folder,
-            user_code=user_code,
-            fields=fields,
-            desired_registration_no=registration_no,
-            allow_auto_update=False,
-            session=session,
+        """Update an existing address book entry using Ricoh's native CHANGEUSER CGI mode."""
+        close_session_at_end = False
+        if session is None:
+            session = self.create_http_client_auth_form_only(printer)
+            close_session_at_end = True
+        try:
+            return self._change_address_user_wizard_internal(
+                session, printer, registration_no, name, email, folder, user_code, fields
+            )
+        finally:
+            if close_session_at_end:
+                try:
+                    self._reset_web_session(session, printer)
+                    session.close()
+                    LOGGER.info("[RicohWizard] CHANGEUSER session closed successfully.")
+                except Exception as close_exc:
+                    LOGGER.debug("[RicohWizard] Failed to close CHANGEUSER session: %s", close_exc)
+
+    def _change_address_user_wizard_internal(
+        self,
+        session: requests.Session,
+        printer: Printer,
+        registration_no: str,
+        name: str = "",
+        email: str = "",
+        folder: str = "",
+        user_code: str = "",
+        fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        LOGGER.info(
+            "[RicohWizard] === START CHANGEUSER wizard: printer=%s (IP=%s), reg_no=%s, name=%s, folder=%s ===",
+            printer.name, printer.ip, registration_no, name, folder,
         )
+        fields = dict(fields or {})
+        registration_no = self._normalize_registration_no(registration_no)
+        if not registration_no:
+            raise ValueError("registration_no is required for CHANGEUSER mode")
+
+        # 1. Fetch WIM token — open wizard in CHANGEUSER mode to load existing entry
+        wim_token, wim_source = self._fetch_wim_token(
+            session, printer, mode="CHANGEUSER", entry_index=registration_no
+        )
+        if not wim_token:
+            LOGGER.error("[RicohWizard] CHANGEUSER token not found for IP: %s", printer.ip)
+            raise RuntimeError("Ricoh CHANGEUSER wizard token not found")
+        LOGGER.info("[RicohWizard] CHANGEUSER token source: %s, token=%s...", wim_source, wim_token[:8])
+
+        # 2. BASE step — update entry name/display name
+        entry_display_name = self._clean_text(
+            self._field_text(fields, "entryDisplayNameIn", "entryDisplayName", default=name)
+        ) or self._clean_text(name)
+
+        tag_value = self._field_text(fields, "entryTagInfoIn", default="1") or "1"
+
+        base_items: list[tuple[str, str]] = [
+            ("mode", "CHANGEUSER"),
+            ("step", "BASE"),
+            ("wimToken", wim_token),
+            ("entryIndexIn", registration_no),
+            ("entryNameIn", self._clean_text(name)[:20]),
+            ("entryDisplayNameIn", entry_display_name[:16]),
+        ]
+        for _ in range(4):
+            base_items.append(("entryTagInfoIn", tag_value))
+        if str(fields.get("entryTypeIn", "") or "").strip():
+            base_items.append(("entryTypeIn", str(fields["entryTypeIn"]).strip()))
+
+        LOGGER.info("[RicohWizard] CHANGEUSER: Submitting BASE step (reg_no=%s)...", registration_no)
+        base_html = self._post_wizard_step(session, printer, base_items)
+        wim_token = self._extract_wim_token(base_html) or wim_token
+        steps_submitted = ["BASE"]
+
+        # 3. MAIL step (optional)
+        email_clean = self._clean_text(email)
+        if email_clean:
+            mail_items: list[tuple[str, str]] = [
+                ("mode", "CHANGEUSER"),
+                ("step", "MAIL"),
+                ("wimToken", wim_token),
+                ("mailAddressIn", email_clean),
+            ]
+            LOGGER.info("[RicohWizard] CHANGEUSER: Submitting MAIL step...")
+            mail_html = self._post_wizard_step(session, printer, mail_items)
+            wim_token = self._extract_wim_token(mail_html) or wim_token
+            steps_submitted.append("MAIL")
+
+        # 4. FOLDER step — update FTP destination IP/port
+        folder_clean = self._clean_text(folder)
+        if folder_clean:
+            folder_server_name, folder_port, folder_path = self._parse_folder_destination(folder_clean)
+            folder_auth_user = self._field_text(fields, "folderAuthUserNameIn", "folderAuthUserName", default="")
+            folder_password = self._field_text(
+                fields, "folderPasswordIn", "wk_folderPasswordIn", "folderPassword", default="",
+            )
+            if not folder_password:
+                folder_password = self._field_text(
+                    fields, "wk_folderPasswordConfirmIn", "folderPasswordConfirmIn", "folderPasswordConfirm", default="",
+                )
+            if not folder_password:
+                folder_auth_user = ""
+
+            import base64
+            encoded_password = base64.b64encode(folder_password.encode("utf-8")).decode("utf-8") if folder_password else ""
+
+            folder_items: list[tuple[str, str]] = [
+                ("mode", "CHANGEUSER"),
+                ("step", "FOLDER"),
+                ("wimToken", wim_token),
+                ("folderProtocolIn", "FTP_O"),
+                ("folderPortNoIn", str(folder_port or 21)),
+                ("folderServerNameIn", folder_server_name),
+                ("folderPathNameIn", folder_path),
+                ("folderAuthUserNameIn", folder_auth_user),
+                ("wk_folderPasswordIn", ""),
+                ("folderPasswordIn", encoded_password),
+                ("wk_folderPasswordConfirmIn", ""),
+                ("folderPasswordConfirmIn", encoded_password),
+            ]
+            LOGGER.info("[RicohWizard] CHANGEUSER: Submitting FOLDER step (server=%s, port=%d)...", folder_server_name, folder_port)
+            folder_html = self._post_wizard_step(session, printer, folder_items)
+            wim_token = self._extract_wim_token(folder_html) or wim_token
+            steps_submitted.append("FOLDER")
+
+        # 5. CONFIRM step — commit the change
+        confirm_items: list[tuple[str, str]] = [
+            ("wimToken", wim_token),
+        ]
+        for step in steps_submitted:
+            confirm_items.append(("stepListIn", step))
+        confirm_items.extend([
+            ("mode", "CHANGEUSER"),
+            ("step", "CONFIRM"),
+        ])
+        LOGGER.info("[RicohWizard] CHANGEUSER: Submitting CONFIRM step...")
+        confirm_html = self._post_wizard_step(session, printer, confirm_items)
+
+        # Navigate back to address list to commit
+        try:
+            list_url = f"http://{printer.ip}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+            session.get(list_url, timeout=10)
+        except Exception:
+            pass
+
+        # Reset session and verify
+        try:
+            self._reset_web_session(session, printer)
+            self._login(session, printer)
+        except Exception as reset_exc:
+            LOGGER.warning("[RicohWizard] Failed to reset session after CHANGEUSER: %s", reset_exc)
+
+        LOGGER.info("[RicohWizard] CHANGEUSER: Waiting 3s for copier to commit...")
+        time.sleep(3.0)
+
+        # Verify entry was updated
+        verified_reg_no = None
+        for attempt in range(3):
+            if attempt > 0:
+                time.sleep(2.0)
+            LOGGER.info("[RicohWizard] CHANGEUSER: Verifying entry (attempt %d/3)...", attempt + 1)
+            verified_reg_no = self._verify_address_entry(session, printer, registration_no, name, folder)
+            if verified_reg_no:
+                break
+        if not verified_reg_no:
+            LOGGER.warning("[RicohWizard] CHANGEUSER verification failed for reg_no=%s. Entry may still have been updated.", registration_no)
+
+        LOGGER.info("[RicohWizard] === FINISH CHANGEUSER wizard: reg_no=%s, verified=%s ===", registration_no, bool(verified_reg_no))
+
+        folder_server_name = ""
+        folder_port = 0
+        folder_path = "/"
+        if folder:
+            folder_server_name, folder_port, folder_path = self._parse_folder_destination(folder)
+
+        return {
+            "printer_name": printer.name,
+            "ip": printer.ip,
+            "ok": True,
+            "action": "CHANGEUSER",
+            "registration_no": registration_no,
+            "entry_name": self._clean_text(name),
+            "folder": folder,
+            "folder_server_name": folder_server_name,
+            "folder_port": folder_port,
+            "folder_path": folder_path,
+            "verified": bool(verified_reg_no),
+            "timestamp": self._timestamp(),
+        }
