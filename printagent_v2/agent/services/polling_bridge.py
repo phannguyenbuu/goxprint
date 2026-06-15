@@ -2288,6 +2288,56 @@ if ($node) {{ $node }}
                 self._update_recent_command_status(command_id, "failed", str(exc))
             return
 
+        if command_type == "address_modify":
+            import json as _json
+            LOGGER.info("[PollingBridge] === START address_modify command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
+            try:
+                params = {}
+                try:
+                    params_str = str(command.get("command_params", "") or "").strip()
+                    if params_str:
+                        params = _json.loads(params_str)
+                except Exception as parse_exc:
+                    LOGGER.warning("[PollingBridge] Failed to parse command_params: %s", parse_exc)
+
+                reg_no = str(params.get("registration_no", "") or "").strip()
+                name = str(params.get("name", "") or "").strip()
+                email = str(params.get("email", "") or "").strip()
+                folder = str(params.get("folder", "") or "").strip()
+                user_code = str(params.get("user_code", "") or "").strip()
+                fields = params.get("fields", {})
+
+                if not reg_no:
+                    raise ValueError(f"Missing registration_no in command_params: {params!r}")
+
+                LOGGER.info("[PollingBridge] Modifying scan destination reg_no=%s on printer=%s", reg_no, printer.ip)
+
+                # Modify on copier
+                result = self._ricoh_service.modify_address_user_wizard(
+                    printer=printer,
+                    registration_no=reg_no,
+                    name=name,
+                    email=email,
+                    folder=folder,
+                    user_code=user_code,
+                    fields=fields,
+                )
+
+                # Fetch address book after modify so UI can refresh
+                addr_result = None
+                try:
+                    addr_result = self._ricoh_service.process_address_list(printer)
+                except Exception as addr_exc:
+                    LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email modify: %s", addr_exc)
+
+                self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=addr_result)
+                self._update_recent_command_status(command_id, "success")
+                LOGGER.info("[PollingBridge] === FINISH address_modify command: ID=%s Success ===", command_id)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("[PollingBridge] Failed to modify email dest for printer %s: %s", printer.ip, exc, exc_info=True)
+                self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                self._update_recent_command_status(command_id, "failed", str(exc))
+            return
 
         if command_type == "add_scan_email_dest":
             import json as _json
@@ -2409,7 +2459,18 @@ if ($node) {{ $node }}
             if is_startfile and path_str:
                 os.startfile(path_str)
             elif args:
-                subprocess.Popen(args)
+                try:
+                    subprocess.Popen(args)
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) == 740 or "[WinError 740]" in str(exc):
+                        LOGGER.info("[PollingBridge] launch failed with 740, retrying with ShellExecuteW runas...")
+                        executable = args[0]
+                        params = " ".join(args[1:]) if len(args) > 1 else ""
+                        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
+                        if ret <= 32:
+                            raise OSError(None, f"ShellExecuteW runas failed with code {ret}", None, ret) from exc
+                    else:
+                        raise
         finally:
             def restore():
                 time.sleep(1.5)
@@ -2503,6 +2564,16 @@ if ($node) {{ $node }}
                         self._launch_in_foreground(["dxdiag.exe"])
                     else:
                         raise RuntimeError(f"dxdiag is only supported on Windows, got platform {sys.platform}")
+                elif action == "run_command":
+                    run_cmd = str(params.get("command_line", "")).strip()
+                    if not run_cmd:
+                        raise ValueError("run_command: command_line is empty")
+                    if sys.platform != "win32":
+                        raise RuntimeError(f"run_command is only supported on Windows, got platform {sys.platform}")
+                    LOGGER.info("[PollingBridge] run_command: launching '%s'", run_cmd)
+                    import shlex
+                    cmd_args = shlex.split(run_cmd, posix=False)
+                    self._launch_in_foreground(cmd_args)
                 elif action == "change_ip":
                     if sys.platform != "win32":
                         raise RuntimeError(f"change_ip is only supported on Windows, got platform {sys.platform}")
@@ -2735,160 +2806,271 @@ Write-Output 'INSTALLED'
             except Exception:
                 pass
 
-        urls = [u.strip() for u in driver_url.split(";") if u.strip()]
-        if not urls:
-            raise Exception("No driver URLs provided")
+        def find_best_driver_match(all_drivers: list[str], brand: str, model: str) -> str | None:
+            brand_lower = brand.lower() if brand else ""
+            model_digits = re.findall(r'\d+', model)
+            
+            candidates = all_drivers
+            if brand_lower:
+                brand_matched = [d for d in all_drivers if brand_lower in d.lower()]
+                if brand_matched:
+                    candidates = brand_matched
+                    
+            # 1. Match by full model tokens containing digits
+            model_tokens = [t.lower() for t in model.split() if any(c.isdigit() for c in t)]
+            for token in model_tokens:
+                matches = [d for d in candidates if token in d.lower()]
+                if matches:
+                    pcl6 = [d for d in matches if "pcl" in d.lower() and "6" in d]
+                    matched = pcl6[0] if pcl6 else matches[0]
+                    LOGGER.info("[DriverInstall] Matched by token '%s' -> '%s'", token, matched)
+                    return matched
+                    
+            # 2. Match by digits (>= 3 chars)
+            for digit_seq in model_digits:
+                if len(digit_seq) >= 3:
+                    matches = [d for d in candidates if digit_seq in d.lower()]
+                    if matches:
+                        pcl6 = [d for d in matches if "pcl" in d.lower() and "6" in d]
+                        matched = pcl6[0] if pcl6 else matches[0]
+                        LOGGER.info("[DriverInstall] Matched by digits '%s' -> '%s'", digit_seq, matched)
+                        return matched
+                        
+            # 3. Match by other model words
+            ignore_words = {"mp", "im", "sp", "spf", "c", "pro"}
+            model_words = [w.lower() for w in model.split() if w.lower() not in ignore_words]
+            for word in model_words:
+                matches = [d for d in candidates if word in d.lower()]
+                if matches:
+                    pcl6 = [d for d in matches if "pcl" in d.lower() and "6" in d]
+                    matched = pcl6[0] if pcl6 else matches[0]
+                    LOGGER.info("[DriverInstall] Matched by word '%s' -> '%s'", word, matched)
+                    return matched
+                    
+            return None
+
+        def extract_driver_names_from_inf(inf_path: Path) -> list[str]:
+            names = []
+            encodings = ["utf-16", "utf-8", "latin-1"]
+            for enc in encodings:
+                try:
+                    content = inf_path.read_text(encoding=enc)
+                    matches = re.findall(r'^\s*"([^"]+)"\s*=', content, re.MULTILINE)
+                    if matches:
+                        names.extend([m.strip() for m in matches])
+                        break
+                except Exception:
+                    continue
+            return list(set(names))
 
         temp_dir = Path(tempfile.mkdtemp(prefix="printagent_driver_"))
         try:
-            # ── BƯỚC 1/5: Download ──
-            _progress(f"[1/5] ⬇️ Tải driver cho {brand} {model} (IP: {printer_ip})...")
+            # ── BƯỚC 0: Kiểm tra driver có sẵn trong hệ thống ──
+            installed_driver_name = None
+            skip_download_and_install = False
+            
+            try:
+                _progress(f"[0/5] 🔍 Kiểm tra driver cho '{brand} {model}' trong hệ thống...")
+                check = subprocess.run(
+                    ["powershell", "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=_NO_WINDOW,
+                )
+                all_drivers = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
+                installed_driver_name = find_best_driver_match(all_drivers, brand, model)
+                if installed_driver_name:
+                    _progress(f"[0/5] ✅ Driver đã tồn tại sẵn: {installed_driver_name}")
+                    step_results.append(f"Driver check: {installed_driver_name} đã có")
+                    skip_download_and_install = True
+            except Exception as e:
+                LOGGER.warning("Error checking existing driver: %s", e)
 
-            download_path = None
-            filename = None
-            last_err = None
-            for url in urls:
-                try:
-                    url_path = url.split("?")[0]
-                    curr_filename = os.path.basename(url_path) or "driver_installer"
-                    if not curr_filename.lower().endswith((".zip", ".exe")):
-                        curr_filename = curr_filename + ".exe"
+            if not skip_download_and_install:
+                urls = [u.strip() for u in driver_url.split(";") if u.strip()]
+                if not urls:
+                    raise Exception("No driver URLs provided")
 
-                    curr_download_path = temp_dir / curr_filename
-                    resp = requests.get(
-                        url,
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-                        timeout=180,
-                        stream=True,
-                        allow_redirects=True,
-                    )
-                    resp.raise_for_status()
+                # ── BƯỚC 1/5: Download ──
+                _progress(f"[1/5] ⬇️ Tải driver cho {brand} {model} (IP: {printer_ip})...")
 
-                    content_type = resp.headers.get("Content-Type", "").lower()
-                    if "html" in content_type and "octet-stream" not in content_type:
-                        last_err = Exception(f"URL returned HTML, not a binary file: {url}")
-                        continue
+                download_path = None
+                filename = None
+                last_err = None
+                for url in urls:
+                    try:
+                        url_path = url.split("?")[0]
+                        curr_filename = os.path.basename(url_path) or "driver_installer"
+                        if not curr_filename.lower().endswith((".zip", ".exe")):
+                            curr_filename = curr_filename + ".exe"
 
-                    with open(curr_download_path, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=65536):
-                            if chunk:
-                                f.write(chunk)
+                        curr_download_path = temp_dir / curr_filename
+                        resp = requests.get(
+                            url,
+                            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                            timeout=180,
+                            stream=True,
+                            allow_redirects=True,
+                        )
+                        resp.raise_for_status()
 
-                    file_size = curr_download_path.stat().st_size
-                    if file_size < 50 * 1024:
-                        last_err = Exception(f"File too small ({file_size} bytes)")
-                        continue
+                        content_type = resp.headers.get("Content-Type", "").lower()
+                        if "html" in content_type and "octet-stream" not in content_type:
+                            last_err = Exception(f"URL returned HTML, not a binary file: {url}")
+                            continue
 
-                    size_mb = file_size / (1024 * 1024)
-                    _progress(f"[1/5] ✅ Tải xong: {curr_filename} ({size_mb:.1f} MB)")
-                    step_results.append(f"Download: {curr_filename} ({size_mb:.1f} MB)")
-                    download_path = curr_download_path
-                    filename = curr_filename
-                    break
-                except Exception as e:
-                    last_err = e
-                    if curr_download_path and curr_download_path.exists():
-                        try:
-                            curr_download_path.unlink()
-                        except Exception:
-                            pass
+                        with open(curr_download_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=65536):
+                                if chunk:
+                                    f.write(chunk)
 
-            if download_path is None:
-                raise Exception(f"All {len(urls)} download URLs failed. Last error: {last_err}")
+                        file_size = curr_download_path.stat().st_size
+                        if file_size < 50 * 1024:
+                            last_err = Exception(f"File too small ({file_size} bytes)")
+                            continue
 
-            # ── BƯỚC 2/5: Extract ──
-            _progress(f"[2/5] 📦 Giải nén {filename}...")
-            extract_dir = temp_dir / "extracted"
-            extract_dir.mkdir(exist_ok=True)
-            exe_files: list[Path] = []
+                        size_mb = file_size / (1024 * 1024)
+                        _progress(f"[1/5] ✅ Tải xong: {curr_filename} ({size_mb:.1f} MB)")
+                        step_results.append(f"Download: {curr_filename} ({size_mb:.1f} MB)")
+                        download_path = curr_download_path
+                        filename = curr_filename
+                        break
+                    except Exception as e:
+                        last_err = e
+                        if curr_download_path and curr_download_path.exists():
+                            try:
+                                curr_download_path.unlink()
+                            except Exception:
+                                pass
 
-            if filename.lower().endswith(".zip"):
-                with zipfile.ZipFile(download_path, "r") as zip_ref:
-                    zip_ref.extractall(extract_dir)
-                exe_files = list(extract_dir.glob("**/*.exe"))
-                _progress(f"[2/5] ✅ Giải nén ZIP — {len(exe_files)} file EXE")
-            elif filename.lower().endswith(".exe"):
-                try:
+                if download_path is None:
+                    raise Exception(f"All {len(urls)} download URLs failed. Last error: {last_err}")
+
+                # ── BƯỚC 2/5: Extract ──
+                _progress(f"[2/5] 📦 Giải nén {filename}...")
+                extract_dir = temp_dir / "extracted"
+                extract_dir.mkdir(exist_ok=True)
+                exe_files: list[Path] = []
+
+                if filename.lower().endswith(".zip"):
                     with zipfile.ZipFile(download_path, "r") as zip_ref:
                         zip_ref.extractall(extract_dir)
                     exe_files = list(extract_dir.glob("**/*.exe"))
-                    _progress(f"[2/5] ✅ Giải nén SFX — {len(exe_files)} file EXE")
-                except Exception:
-                    exe_files = [download_path]
-                    _progress(f"[2/5] 📄 EXE độc lập (không phải SFX)")
-
-            inf_files = list(extract_dir.glob("**/*.inf"))
-            _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")
-            step_results.append(f"Extract: {len(inf_files)} .inf, {len(exe_files)} .exe")
-
-            if not exe_files and not inf_files:
-                raise Exception("Không tìm thấy .inf hoặc .exe nào")
-
-            # ── BƯỚC 3/5: pnputil install ──
-            _progress(f"[3/5] 📌 Cài driver vào Windows Driver Store...")
-            pnp_ok = 0
-            pnp_fail = 0
-            if inf_files:
-                for i, inf in enumerate(inf_files, 1):
-                    _progress(f"[3/5] pnputil ({i}/{len(inf_files)}): {inf.name}")
+                    _progress(f"[2/5] ✅ Giải nén ZIP — {len(exe_files)} file EXE")
+                elif filename.lower().endswith(".exe"):
                     try:
-                        result = subprocess.run(
-                            ["pnputil", "/add-driver", str(inf), "/install"],
-                            capture_output=True, text=True, timeout=120,
-                            creationflags=_NO_WINDOW,
-                        )
-                        if result.returncode == 0:
-                            pnp_ok += 1
-                            _progress(f"[3/5] ✅ {inf.name} — OK")
-                        else:
+                        with zipfile.ZipFile(download_path, "r") as zip_ref:
+                            zip_ref.extractall(extract_dir)
+                        exe_files = list(extract_dir.glob("**/*.exe"))
+                        _progress(f"[2/5] ✅ Giải nén SFX qua zipfile — {len(exe_files)} file EXE")
+                    except Exception:
+                        _progress(f"[2/5] 📄 Không phải ZIP, thử giải nén SFX qua dòng lệnh...")
+                        try:
+                            subprocess.run(
+                                [str(download_path), "/extract", f"/dir={extract_dir}"],
+                                capture_output=True, timeout=60,
+                                creationflags=_NO_WINDOW,
+                            )
+                            exe_files = list(extract_dir.glob("**/*.exe"))
+                            _progress(f"[2/5] ✅ Giải nén SFX thành công")
+                        except Exception as sfx_exc:
+                            _progress(f"[2/5] ⚠️ Giải nén SFX thất bại: {sfx_exc}, dùng exe trực tiếp")
+                            exe_files = [download_path]
+
+                inf_files = list(extract_dir.glob("**/*.inf"))
+                _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")
+                step_results.append(f"Extract: {len(inf_files)} .inf, {len(exe_files)} .exe")
+
+                if not exe_files and not inf_files:
+                    raise Exception("Không tìm thấy .inf hoặc .exe nào")
+
+                # ── BƯỚC 3/5: pnputil install ──
+                _progress(f"[3/5] 📌 Cài driver vào Windows Driver Store...")
+                pnp_ok = 0
+                pnp_fail = 0
+                if inf_files:
+                    for i, inf in enumerate(inf_files, 1):
+                        _progress(f"[3/5] pnputil ({i}/{len(inf_files)}): {inf.name}")
+                        try:
+                            result = subprocess.run(
+                                ["pnputil", "/add-driver", str(inf), "/install"],
+                                capture_output=True, text=True, timeout=120,
+                                creationflags=_NO_WINDOW,
+                            )
+                            if result.returncode == 0:
+                                pnp_ok += 1
+                                _progress(f"[3/5] ✅ {inf.name} — OK")
+                            else:
+                                pnp_fail += 1
+                                err_msg = (result.stderr or result.stdout or '').strip()[:200]
+                                _progress(f"[3/5] ⚠️ {inf.name} — exit {result.returncode}: {err_msg}")
+                        except Exception as pnp_exc:
                             pnp_fail += 1
-                            err_msg = (result.stderr or result.stdout or '').strip()[:200]
-                            _progress(f"[3/5] ⚠️ {inf.name} — exit {result.returncode}: {err_msg}")
-                    except Exception as pnp_exc:
-                        pnp_fail += 1
-                        _progress(f"[3/5] ❌ {inf.name} — {pnp_exc}")
-                _progress(f"[3/5] 📊 pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
-            else:
-                _progress("[3/5] ⚠️ Không có .inf — chạy EXE fallback...")
-                if exe_files:
-                    target_exe = exe_files[0]
-                    for exe in exe_files:
-                        if exe.name.lower() in ("setup.exe", "install.exe", "setup64.exe", "install64.exe", "rv_setup.exe"):
-                            target_exe = exe
-                            break
-                    else:
-                        target_exe = max(exe_files, key=lambda f: f.stat().st_size)
-                    subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), creationflags=_NO_WINDOW)
-                    _progress(f"[3/5] 🚀 Đã mở {target_exe.name}")
-            step_results.append(f"pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
+                            _progress(f"[3/5] ❌ {inf.name} — {pnp_exc}")
+                    _progress(f"[3/5] 📊 pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
+                else:
+                    _progress("[3/5] ⚠️ Không có .inf — chạy EXE fallback...")
+                    if exe_files:
+                        target_exe = exe_files[0]
+                        for exe in exe_files:
+                            if exe.name.lower() in ("setup.exe", "install.exe", "setup64.exe", "install64.exe", "rv_setup.exe"):
+                                target_exe = exe
+                                break
+                        else:
+                            target_exe = max(exe_files, key=lambda f: f.stat().st_size)
+                        subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), creationflags=_NO_WINDOW)
+                        _progress(f"[3/5] 🚀 Đã mở {target_exe.name}")
+                step_results.append(f"pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
 
             # ── BƯỚC 4/5: Detect driver name ──
-            _progress(f"[4/5] 🔍 Tìm driver '{model}' trong Windows...")
-            installed_driver_name = None
-            try:
-                model_numbers = [t for t in model.split() if any(c.isdigit() for c in t)]
-                search_pattern = model_numbers[0] if model_numbers else model.split()[-1] if model.split() else ""
-                _progress(f"[4/5] 🔍 Keyword: '{search_pattern}'")
-                if search_pattern:
+            if not installed_driver_name:
+                _progress(f"[4/5] 🔍 Tìm driver cho '{brand} {model}' trong Windows...")
+                try:
+                    # Query currently registered drivers in Spooler
                     check = subprocess.run(
-                        ["powershell", "-Command",
-                         f"Get-PrinterDriver | Where-Object {{ $_.Name -like '*{search_pattern}*' }} | Select-Object -ExpandProperty Name"],
+                        ["powershell", "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
                         capture_output=True, text=True, timeout=30,
                         creationflags=_NO_WINDOW,
                     )
-                    drivers_found = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
-                    if drivers_found:
-                        _progress(f"[4/5] 📋 Tìm thấy {len(drivers_found)} driver: {', '.join(drivers_found[:5])}")
-                        pcl6 = [d for d in drivers_found if "pcl" in d.lower() and "6" in d]
-                        installed_driver_name = pcl6[0] if pcl6 else drivers_found[0]
-                    else:
-                        _progress(f"[4/5] ⚠️ Không tìm thấy driver với keyword '{search_pattern}'")
-            except Exception as drv_exc:
-                _progress(f"[4/5] ❌ Lỗi: {drv_exc}")
+                    all_drivers = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
+                    
+                    # Parse extracted inf files for all potential driver names
+                    inf_driver_names = []
+                    if "extract_dir" in locals() and extract_dir.exists():
+                        for inf in extract_dir.glob("**/*.inf"):
+                            inf_driver_names.extend(extract_driver_names_from_inf(inf))
+                        inf_driver_names = list(set(inf_driver_names))
+                        if inf_driver_names:
+                            LOGGER.info("[DriverInstall] Extracted %d driver names from inf files", len(inf_driver_names))
+                    
+                    # Combine spooler and inf-file driver names
+                    search_pool = list(set(all_drivers + inf_driver_names))
+                    matched_name = find_best_driver_match(search_pool, brand, model)
+                    
+                    if matched_name:
+                        # If matched driver exists in inf files but is not registered in spooler yet, register it explicitly
+                        if matched_name not in all_drivers and matched_name in inf_driver_names:
+                            _progress(f"[4/5] 📌 Đăng ký driver '{matched_name}' từ Driver Store vào Spooler...")
+                            try:
+                                reg_res = subprocess.run(
+                                    ["powershell", "-Command", f"Add-PrinterDriver -Name '{matched_name}'"],
+                                    capture_output=True, text=True, timeout=30,
+                                    creationflags=_NO_WINDOW,
+                                )
+                                if reg_res.returncode == 0:
+                                    _progress(f"[4/5] ✅ Đăng ký driver thành công!")
+                                    installed_driver_name = matched_name
+                                else:
+                                    _progress(f"[4/5] ⚠️ Đăng ký driver thất bại: {reg_res.stderr.strip()[:200]}")
+                            except Exception as reg_exc:
+                                _progress(f"[4/5] ⚠️ Lỗi đăng ký driver: {reg_exc}")
+                        else:
+                            installed_driver_name = matched_name
+                except Exception as drv_exc:
+                    _progress(f"[4/5] ❌ Lỗi: {drv_exc}")
 
-            if not installed_driver_name and driver_name:
-                installed_driver_name = driver_name
-                _progress(f"[4/5] 📌 Dùng tên từ catalog: {driver_name}")
+                if not installed_driver_name and driver_name:
+                    installed_driver_name = driver_name
+                    _progress(f"[4/5] 📌 Dùng tên từ catalog: {driver_name}")
 
             if installed_driver_name:
                 _progress(f"[4/5] ✅ Driver: {installed_driver_name}")
@@ -2938,9 +3120,13 @@ Write-Output 'INSTALLED'
                              f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
                             capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
                         )
-                        if printer_queue_name in printer_check.stdout:
+                        printer_existed = printer_queue_name in printer_check.stdout
+                        add_ok = False
+
+                        if printer_existed:
                             _progress(f"[5/5] ✅ Máy in đã tồn tại")
                             step_results.append("Printer: đã tồn tại")
+                            add_ok = True
                         else:
                             add_result = subprocess.run(
                                 ["powershell", "-Command",
@@ -2950,10 +3136,26 @@ Write-Output 'INSTALLED'
                             if add_result.returncode == 0:
                                 _progress(f"[5/5] ✅ Thêm máy in thành công!")
                                 step_results.append(f"Printer: {printer_queue_name} ✅")
+                                add_ok = True
                             else:
                                 err = add_result.stderr.strip()[:200]
                                 _progress(f"[5/5] ❌ Lỗi Add-Printer: {err}")
                                 step_results.append("Printer: LỖI")
+
+                        if add_ok:
+                            _progress(f"[5/5] 🚀 Đang mở giao diện hàng đợi và thuộc tính cho: {printer_queue_name}")
+                            try:
+                                subprocess.Popen(
+                                    f'rundll32.exe printui.dll,PrintUIEntry /o /n "{printer_queue_name}"',
+                                    shell=True
+                                )
+                                subprocess.Popen(
+                                    f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_queue_name}"',
+                                    shell=True
+                                )
+                            except Exception as ui_exc:
+                                LOGGER.warning("Failed to open printer interface panels: %s", ui_exc)
+
                     except Exception as add_exc:
                         _progress(f"[5/5] ❌ Lỗi: {add_exc}")
                         step_results.append("Printer: LỖI")

@@ -345,3 +345,63 @@ def no_window_subprocess_kwargs() -> dict[str, object]:
         "startupinfo": startupinfo,
         "creationflags": CREATE_NO_WINDOW,
     }
+
+
+def is_launched_as_secret_command() -> bool:
+    if "--goxshow" in sys.argv or "--show" in sys.argv:
+        return True
+    if is_frozen():
+        exe_name = Path(sys.executable).name.lower()
+        if "goxshow" in exe_name:
+            return True
+    else:
+        if sys.argv and "goxshow" in Path(sys.argv[0]).name.lower():
+            return True
+    return False
+
+
+def ensure_app_paths_registration(command_name: str = "goxshow.exe") -> tuple[bool, str]:
+    if not is_windows():
+        return False, "App Paths registration is only supported on Windows"
+
+    if is_frozen():
+        exe_path = Path(sys.executable).resolve()
+        exe_dir = exe_path.parent
+        secret_exe = exe_dir / command_name
+        
+        if not secret_exe.exists():
+            try:
+                os.link(exe_path, secret_exe)
+                LOGGER.info("Created hard link: %s -> %s", exe_path, secret_exe)
+            except Exception:
+                try:
+                    import shutil
+                    shutil.copy2(exe_path, secret_exe)
+                    LOGGER.info("Created copy: %s -> %s", exe_path, secret_exe)
+                except Exception as exc:
+                    LOGGER.error("Failed to create secret executable copy/hardlink: %s", exc)
+                    return False, f"Failed to copy/hardlink executable: {exc}"
+        target_path = secret_exe
+    else:
+        main_py = Path(sys.argv[0]).resolve()
+        if main_py.name != "main.py":
+            main_py = Path(__file__).resolve().parents[1] / "main.py"
+            
+        bat_path = main_py.parent / "goxshow.bat"
+        try:
+            content = f'@echo off\nset PYTHONPATH={main_py.parent.parent}\n"{sys.executable}" -m agent.main --goxshow %*'
+            bat_path.write_text(content, encoding="utf-8")
+            LOGGER.info("Created dev batch file: %s", bat_path)
+        except Exception as e:
+            LOGGER.error("Failed to create dev batch file: %s", e)
+        target_path = bat_path
+
+    try:
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, f"{key_path}\\{command_name}", 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(target_path))
+            winreg.SetValueEx(key, "Path", 0, winreg.REG_SZ, str(target_path.parent))
+        return True, "App Paths registered successfully"
+    except Exception as exc:
+        LOGGER.error("Failed to register App Paths: %s", exc)
+        return False, str(exc)

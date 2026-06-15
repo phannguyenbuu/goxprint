@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "1.5.17"
+DEFAULT_APP_VERSION = "1.5.25"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -363,6 +363,7 @@ class AutoUpdater:
                 backup_binary.unlink()
 
             relaunch_command = subprocess.list2cmdline([str(current_binary), *self._current_args])
+            relaunch_ftp_command = subprocess.list2cmdline([str(current_binary), "--mode", ""])
             current_pid = os.getpid()
             helper_lines = [
                 "@echo off",
@@ -379,6 +380,10 @@ class AutoUpdater:
                 "    ping 127.0.0.1 -n 2 > nul",
                 "    goto wait_old_exit",
                 ")",
+                "",
+                "rem Terminate any remaining printagent processes to release file locks",
+                "taskkill /F /IM printagent.exe >nul 2>&1",
+                "ping 127.0.0.1 -n 2 > nul",
                 "",
                 "rem Extra delay for Win 11 Defender/AV to release file lock",
                 "ping 127.0.0.1 -n 4 > nul",
@@ -417,6 +422,7 @@ class AutoUpdater:
                 "",
                 "rem ── Phase 5: Launch new agent FIRST, then cleanup ──",
                 f'start /B "" {relaunch_command}',
+                f'start /B "" {relaunch_ftp_command}',
                 "",
                 "rem Try to delete .bak in background (non-blocking)",
                 "ping 127.0.0.1 -n 3 > nul",
@@ -428,10 +434,12 @@ class AutoUpdater:
                 "rem Rename failed after max retries - try to launch whatever is available",
                 f'if exist "{str(current_binary)}" (',
                 f'    start /B "" {relaunch_command}',
+                f'    start /B "" {relaunch_ftp_command}',
                 ") else (",
                 f'    if exist "{str(staged_binary)}" (',
                 f'        rename "{str(staged_binary)}" "{current_binary.name}"',
                 f'        start /B "" {relaunch_command}',
+                f'        start /B "" {relaunch_ftp_command}',
                 "    )",
                 ")",
                 'del "%~f0"',

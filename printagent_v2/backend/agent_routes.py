@@ -724,7 +724,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.post("/api/agents/<agent_uid>/utility/<action>")
     def trigger_agent_utility(agent_uid: str, action: str) -> Any:
-        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec"}
+        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec", "run_command"}
         if action not in valid_actions:
             return jsonify({"ok": False, "error": f"Invalid utility action: {action}"}), 400
             

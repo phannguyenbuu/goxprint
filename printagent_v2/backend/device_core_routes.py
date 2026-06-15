@@ -433,6 +433,90 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             "mac_id": printer_mac_value,
         })
 
+    @app.post("/api/devices/action")
+    def api_device_action() -> Any:
+        import json as _json
+        body = request.get_json(silent=True) or {}
+        ip = str(body.get("ip", "")).strip()
+        action = str(body.get("action", "")).strip().lower()
+        if not ip:
+            return jsonify({"ok": False, "error": "Missing ip"}), 400
+        if not action:
+            return jsonify({"ok": False, "error": "Missing action"}), 400
+
+        if action == "address_modify":
+            registration_no = str(body.get("registration_no", "")).strip()
+            name = str(body.get("name", "")).strip()
+            email = str(body.get("email", "")).strip()
+            folder = str(body.get("folder", "")).strip()
+            user_code = str(body.get("user_code", "")).strip()
+            fields = body.get("fields", {})
+
+            if not registration_no:
+                return jsonify({"ok": False, "error": "Missing registration_no"}), 400
+
+            requested_at = datetime.now(timezone.utc)
+            with session_factory() as session:
+                printer = session.execute(
+                    select(Printer).where(Printer.ip == ip)
+                ).scalars().first()
+                if printer is None:
+                    return jsonify({"ok": False, "error": f"Printer with IP {ip} not found"}), 404
+
+                printer_id_value = int(printer.id)
+                printer_mac_value = _normalize_mac(printer.mac_address) or printer.mac_address or ""
+
+                pending = session.execute(
+                    select(PrinterControlCommand).where(
+                        PrinterControlCommand.printer_id == printer.id,
+                        PrinterControlCommand.status == "pending",
+                    )
+                ).scalars().all()
+                for cmd in pending:
+                    cmd.status = "failed"
+                    cmd.error_message = "Superseded by newer command"
+                    cmd.responded_at = requested_at
+
+                target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+
+                command = PrinterControlCommand(
+                    printer_id=printer.id,
+                    lead=printer.lead,
+                    lan_uid=printer.lan_uid,
+                    agent_uid=target_agent_uid,
+                    printer_name=printer.printer_name,
+                    ip=printer.ip,
+                    desired_enabled=printer.enabled,
+                    command_type="address_modify",
+                    auth_user=printer.auth_user or "",
+                    auth_password=printer.auth_password or "",
+                    command_params=_json.dumps({
+                        "registration_no": registration_no,
+                        "name": name,
+                        "email": email,
+                        "folder": folder,
+                        "user_code": user_code,
+                        "fields": fields
+                    }),
+                    status="pending",
+                    error_message="",
+                    requested_at=requested_at,
+                    responded_at=None,
+                )
+                session.add(command)
+                session.commit()
+                command_id = int(command.id)
+
+            return jsonify({
+                "ok": True,
+                "status": "pending",
+                "command_id": command_id,
+                "printer_id": printer_id_value,
+                "mac_id": printer_mac_value,
+            })
+
+        return jsonify({"ok": False, "error": f"Unsupported action: {action}"}), 400
+
     @app.get("/api/commands/<int:command_id>/status")
     def get_command_status(command_id: int) -> Any:
         with session_factory() as session:

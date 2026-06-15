@@ -362,13 +362,15 @@ class TrayController:
             return 0
 
         hinstance = ctypes.windll.kernel32.GetModuleHandleW(None)
-        class_name = f"GoPrinxAgentTray_{id(self):x}"
+        class_name = "GoPrinxAgentTray"
 
         WNDPROCTYPE = ctypes.WINFUNCTYPE(LRESULT_T, wintypes.HWND, wintypes.UINT, WPARAM_T, LPARAM_T)
 
         def wndproc(hwnd, msg, wparam, lparam):
             if msg == self._taskbar_created:
-                self._add_tray_icon()
+                from agent.config import AppConfig
+                if AppConfig.load().get_bool("show_tray_icon", True):
+                    self._add_tray_icon()
                 return 0
             if msg == WM_COMMAND:
                 command = int(wparam) & 0xFFFF
@@ -469,11 +471,24 @@ class TrayController:
         if not hwnd:
             LOGGER.warning("Failed to create tray window")
             return
-        self._add_tray_icon()
-        self._update_tray_tip()
-        self._show_startup_notice()
+
+        from agent.config import AppConfig
+        config = AppConfig.load()
+        if config.get_bool("show_tray_icon", True):
+            self._add_tray_icon()
+            self._update_tray_tip()
+            self._show_startup_notice()
+        else:
+            LOGGER.info("Tray icon is disabled by configuration (show_tray_icon=false)")
+
         user32.ShowWindow(hwnd, SW_HIDE)
         user32.UpdateWindow(hwnd)
+
+        from agent.services.runtime import is_launched_as_secret_command
+        if is_launched_as_secret_command():
+            LOGGER.info("Launched as secret command; showing GUI immediately")
+            self._show()
+            threading.Thread(target=self._show_version_dialog, daemon=True, name="gui-version-dialog").start()
 
         msg = wintypes.MSG()
         while not self._closed:

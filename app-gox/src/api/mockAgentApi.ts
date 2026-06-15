@@ -254,6 +254,13 @@ export async function deleteEmailDestination(printerId: string, regNo: string, e
   });
 }
 
+export async function modifyDeviceAddress(body: any): Promise<any> {
+  return fetchApi('/api/devices/action', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+}
+
 export async function deleteLanEmail(emailId: number): Promise<any> {
   return fetchApi(`/api/lan-emails/${emailId}`, {
     method: 'DELETE'
