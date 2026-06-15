@@ -800,13 +800,32 @@ class RicohAddressWizardMixin(RicohServiceBase):
         folder_clean = self._clean_text(folder)
         if folder_clean:
             folder_server_name, folder_port, folder_path = self._parse_folder_destination(folder_clean)
-            folder_auth_user = self._field_text(fields, "folderAuthUserNameIn", "folderAuthUserName", default="")
+            
+            # Auto-fallback to default FTP credentials from AppConfig for FTP targets
+            default_user = ""
+            default_password = ""
+            if str(folder_clean or "").lower().startswith("ftp://"):
+                default_user = "goxprint"
+                default_password = "goxprint"
+                app_config = getattr(self, "_config", None)
+                if app_config is not None:
+                    try:
+                        val_u = app_config.get_string("ftp_user")
+                        if val_u:
+                            default_user = val_u
+                        val_p = app_config.get_string("ftp_pass")
+                        if val_p:
+                            default_password = val_p
+                    except Exception:
+                        pass
+
+            folder_auth_user = self._field_text(fields, "folderAuthUserNameIn", "folderAuthUserName", default=default_user)
             folder_password = self._field_text(
-                fields, "folderPasswordIn", "wk_folderPasswordIn", "folderPassword", default="",
+                fields, "folderPasswordIn", "wk_folderPasswordIn", "folderPassword", default=default_password,
             )
             if not folder_password:
                 folder_password = self._field_text(
-                    fields, "wk_folderPasswordConfirmIn", "folderPasswordConfirmIn", "folderPasswordConfirm", default="",
+                    fields, "wk_folderPasswordConfirmIn", "folderPasswordConfirmIn", "folderPasswordConfirm", default=default_password,
                 )
             if not folder_password:
                 folder_auth_user = ""
