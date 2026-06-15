@@ -22,6 +22,49 @@ import concurrent.futures
 import re
 from pathlib import Path
 
+
+import subprocess
+import sys
+
+def open_printer_interface(printer_name, interface_type="both"):
+    """
+    Mở giao diện quản lý máy in trên Windows.
+    
+    Tham số:
+      - printer_name: Tên máy in (ví dụ: "7503")
+      - interface_type: Giao diện cần mở:
+        - "queue": Mở hàng đợi in (Print Queue)
+        - "properties": Mở thuộc tính máy in (Printer Properties)
+        - "both": Mở cả hai giao diện trên cùng lúc (mặc định)
+    """
+    if sys.platform != "win32":
+        print("Lỗi: Lệnh này chỉ chạy được trên Windows.")
+        return
+
+    interfaces = {
+        "queue": ("/o", "Hàng đợi in (Print Queue)"),
+        "properties": ("/p", "Thuộc tính máy in (Printer Properties)")
+    }
+
+    # Xác định các giao diện cần mở
+    types_to_open = ["queue", "properties"] if interface_type == "both" else [interface_type]
+
+    for t in types_to_open:
+        if t not in interfaces:
+            print(f"Lỗi: Không hỗ trợ giao diện '{t}'")
+            continue
+            
+        flag, label = interfaces[t]
+        command = f'rundll32.exe printui.dll,PrintUIEntry {flag} /n "{printer_name}"'
+        
+        try:
+            # Chạy lệnh mở giao diện (không chặn script bằng cách dùng Popen hoặc chạy run thông thường)
+            subprocess.Popen(command, shell=True)
+            print(f"Đang mở {label} của máy in: {printer_name}")
+        except Exception as e:
+            print(f"Có lỗi xảy ra khi mở {label}: {e}")
+
+
 DRIVER_URL = "https://support.ricoh.com/bb/pub_e/dr_ut_e/0001343/0001343268/V3200/z05906L16.exe"
 PRINTER_MODEL = "MP 7503"
 SCAN_TIMEOUT = 5  # seconds per host
@@ -95,15 +138,28 @@ def extract_printer_name(ip):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=SCAN_TIMEOUT) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
+            
+            # 1. Search for Device Name in dl/dt/dd tags
+            match = re.search(r'<dt>Device\s+Name</dt>\s*<dd[^>]*>(?::&nbsp;)?\s*([^<]+)', html, re.IGNORECASE)
+            if match:
+                name = match.group(1).replace("&nbsp;", " ").strip()
+                if name.lower() not in ("status", "web image monitor", "ricoh printer", ""):
+                    return name
+            
+            # 2. Search for common Ricoh model pattern in html body
+            match = re.search(r'\b(RICOH\s+)?(MP|IM|SP|Pro|Aficio\s+MP)\s+\d+\w*\b', html, re.IGNORECASE)
+            if match:
+                return match.group(0).strip()
+                
+            # 3. Fallback to title, but only if it's descriptive
             match = re.search(r'<title[^>]*>([^<]*)</title>', html, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
-            match = re.search(r'((?:MP|IM|SP)\s*\w+\s*\w*)', html)
-            if match:
-                return match.group(1).strip()
+                title = match.group(1).strip()
+                if title.lower() not in ("status", "web image monitor", "home", "ricoh printer", ""):
+                    return title
     except Exception:
         pass
-    return "Ricoh Printer"
+    return "RICOH MP 7503"
 
 
 def scan_subnet_for_printers(subnet):
@@ -112,7 +168,7 @@ def scan_subnet_for_printers(subnet):
     found = []
     ips = [f"{subnet}.{i}" for i in range(1, 255)]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=80) as executor:
         futures = {executor.submit(check_ricoh_printer, ip): ip for ip in ips}
         for future in concurrent.futures.as_completed(futures):
             ip, name = future.result()
@@ -240,37 +296,55 @@ def main():
     filename = DRIVER_URL.split("/")[-1].split("?")[0]
     download_path = temp_dir / filename
 
+    driver_name = None
     try:
-        # ── Step 1: Download ──
-        print("📥 BƯỚC 1: Tải driver package")
-        print(f"   URL: {DRIVER_URL}")
-        urllib.request.urlretrieve(DRIVER_URL, str(download_path))
-        size_mb = download_path.stat().st_size / (1024 * 1024)
-        print(f"   ✅ Tải xong: {filename} ({size_mb:.1f} MB)")
-        print()
+        # Check if driver is already installed first
+        print("🔍 BƯỚC 0: Kiểm tra driver có sẵn trong hệ thống")
+        check_driver = subprocess.run(
+            ["powershell", "-Command",
+             "Get-PrinterDriver | Where-Object { $_.Name -like '*7503*' } | Select-Object -ExpandProperty Name"],
+            capture_output=True, text=True
+        )
+        available_drivers = [d.strip() for d in check_driver.stdout.strip().splitlines() if d.strip()]
+        if available_drivers:
+            driver_name = available_drivers[0]
+            print(f"   ✅ Driver đã tồn tại: {driver_name}")
+            print("   ⏭️  Bỏ qua Bước 1 (Tải) và Bước 2 (Cài đặt driver).")
+            print()
+        else:
+            print("   ❌ Driver RICOH MP 7503 chưa được cài đặt. Tiến hành tải và cài đặt...")
+            print()
 
-        # ── Step 2: Extract + pnputil ──
-        print("📦 BƯỚC 2: Giải nén + cài driver vào Driver Store")
-        extract_dir = temp_dir / "extracted"
-        extract_dir.mkdir(exist_ok=True)
+            # ── Step 1: Download ──
+            print("📥 BƯỚC 1: Tải driver package")
+            print(f"   URL: {DRIVER_URL}")
+            urllib.request.urlretrieve(DRIVER_URL, str(download_path))
+            size_mb = download_path.stat().st_size / (1024 * 1024)
+            print(f"   ✅ Tải xong: {filename} ({size_mb:.1f} MB)")
+            print()
 
-        try:
-            with zipfile.ZipFile(download_path, "r") as zf:
-                zf.extractall(extract_dir)
-            print(f"   ✅ Giải nén SFX xong")
-        except zipfile.BadZipFile:
-            # Not a ZIP — extract via 7z or just use as-is
-            print(f"   📄 Không phải ZIP, thử chạy SFX extract...")
-            subprocess.run(
-                [str(download_path), "/extract", f"/dir={extract_dir}"],
-                capture_output=True, timeout=60
-            )
+            # ── Step 2: Extract + pnputil ──
+            print("📦 BƯỚC 2: Giải nén + cài driver vào Driver Store")
+            extract_dir = temp_dir / "extracted"
+            extract_dir.mkdir(exist_ok=True)
 
-        driver_name = install_inf_driver(extract_dir)
-        if not driver_name:
-            print("   ❌ Không cài được driver. Dừng lại.")
-            return 1
-        print()
+            try:
+                with zipfile.ZipFile(download_path, "r") as zf:
+                    zf.extractall(extract_dir)
+                print(f"   ✅ Giải nén SFX xong")
+            except zipfile.BadZipFile:
+                # Not a ZIP — extract via 7z or just use as-is
+                print(f"   📄 Không phải ZIP, thử chạy SFX extract...")
+                subprocess.run(
+                    [str(download_path), "/extract", f"/dir={extract_dir}"],
+                    capture_output=True, timeout=60
+                )
+
+            driver_name = install_inf_driver(extract_dir)
+            if not driver_name:
+                print("   ❌ Không cài được driver. Dừng lại.")
+                return 1
+            print()
 
         # ── Step 3: Scan ALL LANs ──
         print("🔍 BƯỚC 3: Quét tất cả mạng LAN tìm máy in Ricoh")
@@ -314,6 +388,7 @@ def main():
             print(f"   ── {printer_name} ──")
             if create_printer(ip, driver_name, printer_name):
                 success_count += 1
+                open_printer_interface(printer_name, "both")
             print()
 
         print(f"{'='*60}")
