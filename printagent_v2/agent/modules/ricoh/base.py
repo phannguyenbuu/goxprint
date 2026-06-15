@@ -78,50 +78,46 @@ def _write_ricoh_html(url: str, text: str, step_name: str = "") -> None:
 def _patched_request(self, method, url, *args, **kwargs):
     response = _original_request(self, method, url, *args, **kwargs)
     try:
-        import threading
-        thread_name = threading.current_thread().name
-        # Only log HTML for command flows originating from the server (thread name starts with 'server-command-')
-        if thread_name.startswith("server-command-"):
-            url_lower = response.url.lower()
-            if any(p in url_lower for p in ["/web/entry/", "/web/guest/", "/guest/", "/entry/", ".cgi"]):
-                # Do not save automated cycles like counter and status
-                is_automated = any(
-                    term in url_lower 
-                    for term in [
-                        "getunificationcounter", 
-                        "getstatus", 
-                        "configuration", 
-                        "getinterface", 
-                        "readnetworkinterface"
-                    ]
-                )
-                if not is_automated:
-                    content_type = response.headers.get("Content-Type", "").lower()
-                    is_binary = any(b in content_type for b in ["image/", "application/octet-stream", "pdf", "zip"])
-                    if not is_binary and response.text:
-                        # Extract step parameter if available in POST payload
-                        step_name = ""
-                        req_body = getattr(response.request, "body", None)
-                        if req_body:
-                            try:
-                                if isinstance(req_body, bytes):
-                                    body_str = req_body.decode("utf-8", errors="ignore")
-                                else:
-                                    body_str = str(req_body)
-                                
-                                # Try URL-encoded format first: step=BASE
-                                m = re.search(r'\bstep=([^&;\s]+)', body_str, re.I)
+        url_lower = response.url.lower()
+        if any(p in url_lower for p in ["/web/entry/", "/web/guest/", "/guest/", "/entry/", ".cgi"]):
+            # Do not save automated cycles like counter and status
+            is_automated = any(
+                term in url_lower 
+                for term in [
+                    "getunificationcounter", 
+                    "getstatus", 
+                    "configuration", 
+                    "getinterface", 
+                    "readnetworkinterface"
+                ]
+            )
+            if not is_automated:
+                content_type = response.headers.get("Content-Type", "").lower()
+                is_binary = any(b in content_type for b in ["image/", "application/octet-stream", "pdf", "zip"])
+                if not is_binary and response.text:
+                    # Extract step parameter if available in POST payload
+                    step_name = ""
+                    req_body = getattr(response.request, "body", None)
+                    if req_body:
+                        try:
+                            if isinstance(req_body, bytes):
+                                body_str = req_body.decode("utf-8", errors="ignore")
+                            else:
+                                body_str = str(req_body)
+                            
+                            # Try URL-encoded format first: step=BASE
+                            m = re.search(r'\bstep=([^&;\s]+)', body_str, re.I)
+                            if m:
+                                step_name = m.group(1).strip()
+                            else:
+                                # Try multipart format
+                                m = re.search(r'name=["\']step["\']\s*\r?\n\r?\n([A-Za-z0-9_-]+)', body_str, re.I)
                                 if m:
                                     step_name = m.group(1).strip()
-                                else:
-                                    # Try multipart format
-                                    m = re.search(r'name=["\']step["\']\s*\r?\n\r?\n([A-Za-z0-9_-]+)', body_str, re.I)
-                                    if m:
-                                        step_name = m.group(1).strip()
-                            except Exception:
-                                pass
-                        
-                        _write_ricoh_html(response.url, response.text, step_name=step_name)
+                        except Exception:
+                            pass
+                    
+                    _write_ricoh_html(response.url, response.text, step_name=step_name)
     except Exception:
         pass
     return response

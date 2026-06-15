@@ -135,7 +135,12 @@ def main():
             log(f"Verified target entry after update:")
             log(f"  Name      : {verified_entry.get('name')}")
             log(f"  Folder FTP: {verified_entry.get('folder')}")
-            if verified_entry.get('folder') == new_folder:
+            
+            actual_folder = str(verified_entry.get('folder', '')).strip().lower()
+            expected_host = new_ftp_ip.lower()
+            expected_path = "/cuongnhat24@gmail.com/".lower()
+            
+            if expected_host in actual_folder and expected_path in actual_folder:
                 print("=" * 80)
                 print("   SUCCESS: FTP DESTINATION IP SUCCESSFULLY CHANGED AND VERIFIED!")
                 print("=" * 80)

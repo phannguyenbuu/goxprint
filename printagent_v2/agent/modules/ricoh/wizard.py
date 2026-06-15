@@ -97,7 +97,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
         
         post_data = {
             "mode": mode,
-            "outputSpecifyModeIn": "DEFAULT",
+            "outputSpecifyModeIn": "PROGRAMMED" if mode in ("MODUSER", "CHANGEUSER") else "DEFAULT",
         }
         if entry_index:
             post_data["entryIndexIn"] = entry_index
@@ -710,7 +710,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
         entry_id: str | None = None,
         session: requests.Session | None = None,
     ) -> dict[str, Any]:
-        """Update an existing address book entry using Ricoh's native CHANGEUSER CGI mode."""
+        """Update an existing address book entry using Ricoh's native MODUSER CGI mode."""
         close_session_at_end = False
         if session is None:
             session = self.create_http_client_auth_form_only(printer)
@@ -724,9 +724,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 try:
                     self._reset_web_session(session, printer)
                     session.close()
-                    LOGGER.info("[RicohWizard] CHANGEUSER session closed successfully.")
+                    LOGGER.info("[RicohWizard] MODUSER session closed successfully.")
                 except Exception as close_exc:
-                    LOGGER.debug("[RicohWizard] Failed to close CHANGEUSER session: %s", close_exc)
+                    LOGGER.debug("[RicohWizard] Failed to close MODUSER session: %s", close_exc)
 
     def _change_address_user_wizard_internal(
         self,
@@ -740,22 +740,22 @@ class RicohAddressWizardMixin(RicohServiceBase):
         fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         LOGGER.info(
-            "[RicohWizard] === START CHANGEUSER wizard: printer=%s (IP=%s), reg_no=%s, name=%s, folder=%s ===",
+            "[RicohWizard] === START MODUSER wizard: printer=%s (IP=%s), reg_no=%s, name=%s, folder=%s ===",
             printer.name, printer.ip, registration_no, name, folder,
         )
         fields = dict(fields or {})
         registration_no = self._normalize_registration_no(registration_no)
         if not registration_no:
-            raise ValueError("registration_no is required for CHANGEUSER mode")
+            raise ValueError("registration_no is required for MODUSER mode")
 
-        # 1. Fetch WIM token — open wizard in CHANGEUSER mode to load existing entry
+        # 1. Fetch WIM token — open wizard in MODUSER mode to load existing entry
         wim_token, wim_source = self._fetch_wim_token(
-            session, printer, mode="CHANGEUSER", entry_index=registration_no
+            session, printer, mode="MODUSER", entry_index=registration_no
         )
         if not wim_token:
-            LOGGER.error("[RicohWizard] CHANGEUSER token not found for IP: %s", printer.ip)
-            raise RuntimeError("Ricoh CHANGEUSER wizard token not found")
-        LOGGER.info("[RicohWizard] CHANGEUSER token source: %s, token=%s...", wim_source, wim_token[:8])
+            LOGGER.error("[RicohWizard] MODUSER token not found for IP: %s", printer.ip)
+            raise RuntimeError("Ricoh MODUSER wizard token not found")
+        LOGGER.info("[RicohWizard] MODUSER token source: %s, token=%s...", wim_source, wim_token[:8])
 
         # 2. BASE step — update entry name/display name
         entry_display_name = self._clean_text(
@@ -765,7 +765,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
         tag_value = self._field_text(fields, "entryTagInfoIn", default="1") or "1"
 
         base_items: list[tuple[str, str]] = [
-            ("mode", "CHANGEUSER"),
+            ("mode", "MODUSER"),
             ("step", "BASE"),
             ("wimToken", wim_token),
             ("entryIndexIn", registration_no),
@@ -777,7 +777,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
         if str(fields.get("entryTypeIn", "") or "").strip():
             base_items.append(("entryTypeIn", str(fields["entryTypeIn"]).strip()))
 
-        LOGGER.info("[RicohWizard] CHANGEUSER: Submitting BASE step (reg_no=%s)...", registration_no)
+        LOGGER.info("[RicohWizard] MODUSER: Submitting BASE step (reg_no=%s)...", registration_no)
         base_html = self._post_wizard_step(session, printer, base_items)
         wim_token = self._extract_wim_token(base_html) or wim_token
         steps_submitted = ["BASE"]
@@ -786,12 +786,12 @@ class RicohAddressWizardMixin(RicohServiceBase):
         email_clean = self._clean_text(email)
         if email_clean:
             mail_items: list[tuple[str, str]] = [
-                ("mode", "CHANGEUSER"),
+                ("mode", "MODUSER"),
                 ("step", "MAIL"),
                 ("wimToken", wim_token),
                 ("mailAddressIn", email_clean),
             ]
-            LOGGER.info("[RicohWizard] CHANGEUSER: Submitting MAIL step...")
+            LOGGER.info("[RicohWizard] MODUSER: Submitting MAIL step...")
             mail_html = self._post_wizard_step(session, printer, mail_items)
             wim_token = self._extract_wim_token(mail_html) or wim_token
             steps_submitted.append("MAIL")
@@ -815,7 +815,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
             encoded_password = base64.b64encode(folder_password.encode("utf-8")).decode("utf-8") if folder_password else ""
 
             folder_items: list[tuple[str, str]] = [
-                ("mode", "CHANGEUSER"),
+                ("mode", "MODUSER"),
                 ("step", "FOLDER"),
                 ("wimToken", wim_token),
                 ("folderProtocolIn", "FTP_O"),
@@ -823,12 +823,13 @@ class RicohAddressWizardMixin(RicohServiceBase):
                 ("folderServerNameIn", folder_server_name),
                 ("folderPathNameIn", folder_path),
                 ("folderAuthUserNameIn", folder_auth_user),
+                ("folderPasswordUpdateIn", "ACCOUNTPWD_ON_RB"),
                 ("wk_folderPasswordIn", ""),
                 ("folderPasswordIn", encoded_password),
                 ("wk_folderPasswordConfirmIn", ""),
                 ("folderPasswordConfirmIn", encoded_password),
             ]
-            LOGGER.info("[RicohWizard] CHANGEUSER: Submitting FOLDER step (server=%s, port=%d)...", folder_server_name, folder_port)
+            LOGGER.info("[RicohWizard] MODUSER: Submitting FOLDER step (server=%s, port=%d)...", folder_server_name, folder_port)
             folder_html = self._post_wizard_step(session, printer, folder_items)
             wim_token = self._extract_wim_token(folder_html) or wim_token
             steps_submitted.append("FOLDER")
@@ -840,10 +841,10 @@ class RicohAddressWizardMixin(RicohServiceBase):
         for step in steps_submitted:
             confirm_items.append(("stepListIn", step))
         confirm_items.extend([
-            ("mode", "CHANGEUSER"),
+            ("mode", "MODUSER"),
             ("step", "CONFIRM"),
         ])
-        LOGGER.info("[RicohWizard] CHANGEUSER: Submitting CONFIRM step...")
+        LOGGER.info("[RicohWizard] MODUSER: Submitting CONFIRM step...")
         confirm_html = self._post_wizard_step(session, printer, confirm_items)
 
         # Navigate back to address list to commit
@@ -858,9 +859,9 @@ class RicohAddressWizardMixin(RicohServiceBase):
             self._reset_web_session(session, printer)
             self._login(session, printer)
         except Exception as reset_exc:
-            LOGGER.warning("[RicohWizard] Failed to reset session after CHANGEUSER: %s", reset_exc)
+            LOGGER.warning("[RicohWizard] Failed to reset session after MODUSER: %s", reset_exc)
 
-        LOGGER.info("[RicohWizard] CHANGEUSER: Waiting 3s for copier to commit...")
+        LOGGER.info("[RicohWizard] MODUSER: Waiting 3s for copier to commit...")
         time.sleep(3.0)
 
         # Verify entry was updated
@@ -868,14 +869,14 @@ class RicohAddressWizardMixin(RicohServiceBase):
         for attempt in range(3):
             if attempt > 0:
                 time.sleep(2.0)
-            LOGGER.info("[RicohWizard] CHANGEUSER: Verifying entry (attempt %d/3)...", attempt + 1)
+            LOGGER.info("[RicohWizard] MODUSER: Verifying entry (attempt %d/3)...", attempt + 1)
             verified_reg_no = self._verify_address_entry(session, printer, registration_no, name, folder)
             if verified_reg_no:
                 break
         if not verified_reg_no:
-            LOGGER.warning("[RicohWizard] CHANGEUSER verification failed for reg_no=%s. Entry may still have been updated.", registration_no)
+            LOGGER.warning("[RicohWizard] MODUSER verification failed for reg_no=%s. Entry may still have been updated.", registration_no)
 
-        LOGGER.info("[RicohWizard] === FINISH CHANGEUSER wizard: reg_no=%s, verified=%s ===", registration_no, bool(verified_reg_no))
+        LOGGER.info("[RicohWizard] === FINISH MODUSER wizard: reg_no=%s, verified=%s ===", registration_no, bool(verified_reg_no))
 
         folder_server_name = ""
         folder_port = 0
@@ -887,7 +888,7 @@ class RicohAddressWizardMixin(RicohServiceBase):
             "printer_name": printer.name,
             "ip": printer.ip,
             "ok": True,
-            "action": "CHANGEUSER",
+            "action": "MODUSER",
             "registration_no": registration_no,
             "entry_name": self._clean_text(name),
             "folder": folder,
