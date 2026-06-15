@@ -12,6 +12,7 @@ import {
   addPrivateLanEmail,
   deleteEmailDestination,
   deleteLanEmail,
+  modifyDeviceAddress,
   getScansFiles,
   installDriverOnAgent,
   getAgentSettings,
@@ -121,9 +122,15 @@ export function AgentPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals
-  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | null>(null);
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | null>(null);
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
+  const [editIpModalData, setEditIpModalData] = useState<{
+    printerId: string;
+    entry: any;
+    currentIp: string;
+    newIp: string;
+  } | null>(null);
   
   // Custom Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -274,6 +281,7 @@ export function AgentPage() {
   const [utilityStatusMsg, setUtilityStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [utilityCommands, setUtilityCommands] = useState<any[]>([]);
   const [utilityCommandsLoading, setUtilityCommandsLoading] = useState(false);
+  const [customRunCommand, setCustomRunCommand] = useState('');
 
   const loadUtilitySettings = useCallback(async (agent: any) => {
     if (!agent) return;
@@ -342,12 +350,12 @@ export function AgentPage() {
     }
   }, [selectedUtilityAgent]);
 
-  const handleTriggerUtility = useCallback(async (action: 'printers' | 'scan' | 'dxdiag' | 'change_ip', payload?: any) => {
+  const handleTriggerUtility = useCallback(async (action: 'printers' | 'scan' | 'dxdiag' | 'change_ip' | 'run_command', payload?: any) => {
     if (!selectedUtilityAgent) return;
     setUtilityActionPending(action);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
     
-    const backendAction = action === 'printers' ? 'devices_and_printers' : (action === 'scan' ? 'open_scan_folder' : (action === 'change_ip' ? 'change_ip' : 'dxdiag'));
+    const backendAction = action === 'printers' ? 'devices_and_printers' : (action === 'scan' ? 'open_scan_folder' : (action === 'change_ip' ? 'change_ip' : (action === 'run_command' ? 'run_command' : 'dxdiag')));
     
     try {
       const res = await triggerAgentUtility(selectedUtilityAgent.agent_uid, backendAction, payload);
@@ -782,6 +790,83 @@ export function AgentPage() {
         }
       }
     });
+  };
+
+  const handleEditIP = (printerId: string, entry: any) => {
+    const currentFolder = entry.folder || entry.physical_path || entry.folder_path || '';
+    let currentIp = '';
+    const ftpMatch = currentFolder.match(/ftp:\/\/([^:/]+)/);
+    const smbMatch = currentFolder.match(/^\\\\([^\\]+)/);
+    if (ftpMatch) {
+      currentIp = ftpMatch[1];
+    } else if (smbMatch) {
+      currentIp = smbMatch[1];
+    }
+
+    setEditIpModalData({
+      printerId,
+      entry,
+      currentIp,
+      newIp: currentIp || '192.168.1.100'
+    });
+    setActiveModal('edit_ip');
+  };
+
+  const handleSaveEditIP = async () => {
+    if (!editIpModalData) return;
+    const { printerId, entry, newIp } = editIpModalData;
+    const currentFolder = entry.folder || entry.physical_path || entry.folder_path || '';
+    const ftpMatch = currentFolder.match(/ftp:\/\/([^:/]+)/);
+    const smbMatch = currentFolder.match(/^\\\\([^\\]+)/);
+
+    let newFolder = currentFolder;
+    if (ftpMatch) {
+      newFolder = currentFolder.replace(/ftp:\/\/([^:/]+)/, `ftp://${newIp}`);
+    } else if (smbMatch) {
+      newFolder = currentFolder.replace(/^\\\\([^\\]+)/, `\\\\${newIp}`);
+    }
+
+    const targetAgent = selectedTargetAgents[printerId] || '';
+    const regNo = entry.registration_no;
+
+    setActiveModal(null);
+    showToast('Gửi yêu cầu thay đổi IP của điểm scan...', 'info', 3000);
+
+    try {
+      const printer = selectedLan?.printers?.find((pr: any) => pr.id === Number(printerId));
+      const copierIp = printer?.ip || '';
+
+      const res = await modifyDeviceAddress({
+        ip: copierIp,
+        action: 'address_modify',
+        registration_no: regNo,
+        name: entry.name,
+        email: entry.email_address || entry.email || '',
+        folder: newFolder,
+        user_code: entry.user_code || '-',
+        agent_uid: targetAgent || undefined,
+        fields: {}
+      });
+
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh thay đổi IP');
+      }
+
+      pollCommandStatus(
+        res.command_id,
+        printerId,
+        async () => {
+          showToast(`Đã thay đổi IP điểm scan #${regNo} thành công!`, 'success');
+          await fetchLanSitesData();
+        },
+        (errorMsg) => {
+          showToast(`Lỗi thay đổi IP: ${errorMsg}`, 'error');
+        },
+        `⌛ Đang cập nhật IP điểm scan #${regNo}...`
+      );
+    } catch (err: any) {
+      showToast(`Lỗi gửi lệnh thay đổi IP: ${err.message}`, 'error');
+    }
   };
 
   /*
@@ -1723,26 +1808,54 @@ export function AgentPage() {
                                             {/* Connection Status badge */}
                                             <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <span
-                                                  style={{
-                                                    ...styles.destStatusBadge,
-                                                    color:
-                                                      statusInfo.type === 'success'
-                                                        ? 'var(--color-success)'
-                                                        : statusInfo.type === 'warning'
-                                                        ? 'var(--color-warning)'
-                                                        : 'var(--color-error)',
-                                                    background:
-                                                      statusInfo.type === 'success'
-                                                        ? 'rgba(0, 255, 136, 0.08)'
-                                                        : statusInfo.type === 'warning'
-                                                        ? 'rgba(255, 170, 0, 0.08)'
-                                                        : 'rgba(255, 68, 102, 0.08)',
-                                                  }}
-                                                  title={statusInfo.title}
-                                                >
-                                                  {statusInfo.label}
-                                                </span>
+                                                {statusInfo.label === 'PENDING SETUP' ? (
+                                                  <button
+                                                    style={{
+                                                      ...styles.destStatusBadge,
+                                                      color: 'var(--color-warning)',
+                                                      background: 'rgba(255, 170, 0, 0.08)',
+                                                      border: '1px dashed var(--color-warning)',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '4px',
+                                                      padding: '2px 6px',
+                                                      fontWeight: 600,
+                                                      fontSize: '0.68rem',
+                                                      borderRadius: '4px',
+                                                    }}
+                                                    onClick={() => handleEditIP(p.id, entry)}
+                                                    disabled={isRowPending}
+                                                    title="Click để thay đổi IP của điểm scan này"
+                                                  >
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
+                                                      <path d="M12 20h9"/>
+                                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                                                    </svg>
+                                                    Edit IP
+                                                  </button>
+                                                ) : (
+                                                  <span
+                                                    style={{
+                                                      ...styles.destStatusBadge,
+                                                      color:
+                                                        statusInfo.type === 'success'
+                                                          ? 'var(--color-success)'
+                                                          : statusInfo.type === 'warning'
+                                                          ? 'var(--color-warning)'
+                                                          : 'var(--color-error)',
+                                                      background:
+                                                        statusInfo.type === 'success'
+                                                          ? 'rgba(0, 255, 136, 0.08)'
+                                                          : statusInfo.type === 'warning'
+                                                          ? 'rgba(255, 170, 0, 0.08)'
+                                                          : 'rgba(255, 68, 102, 0.08)',
+                                                    }}
+                                                    title={statusInfo.title}
+                                                  >
+                                                    {statusInfo.label}
+                                                  </span>
+                                                )}
 
                                                 {isRowPending && (
                                                   <span style={{ fontSize: '0.72rem', color: 'var(--color-warning)' }}>
@@ -2215,46 +2328,48 @@ export function AgentPage() {
                             <LoadingSpinner size="sm" /> Đang tải danh sách lệnh...
                           </div>
                         ) : utilityCommands.length > 0 ? (
-                          utilityCommands.map((cmd: any) => (
-                            <button
-                              key={cmd.command}
-                              onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
-                              disabled={utilityActionPending !== null}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '12px',
-                                background: 'var(--color-surface-light)',
-                                border: '1px solid var(--color-surface-light)',
-                                borderRadius: '8px',
-                                padding: '10px 12px',
-                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                textAlign: 'left',
-                                width: '100%',
-                                transition: 'all 0.2s',
-                                opacity: utilityActionPending !== null ? 0.6 : 1,
-                              }}
-                              onMouseEnter={(e) => {
-                                if (utilityActionPending === null) {
-                                  e.currentTarget.style.borderColor = 'var(--color-primary)';
-                                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                                e.currentTarget.style.background = 'var(--color-surface-light)';
-                              }}
-                            >
-                              <div style={{ fontSize: '1.4rem' }}>{cmd.icon || '🔧'}</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>{cmd.label}</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>{cmd.description}</div>
-                              </div>
-                              {utilityActionPending === cmd.command && <LoadingSpinner size="sm" />}
-                            </button>
-                          ))
+                          utilityCommands
+                            .filter((cmd: any) => cmd.command !== 'dxdiag')
+                            .map((cmd: any) => (
+                              <button
+                                key={cmd.command}
+                                onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
+                                disabled={utilityActionPending !== null}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '12px',
+                                  background: 'var(--color-surface-light)',
+                                  border: '1px solid var(--color-surface-light)',
+                                  borderRadius: '8px',
+                                  padding: '10px 12px',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  textAlign: 'left',
+                                  width: '100%',
+                                  transition: 'all 0.2s',
+                                  opacity: utilityActionPending !== null ? 0.6 : 1,
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (utilityActionPending === null) {
+                                    e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                    e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                                  e.currentTarget.style.background = 'var(--color-surface-light)';
+                                }}
+                              >
+                                <div style={{ fontSize: '1.4rem' }}>{cmd.icon || '🔧'}</div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>{cmd.label}</div>
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>{cmd.description}</div>
+                                </div>
+                                {utilityActionPending === cmd.command && <LoadingSpinner size="sm" />}
+                              </button>
+                            ))
                         ) : (
-                          // Fallback: nếu chưa có JSON, dùng 3 lệnh cũ
+                          // Fallback: nếu chưa có JSON, dùng 2 lệnh mặc định
                           <>
                             <button onClick={() => handleTriggerUtility('printers')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
                               <div style={{ fontSize: '1.4rem' }}>🖨️</div>
@@ -2272,16 +2387,92 @@ export function AgentPage() {
                               </div>
                               {utilityActionPending === 'scan' && <LoadingSpinner size="sm" />}
                             </button>
-                            <button onClick={() => handleTriggerUtility('dxdiag')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
-                              <div style={{ fontSize: '1.4rem' }}>💻</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện run (dxdiag)</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Chạy DirectX Diagnostic Tool xem cấu hình phần cứng</div>
-                              </div>
-                              {utilityActionPending === 'dxdiag' && <LoadingSpinner size="sm" />}
-                            </button>
                           </>
                         )}
+
+                        {/* Run command input — luôn hiển thị ở dưới cùng */}
+                        <div style={{ background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <div style={{ fontSize: '1.4rem' }}>💻</div>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện lệnh Run</div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                            <input
+                              type="text"
+                              value={customRunCommand}
+                              onChange={(e) => setCustomRunCommand(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && customRunCommand.trim()) {
+                                  handleTriggerUtility('run_command', { command_line: customRunCommand.trim() });
+                                }
+                              }}
+                              placeholder="Nhập lệnh cần chạy..."
+                              disabled={utilityActionPending !== null}
+                              style={{
+                                flex: 1,
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                fontSize: '0.78rem',
+                                outline: 'none',
+                                fontFamily: 'monospace',
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                if (customRunCommand.trim()) {
+                                  handleTriggerUtility('run_command', { command_line: customRunCommand.trim() });
+                                }
+                              }}
+                              disabled={utilityActionPending !== null || !customRunCommand.trim()}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: customRunCommand.trim() ? 'var(--color-primary)' : 'var(--color-surface)',
+                                color: customRunCommand.trim() ? '#fff' : 'var(--color-text-secondary)',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                cursor: customRunCommand.trim() && utilityActionPending === null ? 'pointer' : 'not-allowed',
+                                transition: 'all 0.2s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              {utilityActionPending === 'run_command' ? <LoadingSpinner size="sm" /> : '▶ Run'}
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {[
+                              { label: 'dxdiag', cmd: 'dxdiag', desc: 'Cấu hình phần cứng' },
+                              { label: 'msconfig', cmd: 'msconfig', desc: 'Cấu hình hệ thống' },
+                              { label: 'ping', cmd: 'ping google.com', desc: 'Kiểm tra mạng' },
+                            ].map((item) => (
+                              <button
+                                key={item.cmd}
+                                onClick={() => setCustomRunCommand(item.cmd)}
+                                disabled={utilityActionPending !== null}
+                                title={item.desc}
+                                style={{
+                                  padding: '3px 10px',
+                                  borderRadius: '12px',
+                                  border: '1px solid var(--color-border)',
+                                  background: customRunCommand === item.cmd ? 'rgba(59, 130, 246, 0.15)' : 'var(--color-surface)',
+                                  color: customRunCommand === item.cmd ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                                  fontSize: '0.68rem',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.2s',
+                                  fontFamily: 'monospace',
+                                }}
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -2298,6 +2489,50 @@ export function AgentPage() {
                       }}
                     >
                       Đóng cửa sổ
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* 7. Edit IP Modal */}
+              {activeModal === 'edit_ip' && editIpModalData && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>✏️ Thay đổi IP điểm scan</h3>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+                  <div style={styles.modalBody}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '12px' }}>
+                      Nhập địa chỉ IP mới cho điểm scan <strong>{editIpModalData.entry.name}</strong>:
+                    </div>
+                    <input
+                      type="text"
+                      value={editIpModalData.newIp}
+                      onChange={(e) =>
+                        setEditIpModalData((prev: any) => prev ? { ...prev, newIp: e.target.value } : null)
+                      }
+                      placeholder="Ví dụ: 192.168.1.100"
+                      style={styles.modalInput}
+                    />
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', marginTop: '8px', fontStyle: 'italic' }}>
+                      Đường dẫn hiện tại: {editIpModalData.entry.folder || editIpModalData.entry.physical_path || editIpModalData.entry.folder_path}
+                    </div>
+                  </div>
+                  <div style={styles.modalFooter}>
+                    <button
+                      style={{ ...styles.smallBtn, background: 'none', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', padding: '8px 16px' }}
+                      onClick={() => setActiveModal(null)}
+                    >
+                      Hủy bỏ
+                    </button>
+                    <button
+                      style={{ ...styles.smallBtn, background: 'var(--color-primary)', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold' }}
+                      onClick={handleSaveEditIP}
+                      disabled={!editIpModalData.newIp.trim()}
+                    >
+                      Lưu lại
                     </button>
                   </div>
                 </>

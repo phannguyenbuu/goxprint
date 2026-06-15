@@ -40,6 +40,7 @@ class AppConfig:
                 default_settings = {
                     "api_url": "https://agentapi.quanlymay.com/api",
                     "path": "/",
+                    "show_tray_icon": True,
                     "ftp_port": 2130,
                     "ftp_user": "goxprint",
                     "ftp_pass": "goxprint",
@@ -87,6 +88,9 @@ class AppConfig:
                     file_data = json.load(f)
                 if isinstance(file_data, dict):
                     changed = False
+                    if "show_tray_icon" not in file_data:
+                        file_data["show_tray_icon"] = True
+                        changed = True
                     if "path" not in file_data:
                         file_data["path"] = "/"
                         changed = True
@@ -179,6 +183,7 @@ class AppConfig:
             "database_url": "sqlite:///storage/data/agent_config.db",
             "api_url": "https://agentapi.quanlymay.com/api",
             "path": "/",
+            "show_tray_icon": True,
             "ftp_port": 2130,
             "ftp_user": "goxprint",
             "ftp_pass": "goxprint",

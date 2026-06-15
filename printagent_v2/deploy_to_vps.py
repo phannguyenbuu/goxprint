@@ -65,6 +65,7 @@ if local_exe.exists():
     shutil.copy2(str(local_exe), str(dest_exe))
 
 files_to_copy = [
+    (str(local_backend / 'storage' / 'utility_commands.json'), '/opt/printagent/storage/utility_commands.json'),
     (str(local_backend / 'storage' / 'releases' / 'agent_release.json'), '/opt/printagent/storage/releases/agent_release.json'),
     (str(local_backend / 'storage' / 'releases' / 'agent_core_release.json'), '/opt/printagent/storage/releases/agent_core_release.json'),
     (str(local_backend / 'static' / 'releases' / 'agent_core.zip'), '/opt/printagent/static/releases/agent_core.zip'),

@@ -24,23 +24,11 @@ print("Connecting to DB:", db_url)
 try:
     conn = psycopg2.connect(db_url)
     cursor = conn.cursor()
-    cursor.execute('SELECT id, printer_id, command_type, status, error_message, requested_at, responded_at FROM "PrinterControlCommand" ORDER BY id DESC LIMIT 5')
+    cursor.execute('SELECT id, lead, printer_name, ip, is_online FROM "Printer"')
     rows = cursor.fetchall()
-    print("Found", len(rows), "printer control commands:")
+    print("Found", len(rows), "printers:")
     for r in rows:
-        print(f"ID: {r[0]} | PrinterID: {r[1]} | Type: {r[2]} | Status: {r[3]}")
-        print(f"  Error: {r[4]}")
-        print(f"  Requested: {r[5]}")
-        print(f"  Responded: {r[6]}")
-        print("-" * 50)
-        
-    cursor.execute('SELECT printer_name, ip, address_book_sync FROM "Printer" WHERE id = 48')
-    row = cursor.fetchone()
-    if row:
-        print(f"Printer: {row[0]} | IP: {row[1]}")
-        print("Address Book Sync Data:")
-        import json
-        print(json.dumps(row[2], indent=2, ensure_ascii=False))
+        print(f"ID: {r[0]} | Lead: {r[1]} | Name: {r[2]} | IP: {r[3]} | Online: {r[4]}")
     conn.close()
 except Exception as e:
     print("Error querying database:", e)

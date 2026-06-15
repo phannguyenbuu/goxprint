@@ -11,7 +11,7 @@ from flask import Flask, jsonify, request
 from sqlalchemy import select
 
 from utils import _to_text, _format_datetime_ui, _apply_date_filters
-from serializers import _refresh_stale_agent_offline
+from serializers import _refresh_stale_agent_offline, _refresh_stale_offline
 from app_helpers import _serialize_audit_payload_iso
 from models import LanSite, AgentNode, LanEmail, Printer
 
@@ -160,6 +160,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         # require_online = _to_text(request.args.get("require_online")).lower() == "true"
         with session_factory() as session:
             _refresh_stale_agent_offline(session=session, lead=lead)
+            _refresh_stale_offline(session=session, lead=lead)
             session.commit()
 
             stmt = select(LanSite).order_by(LanSite.created_at.desc())

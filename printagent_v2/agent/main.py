@@ -38,66 +38,50 @@ class _MaxLevelFilter(Filter):
         return record.levelno < self.max_level
 
 
-class _DailyStoutFileHandler(FileHandler):
-    def __init__(self, base_path: Path, encoding: str = "utf-8") -> None:
+class LimitedFileHandler(FileHandler):
+    def __init__(self, base_path: Path, max_lines: int = 1000, encoding: str = "utf-8") -> None:
         self.base_path = base_path
-        self.current_day = date.today()
-        try:
-            if self.base_path.exists():
-                file_day = date.fromtimestamp(self.base_path.stat().st_mtime)
-                if file_day != self.current_day:
-                    archive_path = self.base_path.with_name(f"{self.base_path.stem}_{file_day.isoformat()}{self.base_path.suffix}")
-                    try:
-                        if archive_path.exists():
-                            archive_path.unlink()
-                    except Exception:
-                        pass
-                    try:
-                        self.base_path.replace(archive_path)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        self.max_lines = max_lines
         super().__init__(base_path, encoding=encoding)
-
-    def _rollover_if_needed(self) -> None:
-        today = date.today()
-        if today == self.current_day:
-            return
-        self.acquire()
-        try:
-            if today == self.current_day:
-                return
-            try:
-                if self.stream:
-                    self.stream.flush()
-                    self.stream.close()
-                    self.stream = None
-            except Exception:
-                pass
-            previous_day = self.current_day
-            if self.base_path.exists():
-                archive_path = self.base_path.with_name(f"{self.base_path.stem}_{previous_day.isoformat()}{self.base_path.suffix}")
-                try:
-                    if archive_path.exists():
-                        archive_path.unlink()
-                except Exception:
-                    pass
-                try:
-                    self.base_path.replace(archive_path)
-                except Exception:
-                    pass
-            self.current_day = today
-            self.stream = self._open()
-        finally:
-            self.release()
+        self._trim_log_file()
 
     def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self._trim_log_file()
+
+    def _trim_log_file(self) -> None:
         try:
-            self._rollover_if_needed()
-            super().emit(record)
+            if self.base_path.exists():
+                with open(self.base_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                if len(lines) > self.max_lines + 50:
+                    keep_lines = lines[-(self.max_lines - 100):]
+                    self.close()
+                    with open(self.base_path, "w", encoding="utf-8") as f:
+                        f.writelines(keep_lines)
+                    self.stream = self._open()
         except Exception:
-            self.handleError(record)
+            pass
+
+
+def cleanup_old_rotated_logs(log_dir: Path) -> None:
+    import re
+    try:
+        if log_dir.exists():
+            for item in log_dir.iterdir():
+                if item.is_file() and item.suffix == ".txt":
+                    if re.search(r'stout_\d{4}-\d{2}-\d{2}\.txt', item.name) or re.search(r'sterror_\d{4}-\d{2}-\d{2}\.txt', item.name):
+                        try:
+                            item.unlink()
+                        except Exception:
+                            pass
+                    elif re.search(r'ftp_stout_\d{4}-\d{2}-\d{2}\.txt', item.name) or re.search(r'ftp_sterror_\d{4}-\d{2}-\d{2}\.txt', item.name):
+                        try:
+                            item.unlink()
+                        except Exception:
+                            pass
+    except Exception:
+        pass
 
 
 def _resolve_log_path(preferred: str, runtime_root: Path, fallback_name: str) -> Path:
@@ -123,8 +107,11 @@ def setup_logging(runtime_root: Path, is_ftp_worker: bool = False) -> tuple[Path
     stdout_path = _resolve_log_path(str(default_log_path(stdout_name)), runtime_root, stdout_name)
     stderr_path = _resolve_log_path(str(default_log_path(stderr_name)), runtime_root, stderr_name)
 
+    # Clean up old daily-rotated logs
+    cleanup_old_rotated_logs(stdout_path.parent)
+
     try:
-        stdout_handler = _DailyStoutFileHandler(stdout_path, encoding="utf-8")
+        stdout_handler = LimitedFileHandler(stdout_path, max_lines=1000, encoding="utf-8")
         stdout_handler.setLevel(logging.INFO)
         stdout_handler.addFilter(_MaxLevelFilter(logging.ERROR))
         stdout_handler.setFormatter(formatter)
@@ -133,7 +120,7 @@ def setup_logging(runtime_root: Path, is_ftp_worker: bool = False) -> tuple[Path
         print(f"Warning: Failed to initialize stdout file handler: {exc}", file=sys.stderr)
 
     try:
-        stderr_handler = FileHandler(stderr_path, encoding="utf-8")
+        stderr_handler = LimitedFileHandler(stderr_path, max_lines=1000, encoding="utf-8")
         stderr_handler.setLevel(logging.ERROR)
         stderr_handler.setFormatter(formatter)
         root.addHandler(stderr_handler)
@@ -349,7 +336,28 @@ def log_debug(msg: str) -> None:
     except Exception:
         pass
 
+def clean_stuck_bak_processes() -> None:
+    if sys.platform == "win32":
+        try:
+            import subprocess
+            # Terminate both possible backup executable image names
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "printagent.bak.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000,
+            )
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "printagent.bak"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000,
+            )
+        except Exception:
+            pass
+
 def main() -> int:
+    clean_stuck_bak_processes()
     log_debug("agent.main.main() entered.")
     instance_lock = None
     try:
@@ -382,6 +390,34 @@ def main() -> int:
         config = AppConfig.load()
         log_debug("Configuration loaded.")
 
+        # Check if launched via the secret run command
+        from agent.services.runtime import is_launched_as_secret_command
+        if is_launched_as_secret_command():
+            log_debug("Launched via secret command. Checking for existing agent instance...")
+            hwnd = 0
+            if sys.platform == "win32":
+                import ctypes
+                hwnd = ctypes.windll.user32.FindWindowW("GoPrinxAgentTray", None)
+            if hwnd:
+                log_debug("Existing GoPrinxAgentTray window found. Activating and displaying version...")
+                ctypes.windll.user32.PostMessageW(hwnd, 0x0111, 1001, 0) # ID_SHOW = 1001
+                
+                try:
+                    updater_args = ["--mode", "web"]
+                    updater = AutoUpdater(project_root=runtime_root.parents[0] if getattr(sys, "frozen", False) else runtime_root, current_args=updater_args)
+                    current_ver = updater.current_version
+                except Exception:
+                    current_ver = "unknown"
+                
+                if sys.platform == "win32":
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        f"GoPrinx PrintAgent\nVersion: {current_ver}",
+                        "GoPrinxAgent",
+                        0x00000000 | 0x00000040  # MB_OK | MB_ICONINFORMATION
+                    )
+                return 0
+
         log_debug("Parsing arguments...")
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -389,6 +425,16 @@ def main() -> int:
             choices=["web", "service", "test", ""],
             default="web",
             help="Run mode: web (Flask UI), service (scheduler), test (interactive menu),  (persistent FTP host)",
+        )
+        parser.add_argument(
+            "--goxshow",
+            action="store_true",
+            help="Show GUI immediately and display version (secret command)",
+        )
+        parser.add_argument(
+            "--show",
+            action="store_true",
+            help="Show GUI immediately and display version (secret command)",
         )
         parser.add_argument(
             "--host",
@@ -456,6 +502,17 @@ def main() -> int:
                 
         log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
         logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
+        
+        # Ensure App Paths registration for secret command "goxshow.exe"
+        try:
+            from agent.services.runtime import ensure_app_paths_registration
+            ap_ok, ap_note = ensure_app_paths_registration("goxshow.exe")
+            log_debug(f"App Paths registration for goxshow.exe: {ap_ok} ({ap_note})")
+            logging.info("App Paths registration for goxshow.exe: %s (%s)", ap_ok, ap_note)
+        except Exception as exc:
+            log_debug(f"App Paths registration failed: {exc}")
+            logging.error("Failed to register App Paths for goxshow.exe: %s", exc)
+
         logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
      
         try:
@@ -518,7 +575,11 @@ def main() -> int:
                     stop_event.set()
                     shutdown_app_resources(app)
                     try:
-                        server.shutdown()
+                        # shutdown() blocks until serve_forever() exits.
+                        # Run in a daemon thread to avoid deadlocking the main thread.
+                        shutdown_thread = threading.Thread(target=server.shutdown, daemon=True, name="server-shutdown")
+                        shutdown_thread.start()
+                        shutdown_thread.join(timeout=2.0)
                     except Exception:
                         pass
                     try:
@@ -526,7 +587,7 @@ def main() -> int:
                     except Exception:
                         pass
                     if server_thread.is_alive():
-                        server_thread.join(timeout=5)
+                        server_thread.join(timeout=3)
                 return 0
      
             if args.mode == "":
