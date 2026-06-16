@@ -232,7 +232,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     session.commit()
                     return jsonify({"ok": False, "error": "Printer not found"}), 404
 
-            if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest"):
+            if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify"):
                 if ok_value:
                     command.status = "success"
                     command.error_message = ""
@@ -283,11 +283,12 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                     entry["folder_port_no"] = parsed["port"]
                                     entry["path_on_folder"] = parsed["path"]
                             enriched_list.append(entry)
-                        printer.address_book_sync = {
+                        sync_data = {
                             "status": "success",
                             "timestamp": responded_at.isoformat(),
                             "address_list": enriched_list,
                         }
+                        command.error_message = json.dumps(sync_data, ensure_ascii=False)
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
                     if command.command_type == "add_scan_email_dest" and wizard_short_name and wizard_source_email:
@@ -351,12 +352,6 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     command.status = "failed"
                     command.error_message = error_message or "Command failed"
                     command.responded_at = responded_at
-                    if printer is not None:
-                        printer.address_book_sync = {
-                            "status": "error",
-                            "timestamp": responded_at.isoformat(),
-                            "error": command.error_message,
-                        }
             else:
                 if ok_value:
                     command.status = "success"

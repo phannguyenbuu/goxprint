@@ -118,6 +118,9 @@ export function AgentPage() {
   // Target Agent Select state (key: printerId, value: agentUid)
   const [selectedTargetAgents, setSelectedTargetAgents] = useState<Record<string, string>>({});
 
+  // Live (uncached) address books loaded from agents (key: printerId)
+  const [liveAddressBooks, setLiveAddressBooks] = useState<Record<string, any>>({});
+
   // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -228,6 +231,26 @@ export function AgentPage() {
   const selectedLan = useMemo(() => {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
+
+  const getTargetAgentUid = useCallback((printerId: string | number) => {
+    const pId = Number(printerId);
+    const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId);
+    if (!printer || !selectedLan) return '';
+    const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_online);
+    const selected = selectedTargetAgents[pId];
+    if (selected) {
+      const isSelOnline = onlineAgents.some((a: any) => a.agent_uid === selected);
+      if (isSelOnline) return selected;
+    }
+    if (printer.agent_uid) {
+      const isAssignedOnline = onlineAgents.some((a: any) => a.agent_uid === printer.agent_uid);
+      if (isAssignedOnline) return printer.agent_uid;
+    }
+    if (onlineAgents.length > 0) {
+      return onlineAgents[0].agent_uid;
+    }
+    return printer.agent_uid || '';
+  }, [selectedLan, selectedTargetAgents]);
 
   // State to store scan file counts for each private email destination on VPS
   const [emailFileCounts, setEmailFileCounts] = useState<Record<string, number>>({});
@@ -637,7 +660,7 @@ export function AgentPage() {
 
   // ── REFECTH / SYNC ADDRESS BOOK ──
   const handleRefetchAddressBook = async (printerId: string) => {
-    const targetAgent = selectedTargetAgents[printerId] || '';
+    const targetAgent = getTargetAgentUid(printerId);
     showToast('Bắt đầu gửi yêu cầu đồng bộ danh bạ máy in...', 'info', 3000);
     
     try {
@@ -649,10 +672,12 @@ export function AgentPage() {
       pollCommandStatus(
         res.command_id,
         printerId,
-        async () => {
+        async (pollData: any) => {
           showToast('Đã đồng bộ danh bạ máy photocopy thành công!', 'success');
           await fetchLanSitesData();
-          
+          if (pollData && pollData.address_book_sync) {
+            setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
+          }
           // Auto expand and view address book after sync
           setExpandedPrinters((prev) => ({ ...prev, [printerId]: true }));
         },
@@ -688,9 +713,12 @@ export function AgentPage() {
       pollCommandStatus(
         res.command_id,
         printerId,
-        async () => {
+        async (pollData: any) => {
           showToast(`Đã thêm điểm scan ${email} thành công!`, 'success');
           await fetchLanSitesData();
+          if (pollData && pollData.address_book_sync) {
+            setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
+          }
         },
         (errorMsg) => {
           showToast(`Thêm điểm scan thất bại: ${errorMsg}`, 'error');
@@ -764,7 +792,7 @@ export function AgentPage() {
         }
 
         // Copier Address Book entry deletion (requires command status polling)
-        const targetAgent = selectedTargetAgents[printerId] || '';
+        const targetAgent = getTargetAgentUid(printerId);
         showToast('Gửi lệnh xóa điểm scan trên máy photocopy...', 'info', 3000);
 
         try {
@@ -776,9 +804,12 @@ export function AgentPage() {
           pollCommandStatus(
             res.command_id,
             printerId,
-            async () => {
+            async (pollData: any) => {
               showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
               await fetchLanSitesData();
+              if (pollData && pollData.address_book_sync) {
+                setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
+              }
             },
             (errorMsg) => {
               showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
@@ -826,7 +857,7 @@ export function AgentPage() {
       newFolder = currentFolder.replace(/^\\\\([^\\]+)/, `\\\\${newIp}`);
     }
 
-    const targetAgent = selectedTargetAgents[printerId] || '';
+    const targetAgent = getTargetAgentUid(printerId);
     const regNo = entry.registration_no;
 
     setActiveModal(null);
@@ -837,6 +868,7 @@ export function AgentPage() {
       const copierIp = printer?.ip || '';
 
       const res = await modifyDeviceAddress({
+        id: Number(printerId), // Pass printer ID to ensure correct database record selection
         ip: copierIp,
         action: 'address_modify',
         registration_no: regNo,
@@ -855,9 +887,12 @@ export function AgentPage() {
       pollCommandStatus(
         res.command_id,
         printerId,
-        async () => {
+        async (pollData: any) => {
           showToast(`Đã thay đổi IP điểm scan #${regNo} thành công!`, 'success');
           await fetchLanSitesData();
+          if (pollData && pollData.address_book_sync) {
+            setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
+          }
         },
         (errorMsg) => {
           showToast(`Lỗi thay đổi IP: ${errorMsg}`, 'error');
@@ -873,7 +908,7 @@ export function AgentPage() {
   // ── DETAILED INFO ENTRY (INFOR) ──
   const handleFetchEntryDetail = async (printerId: string, entry: any) => {
     const regNo = String(entry.registration_no || '').trim();
-    const targetAgent = selectedTargetAgents[printerId] || '';
+    const targetAgent = getTargetAgentUid(printerId);
     
     // Key to show command status on the specific entry row
     const entryRowKey = `${printerId}-${regNo}`;
@@ -1413,7 +1448,7 @@ export function AgentPage() {
                       const driversExpanded = expandedDrivers[p.id] || false;
                       const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
                       
-                      const sync = p.address_book_sync || {};
+                      const sync = liveAddressBooks[p.id] || {};
                       const syncCount = sync.address_list ? sync.address_list.length : 0;
                       const syncTime = sync.timestamp ? new Date(sync.timestamp).toLocaleTimeString('vi-VN') : '';
                       
@@ -1422,7 +1457,7 @@ export function AgentPage() {
 
                       // Filter online agents for relays
                       const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
-                      const selectedAgentUid = selectedTargetAgents[p.id] || '';
+                      const selectedAgentUid = getTargetAgentUid(p.id);
 
                       return (
                         <div
@@ -1686,9 +1721,13 @@ export function AgentPage() {
 
                             <button
                               style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
-                              onClick={() =>
-                                setExpandedPrinters((prev) => ({ ...prev, [p.id]: !isExpanded }))
-                              }
+                              onClick={() => {
+                                if (!isExpanded) {
+                                  handleRefetchAddressBook(String(p.id));
+                                } else {
+                                  setExpandedPrinters((prev) => ({ ...prev, [p.id]: false }));
+                                }
+                              }}
                             >
                               {isExpanded ? '▲ Ẩn danh bạ' : '👁 Xem danh bạ'}
                             </button>

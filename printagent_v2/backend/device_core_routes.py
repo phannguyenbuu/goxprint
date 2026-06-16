@@ -50,6 +50,26 @@ def _resolve_printer_control_target(session: Any, device_ref: Any) -> Printer | 
     return None
 
 
+def _resolve_target_agent_uid(session: Any, printer: Printer, req_agent_uid: str) -> str:
+    agent_uid = req_agent_uid.strip()
+    if agent_uid:
+        return agent_uid
+    # Fallback to an online agent on the printer's LAN
+    from models import AgentNode
+    online_agent = session.execute(
+        select(AgentNode)
+        .where(
+            AgentNode.lead == printer.lead,
+            AgentNode.lan_uid == printer.lan_uid,
+            AgentNode.is_online.is_(True)
+        )
+        .order_by(AgentNode.id.asc())
+    ).scalars().first()
+    if online_agent:
+        return online_agent.agent_uid
+    return printer.agent_uid or ""
+
+
 def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
 
     @app.get("/api/devices")
@@ -225,12 +245,11 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 cmd.responded_at = requested_at
 
             # Resolve target_agent_uid from query string or JSON body if present
-            target_agent_uid = request.args.get("agent_uid", "").strip()
+            req_agent_uid = request.args.get("agent_uid", "").strip()
             body = request.get_json(silent=True) or {}
-            if not target_agent_uid and isinstance(body, dict):
-                target_agent_uid = body.get("agent_uid", "").strip()
-            if not target_agent_uid:
-                target_agent_uid = printer.agent_uid
+            if not req_agent_uid and isinstance(body, dict):
+                req_agent_uid = body.get("agent_uid", "").strip()
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
             command = PrinterControlCommand(
                 printer_id=printer.id,
@@ -339,7 +358,8 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 cmd.responded_at = requested_at
 
             # Resolve target_agent_uid from query string or JSON body if present
-            target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+            req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
             command = PrinterControlCommand(
                 printer_id=printer.id,
@@ -402,7 +422,8 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 cmd.responded_at = requested_at
 
             # Resolve target_agent_uid
-            target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+            req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
             command = PrinterControlCommand(
                 printer_id=printer.id,
@@ -455,11 +476,19 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             if not registration_no:
                 return jsonify({"ok": False, "error": "Missing registration_no"}), 400
 
+            printer_id_val = body.get("printer_id") or body.get("id")
             requested_at = datetime.now(timezone.utc)
             with session_factory() as session:
-                printer = session.execute(
-                    select(Printer).where(Printer.ip == ip)
-                ).scalars().first()
+                printer = None
+                if printer_id_val:
+                    try:
+                        printer = session.get(Printer, int(printer_id_val))
+                    except Exception:
+                        pass
+                if printer is None:
+                    printer = session.execute(
+                        select(Printer).where(Printer.ip == ip)
+                    ).scalars().first()
                 if printer is None:
                     return jsonify({"ok": False, "error": f"Printer with IP {ip} not found"}), 404
 
@@ -477,7 +506,8 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     cmd.error_message = "Superseded by newer command"
                     cmd.responded_at = requested_at
 
-                target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip() or printer.agent_uid
+                req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
+                target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
                 command = PrinterControlCommand(
                     printer_id=printer.id,
@@ -535,14 +565,20 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 session.commit()
 
             if cmd.status == "success":
-                pr = session.get(Printer, cmd.printer_id)
+                address_book_sync = None
+                if cmd.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify") and cmd.error_message:
+                    try:
+                        import json as _json
+                        address_book_sync = _json.loads(cmd.error_message)
+                    except Exception:
+                        pass
                 return jsonify(
                     {
                         "ok": True,
                         "status": "success",
                         "command_id": command_id,
                         "id": int(cmd.printer_id),
-                        "address_book_sync": pr.address_book_sync if pr else None,
+                        "address_book_sync": address_book_sync,
                         "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
                         "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
                         "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
