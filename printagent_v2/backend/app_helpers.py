@@ -258,13 +258,13 @@ def _load_agent_release_manifest() -> dict[str, Any]:
             "notes": "",
             "mandatory": False,
             "published_at": "",
-            "download_url": "/static/releases/printagent.exe",
+            "download_url": "https://download.goxprint.com/printagent.exe",
         }
 
     binary_path_raw = _to_text(payload.get("binary_path"))
     binary_path = Path(binary_path_raw) if binary_path_raw else AGENT_RELEASE_BINARY_PATH
     if not _to_text(payload.get("download_url")):
-        payload["download_url"] = "/static/releases/printagent.exe"
+        payload["download_url"] = "https://download.goxprint.com/printagent.exe"
     if binary_path.exists():
         try:
             payload["sha256"] = _sha256_file(binary_path)

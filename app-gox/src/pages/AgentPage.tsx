@@ -148,13 +148,30 @@ export function AgentPage() {
     onConfirm: () => {},
   });
 
+  // IP Input Modal state
+  const [ipInputModal, setIpInputModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    hint: string;
+    value: string;
+    error: string;
+    onConfirm: (ip: string) => void;
+  }>({
+    isOpen: false,
+    title: '🌐 Đổi địa chỉ IP tĩnh',
+    hint: 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.',
+    value: '192.168.1.12',
+    error: '',
+    onConfirm: () => {},
+  });
+
   // Storage Modal states
   const [storageModalData, setStorageModalData] = useState<{ lanUid: string; email: string }>({ lanUid: '', email: '' });
   const [storageFiles, setStorageFiles] = useState<any[]>([]);
   const [storageLoading, setStorageLoading] = useState(false);
 
   // Add Public FTP states
-  const [publicFtpData, setPublicFtpData] = useState<{ printerId: string; email: string; agentUid: string }>({ printerId: '', email: '', agentUid: '' });
+  const [publicFtpData, setPublicFtpData] = useState<{ printerId: string; name: string; email: string; agentUid: string }>({ printerId: '', name: '', email: '', agentUid: '' });
   const [publicFtpLoading, setPublicFtpLoading] = useState(false);
 
   // Add Private FTP states
@@ -305,6 +322,17 @@ export function AgentPage() {
   const [utilityCommands, setUtilityCommands] = useState<any[]>([]);
   const [utilityCommandsLoading, setUtilityCommandsLoading] = useState(false);
   const [customRunCommand, setCustomRunCommand] = useState('');
+  const [viewOutputModal, setViewOutputModal] = useState<{ isOpen: boolean; title: string; content: string }>({
+    isOpen: false, title: '', content: '',
+  });
+
+  // Commands that return content via RuntimeError — show in view modal instead of error
+  const VIEW_COMMANDS = new Set(['view_settings_json', 'view_stout', 'view_sterror']);
+  const VIEW_COMMAND_TITLES: Record<string, string> = {
+    view_settings_json: '⚙️ settings.json',
+    view_stout: '📄 stout.txt — 100 dòng gần nhất',
+    view_sterror: '🔴 sterror.txt — 100 dòng gần nhất',
+  };
 
   const loadUtilitySettings = useCallback(async (agent: any) => {
     if (!agent) return;
@@ -436,10 +464,69 @@ export function AgentPage() {
   // Dynamic exec: gửi command_content từ JSON đến agent để exec()
   const handleTriggerUtilityExec = useCallback(async (command: string, commandContent: string) => {
     if (!selectedUtilityAgent) return;
+    
+    let content = commandContent;
+    if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
+      const isChangeIp = command === 'change_agent_ip';
+      // Open IP input modal instead of window.prompt
+      setIpInputModal({
+        isOpen: true,
+        title: isChangeIp ? '🌐 Đổi địa chỉ IP tĩnh' : '🔍 Kiểm tra IP khớp Copier',
+        hint: isChangeIp
+          ? 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.'
+          : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
+        value: '192.168.1.12',
+        error: '',
+        onConfirm: (targetIp: string) => {
+          const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
+          setUtilityActionPending(command);
+          setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
+          triggerAgentUtilityExec(selectedUtilityAgent!.agent_uid, command, finalContent)
+            .then((res: any) => {
+              if (!res.ok || !res.command_id) throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+              const commandId = res.command_id;
+              const maxPollMs = 60000;
+              const startTime = Date.now();
+              const timer = setInterval(async () => {
+                try {
+                  const elapsed = Date.now() - startTime;
+                  if (elapsed > maxPollMs) {
+                    clearInterval(timer);
+                    setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+                    setUtilityActionPending(null);
+                    return;
+                  }
+                  const statusRes = await getCommandStatus(commandId);
+                  if (statusRes.status === 'success') {
+                    clearInterval(timer);
+                    setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+                    setUtilityActionPending(null);
+                  } else if (statusRes.status === 'failed' || !statusRes.ok) {
+                    clearInterval(timer);
+                    setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                    setUtilityActionPending(null);
+                  } else {
+                    const elapsedSec = Math.round(elapsed / 1000);
+                    setUtilityStatusMsg({ text: `⌛ Đang xử lý... (${elapsedSec}s)`, isError: false });
+                  }
+                } catch (pollErr: any) {
+                  console.error('Poll error:', pollErr);
+                }
+              }, 1000);
+            })
+            .catch((err: any) => {
+              setUtilityStatusMsg({ text: `Lỗi: ${err.message}`, isError: true });
+              setUtilityActionPending(null);
+            });
+        },
+      });
+      return; // Early return — execution continues in modal's onConfirm
+    }
+
     setUtilityActionPending(command);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
     try {
-      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, command, commandContent);
+      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, command, content);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
       }
@@ -462,14 +549,38 @@ export function AgentPage() {
             setUtilityActionPending(null);
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
-            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            if (VIEW_COMMANDS.has(command)) {
+              // View commands return content via RuntimeError — show in modal, not as error
+              setViewOutputModal({
+                isOpen: true,
+                title: VIEW_COMMAND_TITLES[command] || command,
+                content: statusRes.error || '(không có nội dung)',
+              });
+              setUtilityStatusMsg(null);
+            } else {
+              setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            }
             setUtilityActionPending(null);
           } else {
             const elapsedSec = Math.round(elapsed / 1000);
             setUtilityStatusMsg({ text: `⌛ Đang xử lý... (${elapsedSec}s)`, isError: false });
           }
         } catch (pollErr: any) {
-          console.error('Poll error:', pollErr);
+          // fetchApi may throw (not return) when HTTP status is error.
+          // For view commands, the thrown Error.message IS the content we want to display.
+          const errMsg: string = pollErr?.message || String(pollErr || '');
+          if (VIEW_COMMANDS.has(command) && errMsg.startsWith('[PATH]')) {
+            clearInterval(timer);
+            setViewOutputModal({
+              isOpen: true,
+              title: VIEW_COMMAND_TITLES[command] || command,
+              content: errMsg,
+            });
+            setUtilityStatusMsg(null);
+            setUtilityActionPending(null);
+          } else {
+            console.error('Poll error:', pollErr);
+          }
         }
       }, 1000);
     } catch (err: any) {
@@ -693,7 +804,11 @@ export function AgentPage() {
 
   // ── ADD PUBLIC FTP ──
   const handleAddPublicFtp = async () => {
-    const { printerId, email, agentUid } = publicFtpData;
+    const { printerId, name, email, agentUid } = publicFtpData;
+    if (!name || !name.trim()) {
+      showToast('Vui lòng nhập tên điểm scan', 'error');
+      return;
+    }
     if (!email || !email.includes('@')) {
       showToast('Địa chỉ email không hợp lệ', 'error');
       return;
@@ -702,7 +817,7 @@ export function AgentPage() {
     showToast('Đang tạo yêu cầu thêm FTP/Email lên máy in...', 'info', 3000);
 
     try {
-      const res = await addEmailDestination(printerId, email, agentUid || undefined);
+      const res = await addEmailDestination(printerId, name.trim(), email, agentUid || undefined);
       setPublicFtpLoading(false);
       setActiveModal(null);
 
@@ -714,7 +829,7 @@ export function AgentPage() {
         res.command_id,
         printerId,
         async (pollData: any) => {
-          showToast(`Đã thêm điểm scan ${email} thành công!`, 'success');
+          showToast(`Đã tạo điểm scan "${name.trim()}" thành công!`, 'success');
           await fetchLanSitesData();
           if (pollData && pollData.address_book_sync) {
             setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
@@ -723,7 +838,7 @@ export function AgentPage() {
         (errorMsg) => {
           showToast(`Thêm điểm scan thất bại: ${errorMsg}`, 'error');
         },
-        `⌛ Đang thêm điểm scan ${email}...`
+          `⌛ Đang tạo điểm scan "${name.trim()}"...`
       );
     } catch (err: any) {
       setPublicFtpLoading(false);
@@ -1711,12 +1826,12 @@ export function AgentPage() {
                             <button
                               style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center' }}
                               onClick={() => {
-                                setPublicFtpData({ printerId: p.id, email: '', agentUid: selectedAgentUid });
+                                setPublicFtpData({ printerId: p.id, name: '', email: '', agentUid: selectedAgentUid });
                                 setActiveModal('public_ftp');
                               }}
                               disabled={onlineAgents.length === 0}
                             >
-                              ➕ Thêm FTP/Email
+                              ➕ Tạo điểm scan
                             </button>
 
                             <button
@@ -2038,13 +2153,25 @@ export function AgentPage() {
               {activeModal === 'public_ftp' && (
                 <>
                   <div style={styles.modalHeader}>
-                    <h3 style={styles.modalTitle}>➕ Thêm Public FTP/Email</h3>
+                    <h3 style={styles.modalTitle}>➕ Tạo điểm scan</h3>
                     <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
                       &times;
                     </button>
                   </div>
 
                   <div style={styles.modalBody}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Tên điểm scan *</label>
+                      <input
+                        type="text"
+                        style={styles.modalInput}
+                        placeholder="VD: scan, scan-tang1, van-phong..."
+                        value={publicFtpData.name}
+                        onChange={(e) => setPublicFtpData((p) => ({ ...p, name: e.target.value }))}
+                      />
+                      <span style={styles.formHelpText}>Tên sẽ được dùng cho cả FTP folder và mục scan trên máy photocopy.</span>
+                    </div>
+
                     <div style={styles.formGroup}>
                       <label style={styles.formLabel}>Địa chỉ Email *</label>
                       <input
@@ -2633,6 +2760,208 @@ export function AgentPage() {
                   onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
                 >
                   Hủy bỏ
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. IP INPUT MODAL */}
+      <AnimatePresence>
+        {ipInputModal.isOpen && (
+          <div
+            style={{ ...styles.confirmOverlay, zIndex: 170 }}
+            onClick={() => setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }))}
+          >
+            <motion.div
+              style={styles.confirmModalCard}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+            >
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>{ipInputModal.title}</h3>
+                <button
+                  style={styles.modalCloseBtn}
+                  onClick={() => setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }))}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={styles.modalBody}>
+                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', margin: '0 0 10px 0', lineHeight: 1.5 }}>
+                  {ipInputModal.hint} Ví dụ: <code style={{ background: 'var(--color-surface-light)', padding: '1px 5px', borderRadius: 4 }}>192.168.1.15</code>
+                </p>
+                <input
+                  autoFocus
+                  type="text"
+                  value={ipInputModal.value}
+                  onChange={(e) => setIpInputModal((prev) => ({ ...prev, value: e.target.value, error: '' }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+                      if (!ipPattern.test(ipInputModal.value.trim())) {
+                        setIpInputModal((prev) => ({ ...prev, error: 'IP không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x' }));
+                        return;
+                      }
+                      const cb = ipInputModal.onConfirm;
+                      setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
+                      cb(ipInputModal.value.trim());
+                    }
+                    if (e.key === 'Escape') {
+                      setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
+                    }
+                  }}
+                  placeholder="192.168.1.x"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: ipInputModal.error
+                      ? '1.5px solid var(--color-error)'
+                      : '1.5px solid var(--color-surface-light)',
+                    background: 'var(--color-background)',
+                    color: 'var(--color-text)',
+                    fontSize: '0.9rem',
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onFocus={(e) => {
+                    if (!ipInputModal.error) e.target.style.borderColor = 'var(--color-primary)';
+                  }}
+                  onBlur={(e) => {
+                    if (!ipInputModal.error) e.target.style.borderColor = 'var(--color-surface-light)';
+                  }}
+                />
+                {ipInputModal.error && (
+                  <p style={{ margin: '6px 0 0 0', fontSize: '0.72rem', color: 'var(--color-error)' }}>
+                    ⚠️ {ipInputModal.error}
+                  </p>
+                )}
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    background: 'var(--color-primary)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'white',
+                  }}
+                  onClick={() => {
+                    const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+                    if (!ipPattern.test(ipInputModal.value.trim())) {
+                      setIpInputModal((prev) => ({ ...prev, error: 'IP không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x' }));
+                      return;
+                    }
+                    const cb = ipInputModal.onConfirm;
+                    setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
+                    cb(ipInputModal.value.trim());
+                  }}
+                >
+                  ✅ Xác nhận
+                </button>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    borderColor: 'var(--color-secondary)',
+                    color: 'var(--color-secondary)',
+                  }}
+                  onClick={() => setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }))}
+                >
+                  Hủy
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. VIEW OUTPUT MODAL — hiển thị nội dung file log/config từ agent */}
+      <AnimatePresence>
+        {viewOutputModal.isOpen && (
+          <div
+            style={{ ...styles.confirmOverlay, zIndex: 180, alignItems: 'flex-start', paddingTop: '5vh' }}
+            onClick={() => setViewOutputModal((prev) => ({ ...prev, isOpen: false }))}
+          >
+            <motion.div
+              style={{
+                ...styles.confirmModalCard,
+                maxWidth: '680px',
+                width: '95%',
+                maxHeight: '88vh',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+            >
+              <div style={styles.modalHeader}>
+                <h3 style={{ ...styles.modalTitle, fontSize: '0.85rem' }}>{viewOutputModal.title}</h3>
+                <button
+                  style={styles.modalCloseBtn}
+                  onClick={() => setViewOutputModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <pre
+                style={{
+                  flex: 1,
+                  overflow: 'auto',
+                  margin: 0,
+                  padding: '12px',
+                  background: 'var(--color-background)',
+                  border: '1px solid var(--color-surface-light)',
+                  borderRadius: '8px',
+                  fontSize: '0.68rem',
+                  lineHeight: 1.55,
+                  fontFamily: "'Consolas', 'Monaco', monospace",
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  color: 'var(--color-text)',
+                  minHeight: 0,
+                }}
+              >
+                {viewOutputModal.content}
+              </pre>
+
+              <div style={{ ...styles.modalFooter, marginTop: '10px' }}>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '8px 14px',
+                    fontSize: '0.78rem',
+                  }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(viewOutputModal.content).catch(() => {});
+                  }}
+                >
+                  📋 Copy
+                </button>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '8px 14px',
+                    fontSize: '0.78rem',
+                    borderColor: 'var(--color-secondary)',
+                    color: 'var(--color-secondary)',
+                  }}
+                  onClick={() => setViewOutputModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Đóng
                 </button>
               </div>
             </motion.div>

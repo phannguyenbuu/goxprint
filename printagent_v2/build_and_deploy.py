@@ -105,7 +105,7 @@ def main():
             "size": exe_size,
             "published_at": now_str,
             "mandatory": True,
-            "download_url": "/static/releases/printagent.exe",
+            "download_url": "https://download.goxprint.com/printagent.exe",
             "notes": f"Build {new_version}: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
             "channel": "stable"
         })

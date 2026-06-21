@@ -1,6 +1,9 @@
 {
   "api_url": "https://agentapi.quanlymay.com/api",
   "path": "/",
+  "ftp_port": 2130,
+  "ftp_user": "goxprint",
+  "ftp_pass": "goxprint",
   "polling": {
     "enabled": true,
     "device_enabled": true,
@@ -9,10 +12,11 @@
     "control_interval_seconds": 1,
     "scan_enabled": true,
     "scan_interval_seconds": 1,
-    "scan_dirs": "storage/scans/inbox",
+    "scan_dirs": "C:\\Users\\nguyenbuu.DESKTOP-TOEFTR1\\AppData\\Local\\Temp\\GoPrinxAgent\\ftp",
     "scan_recursive": true,
     "scan_auto_open_file": true,
-    "scan_auto_open_dir": true
+    "scan_auto_open_dir": true,
+    "agent_uid": "administrator"
   },
   "modules": {
     "ricoh": {
@@ -31,5 +35,5 @@
       "enabled": true
     }
   },
-  "ftp_port": 2130
+  "show_tray_icon": true
 }

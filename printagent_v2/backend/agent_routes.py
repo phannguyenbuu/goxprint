@@ -77,7 +77,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 "version": version,
                 "release_date": release_date,
                 "size_label": size_mb,
-                "download_url": _to_text(manifest.get("download_url")) or "/static/releases/printagent.exe",
+                "download_url": _to_text(manifest.get("download_url")) or "https://download.goxprint.com/printagent.exe",
                 "notes": _to_text(manifest.get("notes")),
                 "channel": _to_text(manifest.get("channel")) or "stable",
             },

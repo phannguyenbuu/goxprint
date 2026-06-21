@@ -335,8 +335,11 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         import json as _json
         body = request.get_json(silent=True) or {}
         email = str(body.get("email", "")).strip().lower()
+        name = str(body.get("name", "")).strip()
         if not email or "@" not in email:
             return jsonify({"ok": False, "error": "Valid email address required"}), 400
+        if not name:
+            name = email.split("@")[0]  # fallback: dùng phần trước @ làm tên
 
         requested_at = datetime.now(timezone.utc)
         with session_factory() as session:
@@ -372,7 +375,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 command_type="add_scan_email_dest",
                 auth_user=printer.auth_user or "",
                 auth_password=printer.auth_password or "",
-                command_params=_json.dumps({"email": email}),
+                command_params=_json.dumps({"email": email, "name": name}),
                 status="pending",
                 error_message="",
                 requested_at=requested_at,

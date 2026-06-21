@@ -110,7 +110,7 @@ def test_apply_release_manifest_same_sha_skips_update(monkeypatch) -> None:
     ok, message, restart_required = updater.apply_release_manifest(
         {
             "version": "1.3.40",
-            "download_url": "/static/releases/printagent.exe",
+            "download_url": "https://download.goxprint.com/printagent.exe",
             "sha256": expected_sha,
             "update_available": True,
         },
@@ -143,7 +143,7 @@ def test_apply_release_manifest_triggers_download_for_newer_release(monkeypatch)
     ok, message, restart_required = updater.apply_release_manifest(
         {
             "version": "1.3.40",
-            "download_url": "/static/releases/printagent.exe",
+            "download_url": "https://download.goxprint.com/printagent.exe",
             "sha256": "deadbeef",
             "update_available": True,
         },
@@ -154,7 +154,7 @@ def test_apply_release_manifest_triggers_download_for_newer_release(monkeypatch)
     assert restart_required is True
     assert message == "Update staged; restarting agent"
     assert captured == {
-        "download_url": "https://agentapi.quanlymay.com/static/releases/printagent.exe",
+        "download_url": "https://download.goxprint.com/printagent.exe",
         "target_version": "1.3.40",
         "expected_sha256": "deadbeef",
     }

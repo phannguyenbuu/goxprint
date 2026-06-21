@@ -75,13 +75,11 @@ class RicohService(
 
             new_items = []
             if ftp_root_path and ftp_root_path.is_dir():
-                for sub in ftp_root_path.iterdir():
-                    if sub.is_dir():
-                        new_items.append(str(sub))
+                new_items.append(str(ftp_root_path))
             
             self._config.set_value("polling.scan_dirs", ";".join(new_items))
-            LOGGER.info("Cleared scan_dirs and synced with FTP subfolders for port %s: registered %d subfolders.", 
-                        config_port or "default", len(new_items))
+            LOGGER.info("Cleared scan_dirs and synced with FTP root for port %s: %s", 
+                        config_port or "default", str(ftp_root_path) if ftp_root_path else "none")
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Failed to register existing FTP scan roots: %s", exc)
 

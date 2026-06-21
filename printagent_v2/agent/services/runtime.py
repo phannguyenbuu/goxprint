@@ -183,6 +183,24 @@ def acquire_single_instance(name: str) -> tuple[SingleInstanceLock | None, bool]
         except Exception:
             pass
         raise OSError("CreateMutexW failed")
+
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        try:
+            kernel32.CloseHandle(mutex)
+        except Exception:
+            pass
+        try:
+            if msvcrt is not None:
+                file_handle.seek(0)
+                msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except Exception:
+            pass
+        try:
+            file_handle.close()
+        except Exception:
+            pass
+        return None, False
+
     return SingleInstanceLock(name=name, handle=int(mutex), file_handle=file_handle, lock_path=lock_path), True
 
 

@@ -1,0 +1,2 @@
+2026-06-18 08:49:42,021 [INFO] This is info log
+2026-06-18 08:49:42,021 [WARNING] This is warning log
