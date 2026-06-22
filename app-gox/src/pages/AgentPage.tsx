@@ -20,6 +20,7 @@ import {
   triggerAgentUtility,
   getAgentUtilityCommands,
   triggerAgentUtilityExec,
+  triggerEmergencyRestart,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -125,9 +126,10 @@ export function AgentPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals
-  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | null>(null);
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | 'remote_lock' | null>(null);
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
+  const [remoteLockPrinter, setRemoteLockPrinter] = useState<{ ip: string; name: string; id: string | number; agentUid: string } | null>(null);
   const [editIpModalData, setEditIpModalData] = useState<{
     printerId: string;
     entry: any;
@@ -587,6 +589,28 @@ export function AgentPage() {
       setUtilityStatusMsg({ text: `Lỗi: ${err.message}`, isError: true });
       setUtilityActionPending(null);
     }
+  }, [selectedUtilityAgent]);
+
+  const handleEmergencyRestart = useCallback(async () => {
+    if (!selectedUtilityAgent) return;
+    setConfirmModal({
+      isOpen: true,
+      title: '🚨 Kích hoạt Khởi động khẩn cấp',
+      message: 'Lệnh này sẽ đánh dấu yêu cầu thoát khẩn cấp cho Agent này trên server. File watchdog.bat (nếu có trên máy client) sẽ tự động phát hiện và ép đóng printagent.exe rồi mở lại. Việc này giúp thoát khỏi tình trạng treo update. Bạn có chắc chắn muốn thực hiện?',
+      onConfirm: async () => {
+        setUtilityActionPending('emergency_restart');
+        setUtilityStatusMsg({ text: '⌛ Đang đăng ký cờ khởi động lại khẩn cấp...', isError: false });
+        try {
+          const res = await triggerEmergencyRestart(selectedUtilityAgent.agent_uid);
+          if (!res.ok) throw new Error(res.error || 'Thất bại');
+          setUtilityStatusMsg({ text: '⚡ Đã lưu cờ tắt khẩn cấp trên Server. Chờ Watchdog quét...', isError: false });
+        } catch (err: any) {
+          setUtilityStatusMsg({ text: `❌ Lỗi: ${err.message}`, isError: true });
+        } finally {
+          setUtilityActionPending(null);
+        }
+      }
+    });
   }, [selectedUtilityAgent]);
 
   useEffect(() => {
@@ -1835,6 +1859,27 @@ export function AgentPage() {
                             </button>
 
                             <button
+                              style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#3b82f6', color: '#3b82f6' }}
+                              onClick={() => {
+                                if (!selectedAgentUid) {
+                                  showToast('Vui lòng chọn Target Agent trước', 'error');
+                                  return;
+                                }
+                                const script = `import webbrowser\nwebbrowser.open('http://${p.ip}/')`;
+                                triggerAgentUtilityExec(selectedAgentUid, 'open_web_setting', script)
+                                  .then((res: any) => {
+                                    if (!res.ok) showToast('Lỗi: ' + (res.error || 'Unknown'), 'error');
+                                    else showToast('Đã gửi lệnh mở Web Setting tới Agent thành công!', 'success');
+                                  })
+                                  .catch((err: any) => showToast('Lỗi kết nối: ' + err.message, 'error'));
+                              }}
+                              disabled={onlineAgents.length === 0 || !selectedAgentUid}
+                              title="Mở trình duyệt trên máy Agent truy cập vào Web Setting của máy photo này"
+                            >
+                              🌐 Mở web setting từ xa
+                            </button>
+
+                            <button
                               style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
                               onClick={() => {
                                 if (!isExpanded) {
@@ -1845,6 +1890,17 @@ export function AgentPage() {
                               }}
                             >
                               {isExpanded ? '▲ Ẩn danh bạ' : '👁 Xem danh bạ'}
+                            </button>
+
+                            <button
+                              style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#ef4444', color: '#ef4444' }}
+                              onClick={() => {
+                                setRemoteLockPrinter({ ip: p.ip, name: p.name || p.printer_name || p.ip, id: p.id, agentUid: selectedAgentUid });
+                                setActiveModal('remote_lock');
+                              }}
+                              disabled={onlineAgents.length === 0}
+                            >
+                              🔒 Khóa máy từ xa
                             </button>
                           </div>
 
@@ -2642,6 +2698,125 @@ export function AgentPage() {
                       </div>
                     </div>
 
+                    {/* Section 3: Emergency */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        🚨 Xử lý sự cố
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(239, 68, 68, 0.05)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
+                          Sử dụng khi Agent bị treo trong lúc cập nhật phiên bản hoặc không phản hồi lệnh thông thường. (Yêu cầu file watchdog.bat đang chạy trên máy client).
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={handleEmergencyRestart}
+                            disabled={utilityActionPending !== null}
+                            style={{
+                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '8px',
+                              background: '#ef4444',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '8px 16px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                              opacity: utilityActionPending !== null ? 0.7 : 1,
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            {utilityActionPending === 'emergency_restart' ? <LoadingSpinner size="sm" /> : '🔌 Emergency Kill'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (!selectedUtilityAgent) return;
+                              setUtilityActionPending('check_watchdog');
+                              setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
+                              const script = `import subprocess, os, sys
+results = []
+def check(name):
+    try:
+        out = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {name}'], text=True, creationflags=0x08000000)
+        count = out.lower().count(name.lower())
+        return count
+    except:
+        return 0
+
+wd = check('cmd.exe')
+pa = check('printagent.exe')
+
+exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
+wd_exists = os.path.exists(os.path.join(exe_dir, 'watchdog.bat'))
+
+lines = []
+lines.append(f'printagent.exe: {pa} process(es) running')
+lines.append(f'watchdog.bat file: {"EXISTS" if wd_exists else "NOT FOUND"} in {exe_dir}')
+raise RuntimeError('\\n'.join(lines))`;
+                              triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', script)
+                                .then((res: any) => {
+                                  if (res.ok && res.command_id) {
+                                    const maxPollMs = 30000;
+                                    const startTime = Date.now();
+                                    const timer = setInterval(async () => {
+                                      if (Date.now() - startTime > maxPollMs) {
+                                        clearInterval(timer);
+                                        setUtilityStatusMsg({ text: '⏱️ Timeout chờ kết quả (30s)', isError: true });
+                                        setUtilityActionPending(null);
+                                        return;
+                                      }
+                                      try {
+                                        const statusRes = await getCommandStatus(res.command_id);
+                                        if (statusRes.status === 'success') {
+                                          clearInterval(timer);
+                                          const msg = statusRes.error || statusRes.result || 'Hoàn thành';
+                                          setUtilityStatusMsg({ text: `✅ ${msg}`, isError: false });
+                                          setUtilityActionPending(null);
+                                        } else if (statusRes.status === 'failed') {
+                                          clearInterval(timer);
+                                          const errMsg = statusRes.error || 'Failed';
+                                          setUtilityStatusMsg({ text: errMsg.includes('printagent') ? `📋 ${errMsg}` : `❌ ${errMsg}`, isError: !errMsg.includes('printagent') });
+                                          setUtilityActionPending(null);
+                                        }
+                                      } catch {}
+                                    }, 2000);
+                                  } else {
+                                    setUtilityStatusMsg({ text: '❌ ' + (res.error || 'Không thể gửi lệnh'), isError: true });
+                                    setUtilityActionPending(null);
+                                  }
+                                })
+                                .catch((err: any) => {
+                                  setUtilityStatusMsg({ text: '❌ ' + err.message, isError: true });
+                                  setUtilityActionPending(null);
+                                });
+                            }}
+                            disabled={utilityActionPending !== null}
+                            style={{
+                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '8px',
+                              background: 'var(--color-surface)',
+                              color: 'var(--color-text)',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: '6px',
+                              padding: '8px 16px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                              opacity: utilityActionPending !== null ? 0.7 : 1,
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            {utilityActionPending === 'check_watchdog' ? <LoadingSpinner size="sm" /> : '🩺 Check Watchdog'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
 
                   </div>
 
@@ -2703,6 +2878,90 @@ export function AgentPage() {
                   </div>
                 </>
               )}
+
+              {activeModal === 'remote_lock' && remoteLockPrinter && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>🔒 Khóa / Mở khóa máy từ xa</h3>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+                  <div style={styles.modalBody}>
+                    <p style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: 'var(--color-text)' }}>
+                      Máy: <strong>{remoteLockPrinter.name}</strong> ({remoteLockPrinter.ip})
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {/* Nút Khóa máy */}
+                      <button
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          background: '#fee2e2', border: '1px solid #ef4444', borderRadius: '8px',
+                          padding: '12px 14px', cursor: 'pointer', textAlign: 'left',
+                        }}
+                        onClick={() => {
+                          setActiveModal(null);
+                          showToast(`Đang gửi lệnh khóa máy ${remoteLockPrinter.name}...`, 'info', 3000);
+                          modifyDeviceAddress({
+                            ip: remoteLockPrinter.ip,
+                            action: 'lock_machine',
+                            agent_uid: remoteLockPrinter.agentUid,
+                          })
+                            .then((res: any) => {
+                              if (res.ok) {
+                                showToast(`Đã gửi lệnh khóa máy ${remoteLockPrinter.name} thành công!`, 'success');
+                              } else {
+                                showToast('Lỗi: ' + (res.error || 'Failed'), 'error');
+                              }
+                            })
+                            .catch((err: any) => {
+                              showToast('Lỗi: ' + err.message, 'error');
+                            });
+                        }}
+                      >
+                        <div style={{ fontSize: '1.4rem' }}>🔒</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#dc2626' }}>Khóa máy</div>
+                          <div style={{ fontSize: '0.7rem', color: '#7f1d1d' }}>Bật xác thực User Code, ngăn người dùng trái phép sử dụng máy</div>
+                        </div>
+                      </button>
+                      {/* Nút Mở khóa máy */}
+                      <button
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          background: '#dcfce7', border: '1px solid #22c55e', borderRadius: '8px',
+                          padding: '12px 14px', cursor: 'pointer', textAlign: 'left',
+                        }}
+                        onClick={() => {
+                          setActiveModal(null);
+                          showToast(`Đang gửi lệnh mở khóa máy ${remoteLockPrinter.name}...`, 'info', 3000);
+                          modifyDeviceAddress({
+                            ip: remoteLockPrinter.ip,
+                            action: 'enable_machine',
+                            agent_uid: remoteLockPrinter.agentUid,
+                          })
+                            .then((res: any) => {
+                              if (res.ok) {
+                                showToast(`Đã gửi lệnh mở khóa máy ${remoteLockPrinter.name} thành công!`, 'success');
+                              } else {
+                                showToast('Lỗi: ' + (res.error || 'Failed'), 'error');
+                              }
+                            })
+                            .catch((err: any) => {
+                              showToast('Lỗi: ' + err.message, 'error');
+                            });
+                        }}
+                      >
+                        <div style={{ fontSize: '1.4rem' }}>🔓</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#16a34a' }}>Mở khóa máy</div>
+                          <div style={{ fontSize: '0.7rem', color: '#14532d' }}>Tắt xác thực User Code, cho phép sử dụng máy tự do</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
         )}
@@ -2745,7 +3004,10 @@ export function AgentPage() {
                     borderColor: 'var(--color-error)',
                     color: 'white',
                   }}
-                  onClick={confirmModal.onConfirm}
+                  onClick={() => {
+                    setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                    confirmModal.onConfirm?.();
+                  }}
                 >
                   Đồng ý
                 </button>

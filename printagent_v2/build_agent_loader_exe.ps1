@@ -36,4 +36,7 @@ if (Test-Path "agent_core.zip") {
 # Create dist/storage/data directories
 New-Item -ItemType Directory -Force -Path "dist\storage\data" | Out-Null
 
-Write-Host "Build completed: $root\dist\printagent.exe" -ForegroundColor Green
+Write-Host "Running PyInstaller with printagentinstall.spec..." -ForegroundColor Cyan
+& $venvPython -m PyInstaller --clean printagentinstall.spec
+
+Write-Host "Build completed: $root\dist\printagent.exe and $root\dist\printagentinstall.exe" -ForegroundColor Green

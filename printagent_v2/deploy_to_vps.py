@@ -70,6 +70,7 @@ files_to_copy = [
     (str(local_backend / 'storage' / 'releases' / 'agent_core_release.json'), '/opt/printagent/storage/releases/agent_core_release.json'),
     (str(local_backend / 'static' / 'releases' / 'agent_core.zip'), '/opt/printagent/static/releases/agent_core.zip'),
     (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
+    (str(root_dir / 'dist' / 'printagentinstall.exe'), '/opt/printagent/static/releases/printagentinstall.exe'),
     (str(local_backend / 'static' / 'releases' / 'GoxDriverService.exe'), '/opt/printagent/static/releases/GoxDriverService.exe'),
     (str(local_backend / 'static' / 'releases' / 'install_gox_driver_service.ps1'), '/opt/printagent/static/releases/install_gox_driver_service.ps1'),
     (str(local_backend / 'static' / 'releases' / 'diagnose.py'), '/opt/printagent/static/releases/diagnose.py')
@@ -91,6 +92,30 @@ print("Restarting printagent service on remote VPS...")
 _, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
 print("Restart STDOUT:", out.read().decode('utf-8'))
 print("Restart STDERR:", err.read().decode('utf-8'))
+
+# Create cache-busted copies of the installer on the remote VPS
+try:
+    import json
+    import time
+    manifest_path = root_dir / "backend" / "storage" / "releases" / "agent_release.json"
+    version_str = "2.0.13"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        version_str = manifest.get("version", "2.0.13")
+    v_underscore = version_str.replace(".", "_")
+    ts = int(time.time())
+    
+    print(f"Creating cache-busted copies of installer (v{version_str}, ts {ts})...")
+    remote_cmd = (
+        f"cp /opt/printagent/static/releases/printagentinstall.exe /opt/printagent/static/releases/printagentinstall_v{v_underscore}.exe && "
+        f"cp /opt/printagent/static/releases/printagentinstall.exe /opt/printagent/static/releases/printagentinstall_{ts}.exe"
+    )
+    _, out, err = ssh.exec_command(remote_cmd)
+    # Wait for the command to finish
+    out.read()
+    print("Cache-busted copies created successfully on VPS.")
+except Exception as e:
+    print(f"Warning: Failed to create cache-busted copies on VPS: {e}")
 
 ssh.close()
 print("Done!")

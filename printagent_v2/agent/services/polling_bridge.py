@@ -1127,9 +1127,31 @@ if ($r) { $r }
                 check=False,
                 **no_window_subprocess_kwargs(),
             )
-            return PollingBridge._normalize_ipv4(result.stdout.strip())
+            val = PollingBridge._normalize_ipv4(result.stdout.strip())
+            if val:
+                return val
         except Exception:  # noqa: BLE001
-            return ""
+            pass
+
+        # Fallback to route print command when powershell fails or is blocked
+        try:
+            result = subprocess.run(
+                ["route", "print", "0.0.0.0"],
+                capture_output=True,
+                text=True,
+                timeout=6,
+                check=False,
+                **no_window_subprocess_kwargs(),
+            )
+            for line in (result.stdout or "").splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 4 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                    gateway = PollingBridge._normalize_ipv4(parts[2])
+                    if gateway and gateway != "0.0.0.0":
+                        return gateway
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
 
 
 
@@ -2089,8 +2111,6 @@ if ($node) {{ $node }}
 
     def _show_command_popup(self, printer: Printer, command_type: str, command: dict[str, object]) -> None:
         import json as _json
-        import tkinter as tk
-        from tkinter import messagebox
         import threading
 
         cmd_translations = {
@@ -2202,8 +2222,6 @@ if ($node) {{ $node }}
             LOGGER.warning("Failed to schedule Tkinter toast: %s", gui_exc)
 
     def _show_agent_command_popup(self, command_type: str, params: dict) -> None:
-        import tkinter as tk
-        
         title = "Thông báo Lệnh từ Server"
         msg_lines = []
         
@@ -2257,6 +2275,7 @@ if ($node) {{ $node }}
             if _gui_root is not None:
                 def _show_toplevel():
                     try:
+                        import tkinter as tk
                         toast = tk.Toplevel(_gui_root)
                         toast.withdraw()
                         toast.overrideredirect(True)
@@ -2759,8 +2778,15 @@ if ($node) {{ $node }}
                     if not command_content:
                         raise ValueError("exec_utility: command_content is empty")
                     LOGGER.info("[PollingBridge] exec_utility '%s': executing dynamic command", command_name)
-                    exec(command_content, {"__builtins__": __builtins__, "bridge": self})  # noqa: S102
+                    context_vars = {"result_payload": None}
+                    exec(command_content, {"__builtins__": __builtins__, "bridge": self, "context": context_vars})  # noqa: S102
                     LOGGER.info("[PollingBridge] exec_utility '%s': done", command_name)
+                    
+                    payload = context_vars.get("result_payload")
+                    payload_str = json.dumps(payload) if payload else ""
+                    self._post_control_result(command_id=command_id, ok=True, error=payload_str)
+                    self._update_recent_command_status(command_id, "success", payload_str)
+                    return
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
 
