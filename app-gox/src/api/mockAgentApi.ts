@@ -216,6 +216,12 @@ export async function mockDeleteAgent(agentId: string): Promise<AgentActionResul
 
 // ── REAL API CALLS TO VPS BACKEND ──
 
+export async function deleteAgentNode(agentId: number): Promise<any> {
+  return fetchApi(`/api/agents/${agentId}?lead=default`, {
+    method: 'DELETE'
+  });
+}
+
 export async function saveCopierCredentials(printerId: string, user: string, pass: string): Promise<any> {
   return fetchApi(`/api/devices/${printerId}/credentials`, {
     method: 'PATCH',

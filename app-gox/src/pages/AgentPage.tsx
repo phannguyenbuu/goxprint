@@ -21,6 +21,7 @@ import {
   getAgentUtilityCommands,
   triggerAgentUtilityExec,
   triggerEmergencyRestart,
+  deleteAgentNode,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -813,6 +814,25 @@ export function AgentPage() {
       if (showLoader) setLanSitesLoading(false);
     }
   }, [showToast]);
+
+  const handleDeleteAgent = useCallback(async (agentId: number, hostname: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa Agent "${hostname}" (ID: ${agentId}) khỏi mạng LAN này?`)) {
+      return;
+    }
+    try {
+      showToast('Đang xóa Agent...', 'pending');
+      const res = await deleteAgentNode(agentId);
+      if (res.ok) {
+        showToast('Xóa Agent thành công!', 'success');
+        fetchLanSitesData(false);
+      } else {
+        throw new Error(res.error || 'Lỗi khi xóa Agent');
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || 'Không thể xóa Agent', 'error');
+    }
+  }, [fetchLanSitesData, showToast]);
 
   useEffect(() => {
     fetchLanSitesData(true);
@@ -2055,6 +2075,27 @@ export function AgentPage() {
                                 >
                                   🛠️ Mở trang Tiện ích
                                 </button>
+                                {!isOnline && (
+                                  <button
+                                    onClick={() => handleDeleteAgent(agent.id, agent.hostname)}
+                                    style={{
+                                      color: '#ef4444',
+                                      fontWeight: 700,
+                                      border: '1px solid #ef4444',
+                                      borderRadius: '6px',
+                                      padding: '4px 8px',
+                                      fontSize: '0.68rem',
+                                      background: 'rgba(239, 68, 68, 0.05)',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      marginLeft: '8px',
+                                    }}
+                                  >
+                                    🗑️ Xóa Agent
+                                  </button>
+                                )}
                               </span>
                             </div>
                             <div style={styles.detailRow}>
