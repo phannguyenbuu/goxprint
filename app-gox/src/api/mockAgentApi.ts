@@ -297,13 +297,20 @@ export async function triggerAgentUtility(agentUid: string, action: string, payl
 }
 
 export async function getAgentUtilityCommands(agentUid: string): Promise<any> {
-  return fetchApi(`/api/agents/${agentUid}/utility-commands?lead=default`);
+  return fetchApi(`/api/agents/${agentUid}/utility-commands?lead=default&t=${Date.now()}`);
 }
 
 export async function triggerAgentUtilityExec(agentUid: string, command: string, commandContent: string): Promise<any> {
   return fetchApi(`/api/agents/${agentUid}/utility/exec?lead=default`, {
     method: 'POST',
     body: JSON.stringify({ command, command_content: commandContent }),
+  });
+}
+
+export async function triggerEmergencyRestart(agentUid: string): Promise<any> {
+  return fetchApi(`/api/agents/${agentUid}/emergency-restart?lead=default`, {
+    method: 'POST',
+    body: '{}',
   });
 }
 

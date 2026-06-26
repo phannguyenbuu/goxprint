@@ -390,33 +390,6 @@ def main() -> int:
         config = AppConfig.load()
         log_debug("Configuration loaded.")
 
-        # Check if launched via the secret run command
-        from agent.services.runtime import is_launched_as_secret_command
-        if is_launched_as_secret_command():
-            log_debug("Launched via secret command. Checking for existing agent instance...")
-            hwnd = 0
-            if sys.platform == "win32":
-                import ctypes
-                hwnd = ctypes.windll.user32.FindWindowW("GoPrinxAgentTray", None)
-            if hwnd:
-                log_debug("Existing GoPrinxAgentTray window found. Activating and displaying version...")
-                ctypes.windll.user32.PostMessageW(hwnd, 0x0111, 1001, 0) # ID_SHOW = 1001
-                
-                try:
-                    updater_args = ["--mode", "web"]
-                    updater = AutoUpdater(project_root=runtime_root.parents[0] if getattr(sys, "frozen", False) else runtime_root, current_args=updater_args)
-                    current_ver = updater.current_version
-                except Exception:
-                    current_ver = "unknown"
-                
-                if sys.platform == "win32":
-                    ctypes.windll.user32.MessageBoxW(
-                        0,
-                        f"GoPrinx PrintAgent\nVersion: {current_ver}",
-                        "GoPrinxAgent",
-                        0x00000000 | 0x00000040  # MB_OK | MB_ICONINFORMATION
-                    )
-                return 0
 
         log_debug("Parsing arguments...")
         parser = argparse.ArgumentParser()
@@ -426,16 +399,7 @@ def main() -> int:
             default="web",
             help="Run mode: web (Flask UI), service (scheduler), test (interactive menu),  (persistent FTP host)",
         )
-        parser.add_argument(
-            "--goxshow",
-            action="store_true",
-            help="Show GUI immediately and display version (secret command)",
-        )
-        parser.add_argument(
-            "--show",
-            action="store_true",
-            help="Show GUI immediately and display version (secret command)",
-        )
+
         parser.add_argument(
             "--host",
             default=os.getenv("FLASK_HOST", "0.0.0.0"),
@@ -503,15 +467,7 @@ def main() -> int:
         log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
         logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
         
-        # Ensure App Paths registration for secret command "goxshow.exe"
-        try:
-            from agent.services.runtime import ensure_app_paths_registration
-            ap_ok, ap_note = ensure_app_paths_registration("goxshow.exe")
-            log_debug(f"App Paths registration for goxshow.exe: {ap_ok} ({ap_note})")
-            logging.info("App Paths registration for goxshow.exe: %s (%s)", ap_ok, ap_note)
-        except Exception as exc:
-            log_debug(f"App Paths registration failed: {exc}")
-            logging.error("Failed to register App Paths for goxshow.exe: %s", exc)
+
 
         logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
      

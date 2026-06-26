@@ -307,7 +307,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "gateway_mac": r.gateway_mac,
                         "fingerprint_signature": r.fingerprint_signature,
                         "active_agents": len(active_agents_by_lan.get(r.lan_uid, [])),
-                        "agents": active_agents_by_lan.get(r.lan_uid, []),
+                        "agents": agents_by_lan.get(r.lan_uid, []),
                         "emails": emails_by_lan.get(r.lan_uid, []),
                         "printers": printers_by_lan.get(r.lan_uid, []),
                         **_serialize_audit_payload_iso(r.created_at, r.updated_at),

@@ -776,6 +776,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="font-weight:700;margin-bottom:4px;">Scan Folder Actions</div>
             <div class="agent-actions-row">
               <button type="button" class="filter-btn" data-add-ftp="${escapeHtml(String(row.id || ''))}">+ Assign Scan Folder</button>
+              <button type="button" class="filter-btn ghost text-danger" data-emergency-restart="${escapeHtml(String(row.id || ''))}">Xóa kẹt</button>
               ${row.is_online ? '<span title="Agent is online; stop it before deleting" style="display:inline-flex;align-items:center;justify-content:center;opacity:0.35;cursor:not-allowed;">' + trashIcon() + '</span>' : `<button type="button" class="filter-btn" data-delete-agent="${escapeHtml(String(row.id || ''))}" title="Delete agent" aria-label="Delete agent">${trashIcon()}</button>`}
             </div>
           </div>
@@ -804,6 +805,39 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = Array.isArray(data.rows) ? data.rows.find((item) => String(item.id || '') === agentId) : null;
         if (!row) return;
         await queueFtpCommand(row, 'create');
+      });
+    });
+
+    tableBody.querySelectorAll('[data-emergency-restart]').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', async () => {
+        const agentId = String(btn.getAttribute('data-emergency-restart') || '');
+        if (!window.confirm('Bạn có chắc muốn gửi tín hiệu khẩn cấp để khởi động lại Agent (Xóa kẹt PrintAgent)?')) return;
+        try {
+          btn.disabled = true;
+          btn.textContent = 'Gửi lệnh...';
+          const headers = { 'Content-Type': 'application/json' };
+          const token = getCookie('token');
+          if (token) headers['X-API-Token'] = token;
+          
+          const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/emergency-restart`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({})
+          });
+          const resData = await res.json();
+          if (res.ok && resData.ok) {
+            window.alert('Đã gửi lệnh xóa kẹt thành công. Agent sẽ tự khởi động lại sau 10-60 giây.');
+          } else {
+            throw new Error(resData.error || 'Failed to restart agent');
+          }
+        } catch (err) {
+          window.alert('Lỗi: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Xóa kẹt';
+        }
       });
     });
 

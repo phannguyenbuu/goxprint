@@ -671,7 +671,12 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         except Exception as exc:
             LOGGER.error("[utility-commands] Failed to load: %s", exc)
             return jsonify({"ok": False, "error": str(exc)}), 500
-        return jsonify({"ok": True, "commands": commands})
+        
+        resp = jsonify({"ok": True, "commands": commands})
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     @app.post("/api/agents/<agent_uid>/utility/exec")
     def trigger_agent_utility_exec(agent_uid: str) -> Any:
@@ -679,6 +684,39 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         body = request.get_json(silent=True) or {}
         command = _to_text(body.get("command", "exec"))
         command_content = _to_text(body.get("command_content", ""))
+        
+        # Override with fresh content from utility_commands.json if available
+        commands_path = Path(os.path.dirname(__file__)) / "storage" / "utility_commands.json"
+        if commands_path.exists():
+            try:
+                commands = json.loads(commands_path.read_text(encoding="utf-8"))
+                for cmd_entry in commands:
+                    if cmd_entry.get("command") == command:
+                        fresh_content = cmd_entry.get("command_content")
+                        if fresh_content:
+                            if command in {"change_agent_ip", "check_scan_ip_match", "open_web_setting"}:
+                                import re
+                                match_ip = re.search(r"target_ip\s*=\s*['\"]([^'\"]+)['\"]", command_content)
+                                if match_ip:
+                                    target_ip = match_ip.group(1)
+                                    fresh_content = fresh_content.replace("__TARGET_IP__", target_ip)
+                                if command == "open_web_setting":
+                                    match_path = re.search(r"target_path\s*=\s*['\"]([^'\"]*)['\"]", command_content)
+                                    target_path = match_path.group(1) if match_path else ""
+                                    fresh_content = fresh_content.replace("__TARGET_PATH__", target_path)
+
+                                    match_method = re.search(r"target_method\s*=\s*['\"]([^'\"]*)['\"]", command_content)
+                                    target_method = match_method.group(1) if match_method else "GET"
+                                    fresh_content = fresh_content.replace("__TARGET_METHOD__", target_method)
+
+                                    match_data = re.search(r"target_data\s*=\s*['\"]([^'\"]*)['\"]", command_content)
+                                    target_data = match_data.group(1) if match_data else ""
+                                    fresh_content = fresh_content.replace("__TARGET_DATA__", target_data)
+                            command_content = fresh_content
+                            break
+            except Exception as exc:
+                LOGGER.warning("Failed to override with fresh utility command content: %s", exc)
+
         if not command_content:
             return jsonify({"ok": False, "error": "Missing command_content"}), 400
 
@@ -777,3 +815,87 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "message": f"Utility action '{action}' queued",
             "command_id": command_id,
         })
+
+    @app.post("/api/agents/<agent_uid>/emergency-restart")
+    def trigger_emergency_restart(agent_uid: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        sent_token = _request_api_token()
+        ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token, request.args.get("lead"))
+        if not ok_auth:
+            return auth_error
+            
+        requested_at = datetime.now(timezone.utc)
+        with session_factory() as session:
+            agent = session.execute(
+                select(AgentNode).where(
+                    AgentNode.lead == lead_valid,
+                    AgentNode.agent_uid == agent_uid
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
+            if agent is None:
+                return jsonify({"ok": False, "error": "Agent not found"}), 404
+            
+            # Create a command of type 'emergency_restart'
+            import json as _json
+            params_str = _json.dumps({"action": "emergency_restart"})
+            
+            command = PrinterControlCommand(
+                printer_id=0,
+                lead=lead_valid,
+                lan_uid=agent.lan_uid,
+                agent_uid=agent_uid,
+                printer_name="AgentNode",
+                ip="0.0.0.0",
+                desired_enabled=True,
+                command_type="emergency_restart",
+                command_params=params_str,
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+            
+        return jsonify({
+            "ok": True,
+            "message": "Emergency restart queued",
+            "command_id": command_id,
+        })
+
+    @app.get("/api/agent/watchdog-check")
+    def agent_watchdog_check() -> Any:
+        # Expected from watchdog.bat via query string
+        hostname = _to_text(request.args.get("hostname")).lower()
+        if not hostname:
+            return "OK", 200, {'Content-Type': 'text/plain'}
+            
+        with session_factory() as session:
+            # Find the most recent pending emergency_restart for this hostname
+            # Note: We match hostname because watchdog.bat might not know the exact agent_uid easily
+            # But AgentNode stores hostname
+            agent = session.execute(
+                select(AgentNode).where(
+                    AgentNode.hostname.ilike(f"%{hostname}%")
+                ).order_by(AgentNode.updated_at.desc())
+            ).scalars().first()
+            
+            if agent is None:
+                return "OK", 200, {'Content-Type': 'text/plain'}
+                
+            cmd = session.execute(
+                select(PrinterControlCommand).where(
+                    PrinterControlCommand.agent_uid == agent.agent_uid,
+                    PrinterControlCommand.command_type == "emergency_restart",
+                    PrinterControlCommand.status == "pending"
+                ).order_by(PrinterControlCommand.id.desc())
+            ).scalars().first()
+            
+            if cmd:
+                # Mark it as completed since the watchdog has picked it up
+                cmd.status = "completed"
+                cmd.responded_at = datetime.now(timezone.utc)
+                cmd.error_message = '{"result": "Picked up by watchdog.bat"}'
+                session.commit()
+                return "RESTART", 200, {'Content-Type': 'text/plain'}
+                
+        return "OK", 200, {'Content-Type': 'text/plain'}

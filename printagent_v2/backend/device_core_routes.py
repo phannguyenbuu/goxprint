@@ -582,6 +582,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                         "command_id": command_id,
                         "id": int(cmd.printer_id),
                         "address_book_sync": address_book_sync,
+                        "result_payload": cmd.error_message or "",
                         "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
                         "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
                         "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,

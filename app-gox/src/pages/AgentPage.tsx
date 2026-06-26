@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlowCard } from '../components/ui/GlowCard';
 import { AnimatedList } from '../components/ui/AnimatedList';
@@ -122,6 +122,22 @@ export function AgentPage() {
   // Live (uncached) address books loaded from agents (key: printerId)
   const [liveAddressBooks, setLiveAddressBooks] = useState<Record<string, any>>({});
 
+  // Register parent window dummy functions for Ricoh iframe scripts
+  useEffect(() => {
+    (window as any).fnGetCookie = (_name?: string) => {
+      return '';
+    };
+    (window as any).fnSetCookie = (_name?: string, _value?: string) => {
+      // Dummy
+    };
+    (window as any).fnGetLocalestring = (_key?: string) => {
+      return '';
+    };
+    (window as any).fnGetHelp = (_url?: string) => {
+      // Dummy
+    };
+  }, []);
+
   // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -130,6 +146,27 @@ export function AgentPage() {
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
   const [remoteLockPrinter, setRemoteLockPrinter] = useState<{ ip: string; name: string; id: string | number; agentUid: string } | null>(null);
+  const [webPreviewModal, setWebPreviewModal] = useState<{ isOpen: boolean; title: string; html: string; ip: string; path: string; agentUid: string } | null>(null);
+  const [webPreviewLoading, setWebPreviewLoading] = useState<boolean>(false);
+  const [directLan, setDirectLan] = useState<boolean>(() => {
+    return localStorage.getItem('goxprint_direct_lan') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('goxprint_direct_lan', String(directLan));
+  }, [directLan]);
+
+  const [webPreviewTab, setWebPreviewTab] = useState<'iframe' | 'html'>('iframe');
+  const [showPreviewDetails, setShowPreviewDetails] = useState<boolean>(() => {
+    return window.innerWidth >= 768;
+  });
+  const [webPreviewHistory, setWebPreviewHistory] = useState<string[]>([]);
+  const [webPreviewHistoryIndex, setWebPreviewHistoryIndex] = useState<number>(-1);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string>('');
+  const [scaleX, setScaleX] = useState<number>(0.95);
+  const [scaleY, setScaleY] = useState<number>(0.95);
+  const [lockAspect, setLockAspect] = useState<boolean>(true);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const [editIpModalData, setEditIpModalData] = useState<{
     printerId: string;
     entry: any;
@@ -215,6 +252,541 @@ export function AgentPage() {
       { id: fixedId, message, type }
     ]);
   }, []);
+
+  const resolveRelativePath = (relative: string, current: string) => {
+    if (relative.startsWith('http://') || relative.startsWith('https://') || relative.startsWith('data:')) {
+      try {
+        const parsed = new URL(relative);
+        return parsed.pathname + parsed.search;
+      } catch {
+        return relative;
+      }
+    }
+    
+    if (relative.startsWith('/')) {
+      return relative;
+    }
+    
+    const baseClean = current.split('?')[0];
+    const parts = baseClean.split('/');
+    parts.pop(); // remove filename
+    const baseDir = parts.join('/');
+    
+    const resolved = baseDir + '/' + relative;
+    try {
+      const urlObj = new URL(resolved, 'http://localhost');
+      return urlObj.pathname + urlObj.search;
+    } catch {
+      return resolved;
+    }
+  };
+
+  const fetchRemotePage = async (
+    printerIp: string,
+    targetPath: string,
+    method: string = 'GET',
+    postData?: any,
+    isHistoryNav: boolean = false,
+    agentUidParam?: string
+  ) => {
+    const activeAgentUid = agentUidParam || webPreviewModal?.agentUid;
+    if (!activeAgentUid) {
+      console.error('No agent UID available for remote page fetch');
+      return;
+    }
+    
+    setWebPreviewModal(prev => {
+      const isFirstLoad = !prev || prev.html === 'LOADING';
+      return {
+        isOpen: true,
+        title: prev?.title || ('Web Image Monitor - ' + printerIp),
+        html: isFirstLoad ? 'LOADING' : prev.html,
+        ip: printerIp,
+        path: targetPath,
+        agentUid: activeAgentUid
+      };
+    });
+    if (directLan) {
+      setWebPreviewModal(prev => {
+        return {
+          isOpen: true,
+          title: prev?.title || ('Web Image Monitor (LAN) - ' + printerIp),
+          html: 'DIRECT_LAN',
+          ip: printerIp,
+          path: targetPath,
+          agentUid: activeAgentUid
+        };
+      });
+      setWebPreviewLoading(false);
+      return;
+    }
+
+    setWebPreviewLoading(true);
+
+    try {
+      const base64Data = postData ? btoa(JSON.stringify(postData)) : '';
+      const script = `target_ip = '${printerIp}'\ntarget_path = '${targetPath}'\ntarget_method = '${method}'\ntarget_data = '${base64Data}'`;
+      
+      const res: any = await triggerAgentUtilityExec(activeAgentUid, 'open_web_setting', script);
+      if (!res.ok || !res.command_id) {
+        setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${res.error || 'Không thể tạo lệnh tiện ích'}` } : null);
+        setWebPreviewLoading(false);
+        return;
+      }
+
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const startTime = Date.now();
+      
+      const pollTimer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(pollTimer);
+            setWebPreviewModal(prev => prev ? { ...prev, html: 'ERROR: Yêu cầu quá thời gian chờ (60s)' } : null);
+            return;
+          }
+
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(pollTimer);
+            let parsedRes: any = {};
+            try {
+              let raw = statusRes.result_payload || statusRes.error || '';
+              if (typeof raw === 'string') {
+                raw = raw.trim();
+                if (raw.startsWith('"') && raw.endsWith('"')) {
+                  try {
+                    raw = JSON.parse(raw);
+                  } catch {}
+                }
+                parsedRes = JSON.parse(raw);
+              } else {
+                parsedRes = raw;
+              }
+            } catch (parseErr) {
+              parsedRes = { error: 'Lỗi parse JSON: ' + (statusRes.result_payload || statusRes.error) };
+            }
+
+            if (parsedRes.html) {
+              let rawHtml = parsedRes.html;
+              const returnedPath = parsedRes.path || targetPath;
+
+              let preparedHtml = rawHtml;
+
+              // 1. Strip render-blocking stylesheets and external scripts to prevent the browser from freezing on unreachable IP assets
+              preparedHtml = preparedHtml.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
+              preparedHtml = preparedHtml.replace(/<script[^>]*src=[^>]*><\/script>/gi, '');
+              preparedHtml = preparedHtml.replace(/<script[^>]*src=[^>]*\s*\/>/gi, '');
+
+              // 2. Insert base tag, CDN jQuery, and top-level fallbacks to prevent ReferenceErrors from executing inline scripts early
+              const fallbacks = `
+                <script>
+                  // Toshiba fallbacks
+                  window.fnGetLocaleString = window.fnGetLocaleString || function(id, defaultVal) { return defaultVal || id || ""; };
+                  window.fnGetResolveLocaleForDisplay = window.fnGetResolveLocaleForDisplay || function(id, defaultVal) { return defaultVal || id || ""; };
+                  window.fnGetResolveLocale = window.fnGetResolveLocale || function(id, defaultVal) { return defaultVal || id || ""; };
+                  window.fnGetLocale = window.fnGetLocale || function(id, defaultVal) { return defaultVal || id || ""; };
+                  window.InitiateServerRequest = window.InitiateServerRequest || function() {};
+
+                  // Ricoh fallbacks
+                  window.mouseOverTransfer = window.mouseOverTransfer || function() {};
+                  window.mouseOutTransfer = window.mouseOutTransfer || function() {};
+                  window.menuParent_Mouseover = window.menuParent_Mouseover || function() {};
+                  window.menuParent_Mouseout = window.menuParent_Mouseout || function() {};
+                  window.menuChild_Mouseover = window.menuChild_Mouseover || function() {};
+                  window.menuChild_Mouseout = window.menuChild_Mouseout || function() {};
+
+                  // Override navigation functions
+                  window.wsMenu_jumpUrl = window.wsMenu_jumpurl = window.wsMenu_jumpURL = function(url) {
+                    window.parent.postMessage({
+                      type: 'iframe_navigate',
+                      href: url,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      target: '_self'
+                    }, '*');
+                  };
+                  window.jumpTo = function(url) {
+                    window.parent.postMessage({
+                      type: 'iframe_navigate',
+                      href: url,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      target: '_self'
+                    }, '*');
+                  };
+                </script>
+              `;
+              const jqueryCdn = `<script src="https://code.jquery.com/jquery-1.4.4.min.js"></script>`;
+              const baseTag = `<base href="http://${printerIp}/">${jqueryCdn}${fallbacks}`;
+              if (/<head[^>]*>/i.test(preparedHtml)) {
+                preparedHtml = preparedHtml.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+              } else {
+                preparedHtml = `${baseTag}${preparedHtml}`;
+              }
+
+              const customStyle = `
+                <style>
+                  body {
+                    font-family: system-ui, -apple-system, sans-serif;
+                    color: #1e293b;
+                    background-color: #f8fafc;
+                    margin: 20px;
+                    line-height: 1.5;
+                  }
+                  a {
+                    color: #2563eb;
+                    text-decoration: none;
+                    font-weight: 500;
+                  }
+                  a:hover {
+                    text-decoration: underline;
+                  }
+                  ul {
+                    padding-left: 20px;
+                  }
+                  li {
+                    margin-bottom: 6px;
+                  }
+                  table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 15px 0;
+                    background: white;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                  }
+                  th, td {
+                    padding: 10px 14px;
+                    border: 1px solid #e2e8f0;
+                    text-align: left;
+                  }
+                  th {
+                    background-color: #f1f5f9;
+                    font-weight: 600;
+                  }
+                  input[type="text"], input[type="password"], select, textarea {
+                    padding: 8px 12px;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 6px;
+                    font-size: 0.9rem;
+                    background: white;
+                  }
+                  input[type="submit"], input[type="button"], button {
+                    background-color: #2563eb;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    cursor: pointer;
+                  }
+                  input[type="submit"]:hover, button:hover {
+                    background-color: #1d4ed8;
+                  }
+                  #shortcutlink, #topwrap form, select[name="language"], input[name="switch"] {
+                    display: inline-block;
+                    margin-right: 10px;
+                  }
+                  #sideColumn ul {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                  }
+                  #sideColumn > div > ul > li {
+                    background: #e2e8f0;
+                    margin-bottom: 10px;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-weight: bold;
+                  }
+                  #sideColumn .submenu {
+                    font-weight: normal;
+                    margin-top: 6px;
+                    padding-left: 10px;
+                    background: #f1f5f9;
+                    border-radius: 6px;
+                    padding: 6px;
+                  }
+                  #sideColumn .submenu li {
+                    margin: 4px 0;
+                  }
+                  .display-n {
+                    display: block !important;
+                  }
+                </style>
+              `;
+
+              if (preparedHtml.includes('</head>')) {
+                preparedHtml = preparedHtml.replace('</head>', `${customStyle}</head>`);
+              } else {
+                preparedHtml = customStyle + preparedHtml;
+              }
+
+              const injectScript = `
+                <script>
+                (function() {
+                  // Register dummy fallback locale functions for Toshiba printers
+                  window.fnGetLocaleString = window.fnGetLocaleString || function(id, defaultVal) {
+                    return defaultVal || id || "";
+                  };
+                  window.fnGetResolveLocaleForDisplay = window.fnGetResolveLocaleForDisplay || function(id, defaultVal) {
+                    return defaultVal || id || "";
+                  };
+                  window.fnGetResolveLocale = window.fnGetResolveLocale || function(id, defaultVal) {
+                    return defaultVal || id || "";
+                  };
+                  window.fnGetLocale = window.fnGetLocale || function(id, defaultVal) {
+                    return defaultVal || id || "";
+                  };
+
+                  // Register dummy fallback menu/hover functions for Ricoh printers
+                  window.mouseOverTransfer = window.mouseOverTransfer || function() {};
+                  window.mouseOutTransfer = window.mouseOutTransfer || function() {};
+                  window.menuParent_Mouseover = window.menuParent_Mouseover || function() {};
+                  window.menuParent_Mouseout = window.menuParent_Mouseout || function() {};
+                  window.menuChild_Mouseover = window.menuChild_Mouseover || function() {};
+                  window.menuChild_Mouseout = window.menuChild_Mouseout || function() {};
+
+                  // Redefine Ricoh menu navigation functions
+                  window.wsMenu_jumpUrl = window.wsMenu_jumpurl = window.wsMenu_jumpURL = function(url) {
+                    window.parent.postMessage({
+                      type: 'iframe_navigate',
+                      href: url,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      target: '_self'
+                    }, '*');
+                  };
+                  window.jumpTo = function(url) {
+                    window.parent.postMessage({
+                      type: 'iframe_navigate',
+                      href: url,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      target: '_self'
+                    }, '*');
+                  };
+
+                  // Intercept anchor clicks
+                  document.addEventListener('click', function(e) {
+                    var anchor = e.target.closest('a');
+                    if (anchor) {
+                      var href = anchor.getAttribute('href');
+                      if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+                        if (href.startsWith('http') && !href.includes('${printerIp}')) {
+                          return;
+                        }
+                        e.preventDefault();
+                        window.parent.postMessage({
+                          type: 'iframe_navigate',
+                          href: href,
+                          currentPath: ${JSON.stringify(returnedPath)},
+                          target: anchor.getAttribute('target') || '_self'
+                        }, '*');
+                      }
+                    }
+                  }, true);
+
+                  // Intercept standard form submit events
+                  document.addEventListener('submit', function(e) {
+                    var form = e.target;
+                    var action = form.getAttribute('action') || '';
+                    e.preventDefault();
+                    
+                    var formData = {};
+                    var inputs = form.querySelectorAll('input, select, textarea');
+                    inputs.forEach(function(input) {
+                      if (input.name) {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                          if (input.checked) {
+                            formData[input.name] = input.value;
+                          }
+                        } else {
+                          formData[input.name] = input.value;
+                        }
+                      }
+                    });
+
+                    window.parent.postMessage({
+                      type: 'iframe_submit',
+                      action: action,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      formData: formData,
+                      target: form.getAttribute('target') || '_self'
+                    }, '*');
+                  }, true);
+
+                  // Intercept programmatic form.submit() calls
+                  var originalSubmit = HTMLFormElement.prototype.submit;
+                  HTMLFormElement.prototype.submit = function() {
+                    var form = this;
+                    var action = form.getAttribute('action') || '';
+                    
+                    var formData = {};
+                    var inputs = form.querySelectorAll('input, select, textarea');
+                    inputs.forEach(function(input) {
+                      if (input.name) {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                          if (input.checked) {
+                            formData[input.name] = input.value;
+                          }
+                        } else {
+                          formData[input.name] = input.value;
+                        }
+                      }
+                    });
+
+                    window.parent.postMessage({
+                      type: 'iframe_submit',
+                      action: action,
+                      currentPath: ${JSON.stringify(returnedPath)},
+                      formData: formData,
+                      target: form.getAttribute('target') || '_self'
+                    }, '*');
+                  };
+                })();
+                </script>
+              `;
+
+              if (preparedHtml.includes('</body>')) {
+                preparedHtml = preparedHtml.replace('</body>', `${injectScript}</body>`);
+              } else {
+                preparedHtml += injectScript;
+              }
+
+              if (!isHistoryNav) {
+                const newHistory = webPreviewHistory.slice(0, webPreviewHistoryIndex + 1);
+                newHistory.push(returnedPath);
+                setWebPreviewHistory(newHistory);
+                setWebPreviewHistoryIndex(newHistory.length - 1);
+              }
+
+              setWebPreviewModal(prev => prev ? { ...prev, html: preparedHtml, path: returnedPath } : null);
+              setWebPreviewLoading(false);
+            } else {
+              setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${parsedRes.error || 'Agent không trả về HTML'}` } : null);
+              setWebPreviewLoading(false);
+            }
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(pollTimer);
+            setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${statusRes.error || 'Lệnh thất bại từ Agent'}` } : null);
+            setWebPreviewLoading(false);
+          }
+        } catch (pollErr: any) {
+          console.error('Poll error:', pollErr);
+        }
+      }, 1500);
+
+    } catch (err: any) {
+      setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${err.message}` } : null);
+      setWebPreviewLoading(false);
+    }
+  };
+
+  const handleHistoryBack = () => {
+    if (webPreviewHistoryIndex > 0 && webPreviewModal) {
+      const prevIdx = webPreviewHistoryIndex - 1;
+      setWebPreviewHistoryIndex(prevIdx);
+      fetchRemotePage(webPreviewModal.ip, webPreviewHistory[prevIdx], 'GET', undefined, true);
+    }
+  };
+
+  const handleHistoryForward = () => {
+    if (webPreviewHistoryIndex < webPreviewHistory.length - 1 && webPreviewModal) {
+      const nextIdx = webPreviewHistoryIndex + 1;
+      setWebPreviewHistoryIndex(nextIdx);
+      fetchRemotePage(webPreviewModal.ip, webPreviewHistory[nextIdx], 'GET', undefined, true);
+    }
+  };
+
+  const handleToggleDirectLan = (enabled: boolean) => {
+    setDirectLan(enabled);
+    if (webPreviewModal) {
+      if (enabled) {
+        setWebPreviewModal(prev => prev ? { ...prev, html: 'DIRECT_LAN' } : null);
+        setWebPreviewLoading(false);
+      } else {
+        // Trigger a fresh remote page fetch via Agent
+        fetchRemotePage(webPreviewModal.ip, webPreviewModal.path, 'GET', undefined, false, webPreviewModal.agentUid);
+      }
+    }
+  };
+
+  const handleCloseWebPreview = () => {
+    if (webPreviewModal && webPreviewModal.agentUid) {
+      const script = `target_ip = '${webPreviewModal.ip}'\ntarget_path = 'logout'\ntarget_method = 'GET'\ntarget_data = ''`;
+      triggerAgentUtilityExec(webPreviewModal.agentUid, 'open_web_setting', script).catch(console.error);
+    }
+    setWebPreviewModal(null);
+    setWebPreviewLoading(false);
+    setWebPreviewHistory([]);
+    setWebPreviewHistoryIndex(-1);
+  };
+
+  useEffect(() => {
+    const handleIframeMessage = (e: MessageEvent) => {
+      const msg = e.data;
+      if (!msg || typeof msg !== 'object') return;
+      if (!webPreviewModal || !webPreviewModal.ip) return;
+
+      if (msg.type === 'iframe_navigate') {
+        const resolved = resolveRelativePath(msg.href, msg.currentPath);
+        fetchRemotePage(webPreviewModal.ip, resolved);
+      } else if (msg.type === 'iframe_submit') {
+        const resolved = resolveRelativePath(msg.action, msg.currentPath);
+        fetchRemotePage(webPreviewModal.ip, resolved, 'POST', msg.formData);
+      }
+    };
+
+    window.addEventListener('message', handleIframeMessage);
+    return () => window.removeEventListener('message', handleIframeMessage);
+  }, [webPreviewModal, webPreviewHistory, webPreviewHistoryIndex]);
+
+  useEffect(() => {
+    if (webPreviewModal?.html && webPreviewModal.html !== 'LOADING' && !webPreviewModal.html.startsWith('ERROR:')) {
+      const blob = new Blob([webPreviewModal.html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      setPreviewBlobUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      setPreviewBlobUrl('');
+    }
+  }, [webPreviewModal?.html]);
+
+  // Apply scaling to iframe content
+  useEffect(() => {
+    const applyScaling = () => {
+      try {
+        const iframe = previewIframeRef.current;
+        if (!iframe) return;
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (doc && doc.body) {
+          // Reset html and body height constraints to let them grow dynamically to fit the full content height, avoiding cutoffs
+          doc.documentElement.style.height = 'auto';
+          doc.body.style.height = 'auto';
+          doc.body.style.minHeight = '100%';
+
+          doc.body.style.transform = `scale(${scaleX}, ${scaleY})`;
+          doc.body.style.transformOrigin = 'top left';
+          doc.body.style.width = `${100 / scaleX}%`;
+          doc.body.style.boxSizing = 'border-box';
+        }
+      } catch (err) {
+        console.error('Failed to apply scaling:', err);
+      }
+    };
+
+    applyScaling();
+
+    const iframe = previewIframeRef.current;
+    if (iframe) {
+      iframe.addEventListener('load', applyScaling);
+      return () => {
+        iframe.removeEventListener('load', applyScaling);
+      };
+    }
+  }, [previewBlobUrl, scaleX, scaleY]);
 
   // ── FETCH DATA ──
   const fetchLanSitesData = useCallback(async (showLoader = false) => {
@@ -1865,16 +2437,10 @@ export function AgentPage() {
                                   showToast('Vui lòng chọn Target Agent trước', 'error');
                                   return;
                                 }
-                                const script = `import webbrowser\nwebbrowser.open('http://${p.ip}/')`;
-                                triggerAgentUtilityExec(selectedAgentUid, 'open_web_setting', script)
-                                  .then((res: any) => {
-                                    if (!res.ok) showToast('Lỗi: ' + (res.error || 'Unknown'), 'error');
-                                    else showToast('Đã gửi lệnh mở Web Setting tới Agent thành công!', 'success');
-                                  })
-                                  .catch((err: any) => showToast('Lỗi kết nối: ' + err.message, 'error'));
+                                fetchRemotePage(p.ip, '', 'GET', null, false, selectedAgentUid);
                               }}
                               disabled={onlineAgents.length === 0 || !selectedAgentUid}
-                              title="Mở trình duyệt trên máy Agent truy cập vào Web Setting của máy photo này"
+                              title="Xem trực tiếp trang quản trị Web Image Monitor của máy photocopy này bằng iframe"
                             >
                               🌐 Mở web setting từ xa
                             </button>
@@ -3227,6 +3793,776 @@ raise RuntimeError('\\n'.join(lines))`;
                 </button>
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 8. WEB PREVIEW MODAL — Xem trực tiếp Web Setting */}
+      <AnimatePresence>
+        {webPreviewModal && webPreviewModal.isOpen && (
+          <div
+            className="web-preview-modal-overlay"
+            style={{ ...styles.confirmOverlay, zIndex: 190, alignItems: 'flex-start', paddingTop: '5vh' }}
+            onClick={handleCloseWebPreview}
+          >
+            <style>{`
+              @keyframes spin {
+                to { transform: rotate(360deg); }
+              }
+              @media (max-width: 767px) {
+                .web-preview-modal-overlay {
+                  padding-top: 0px !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                }
+                .web-preview-modal-card {
+                  width: 100% !important;
+                  height: 100vh !important;
+                  max-height: 100vh !important;
+                  border-radius: 0px !important;
+                  padding: 12px !important;
+                  margin: 0 !important;
+                }
+              }
+            `}</style>
+            {(() => {
+              let pageTitle = 'Trang cấu hình máy in';
+              if (webPreviewModal.html && webPreviewModal.html !== 'LOADING' && !webPreviewModal.html.startsWith('ERROR:')) {
+                if (webPreviewModal.html === 'DIRECT_LAN') {
+                  pageTitle = 'Kết nối trực tiếp LAN';
+                } else {
+                  const titleMatch = webPreviewModal.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+                  if (titleMatch && titleMatch[1]) {
+                    pageTitle = titleMatch[1].trim();
+                  }
+                }
+              }
+              
+              return (
+                <motion.div
+                  className="web-preview-modal-card"
+                  style={{
+                    ...styles.confirmModalCard,
+                    maxWidth: '1200px',
+                    width: '95%',
+                    height: '85vh',
+                    maxHeight: '85vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '20px',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                >
+                  <div style={styles.modalHeader}>
+                    <h3 style={{ ...styles.modalTitle, fontSize: '0.85rem' }}>{webPreviewModal.title}</h3>
+                    <button
+                      style={styles.modalCloseBtn}
+                      onClick={handleCloseWebPreview}
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: '15px', minHeight: 0 }}>
+                    {webPreviewModal.html === 'LOADING' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '12px', padding: '20px' }}>
+                        <svg
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            color: 'var(--color-primary)',
+                            animation: 'spin 1s linear infinite'
+                          }}
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                          Đang đợi phản hồi từ Agent...
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: '320px' }}>
+                          Agent đang kết nối trực tiếp đến máy in và nạp cấu hình...
+                        </span>
+                      </div>
+                    ) : webPreviewModal.html.startsWith('ERROR:') ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '12px', padding: '20px', color: 'var(--color-error)' }}>
+                        <span style={{ fontSize: '2.2rem' }}>⚠️</span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600, textAlign: 'center' }}>
+                          Lỗi lấy trang Web Setting từ Agent
+                        </span>
+                        <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '12px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.15)', width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}>
+                          {webPreviewModal.html.replace('ERROR:', '').trim()}
+                        </pre>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, minHeight: 0 }}>
+                        {/* Compact Connection Mode Status Row */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid var(--color-surface-light)',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          fontSize: '0.74rem'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text)' }}>
+                            <span>🔌 Kết nối: <strong>{directLan ? '⚡ Trực tiếp LAN' : '🌐 Qua Agent'}</strong></span>
+                          </div>
+                          <button
+                            onClick={() => setShowPreviewDetails(!showPreviewDetails)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--color-primary)',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              fontSize: '0.72rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {showPreviewDetails ? 'Thu gọn ▲' : 'Cài đặt & Chi tiết ▼'}
+                          </button>
+                        </div>
+
+                        {showPreviewDetails && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* Success Status & Control Actions */}
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '12px',
+                              background: 'rgba(16, 185, 129, 0.04)',
+                              border: '1px solid rgba(16, 185, 129, 0.15)',
+                              borderRadius: '8px',
+                              padding: '10px 14px',
+                            }}>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                                <span style={{ color: '#10b981', fontWeight: 700 }}>🟢 Kết nối Live:</span> {pageTitle} (<span style={{ fontFamily: 'monospace' }}>{webPreviewModal.ip}</span>)
+                              </div>
+                              
+                              <button
+                                onClick={() => window.open(`http://${webPreviewModal.ip}/`, '_blank')}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 600,
+                                  background: '#10b981',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  color: 'white',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.15)',
+                                }}
+                              >
+                                🌐 Mở trực tiếp LAN
+                              </button>
+                            </div>
+
+                            {/* Chế độ kết nối Switcher */}
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                              background: 'var(--color-surface)',
+                              border: '1px solid var(--color-surface-light)',
+                              borderRadius: '8px',
+                              padding: '8px 12px',
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                                🔗 Chế độ kết nối:
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  onClick={() => handleToggleDirectLan(false)}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '0.70rem',
+                                    fontWeight: 600,
+                                    background: !directLan ? 'var(--color-primary)' : 'rgba(255,255,255,0.05)',
+                                    color: !directLan ? 'white' : 'var(--color-text-secondary)',
+                                    border: !directLan ? '1px solid var(--color-primary)' : '1px solid var(--color-surface-light)',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                  }}
+                                >
+                                  🔌 Qua Agent (Từ xa)
+                                </button>
+                                <button
+                                  onClick={() => handleToggleDirectLan(true)}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '0.70rem',
+                                    fontWeight: 600,
+                                    background: directLan ? '#10b981' : 'rgba(255,255,255,0.05)',
+                                    color: directLan ? 'white' : 'var(--color-text-secondary)',
+                                    border: directLan ? '1px solid #10b981' : '1px solid var(--color-surface-light)',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                  }}
+                                >
+                                  ⚡ Trực tiếp LAN (Cùng Wifi)
+                                </button>
+                              </div>
+                            </div>
+
+                            {directLan && window.location.protocol === 'https:' && (
+                              <div style={{
+                                color: '#fbbf24',
+                                background: 'rgba(251, 191, 36, 0.08)',
+                                border: '1px solid rgba(251, 191, 36, 0.25)',
+                                borderRadius: '8px',
+                                padding: '10px 14px',
+                                fontSize: '0.72rem',
+                                lineHeight: 1.4
+                              }}>
+                                ⚠️ <strong>Mixed Content Block:</strong> Trình duyệt di động/máy tính sẽ chặn kết nối HTTP trực tiếp đến IP máy in từ trang web bảo mật HTTPS. Để kết nối trực tiếp thành công, hãy mở trang web quản trị qua <strong>HTTP</strong> hoặc click nút <strong>🌐 Mở trực tiếp LAN</strong> phía trên để truy cập trong tab mới.
+                              </div>
+                            )}
+
+                            {directLan && (
+                              <div style={{
+                                color: '#60a5fa',
+                                background: 'rgba(96, 165, 250, 0.08)',
+                                border: '1px solid rgba(96, 165, 250, 0.25)',
+                                borderRadius: '8px',
+                                padding: '10px 14px',
+                                fontSize: '0.72rem',
+                                lineHeight: 1.4
+                              }}>
+                                💡 <strong>Chế độ trực tiếp LAN:</strong> Thiết bị kết nối trực tiếp đến IP máy in qua mạng Wifi nội bộ.
+                                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                                  <li>Thanh địa chỉ và Lịch sử duyệt sẽ không tự động cập nhật.</li>
+                                  <li>Chức năng thu phóng (Ngang/Dọc) trong iframe không áp dụng (vui lòng zoom bằng thao tác vuốt).</li>
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Browser Chrome Controls (Address Bar & Nav Buttons) */}
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          background: 'var(--color-surface)',
+                          border: '1px solid var(--color-surface-light)',
+                          borderRadius: '6px',
+                          padding: '6px 12px'
+                        }}>
+                          <button
+                            onClick={handleHistoryBack}
+                            disabled={webPreviewHistoryIndex <= 0}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: webPreviewHistoryIndex <= 0 ? 'rgba(255,255,255,0.15)' : 'var(--color-text)',
+                              cursor: webPreviewHistoryIndex <= 0 ? 'not-allowed' : 'pointer',
+                              padding: '4px',
+                              fontSize: '0.8rem'
+                            }}
+                            title="Back"
+                          >
+                            ◀
+                          </button>
+                          <button
+                            onClick={handleHistoryForward}
+                            disabled={webPreviewHistoryIndex >= webPreviewHistory.length - 1}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: webPreviewHistoryIndex >= webPreviewHistory.length - 1 ? 'rgba(255,255,255,0.15)' : 'var(--color-text)',
+                              cursor: webPreviewHistoryIndex >= webPreviewHistory.length - 1 ? 'not-allowed' : 'pointer',
+                              padding: '4px',
+                              fontSize: '0.8rem'
+                            }}
+                            title="Forward"
+                          >
+                            ▶
+                          </button>
+                          <button
+                            onClick={() => fetchRemotePage(webPreviewModal.ip, webPreviewModal.path)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--color-text)',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              fontSize: '0.8rem',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                            title="Refresh"
+                          >
+                            🔄
+                          </button>
+                          <div style={{
+                            flex: 1,
+                            background: 'var(--color-background)',
+                            border: '1px solid var(--color-surface-light)',
+                            borderRadius: '4px',
+                            padding: '4px 10px',
+                            fontSize: '0.72rem',
+                            fontFamily: 'monospace',
+                            color: 'var(--color-text-secondary)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            http://{webPreviewModal.ip}{webPreviewModal.path || '/'}
+                          </div>
+                        </div>
+
+                        {/* Tab Selector for Preview Mode */}
+                        <div style={{ display: 'flex', borderBottom: '1px solid var(--color-surface-light)', gap: '15px', paddingBottom: '4px' }}>
+                          <button
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: '8px 12px',
+                              fontSize: '0.78rem',
+                              fontWeight: webPreviewTab === 'iframe' ? 600 : 500,
+                              color: webPreviewTab === 'iframe' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                              borderBottom: webPreviewTab === 'iframe' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                            onClick={() => setWebPreviewTab('iframe')}
+                          >
+                            🌐 Giao diện máy in
+                          </button>
+                          <button
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: '8px 12px',
+                              fontSize: '0.78rem',
+                              fontWeight: webPreviewTab === 'html' ? 600 : 500,
+                              color: webPreviewTab === 'html' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                              borderBottom: webPreviewTab === 'html' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                            onClick={() => setWebPreviewTab('html')}
+                          >
+                            📄 Xem mã HTML (Text)
+                          </button>
+                        </div>
+
+                        {webPreviewTab === 'html' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0 }}>
+                            {directLan ? (
+                              <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flex: 1,
+                                gap: '10px',
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.76rem',
+                                padding: '20px',
+                                textAlign: 'center'
+                              }}>
+                                <span>📄 Chế độ trực tiếp LAN không tải mã nguồn về server.</span>
+                                <span style={{ fontSize: '0.70rem', color: 'rgba(255,255,255,0.4)' }}>
+                                  Hãy chuyển sang chế độ <strong>Qua Agent (Từ xa)</strong> để phân tích và xem mã nguồn HTML của máy in.
+                                </span>
+                              </div>
+                            ) : (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                                    Mã nguồn HTML gốc từ máy in:
+                                  </span>
+                                  <button
+                                    style={{
+                                      border: 'none',
+                                      background: 'rgba(59, 130, 246, 0.1)',
+                                      color: '#3b82f6',
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      fontSize: '0.72rem',
+                                      cursor: 'pointer',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(webPreviewModal.html);
+                                      showToast('Đã copy mã HTML vào clipboard', 'success');
+                                    }}
+                                  >
+                                    📋 Copy HTML
+                                  </button>
+                                </div>
+                                <pre style={{
+                                  flex: 1,
+                                  overflow: 'auto',
+                                  margin: 0,
+                                  padding: '12px',
+                                  background: 'var(--color-background)',
+                                  border: '1px solid var(--color-surface-light)',
+                                  borderRadius: '8px',
+                                  fontSize: '0.68rem',
+                                  lineHeight: 1.5,
+                                  fontFamily: "'Consolas', 'Monaco', monospace",
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-all',
+                                  color: 'var(--color-text)',
+                                }}>
+                                  {webPreviewModal.html}
+                                </pre>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minHeight: 0 }}>
+                            {/* Toolbar Zoom & Scale */}
+                            <div style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                              background: 'var(--color-surface)',
+                              border: '1px solid var(--color-surface-light)',
+                              borderRadius: '6px',
+                              padding: '8px 12px',
+                              fontSize: '0.74rem'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                                {/* Horizontal scale */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>↔️ Ngang:</span>
+                                  <button
+                                    onClick={() => {
+                                      const newVal = Math.max(0.3, parseFloat((scaleX - 0.05).toFixed(2)));
+                                      setScaleX(newVal);
+                                      if (lockAspect) setScaleY(newVal);
+                                    }}
+                                    style={{
+                                      background: 'var(--color-background)',
+                                      border: '1px solid var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >-</button>
+                                  <input
+                                    type="range"
+                                    min="0.3"
+                                    max="2.0"
+                                    step="0.05"
+                                    value={scaleX}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value);
+                                      setScaleX(val);
+                                      if (lockAspect) setScaleY(val);
+                                    }}
+                                    style={{ width: '80px', cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const newVal = Math.min(2.0, parseFloat((scaleX + 0.05).toFixed(2)));
+                                      setScaleX(newVal);
+                                      if (lockAspect) setScaleY(newVal);
+                                    }}
+                                    style={{
+                                      background: 'var(--color-background)',
+                                      border: '1px solid var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >+</button>
+                                  <span style={{ minWidth: '35px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text)' }}>
+                                    {Math.round(scaleX * 100)}%
+                                  </span>
+                                </div>
+
+                                {/* Vertical scale */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>↕️ Dọc:</span>
+                                  <button
+                                    onClick={() => {
+                                      const newVal = Math.max(0.3, parseFloat((scaleY - 0.05).toFixed(2)));
+                                      setScaleY(newVal);
+                                      if (lockAspect) setScaleX(newVal);
+                                    }}
+                                    style={{
+                                      background: 'var(--color-background)',
+                                      border: '1px solid var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                    disabled={lockAspect}
+                                  >-</button>
+                                  <input
+                                    type="range"
+                                    min="0.3"
+                                    max="2.0"
+                                    step="0.05"
+                                    value={scaleY}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value);
+                                      setScaleY(val);
+                                      if (lockAspect) setScaleX(val);
+                                    }}
+                                    style={{ width: '80px', cursor: 'pointer', accentColor: 'var(--color-primary)', opacity: lockAspect ? 0.5 : 1 }}
+                                    disabled={lockAspect}
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const newVal = Math.min(2.0, parseFloat((scaleY + 0.05).toFixed(2)));
+                                      setScaleY(newVal);
+                                      if (lockAspect) setScaleX(newVal);
+                                    }}
+                                    style={{
+                                      background: 'var(--color-background)',
+                                      border: '1px solid var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                    disabled={lockAspect}
+                                  >+</button>
+                                  <span style={{ minWidth: '35px', textAlign: 'right', fontWeight: 600, color: lockAspect ? 'var(--color-text-secondary)' : 'var(--color-text)' }}>
+                                    {Math.round(scaleY * 100)}%
+                                  </span>
+                                </div>
+
+                                {/* Lock Aspect Ratio Toggle */}
+                                <button
+                                  onClick={() => {
+                                    setLockAspect(!lockAspect);
+                                    if (!lockAspect) {
+                                      // Sync Y to X when locking
+                                      setScaleY(scaleX);
+                                    }
+                                  }}
+                                  style={{
+                                    background: lockAspect ? 'rgba(124, 106, 247, 0.15)' : 'var(--color-background)',
+                                    border: lockAspect ? '1px solid var(--color-accent, #7c6af7)' : '1px solid var(--color-surface-light)',
+                                    color: lockAspect ? 'var(--color-accent, #7c6af7)' : 'var(--color-text-secondary)',
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  title={lockAspect ? "Bỏ liên kết tỷ lệ" : "Liên kết tỷ lệ Ngang & Dọc"}
+                                >
+                                  {lockAspect ? '🔗 Đồng bộ' : '🔓 Tự do'}
+                                </button>
+                              </div>
+
+                              {/* Presets and Auto-Fit */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <button
+                                  onClick={() => {
+                                    setScaleX(0.95);
+                                    setScaleY(0.95);
+                                  }}
+                                  style={{
+                                    background: 'var(--color-background)',
+                                    border: '1px solid var(--color-surface-light)',
+                                    color: 'var(--color-text)',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 500
+                                  }}
+                                >
+                                  Mặc định
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setScaleX(1.0);
+                                    setScaleY(1.0);
+                                  }}
+                                  style={{
+                                    background: 'var(--color-background)',
+                                    border: '1px solid var(--color-surface-light)',
+                                    color: 'var(--color-text)',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 500
+                                  }}
+                                >
+                                  100%
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    try {
+                                      const iframe = previewIframeRef.current;
+                                      if (!iframe) return;
+                                      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+                                      if (doc && doc.body) {
+                                        // temporary reset width for measurement
+                                        const origWidth = doc.body.style.width;
+                                        const origTransform = doc.body.style.transform;
+                                        doc.body.style.transform = 'none';
+                                        doc.body.style.width = 'auto';
+                                        
+                                        // Let browser reflow and measure scrollWidth
+                                        const contentWidth = doc.body.scrollWidth || doc.documentElement.scrollWidth || 1024;
+                                        const containerWidth = iframe.clientWidth || 800;
+                                        
+                                        // Restore
+                                        doc.body.style.width = origWidth;
+                                        doc.body.style.transform = origTransform;
+
+                                        if (contentWidth > 0 && containerWidth > 0) {
+                                          let fitScale = containerWidth / contentWidth;
+                                          fitScale = Math.max(0.3, Math.min(1.5, fitScale));
+                                          // Round to nearest 0.05 step
+                                          fitScale = Math.round(fitScale * 20) / 20;
+                                          setScaleX(fitScale);
+                                          if (lockAspect) {
+                                            setScaleY(fitScale);
+                                          }
+                                        }
+                                      }
+                                    } catch (e) {
+                                      console.error(e);
+                                    }
+                                  }}
+                                  style={{
+                                    background: 'rgba(16, 185, 129, 0.1)',
+                                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                                    color: '#10b981',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  📐 Vừa khung
+                                </button>
+                              </div>
+                            </div>
+
+                            <div style={{ flex: 1, minHeight: 0, background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--color-surface-light)', position: 'relative' }}>
+                              <iframe
+                                ref={previewIframeRef}
+                                src={directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  border: 'none',
+                                  background: 'white'
+                                }}
+                              />
+                              {webPreviewLoading && (
+                                <div style={{
+                                  position: 'absolute',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  background: 'rgba(15, 23, 42, 0.65)',
+                                  backdropFilter: 'blur(3px)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '12px',
+                                  zIndex: 10
+                                }}>
+                                  <svg
+                                    style={{
+                                      width: '36px',
+                                      height: '36px',
+                                      color: 'var(--color-primary)',
+                                      animation: 'spin 1s linear infinite'
+                                    }}
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  <span style={{ fontSize: '0.85rem', color: 'white', fontWeight: 600 }}>
+                                    Đang đợi phản hồi từ Agent...
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ ...styles.modalFooter, marginTop: '15px', flexShrink: 0, borderTop: '1px solid var(--color-surface-light)', paddingTop: '12px' }}>
+                    {webPreviewModal.html !== 'LOADING' && !webPreviewModal.html.startsWith('ERROR:') && (
+                      <button
+                        style={{
+                          ...styles.smallBtn,
+                          padding: '8px 14px',
+                          fontSize: '0.78rem',
+                          background: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'white',
+                        }}
+                        onClick={() => {
+                          const blob = new Blob([webPreviewModal!.html], { type: 'text/html;charset=utf-8' });
+                          const url = URL.createObjectURL(blob);
+                          window.open(url, '_blank');
+                        }}
+                      >
+                        ↗️ Xem mã HTML gốc
+                      </button>
+                    )}
+                    <button
+                      style={{
+                        ...styles.smallBtn,
+                        padding: '8px 14px',
+                        fontSize: '0.78rem',
+                        borderColor: 'var(--color-secondary)',
+                        color: 'var(--color-secondary)',
+                        marginLeft: '8px'
+                      }}
+                      onClick={() => setWebPreviewModal((prev) => prev ? { ...prev, isOpen: false } : null)}
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </motion.div>
+              );
+            })()}
           </div>
         )}
       </AnimatePresence>

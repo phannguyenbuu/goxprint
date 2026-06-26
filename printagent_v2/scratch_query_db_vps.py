@@ -16,22 +16,25 @@ from pathlib import Path
 env_path = Path("/opt/printagent/.env")
 if env_path.exists():
     load_dotenv(env_path)
-db_url = os.getenv("DATABASE_URL", "postgresql://postgres:myPass@localhost:5432/GoPrinx")
-if db_url.startswith("postgresql+psycopg2://"):
-    db_url = db_url.replace("postgresql+psycopg2://", "postgresql://")
+from app import db, AgentNode
+import sys
 
-print("Connecting to DB:", db_url)
-try:
-    conn = psycopg2.connect(db_url)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, lead, printer_name, ip, is_online FROM "Printer"')
-    rows = cursor.fetchall()
-    print("Found", len(rows), "printers:")
-    for r in rows:
-        print(f"ID: {r[0]} | Lead: {r[1]} | Name: {r[2]} | IP: {r[3]} | Online: {r[4]}")
-    conn.close()
-except Exception as e:
-    print("Error querying database:", e)
+def main():
+    try:
+        from sqlalchemy import text
+        from datetime import timezone
+        
+        # Cấu hình app để query DB
+        from app import app
+        with app.app_context():
+            agents = db.session.query(AgentNode).all()
+            for p in agents:
+                print(f"ID: {p.id} | Name: {p.agent_uid} | IP: {p.ip_address} | Online: {p.is_online} | Last Seen: {p.last_seen_at} | Changed At: {p.online_changed_at}")
+    except Exception as e:
+        print(f"STDERR:\n{e}", file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
 """
 
 import sys

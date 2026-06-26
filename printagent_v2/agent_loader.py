@@ -260,8 +260,18 @@ def main():
             log_debug("Importing agent.main...")
             import agent.main
             log_debug("Imported agent.main successfully. Calling main()...")
-            
-            sys.exit(agent.main.main())
+            try:
+                sys.exit(agent.main.main())
+            except Exception as e:
+                import traceback
+                log_debug(f"CRASH in main(): {traceback.format_exc()}")
+                sys.exit(1)
+            except BaseException as run_exc:
+                import traceback
+                log_debug(f"Fatal error running agent core: {run_exc}\n{traceback.format_exc()}")
+                sys.stdout.flush()
+                safe_input("Press Enter to exit...")
+                sys.exit(1)
         except SystemExit as sys_exit:
             log_debug(f"SystemExit raised with code: {sys_exit.code}")
             sys.stdout.flush()

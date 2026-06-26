@@ -130,10 +130,11 @@ class TrayController:
         return str(value or "").strip()[:limit]
 
     def _build_tip_text(self, version: str = "") -> str:
+        base_text = f"{DEFAULT_TRAY_TIP} v{self.app_version}" if self.app_version else DEFAULT_TRAY_TIP
         version_text = str(version or "").strip()
         if version_text:
-            return self._clip_text(f"{DEFAULT_TRAY_TIP} - Updated version {version_text}", 127)
-        return DEFAULT_TRAY_TIP
+            return self._clip_text(f"{base_text} - Updated version {version_text}", 127)
+        return self._clip_text(base_text, 127)
 
     @staticmethod
     def _read_update_notice() -> str:
@@ -277,80 +278,12 @@ class TrayController:
         if not menu:
             return
         try:
-            from agent.config import AppConfig
-            config = AppConfig.load()
-
-            version_text = f"Version (v{self.app_version})" if self.app_version else "Version"
             user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show")
-            user32.AppendMenuW(menu, MF_STRING, ID_VERSION, version_text)
-            user32.AppendMenuW(menu, MF_STRING, ID_FORCE_UPDATE, "Force Update (Cập nhật)")
             user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-
-            # Polling Settings
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("polling.enabled", True) else MF_UNCHECKED),
-                2001,
-                "Polling Active",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("polling.device_enabled", True) else MF_UNCHECKED),
-                2002,
-                "  Device Polling",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("polling.control_enabled", True) else MF_UNCHECKED),
-                2003,
-                "  Control Polling",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("polling.scan_enabled", True) else MF_UNCHECKED),
-                2004,
-                "  Scan Polling",
-            )
-
-            user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-
-            # Modules Settings
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("modules.ricoh.enabled", True) else MF_UNCHECKED),
-                2005,
-                "Module Ricoh",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("modules.toshiba.enabled", True) else MF_UNCHECKED),
-                2006,
-                "Module Toshiba",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("modules.ftp.enabled", True) else MF_UNCHECKED),
-                2007,
-                "Module FTP",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("modules.updater.enabled", True) else MF_UNCHECKED),
-                2008,
-                "Module Updater",
-            )
-            user32.AppendMenuW(
-                menu,
-                MF_STRING | (MF_CHECKED if config.get_bool("modules.web.enabled", True) else MF_UNCHECKED),
-                2009,
-                "Module Web Server",
-            )
-
-            user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-            user32.AppendMenuW(menu, MF_STRING, ID_CLOSE, "Close")
+            user32.AppendMenuW(menu, MF_STRING, ID_CLOSE, "Quit (Thoát)")
             
             user32.SetForegroundWindow(self._hwnd)
-            pt = POINT()
+            pt = wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(pt))
             user32.TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, self._hwnd, None)
             user32.PostMessageW(self._hwnd, WM_USER + 21, 0, 0)
@@ -402,7 +335,7 @@ class TrayController:
                 return 0
             if msg == WM_USER + 20:
                 if lparam in (WM_LBUTTONDBLCLK, WM_LBUTTONUP):
-                    self._show()
+                    self._show_version_dialog()
                 elif lparam == WM_RBUTTONUP:
                     self._show_menu()
                 return 0
@@ -483,12 +416,6 @@ class TrayController:
 
         user32.ShowWindow(hwnd, SW_HIDE)
         user32.UpdateWindow(hwnd)
-
-        from agent.services.runtime import is_launched_as_secret_command
-        if is_launched_as_secret_command():
-            LOGGER.info("Launched as secret command; showing GUI immediately")
-            self._show()
-            threading.Thread(target=self._show_version_dialog, daemon=True, name="gui-version-dialog").start()
 
         msg = wintypes.MSG()
         while not self._closed:

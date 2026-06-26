@@ -34,7 +34,7 @@ from models import (
 )
 
 LOGGER = logging.getLogger(__name__)
-ONLINE_STALE_SECONDS = 600
+ONLINE_STALE_SECONDS = 60
 AGENT_RELEASE_MANIFEST_FILE = Path("storage/releases/agent_release.json")
 AGENT_RELEASE_BINARY_PATH = Path("static/releases/printagent.exe")
 TASK_STATUS_VALUES = {status.value for status in TaskStatus}

@@ -33,7 +33,7 @@ from serializers import (
     _upsert_printer_from_polling,
     _apply_printer_enabled_state,
 )
-from models import Printer, PrinterControlCommand, ScanEmailAlias
+from models import Printer, PrinterControlCommand, ScanEmailAlias, AgentNode, AgentPresenceLog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -102,6 +102,39 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "gateway_mac": _to_text(request.args.get("gateway_mac")),
                 },
             )
+
+            # Heartbeat update: refresh last_seen_at and is_online since controls check-in is the most frequent agent activity
+            now = datetime.now(timezone.utc)
+            agent = session.execute(
+                select(AgentNode).where(
+                    AgentNode.lead == lead_valid,
+                    AgentNode.lan_uid == lan_uid,
+                    AgentNode.agent_uid == agent_uid
+                )
+            ).scalar_one_or_none()
+            if agent:
+                agent.last_seen_at = now
+                if not agent.is_online:
+                    agent.is_online = True
+                    agent.online_changed_at = now
+                    session.add(
+                        AgentPresenceLog(
+                            lead=lead_valid,
+                            lan_uid=lan_uid,
+                            agent_uid=agent_uid,
+                            hostname=agent.hostname or "",
+                            local_ip=agent.local_ip or "",
+                            local_mac=agent.local_mac or "",
+                            app_version=agent.app_version or "",
+                            run_mode=agent.run_mode or "web",
+                            web_port=int(agent.web_port or 9173),
+                            is_online=True,
+                            changed_at=now,
+                            last_seen_at=now,
+                        )
+                    )
+                session.commit()
+
             from sqlalchemy import or_
 
             stmt = select(Printer).where(Printer.lead == lead_valid, Printer.lan_uid == lan_uid).order_by(Printer.id.asc())
@@ -355,7 +388,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             else:
                 if ok_value:
                     command.status = "success"
-                    command.error_message = ""
+                    command.error_message = error_message or ""
                     command.responded_at = responded_at
                     if printer is not None:
                         _apply_printer_enabled_state(session, printer, bool(command.desired_enabled), responded_at)

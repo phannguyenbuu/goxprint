@@ -355,7 +355,7 @@ def _apply_printer_enabled_state(session: Any, printer: Printer, enabled: bool, 
 
 
 def _refresh_stale_offline(session: Any, lead: str = "", lan_uid: str = "", agent_uid: str = "") -> None:
-    ONLINE_STALE_SECONDS = 600
+    ONLINE_STALE_SECONDS = 60
     stale_before = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_STALE_SECONDS)
     stmt = select(Printer).where(Printer.is_online.is_(True), Printer.updated_at < stale_before)
     if lead:
@@ -377,9 +377,9 @@ def _refresh_stale_agent_offline(
     lead: str = "",
     lan_uid: str = "",
     agent_uid: str = "",
-    stale_seconds: int = 600,
+    stale_seconds: int = 60,
 ) -> None:
-    stale_seconds = max(30, int(stale_seconds or 600))
+    stale_seconds = max(30, int(stale_seconds or 60))
     stale_before = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
     stmt = select(AgentNode).where(AgentNode.is_online.is_(True), AgentNode.last_seen_at < stale_before)
     if lead:
