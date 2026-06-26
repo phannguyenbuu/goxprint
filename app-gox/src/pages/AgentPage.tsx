@@ -21,7 +21,6 @@ import {
   getAgentUtilityCommands,
   triggerAgentUtilityExec,
   triggerEmergencyRestart,
-  deleteAgentNode,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -814,25 +813,6 @@ export function AgentPage() {
       if (showLoader) setLanSitesLoading(false);
     }
   }, [showToast]);
-
-  const handleDeleteAgent = useCallback(async (agentId: number, hostname: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa Agent "${hostname}" (ID: ${agentId}) khỏi mạng LAN này?`)) {
-      return;
-    }
-    try {
-      showToast('Đang xóa Agent...', 'pending');
-      const res = await deleteAgentNode(agentId);
-      if (res.ok) {
-        showToast('Xóa Agent thành công!', 'success');
-        fetchLanSitesData(false);
-      } else {
-        throw new Error(res.error || 'Lỗi khi xóa Agent');
-      }
-    } catch (err: any) {
-      console.error(err);
-      showToast(err.message || 'Không thể xóa Agent', 'error');
-    }
-  }, [fetchLanSitesData, showToast]);
 
   useEffect(() => {
     fetchLanSitesData(true);
@@ -1910,7 +1890,7 @@ export function AgentPage() {
             }}
             onClick={() => setActiveTab('agents')}
           >
-            💻 Máy tính ({selectedLan?.agents?.length ?? 0})
+            💻 Máy tính ({selectedLan?.agents?.filter((a: any) => a.is_online).length ?? 0})
           </button>
           <button
             style={{
@@ -1944,10 +1924,10 @@ export function AgentPage() {
                 style={styles.tabContent}
               >
                 <AnimatedList>
-                  {selectedLan.agents.length === 0 ? (
-                    <div style={styles.emptyText}>Không có Agent nào kết nối trong mạng LAN này.</div>
+                  {selectedLan.agents.filter((a: any) => a.is_online).length === 0 ? (
+                    <div style={styles.emptyText}>Không có Agent nào đang online trong mạng LAN này.</div>
                   ) : (
-                    selectedLan.agents.map((agent) => {
+                    selectedLan.agents.filter((a: any) => a.is_online).map((agent) => {
                       const isOnline = agent.is_online;
                       return (
                         <GlowCard key={agent.agent_uid}>
@@ -2075,27 +2055,6 @@ export function AgentPage() {
                                 >
                                   🛠️ Mở trang Tiện ích
                                 </button>
-                                {!isOnline && (
-                                  <button
-                                    onClick={() => handleDeleteAgent(agent.id, agent.hostname)}
-                                    style={{
-                                      color: '#ef4444',
-                                      fontWeight: 700,
-                                      border: '1px solid #ef4444',
-                                      borderRadius: '6px',
-                                      padding: '4px 8px',
-                                      fontSize: '0.68rem',
-                                      background: 'rgba(239, 68, 68, 0.05)',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      marginLeft: '8px',
-                                    }}
-                                  >
-                                    🗑️ Xóa Agent
-                                  </button>
-                                )}
                               </span>
                             </div>
                             <div style={styles.detailRow}>
