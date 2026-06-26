@@ -1405,7 +1405,7 @@ export function AgentPage() {
       showToast('Vui lòng nhập tên điểm scan', 'error');
       return;
     }
-    if (!email || !email.includes('@')) {
+    if (email && !email.includes('@')) {
       showToast('Địa chỉ email không hợp lệ', 'error');
       return;
     }
@@ -2793,11 +2793,11 @@ export function AgentPage() {
                         value={publicFtpData.name}
                         onChange={(e) => setPublicFtpData((p) => ({ ...p, name: e.target.value }))}
                       />
-                      <span style={styles.formHelpText}>Tên sẽ được dùng cho cả FTP folder và mục scan trên máy photocopy.</span>
+                      <span style={styles.formHelpText}>Tên hiển thị trên máy photocopy và tên thư mục lưu trữ FTP.</span>
                     </div>
 
                     <div style={styles.formGroup}>
-                      <label style={styles.formLabel}>Địa chỉ Email *</label>
+                      <label style={styles.formLabel}>Địa chỉ Email</label>
                       <input
                         type="email"
                         style={styles.modalInput}
@@ -2805,7 +2805,7 @@ export function AgentPage() {
                         value={publicFtpData.email}
                         onChange={(e) => setPublicFtpData((p) => ({ ...p, email: e.target.value }))}
                       />
-                      <span style={styles.formHelpText}>Mã FTP/Folder scan sẽ tự động được gán theo email này.</span>
+                      <span style={styles.formHelpText}>Email dùng để lưu thông tin tham chiếu trong hệ thống (không bắt buộc).</span>
                     </div>
 
                     <div style={styles.formGroup}>

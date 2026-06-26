@@ -324,11 +324,11 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         command.error_message = json.dumps(sync_data, ensure_ascii=False)
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
-                    if command.command_type == "add_scan_email_dest" and wizard_short_name and wizard_source_email:
+                    if command.command_type == "add_scan_email_dest" and wizard_short_name:
                         try:
                             import json as _json
                             # Extract email from command_params as fallback
-                            email_for_alias = wizard_source_email
+                            email_for_alias = wizard_source_email or ""
                             if not email_for_alias:
                                 try:
                                     cp = _json.loads(command.command_params or "{}")
@@ -336,49 +336,48 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 except Exception:
                                     pass
 
-                            if email_for_alias and wizard_short_name:
-                                existing_alias = session.execute(
-                                    select(ScanEmailAlias).where(
-                                        ScanEmailAlias.lead == lead,
-                                        ScanEmailAlias.printer_id == int(command.printer_id),
-                                        ScanEmailAlias.short_name == wizard_short_name,
-                                    )
-                                ).scalar_one_or_none()
-                                if existing_alias is None:
-                                    alias = ScanEmailAlias(
-                                        lead=lead,
-                                        printer_id=int(command.printer_id),
-                                        email=email_for_alias,
-                                        short_name=wizard_short_name,
-                                        registration_no=wizard_reg_no or "",
-                                        entry_name=wizard_entry_name or "",
-                                        ftp_host=wizard_ftp_host or "",
-                                        ftp_port=wizard_ftp_port or 2121,
-                                        ftp_url=wizard_ftp_url or "",
-                                        ftp_upload_url=wizard_ftp_upload_url or "",
-                                        ftp_upload_path=wizard_ftp_upload_path or "",
-                                    )
-                                    session.add(alias)
-                                else:
-                                    # Update existing record
-                                    existing_alias.email = email_for_alias
-                                    existing_alias.registration_no = wizard_reg_no or existing_alias.registration_no
-                                    existing_alias.entry_name = wizard_entry_name or existing_alias.entry_name
-                                    if wizard_ftp_host:
-                                        existing_alias.ftp_host = wizard_ftp_host
-                                    if wizard_ftp_port:
-                                        existing_alias.ftp_port = wizard_ftp_port
-                                    if wizard_ftp_url:
-                                        existing_alias.ftp_url = wizard_ftp_url
-                                    if wizard_ftp_upload_url:
-                                        existing_alias.ftp_upload_url = wizard_ftp_upload_url
-                                    if wizard_ftp_upload_path:
-                                        existing_alias.ftp_upload_path = wizard_ftp_upload_path
-                                LOGGER.info(
-                                    "[polling_control_result] Upserted ScanEmailAlias: lead=%s printer=%s email=%s short_name=%s ftp=%s:%s",
-                                    lead, command.printer_id, email_for_alias, wizard_short_name,
-                                    wizard_ftp_host, wizard_ftp_port,
+                            existing_alias = session.execute(
+                                select(ScanEmailAlias).where(
+                                    ScanEmailAlias.lead == lead,
+                                    ScanEmailAlias.printer_id == int(command.printer_id),
+                                    ScanEmailAlias.short_name == wizard_short_name,
                                 )
+                            ).scalar_one_or_none()
+                            if existing_alias is None:
+                                alias = ScanEmailAlias(
+                                    lead=lead,
+                                    printer_id=int(command.printer_id),
+                                    email=email_for_alias,
+                                    short_name=wizard_short_name,
+                                    registration_no=wizard_reg_no or "",
+                                    entry_name=wizard_entry_name or "",
+                                    ftp_host=wizard_ftp_host or "",
+                                    ftp_port=wizard_ftp_port or 2121,
+                                    ftp_url=wizard_ftp_url or "",
+                                    ftp_upload_url=wizard_ftp_upload_url or "",
+                                    ftp_upload_path=wizard_ftp_upload_path or "",
+                                )
+                                session.add(alias)
+                            else:
+                                # Update existing record
+                                existing_alias.email = email_for_alias
+                                existing_alias.registration_no = wizard_reg_no or existing_alias.registration_no
+                                existing_alias.entry_name = wizard_entry_name or existing_alias.entry_name
+                                if wizard_ftp_host:
+                                    existing_alias.ftp_host = wizard_ftp_host
+                                if wizard_ftp_port:
+                                    existing_alias.ftp_port = wizard_ftp_port
+                                if wizard_ftp_url:
+                                    existing_alias.ftp_url = wizard_ftp_url
+                                if wizard_ftp_upload_url:
+                                    existing_alias.ftp_upload_url = wizard_ftp_upload_url
+                                if wizard_ftp_upload_path:
+                                    existing_alias.ftp_upload_path = wizard_ftp_upload_path
+                            LOGGER.info(
+                                "[polling_control_result] Upserted ScanEmailAlias: lead=%s printer=%s email=%s short_name=%s ftp=%s:%s",
+                                lead, command.printer_id, email_for_alias, wizard_short_name,
+                                wizard_ftp_host, wizard_ftp_port,
+                            )
                         except Exception as alias_exc:
                             LOGGER.warning("[polling_control_result] Failed to upsert ScanEmailAlias: %s", alias_exc)
                 else:

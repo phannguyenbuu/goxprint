@@ -2498,18 +2498,20 @@ if ($node) {{ $node }}
                     LOGGER.warning("[PollingBridge] Failed to parse command_params: %s", parse_exc)
 
                 email = str(params.get("email", "") or "").strip().lower()
-                if not email or "@" not in email:
-                    raise ValueError(f"Invalid or missing email in command_params: {params!r}")
+                if email and "@" not in email:
+                    raise ValueError(f"Invalid email in command_params: {params!r}")
 
-                # Use user-provided name if available, else generate DOS-style short name
+                # Use user-provided name
                 custom_name = str(params.get("name", "") or "").strip()
-                short_name = custom_name if custom_name else self._make_ftp_short_name(email)
-                LOGGER.info("[PollingBridge] Adding scan destination for email=%s ftp_site_name=%s on printer=%s", email, short_name, printer.ip)
+                if not custom_name:
+                    raise ValueError(f"Missing name in command_params: {params!r}")
+                short_name = custom_name
+                LOGGER.info("[PollingBridge] Adding scan destination for name=%s email=%s ftp_site_name=%s on printer=%s", custom_name, email, short_name, printer.ip)
 
                 # Create FTP site + register address book entry on copier
                 result = self._ricoh_service.setup_scan_destination(
                     printer=printer,
-                    username=email,
+                    username=custom_name,
                     ftp_site_name=short_name,
                     email=email,
                 )

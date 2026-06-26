@@ -336,10 +336,13 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         body = request.get_json(silent=True) or {}
         email = str(body.get("email", "")).strip().lower()
         name = str(body.get("name", "")).strip()
-        if not email or "@" not in email:
-            return jsonify({"ok": False, "error": "Valid email address required"}), 400
         if not name:
-            name = email.split("@")[0]  # fallback: dùng phần trước @ làm tên
+            if email:
+                name = email.split("@")[0]
+            else:
+                return jsonify({"ok": False, "error": "Tên điểm scan là bắt buộc"}), 400
+        if email and "@" not in email:
+            return jsonify({"ok": False, "error": "Địa chỉ email không hợp lệ"}), 400
 
         requested_at = datetime.now(timezone.utc)
         with session_factory() as session:

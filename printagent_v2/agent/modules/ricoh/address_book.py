@@ -748,14 +748,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
         goxprint_base = user_temp_root() / "ftp"
         ftp_root_path = goxprint_base  # FTP site serves the /ftp/ root
 
-        # Set folder_name to email if present, otherwise fallback to empty (root)
-        email_clean = str(email or "").strip()
-        if email_clean:
-            folder_name = email_clean
-            subfolder_path = goxprint_base / folder_name
-        else:
-            folder_name = ""
-            subfolder_path = goxprint_base
+        # Set folder_name to safe_username (Tên điểm scan safe version) instead of email
+        folder_name = safe_username
+        subfolder_path = goxprint_base / folder_name
         try:
             subfolder_path.mkdir(parents=True, exist_ok=True)
         except Exception:
