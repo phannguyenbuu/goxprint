@@ -2234,7 +2234,8 @@ export function AgentPage() {
                             </div>
                           </div>
 
-                          {/* Relay Target Agent selector */}
+                          {/* Relay Target Agent selector - Temporarily hidden per user request */}
+                          {/*
                           <div style={styles.detailRow}>
                             <span style={styles.detailLabel}>Target Agent:</span>
                             <select
@@ -2255,6 +2256,7 @@ export function AgentPage() {
                               )}
                             </select>
                           </div>
+                          */}
 
                           {/* Sync Status Box */}
                           <div
@@ -2442,7 +2444,7 @@ export function AgentPage() {
                               disabled={onlineAgents.length === 0 || !selectedAgentUid}
                               title="Xem trực tiếp trang quản trị Web Image Monitor của máy photocopy này bằng iframe"
                             >
-                              🌐 Mở web setting từ xa
+                              🌐 Web setting
                             </button>
 
                             <button
