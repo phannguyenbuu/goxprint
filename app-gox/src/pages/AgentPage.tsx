@@ -901,11 +901,14 @@ export function AgentPage() {
   });
 
   // Commands that return content via RuntimeError — show in view modal instead of error
-  const VIEW_COMMANDS = new Set(['view_settings_json', 'view_stout', 'view_sterror']);
+  const VIEW_COMMANDS = new Set(['view_settings_json', 'view_stout', 'view_sterror', 'get_public_ip', 'check_watchdog', 'open_web_setting']);
   const VIEW_COMMAND_TITLES: Record<string, string> = {
     view_settings_json: '⚙️ settings.json',
     view_stout: '📄 stout.txt — 100 dòng gần nhất',
     view_sterror: '🔴 sterror.txt — 100 dòng gần nhất',
+    get_public_ip: '🌍 IP Public',
+    check_watchdog: '🩺 Check Watchdog',
+    open_web_setting: '🌐 Web setting',
   };
 
   const loadUtilitySettings = useCallback(async (agent: any) => {
@@ -1039,6 +1042,11 @@ export function AgentPage() {
   const handleTriggerUtilityExec = useCallback(async (command: string, commandContent: string) => {
     if (!selectedUtilityAgent) return;
     
+    // Find cmd in local state utilityCommands
+    const cmdObj = utilityCommands.find(c => c.command === command);
+    const isOutputModal = cmdObj?.output_modal || VIEW_COMMANDS.has(command);
+    const displayTitle = cmdObj?.label || VIEW_COMMAND_TITLES[command] || command;
+
     let content = commandContent;
     if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
       const isChangeIp = command === 'change_agent_ip';
@@ -1073,11 +1081,29 @@ export function AgentPage() {
                   const statusRes = await getCommandStatus(commandId);
                   if (statusRes.status === 'success') {
                     clearInterval(timer);
-                    setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+                    if (isOutputModal) {
+                      setViewOutputModal({
+                        isOpen: true,
+                        title: displayTitle,
+                        content: statusRes.result_payload || statusRes.result || '(không có nội dung)',
+                      });
+                      setUtilityStatusMsg(null);
+                    } else {
+                      setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+                    }
                     setUtilityActionPending(null);
                   } else if (statusRes.status === 'failed' || !statusRes.ok) {
                     clearInterval(timer);
-                    setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                    if (isOutputModal) {
+                      setViewOutputModal({
+                        isOpen: true,
+                        title: displayTitle,
+                        content: statusRes.error || statusRes.result_payload || statusRes.result || '(không có nội dung)',
+                      });
+                      setUtilityStatusMsg(null);
+                    } else {
+                      setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                    }
                     setUtilityActionPending(null);
                   } else {
                     const elapsedSec = Math.round(elapsed / 1000);
@@ -1119,16 +1145,24 @@ export function AgentPage() {
           const statusRes = await getCommandStatus(commandId);
           if (statusRes.status === 'success') {
             clearInterval(timer);
-            setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+            if (isOutputModal) {
+              setViewOutputModal({
+                isOpen: true,
+                title: displayTitle,
+                content: statusRes.result_payload || statusRes.result || '(không có nội dung)',
+              });
+              setUtilityStatusMsg(null);
+            } else {
+              setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+            }
             setUtilityActionPending(null);
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
-            if (VIEW_COMMANDS.has(command)) {
-              // View commands return content via RuntimeError — show in modal, not as error
+            if (isOutputModal) {
               setViewOutputModal({
                 isOpen: true,
-                title: VIEW_COMMAND_TITLES[command] || command,
-                content: statusRes.error || '(không có nội dung)',
+                title: displayTitle,
+                content: statusRes.error || statusRes.result_payload || statusRes.result || '(không có nội dung)',
               });
               setUtilityStatusMsg(null);
             } else {
@@ -1143,11 +1177,11 @@ export function AgentPage() {
           // fetchApi may throw (not return) when HTTP status is error.
           // For view commands, the thrown Error.message IS the content we want to display.
           const errMsg: string = pollErr?.message || String(pollErr || '');
-          if (VIEW_COMMANDS.has(command) && errMsg.startsWith('[PATH]')) {
+          if (isOutputModal && (errMsg.startsWith('[PATH]') || errMsg.includes('stout') || errMsg.includes('sterror') || errMsg.includes('settings.json'))) {
             clearInterval(timer);
             setViewOutputModal({
               isOpen: true,
-              title: VIEW_COMMAND_TITLES[command] || command,
+              title: displayTitle,
               content: errMsg,
             });
             setUtilityStatusMsg(null);
@@ -1161,7 +1195,7 @@ export function AgentPage() {
       setUtilityStatusMsg({ text: `Lỗi: ${err.message}`, isError: true });
       setUtilityActionPending(null);
     }
-  }, [selectedUtilityAgent]);
+  }, [selectedUtilityAgent, utilityCommands]);
 
   const handleEmergencyRestart = useCallback(async () => {
     if (!selectedUtilityAgent) return;
@@ -3111,77 +3145,333 @@ export function AgentPage() {
                         🖥️ Công cụ hệ thống Windows
                       </h4>
                       
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                         {/* Dynamic commands from JSON — thêm lệnh mới vào utility_commands.json trên VPS là xong */}
                         {utilityCommandsLoading ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '8px 0' }}>
+                          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '8px 0', justifyContent: 'center' }}>
                             <LoadingSpinner size="sm" /> Đang tải danh sách lệnh...
                           </div>
-                        ) : utilityCommands.length > 0 ? (
-                          utilityCommands
-                            .filter((cmd: any) => cmd.command !== 'dxdiag')
-                            .map((cmd: any) => (
-                              <button
-                                key={cmd.command}
-                                onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
-                                disabled={utilityActionPending !== null}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '12px',
-                                  background: 'var(--color-surface-light)',
-                                  border: '1px solid var(--color-surface-light)',
-                                  borderRadius: '8px',
-                                  padding: '10px 12px',
-                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                  textAlign: 'left',
-                                  width: '100%',
-                                  transition: 'all 0.2s',
-                                  opacity: utilityActionPending !== null ? 0.6 : 1,
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (utilityActionPending === null) {
-                                    e.currentTarget.style.borderColor = 'var(--color-primary)';
-                                    e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                                  }
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                                  e.currentTarget.style.background = 'var(--color-surface-light)';
-                                }}
-                              >
-                                <div style={{ fontSize: '1.4rem' }}>{cmd.icon || '🔧'}</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>{cmd.label}</div>
-                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>{cmd.description}</div>
-                                </div>
-                                {utilityActionPending === cmd.command && <LoadingSpinner size="sm" />}
-                              </button>
-                            ))
                         ) : (
-                          // Fallback: nếu chưa có JSON, dùng 2 lệnh mặc định
                           <>
-                            <button onClick={() => handleTriggerUtility('printers')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
-                              <div style={{ fontSize: '1.4rem' }}>🖨️</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Danh sách Máy in & Thiết bị</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở Control Panel \ Devices and Printers</div>
+                            {utilityCommands.length > 0 ? (
+                              utilityCommands
+                                .filter((cmd: any) => cmd.command !== 'dxdiag')
+                                .map((cmd: any) => {
+                                  const isEmergency = cmd.command === 'emergency_restart';
+                                  return (
+                                    <button
+                                      key={cmd.command}
+                                      onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
+                                      disabled={utilityActionPending !== null}
+                                      style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        background: 'var(--color-surface-light)',
+                                        border: isEmergency ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid var(--color-surface-light)',
+                                        borderRadius: '12px',
+                                        padding: '16px 8px',
+                                        cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                        textAlign: 'center',
+                                        width: '100%',
+                                        transition: 'all 0.2s',
+                                        opacity: utilityActionPending !== null ? 0.6 : 1,
+                                        minHeight: '108px',
+                                        boxSizing: 'border-box',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        if (utilityActionPending === null) {
+                                          e.currentTarget.style.borderColor = isEmergency ? '#ef4444' : 'var(--color-primary)';
+                                          e.currentTarget.style.background = isEmergency ? 'rgba(239, 68, 68, 0.05)' : 'rgba(59, 130, 246, 0.05)';
+                                        }
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.borderColor = isEmergency ? 'rgba(239, 68, 68, 0.25)' : 'var(--color-surface-light)';
+                                        e.currentTarget.style.background = 'var(--color-surface-light)';
+                                      }}
+                                    >
+                                      <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        {utilityActionPending === cmd.command ? <LoadingSpinner size="sm" /> : (cmd.icon || '🔧')}
+                                      </div>
+                                      <div style={{
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        color: isEmergency ? '#ef4444' : 'var(--color-text)',
+                                        lineHeight: '1.2',
+                                        wordBreak: 'break-word',
+                                      }}>
+                                        {cmd.label}
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                            ) : (
+                              // Fallback: nếu chưa có JSON, dùng 2 lệnh mặc định
+                              <>
+                                <button
+                                  onClick={() => handleTriggerUtility('printers')}
+                                  disabled={utilityActionPending !== null}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    background: 'var(--color-surface-light)',
+                                    border: '1px solid var(--color-surface-light)',
+                                    borderRadius: '12px',
+                                    padding: '16px 8px',
+                                    cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                    textAlign: 'center',
+                                    width: '100%',
+                                    transition: 'all 0.2s',
+                                    opacity: utilityActionPending !== null ? 0.6 : 1,
+                                    minHeight: '108px',
+                                    boxSizing: 'border-box',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (utilityActionPending === null) {
+                                      e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                    }
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                                    e.currentTarget.style.background = 'var(--color-surface-light)';
+                                  }}
+                                >
+                                  <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    {utilityActionPending === 'printers' ? <LoadingSpinner size="sm" /> : '🖨️'}
+                                  </div>
+                                  <div style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    color: 'var(--color-text)',
+                                    lineHeight: '1.2',
+                                    wordBreak: 'break-word',
+                                  }}>
+                                    Danh sách Máy in
+                                  </div>
+                                </button>
+                                <button
+                                  onClick={() => handleTriggerUtility('scan')}
+                                  disabled={utilityActionPending !== null}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    background: 'var(--color-surface-light)',
+                                    border: '1px solid var(--color-surface-light)',
+                                    borderRadius: '12px',
+                                    padding: '16px 8px',
+                                    cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                    textAlign: 'center',
+                                    width: '100%',
+                                    transition: 'all 0.2s',
+                                    opacity: utilityActionPending !== null ? 0.6 : 1,
+                                    minHeight: '108px',
+                                    boxSizing: 'border-box',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (utilityActionPending === null) {
+                                      e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                    }
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                                    e.currentTarget.style.background = 'var(--color-surface-light)';
+                                  }}
+                                >
+                                  <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    {utilityActionPending === 'scan' ? <LoadingSpinner size="sm" /> : '📂'}
+                                  </div>
+                                  <div style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    color: 'var(--color-text)',
+                                    lineHeight: '1.2',
+                                    wordBreak: 'break-word',
+                                  }}>
+                                    Thư mục Scan
+                                  </div>
+                                </button>
+                              </>
+                            )}
+
+                            {/* Static buttons: Check watchdog and Emergency Kill */}
+                            {/* Check Watchdog */}
+                            <button
+                              onClick={() => {
+                                if (!selectedUtilityAgent) return;
+                                setUtilityActionPending('check_watchdog');
+                                setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
+                                const script = `import subprocess, os, sys
+results = []
+def check(name):
+    try:
+        out = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {name}'], text=True, creationflags=0x08000000)
+        count = out.lower().count(name.lower())
+        return count
+    except:
+        return 0
+
+wd = check('cmd.exe')
+pa = check('printagent.exe')
+
+exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
+wd_exists = os.path.exists(os.path.join(exe_dir, 'watchdog.bat'))
+
+lines = []
+lines.append(f'printagent.exe: {pa} process(es) running')
+lines.append(f'watchdog.bat file: {"EXISTS" if wd_exists else "NOT FOUND"} in {exe_dir}')
+raise RuntimeError('\\n'.join(lines))`;
+                                triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', script)
+                                  .then((res: any) => {
+                                    if (res.ok && res.command_id) {
+                                      const maxPollMs = 30000;
+                                      const startTime = Date.now();
+                                      const timer = setInterval(async () => {
+                                        if (Date.now() - startTime > maxPollMs) {
+                                          clearInterval(timer);
+                                          setUtilityStatusMsg({ text: '⏱️ Timeout chờ kết quả (30s)', isError: true });
+                                          setUtilityActionPending(null);
+                                          return;
+                                        }
+                                        try {
+                                          const statusRes = await getCommandStatus(res.command_id);
+                                          if (statusRes.status === 'success') {
+                                            clearInterval(timer);
+                                            const msg = statusRes.result_payload || statusRes.result || statusRes.error || 'Hoàn thành';
+                                            setViewOutputModal({
+                                              isOpen: true,
+                                              title: '🩺 Check Watchdog',
+                                              content: msg,
+                                            });
+                                            setUtilityStatusMsg(null);
+                                            setUtilityActionPending(null);
+                                          } else if (statusRes.status === 'failed') {
+                                            clearInterval(timer);
+                                            const errMsg = statusRes.error || statusRes.result_payload || statusRes.result || 'Failed';
+                                            setViewOutputModal({
+                                              isOpen: true,
+                                              title: '🩺 Check Watchdog',
+                                              content: errMsg,
+                                            });
+                                            setUtilityStatusMsg(null);
+                                            setUtilityActionPending(null);
+                                          }
+                                        } catch {}
+                                      }, 2000);
+                                    } else {
+                                      setUtilityStatusMsg({ text: '❌ ' + (res.error || 'Không thể gửi lệnh'), isError: true });
+                                      setUtilityActionPending(null);
+                                    }
+                                  })
+                                  .catch((err: any) => {
+                                    setUtilityStatusMsg({ text: '❌ ' + err.message, isError: true });
+                                    setUtilityActionPending(null);
+                                  });
+                              }}
+                              disabled={utilityActionPending !== null}
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px',
+                                background: 'var(--color-surface-light)',
+                                border: '1px solid var(--color-surface-light)',
+                                borderRadius: '12px',
+                                padding: '16px 8px',
+                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                textAlign: 'center',
+                                width: '100%',
+                                transition: 'all 0.2s',
+                                opacity: utilityActionPending !== null ? 0.6 : 1,
+                                minHeight: '108px',
+                                boxSizing: 'border-box',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (utilityActionPending === null) {
+                                  e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'var(--color-surface-light)';
+                                e.currentTarget.style.background = 'var(--color-surface-light)';
+                              }}
+                            >
+                              <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {utilityActionPending === 'check_watchdog' ? <LoadingSpinner size="sm" /> : '🩺'}
                               </div>
-                              {utilityActionPending === 'printers' && <LoadingSpinner size="sm" />}
+                              <div style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                color: 'var(--color-text)',
+                                lineHeight: '1.2',
+                                wordBreak: 'break-word',
+                              }}>
+                                Check watchdog
+                              </div>
                             </button>
-                            <button onClick={() => handleTriggerUtility('scan')} disabled={utilityActionPending !== null} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s' }}>
-                              <div style={{ fontSize: '1.4rem' }}>📂</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thư mục Scan gốc</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục lưu trữ file scan trên PC</div>
+
+                            {/* Emergency Kill */}
+                            <button
+                              onClick={handleEmergencyRestart}
+                              disabled={utilityActionPending !== null}
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px',
+                                background: 'var(--color-surface-light)',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                borderRadius: '12px',
+                                padding: '16px 8px',
+                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                textAlign: 'center',
+                                width: '100%',
+                                transition: 'all 0.2s',
+                                opacity: utilityActionPending !== null ? 0.6 : 1,
+                                minHeight: '108px',
+                                boxSizing: 'border-box',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (utilityActionPending === null) {
+                                  e.currentTarget.style.borderColor = '#ef4444';
+                                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.05)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+                                e.currentTarget.style.background = 'var(--color-surface-light)';
+                              }}
+                            >
+                              <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {utilityActionPending === 'emergency_restart' ? <LoadingSpinner size="sm" /> : '🔌'}
                               </div>
-                              {utilityActionPending === 'scan' && <LoadingSpinner size="sm" />}
+                              <div style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                color: '#ef4444',
+                                lineHeight: '1.2',
+                                wordBreak: 'break-word',
+                              }}>
+                                Emergency Kill
+                              </div>
                             </button>
                           </>
                         )}
 
                         {/* Run command input — luôn hiển thị ở dưới cùng */}
-                        <div style={{ background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px' }}>
+                        <div style={{ background: 'var(--color-surface-light)', border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '10px 12px', gridColumn: '1 / -1' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                             <div style={{ fontSize: '1.4rem' }}>💻</div>
                             <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>Thực hiện lệnh Run</div>
@@ -3262,126 +3552,6 @@ export function AgentPage() {
                               </button>
                             ))}
                           </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 3: Emergency */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        🚨 Xử lý sự cố
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(239, 68, 68, 0.05)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
-                          Sử dụng khi Agent bị treo trong lúc cập nhật phiên bản hoặc không phản hồi lệnh thông thường. (Yêu cầu file watchdog.bat đang chạy trên máy client).
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            onClick={handleEmergencyRestart}
-                            disabled={utilityActionPending !== null}
-                            style={{
-                              flex: 1,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '8px',
-                              background: '#ef4444',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '6px',
-                              padding: '8px 16px',
-                              fontSize: '0.8rem',
-                              fontWeight: 600,
-                              cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                              opacity: utilityActionPending !== null ? 0.7 : 1,
-                              transition: 'all 0.2s'
-                            }}
-                          >
-                            {utilityActionPending === 'emergency_restart' ? <LoadingSpinner size="sm" /> : '🔌 Emergency Kill'}
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!selectedUtilityAgent) return;
-                              setUtilityActionPending('check_watchdog');
-                              setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
-                              const script = `import subprocess, os, sys
-results = []
-def check(name):
-    try:
-        out = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {name}'], text=True, creationflags=0x08000000)
-        count = out.lower().count(name.lower())
-        return count
-    except:
-        return 0
-
-wd = check('cmd.exe')
-pa = check('printagent.exe')
-
-exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
-wd_exists = os.path.exists(os.path.join(exe_dir, 'watchdog.bat'))
-
-lines = []
-lines.append(f'printagent.exe: {pa} process(es) running')
-lines.append(f'watchdog.bat file: {"EXISTS" if wd_exists else "NOT FOUND"} in {exe_dir}')
-raise RuntimeError('\\n'.join(lines))`;
-                              triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', script)
-                                .then((res: any) => {
-                                  if (res.ok && res.command_id) {
-                                    const maxPollMs = 30000;
-                                    const startTime = Date.now();
-                                    const timer = setInterval(async () => {
-                                      if (Date.now() - startTime > maxPollMs) {
-                                        clearInterval(timer);
-                                        setUtilityStatusMsg({ text: '⏱️ Timeout chờ kết quả (30s)', isError: true });
-                                        setUtilityActionPending(null);
-                                        return;
-                                      }
-                                      try {
-                                        const statusRes = await getCommandStatus(res.command_id);
-                                        if (statusRes.status === 'success') {
-                                          clearInterval(timer);
-                                          const msg = statusRes.error || statusRes.result || 'Hoàn thành';
-                                          setUtilityStatusMsg({ text: `✅ ${msg}`, isError: false });
-                                          setUtilityActionPending(null);
-                                        } else if (statusRes.status === 'failed') {
-                                          clearInterval(timer);
-                                          const errMsg = statusRes.error || 'Failed';
-                                          setUtilityStatusMsg({ text: errMsg.includes('printagent') ? `📋 ${errMsg}` : `❌ ${errMsg}`, isError: !errMsg.includes('printagent') });
-                                          setUtilityActionPending(null);
-                                        }
-                                      } catch {}
-                                    }, 2000);
-                                  } else {
-                                    setUtilityStatusMsg({ text: '❌ ' + (res.error || 'Không thể gửi lệnh'), isError: true });
-                                    setUtilityActionPending(null);
-                                  }
-                                })
-                                .catch((err: any) => {
-                                  setUtilityStatusMsg({ text: '❌ ' + err.message, isError: true });
-                                  setUtilityActionPending(null);
-                                });
-                            }}
-                            disabled={utilityActionPending !== null}
-                            style={{
-                              flex: 1,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '8px',
-                              background: 'var(--color-surface)',
-                              color: 'var(--color-text)',
-                              border: '1px solid var(--color-border)',
-                              borderRadius: '6px',
-                              padding: '8px 16px',
-                              fontSize: '0.8rem',
-                              fontWeight: 600,
-                              cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                              opacity: utilityActionPending !== null ? 0.7 : 1,
-                              transition: 'all 0.2s'
-                            }}
-                          >
-                            {utilityActionPending === 'check_watchdog' ? <LoadingSpinner size="sm" /> : '🩺 Check Watchdog'}
-                          </button>
                         </div>
                       </div>
                     </div>
