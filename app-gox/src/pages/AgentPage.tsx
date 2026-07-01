@@ -335,7 +335,6 @@ export function AgentPage() {
           path: targetPath || '',
           url: data.url
         });
-        window.open(data.url, '_blank');
       } else {
         setWebPreviewModal({
           isOpen: true,
@@ -4728,72 +4727,16 @@ raise RuntimeError('\\n'.join(lines))`;
                             </div>
 
                             <div style={{ flex: 1, minHeight: 0, background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--color-surface-light)', position: 'relative' }}>
-                              {!webPreviewModal.url ? (
-                                <iframe
-                                  ref={previewIframeRef}
-                                  src={directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl}
-                                  style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    border: 'none',
-                                    background: 'white'
-                                  }}
-                                />
-                              ) : (
-                                <div style={{
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
+                              <iframe
+                                ref={previewIframeRef}
+                                src={webPreviewModal.url ? webPreviewModal.url : (directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl)}
+                                style={{
+                                  width: '100%',
                                   height: '100%',
-                                  gap: '16px',
-                                  background: 'var(--color-surface)',
-                                  padding: '30px',
-                                  textAlign: 'center',
-                                  boxSizing: 'border-box'
-                                }}>
-                                  <span style={{ fontSize: '2.5rem' }}>🚀</span>
-                                  <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-                                    Đường hầm kết nối (Tunnel) hoạt động!
-                                  </h4>
-                                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', maxWidth: '450px', margin: 0, lineHeight: 1.5 }}>
-                                    Trang cấu hình máy in <span style={{ fontFamily: 'monospace', color: 'var(--color-text)' }}>{webPreviewModal.ip}</span> đã được mở trong một tab mới của trình duyệt.
-                                  </p>
-                                  <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
-                                    <button
-                                      onClick={() => window.open(webPreviewModal.url, '_blank')}
-                                      style={{
-                                        padding: '10px 20px',
-                                        fontSize: '0.82rem',
-                                        fontWeight: 600,
-                                        background: 'var(--color-primary)',
-                                        border: 'none',
-                                        borderRadius: '6px',
-                                        color: 'white',
-                                        cursor: 'pointer',
-                                        boxShadow: '0 4px 12px rgba(124, 106, 247, 0.2)'
-                                      }}
-                                    >
-                                      🌐 Mở lại tab trang quản trị
-                                    </button>
-                                    <button
-                                      onClick={handleCloseWebPreview}
-                                      style={{
-                                        padding: '10px 20px',
-                                        fontSize: '0.82rem',
-                                        fontWeight: 600,
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: '1px solid var(--color-surface-light)',
-                                        borderRadius: '6px',
-                                        color: 'var(--color-text-secondary)',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      🛑 Ngắt kết nối & Đóng
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
+                                  border: 'none',
+                                  background: 'white'
+                                }}
+                              />
                               {webPreviewLoading && (
                                 <div style={{
                                   position: 'absolute',
