@@ -3,6 +3,7 @@ import sys
 import shutil
 import time
 from pathlib import Path
+import urllib.request
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -11,20 +12,46 @@ except AttributeError:
 
 # --- CONFIGURATION ---
 INSTALL_DIR = Path(os.environ.get("APPDATA", "")) / "GoxPrintAgent"
-FILES_TO_EXTRACT = [
-    "printagent.exe",
-    "watchdog.bat",
-    "run_watchdog.vbs"
-]
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+WATCHDOG_BAT_CONTENT = (
+    '@echo off\n'
+    'setlocal\n'
+    'cd /d "%~dp0"\n'
+    'echo ====================================================\n'
+    'echo PrintAgent Watchdog (Update ^& Emergency)\n'
+    'echo ====================================================\n'
+    '\n'
+    ':loop\n'
+    'rem --- 1. KIỂM TRA UPDATE ---\n'
+    'if exist "printagent.update.exe" (\n'
+    '    echo [Watchdog] Found update file. Applying...\n'
+    '    taskkill /F /IM printagent.exe >nul 2>&1\n'
+    '    taskkill /F /IM agent_loader.exe >nul 2>&1\n'
+    '    timeout /T 3 /nobreak >nul\n'
+    '    if exist "printagent.exe" (\n'
+    '        rename "printagent.exe" "printagent.bak.exe" >nul 2>&1\n'
+    '    )\n'
+    '    rename "printagent.update.exe" "printagent.exe"\n'
+    '    del /f /q "printagent.bak.exe" >nul 2>&1\n'
+    '    start /B "" "printagent.exe"\n'
+    '    echo [Watchdog] Update applied successfully.\n'
+    ')\n'
+    '\n'
+    'rem --- 2. KIỂM TRA RESTART KHẨN CẤP (API) ---\n'
+    'powershell -NoProfile -Command "try { $s=Get-Content \'settings.json\' -ErrorAction Stop | ConvertFrom-Json; $url=$s.api_url; if(!$url){$url=$s.polling.url}; if(!$url){$url=\'https://agentapi.quanlymay.com\'}; $url=$url.TrimEnd(\'/\'); $url=$url -replace \'/api$\', \'\'; $hostName=$env:COMPUTERNAME; $res=Invoke-RestMethod -Uri \\"$url/api/agent/watchdog-check?hostname=$hostName\\" -TimeoutSec 10 -ErrorAction Stop; if($res -match \'RESTART\') { Write-Host \\"$(Get-Date -Format \'yyyy-MM-dd HH:mm:ss\') RESTART SIGNAL RECEIVED!\\"; Stop-Process -Name \'printagent\' -Force -ErrorAction SilentlyContinue; Stop-Process -Name \'agent_loader\' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; if(Test-Path \'printagent.exe\') { Start-Process -FilePath \'printagent.exe\' -WindowStyle Hidden; Write-Host \'Agent restarted.\' } } } catch { }"\n'
+    '\n'
+    'timeout /t 60 /nobreak >nul\n'
+    'goto loop\n'
+)
+
+RUN_WATCHDOG_VBS_CONTENT = (
+    'Set WshShell = CreateObject("WScript.Shell")\n'
+    'Set fso = CreateObject("Scripting.FileSystemObject")\n'
+    'currentFolder = fso.GetParentFolderName(WScript.ScriptFullName)\n'
+    'WshShell.CurrentDirectory = currentFolder\n'
+    'WshShell.Run chr(34) & "watchdog.bat" & Chr(34), 0\n'
+    'Set WshShell = Nothing\n'
+)
 
 def create_startup_shortcut(target_vbs: Path):
     print("Thiết lập tự động khởi chạy cùng Windows...")
@@ -91,6 +118,86 @@ def kill_existing_processes():
     except Exception as e:
         print(f" Không thể xóa registry cũ: {e}")
 
+def get_api_url_from_settings():
+    dirs_to_check = []
+    try:
+        exe_dir = Path(sys.executable).parent
+        dirs_to_check.append(exe_dir)
+    except Exception:
+        pass
+    dirs_to_check.append(Path("."))
+    dirs_to_check.append(INSTALL_DIR)
+    
+    for d in dirs_to_check:
+        settings_path = d / "settings.json"
+        if settings_path.exists():
+            try:
+                import json
+                with settings_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    api_url = data.get("api_url") or data.get("polling", {}).get("url")
+                    if api_url:
+                        print(f" Đã đọc cấu hình từ: {settings_path}")
+                        return api_url.strip()
+            except Exception:
+                pass
+    return "https://agentapi.quanlymay.com"
+
+def download_printagent(dest_path: Path, api_url: str) -> bool:
+    print("Đang kết nối tới máy chủ để tải bản PrintAgent mới nhất...")
+    base_url = api_url.strip().rstrip("/")
+    if base_url.endswith("/api"):
+        base_url = base_url[:-4]
+    
+    download_url = f"{base_url}/static/releases/printagent.exe"
+    # Anti-cache query parameter using current microsecond timestamp
+    cache_buster = f"t={int(time.time() * 1000)}"
+    download_url = f"{download_url}?{cache_buster}"
+    
+    print(f"URL tải xuống: {download_url}")
+    
+    # Headers strict anti-cache enforcement
+    req = urllib.request.Request(
+        download_url,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "User-Agent": "GoxPrintAgentInstaller/2.0"
+        }
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=45) as response:
+            total_size = int(response.headers.get('content-length', 0))
+            block_size = 1024 * 64
+            downloaded = 0
+            
+            with open(dest_path, 'wb') as f:
+                while True:
+                    buffer = response.read(block_size)
+                    if not buffer:
+                        break
+                    downloaded += len(buffer)
+                    f.write(buffer)
+                    
+                    if total_size > 0:
+                        percent = (downloaded / total_size) * 100
+                        mb_downloaded = downloaded / (1024 * 1024)
+                        mb_total = total_size / (1024 * 1024)
+                        sys.stdout.write(f"\r Đang tải: {percent:.1f}% ({mb_downloaded:.2f} MB / {mb_total:.2f} MB)...")
+                        sys.stdout.flush()
+                    else:
+                        mb_downloaded = downloaded / (1024 * 1024)
+                        sys.stdout.write(f"\r Đang tải: {mb_downloaded:.2f} MB...")
+                        sys.stdout.flush()
+            print("\n Tải xuống hoàn tất thành công!")
+            return True
+    except Exception as e:
+        print(f"\n Lỗi khi tải xuống PrintAgent: {e}")
+        return False
+
 def main():
     print("==============================================")
     print("      TRÌNH CÀI ĐẶT GOX PRINT AGENT           ")
@@ -107,27 +214,40 @@ def main():
     
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     
-    print("\nĐang giải nén các tệp tin...")
-    success_count = 0
-    for filename in FILES_TO_EXTRACT:
-        src_path = resource_path(filename)
-        dest_path = INSTALL_DIR / filename
+    # 1. Write config files dynamically
+    print("\nĐang tạo các tệp cấu hình...")
+    try:
+        with open(INSTALL_DIR / "watchdog.bat", "w", encoding="utf-8") as f:
+            f.write(WATCHDOG_BAT_CONTENT)
+        print(" Đã ghi: watchdog.bat")
         
-        if os.path.exists(src_path):
-            try:
-                shutil.copy2(src_path, dest_path)
-                print(f" Đã bung file: {filename}")
-                success_count += 1
-            except Exception as e:
-                print(f" Lỗi khi giải nén {filename}: {e}")
-        else:
-            print(f" Lỗi: Không tìm thấy file gốc {filename} trong bộ cài.")
-            
-    if success_count < len(FILES_TO_EXTRACT):
-        print("\n Lỗi: Không thể giải nén đầy đủ các thành phần.")
+        with open(INSTALL_DIR / "run_watchdog.vbs", "w", encoding="utf-8") as f:
+            f.write(RUN_WATCHDOG_VBS_CONTENT)
+        print(" Đã ghi: run_watchdog.vbs")
+    except Exception as e:
+        print(f" Lỗi khi ghi tệp cấu hình: {e}")
         input("Nhấn Enter để thoát...")
         sys.exit(1)
         
+    # 2. Download printagent.exe with cache-busting from VPS
+    api_url = get_api_url_from_settings()
+    dest_exe = INSTALL_DIR / "printagent.exe"
+    
+    success = download_printagent(dest_exe, api_url)
+    if not success:
+        print("\n Lỗi: Không thể tải xuống PrintAgent từ máy chủ.")
+        # If fallback exists, try to reuse it, otherwise fail
+        if (INSTALL_DIR / "printagent.old.exe").exists() and not dest_exe.exists():
+            try:
+                shutil.copy2(INSTALL_DIR / "printagent.old.exe", dest_exe)
+                print(" Cảnh báo: Sử dụng lại phiên bản cũ có sẵn do không tải được.")
+            except Exception:
+                input("Nhấn Enter để thoát...")
+                sys.exit(1)
+        else:
+            input("Nhấn Enter để thoát...")
+            sys.exit(1)
+            
     print("\nCài đặt file thành công!")
     
     # Configure startup
@@ -137,7 +257,7 @@ def main():
     print("\nKhởi động PrintAgent Watchdog...")
     try:
         os.startfile(str(target_vbs))
-        os.startfile(str(INSTALL_DIR / 'printagent.exe'))
+        os.startfile(str(dest_exe))
         print(" Đã khởi chạy Watchdog và Agent.")
     except Exception as e:
         print(f" Lỗi khởi chạy: {e}")

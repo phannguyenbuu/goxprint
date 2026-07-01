@@ -5,7 +5,7 @@ a = Analysis(
     ['installer.py'],
     pathex=[],
     binaries=[],
-    datas=[('dist\\printagent.exe', '.'), ('watchdog.bat', '.'), ('run_watchdog.vbs', '.')],
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
