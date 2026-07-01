@@ -964,9 +964,29 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         }
         
         with session_factory() as session:
-            printer = session.execute(
-                select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+            # Query the most recently active AgentNode for this agent_uid to get current active lan_uid
+            active_agent = session.execute(
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.last_seen_at.desc())
             ).scalars().first()
+
+            printer = None
+            if active_agent:
+                # Prioritize matching agent_uid, ip, and the active lan_uid
+                printer = session.execute(
+                    select(Printer).where(
+                        Printer.agent_uid == agent_uid,
+                        Printer.ip == printer_ip,
+                        Printer.lan_uid == active_agent.lan_uid
+                    )
+                ).scalars().first()
+
+            if not printer:
+                printer = session.execute(
+                    select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+                ).scalars().first()
+
             if not printer:
                 printer = session.execute(
                     select(Printer).where(Printer.ip == printer_ip)
