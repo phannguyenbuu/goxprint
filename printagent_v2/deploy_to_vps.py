@@ -98,10 +98,10 @@ try:
     import json
     import time
     manifest_path = root_dir / "backend" / "storage" / "releases" / "agent_release.json"
-    version_str = "2.0.14"
+    version_str = "2.0.15"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        version_str = manifest.get("version", "2.0.14")
+        version_str = manifest.get("version", "2.0.15")
     v_underscore = version_str.replace(".", "_")
     ts = int(time.time())
     

