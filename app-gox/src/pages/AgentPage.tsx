@@ -3155,7 +3155,7 @@ export function AgentPage() {
                           <>
                             {utilityCommands.length > 0 ? (
                               utilityCommands
-                                .filter((cmd: any) => cmd.command !== 'dxdiag')
+                                .filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.command !== 'open_web_setting')
                                 .map((cmd: any) => {
                                   const isEmergency = cmd.command === 'emergency_restart';
                                   return (
