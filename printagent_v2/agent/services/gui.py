@@ -2061,16 +2061,19 @@ class QuickSetupUI:
                 self.printers_list = []
                 options = []
                 for p in printers:
+                    ip_str = str(p.ip or "").strip()
+                    if not ip_str:
+                        continue
                     self.printers_list.append({
                         "id": p.id,
                         "name": p.name,
-                        "ip": p.ip,
+                        "ip": ip_str,
                         "user": p.user,
                         "password": p.password,
                         "printer_type": p.printer_type,
                         "mac_address": p.mac_address
                     })
-                    options.append(f"{p.name} ({p.ip})")
+                    options.append(f"{p.name} ({ip_str})")
                 
                 def update_cb():
                     if options:
