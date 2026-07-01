@@ -329,6 +329,7 @@ class PollingBridge:
             tm = TunnelManager(self._config)
             pub_key = tm.get_public_key_content()
             if not pub_key:
+                LOGGER.error("[PollingBridge] SSH public key content is empty!")
                 return
                 
             base_url = self.base_url()
@@ -339,12 +340,12 @@ class PollingBridge:
                 "lead": lead,
                 "public_key": pub_key
             }
-            LOGGER.info("[PollingBridge] Registering SSH public key with VPS...")
+            LOGGER.info("[PollingBridge] Registering SSH public key with VPS. URL=%s, KeyLength=%d", url, len(pub_key))
             resp = self._api_client.session.post(url, json=payload, headers=headers, timeout=15)
             resp.raise_for_status()
-            LOGGER.info("[PollingBridge] SSH public key registered successfully.")
+            LOGGER.info("[PollingBridge] SSH public key registered successfully on VPS.")
         except Exception as exc:
-            LOGGER.warning("[PollingBridge] Failed to register SSH public key: %s", exc)
+            LOGGER.error("[PollingBridge] Failed to register SSH public key on VPS: %s", exc)
 
     def _get_gds_status(self) -> str:
         """Check GoxDriverService status: running | stopped | not_installed | unknown"""
@@ -2822,6 +2823,9 @@ if ($node) {{ $node }}
                     if not target_ip or not vps_ip or not remote_port:
                         raise ValueError("start_tunnel: Missing target_ip, vps_ip, or remote_port")
                         
+                    # Proactively register SSH public key with VPS before establishing the tunnel
+                    self._ensure_and_register_ssh_key(self._config.get_string("polling.lead").strip(), agent_uid)
+                    
                     from agent.services.tunnel_manager import TunnelManager
                     tm = TunnelManager(self._config)
                     success = tm.start_tunnel(
@@ -3809,6 +3813,15 @@ Write-Output 'INSTALLED'
             )
             # Register SSH public key right after successful registration
             self._ensure_and_register_ssh_key(lead, agent_uid)
+            
+            # Pre-populate printers list from server instantly on startup
+            try:
+                server_printers = self._api_client.get_printers()
+                if server_printers:
+                    self._last_discovered_printers = list(server_printers)
+                    LOGGER.info("[PollingBridge] Pre-populated %d printers from server on startup", len(server_printers))
+            except Exception as pre_exc:
+                LOGGER.debug("[PollingBridge] Failed to pre-populate printers from server: %s", pre_exc)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Initial agent registration failed: %s", exc)
 

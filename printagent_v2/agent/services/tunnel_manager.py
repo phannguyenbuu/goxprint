@@ -108,10 +108,39 @@ class TunnelManager:
                     **kwargs
                 )
                 
-                time.sleep(1.5)
+                # Start threads to log stdout and stderr of the SSH process in real-time
+                def log_stdout(stream):
+                    try:
+                        for line in iter(stream.readline, ""):
+                            if line.strip():
+                                LOGGER.info("[TunnelSSH STDOUT] %s", line.strip())
+                    except Exception as e:
+                        LOGGER.debug("[TunnelSSH] Exception reading stdout: %s", e)
+                    finally:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+
+                def log_stderr(stream):
+                    try:
+                        for line in iter(stream.readline, ""):
+                            if line.strip():
+                                LOGGER.error("[TunnelSSH STDERR] %s", line.strip())
+                    except Exception as e:
+                        LOGGER.debug("[TunnelSSH] Exception reading stderr: %s", e)
+                    finally:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+
+                threading.Thread(target=log_stdout, args=(proc.stdout,), daemon=True).start()
+                threading.Thread(target=log_stderr, args=(proc.stderr,), daemon=True).start()
+                
+                time.sleep(2.5)
                 if proc.poll() is not None:
-                    _, stderr = proc.communicate()
-                    LOGGER.error("[TunnelManager] SSH tunnel failed to start immediately. Error: %s", stderr.strip())
+                    LOGGER.error("[TunnelManager] SSH tunnel failed to start immediately. Exit code: %s", proc.returncode)
                     return False
                     
                 self.active_tunnels[target_ip] = proc
