@@ -4380,6 +4380,31 @@ raise RuntimeError('\\n'.join(lines))`;
                           }}>
                             http://{webPreviewModal.ip}{webPreviewModal.path || '/'}
                           </div>
+                          {webPreviewModal.url && (
+                            <a
+                              href={webPreviewModal.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                background: 'var(--color-primary)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '4px 10px',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                textDecoration: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                cursor: 'pointer',
+                                marginLeft: '8px'
+                              }}
+                              title="Mở trang quản trị Web Image Monitor trong tab mới"
+                            >
+                              🔗 Mở tab mới ↗
+                            </a>
+                          )}
                         </div>
 
                         {/* Tab Selector for Preview Mode */}
