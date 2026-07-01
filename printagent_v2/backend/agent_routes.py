@@ -964,8 +964,23 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         }
         
         with session_factory() as session:
+            printer = session.execute(
+                select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+            ).scalars().first()
+            if not printer:
+                printer = session.execute(
+                    select(Printer).where(Printer.ip == printer_ip)
+                ).scalars().first()
+            if not printer:
+                return jsonify({"ok": False, "error": f"Printer with IP {printer_ip} not found in database"}), 404
+
             command = PrinterControlCommand(
+                printer_id=printer.id,
+                lead=printer.lead,
+                lan_uid=printer.lan_uid,
                 agent_uid=agent_uid,
+                printer_name=printer.printer_name,
+                ip=printer_ip,
                 command_type="trigger_utility",
                 command_params=json.dumps(params),
                 status="pending",
@@ -1016,8 +1031,23 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "target_ip": printer_ip
         }
         with session_factory() as session:
+            printer = session.execute(
+                select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+            ).scalars().first()
+            if not printer:
+                printer = session.execute(
+                    select(Printer).where(Printer.ip == printer_ip)
+                ).scalars().first()
+            if not printer:
+                return jsonify({"ok": False, "error": f"Printer with IP {printer_ip} not found in database"}), 404
+
             command = PrinterControlCommand(
+                printer_id=printer.id,
+                lead=printer.lead,
+                lan_uid=printer.lan_uid,
                 agent_uid=agent_uid,
+                printer_name=printer.printer_name,
+                ip=printer_ip,
                 command_type="trigger_utility",
                 command_params=json.dumps(params),
                 status="pending",
