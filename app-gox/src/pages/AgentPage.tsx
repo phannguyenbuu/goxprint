@@ -146,7 +146,7 @@ export function AgentPage() {
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
   const [remoteLockPrinter, setRemoteLockPrinter] = useState<{ ip: string; name: string; id: string | number; agentUid: string } | null>(null);
-  const [webPreviewModal, setWebPreviewModal] = useState<{ isOpen: boolean; title: string; html: string; ip: string; path: string; agentUid: string } | null>(null);
+  const [webPreviewModal, setWebPreviewModal] = useState<{ isOpen: boolean; title: string; html: string; ip: string; path: string; agentUid: string; url?: string } | null>(null);
   const [webPreviewLoading, setWebPreviewLoading] = useState<boolean>(false);
   const [directLan, setDirectLan] = useState<boolean>(() => {
     return localStorage.getItem('goxprint_direct_lan') === 'true';
@@ -282,6 +282,85 @@ export function AgentPage() {
   };
 
   const fetchRemotePage = async (
+    printerIp: string,
+    targetPath: string,
+    _method: string = 'GET',
+    _postData?: any,
+    _isHistoryNav: boolean = false,
+    agentUidParam?: string
+  ) => {
+    const activeAgentUid = agentUidParam || webPreviewModal?.agentUid;
+    if (!activeAgentUid) {
+      console.error('No agent UID available for remote page fetch');
+      return;
+    }
+    
+    setWebPreviewModal({
+      isOpen: true,
+      title: 'Thiết lập kết nối an toàn - ' + printerIp,
+      ip: printerIp,
+      agentUid: activeAgentUid,
+      html: 'LOADING',
+      path: targetPath || ''
+    });
+    setWebPreviewLoading(true);
+
+    if (directLan) {
+      setWebPreviewModal({
+        isOpen: true,
+        title: 'Kết nối trực tiếp LAN - ' + printerIp,
+        ip: printerIp,
+        agentUid: activeAgentUid,
+        html: 'DIRECT_LAN',
+        path: targetPath || ''
+      });
+      setWebPreviewLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/agents/${activeAgentUid}/tunnel/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_ip: printerIp, printer_port: 80 })
+      });
+      const data = await response.json();
+      if (data.ok && data.url) {
+        setWebPreviewModal({
+          isOpen: true,
+          title: 'Kết nối Máy photocopy - ' + printerIp,
+          ip: printerIp,
+          agentUid: activeAgentUid,
+          html: 'TUNNEL_CONNECTED',
+          path: targetPath || '',
+          url: data.url
+        });
+        window.open(data.url, '_blank');
+      } else {
+        setWebPreviewModal({
+          isOpen: true,
+          title: 'Kết nối lỗi - ' + printerIp,
+          ip: printerIp,
+          agentUid: activeAgentUid,
+          html: 'ERROR: ' + (data.error || 'Không thể khởi động đường hầm SSH ngược trên Agent'),
+          path: targetPath || ''
+        });
+      }
+    } catch (err: any) {
+      setWebPreviewModal({
+        isOpen: true,
+        title: 'Kết nối lỗi - ' + printerIp,
+        ip: printerIp,
+        agentUid: activeAgentUid,
+        html: 'ERROR: Lỗi hệ thống VPS: ' + (err.message || err),
+        path: targetPath || ''
+      });
+    } finally {
+      setWebPreviewLoading(false);
+    }
+  };
+
+  /* const fetchRemotePageOld = async (
     printerIp: string,
     targetPath: string,
     method: string = 'GET',
@@ -680,7 +759,7 @@ export function AgentPage() {
       setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${err.message}` } : null);
       setWebPreviewLoading(false);
     }
-  };
+  }; */
 
   const handleHistoryBack = () => {
     if (webPreviewHistoryIndex > 0 && webPreviewModal) {
@@ -713,8 +792,11 @@ export function AgentPage() {
 
   const handleCloseWebPreview = () => {
     if (webPreviewModal && webPreviewModal.agentUid) {
-      const script = `target_ip = '${webPreviewModal.ip}'\ntarget_path = 'logout'\ntarget_method = 'GET'\ntarget_data = ''`;
-      triggerAgentUtilityExec(webPreviewModal.agentUid, 'open_web_setting', script).catch(console.error);
+      fetch(`/api/agents/${webPreviewModal.agentUid}/tunnel/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_ip: webPreviewModal.ip })
+      }).catch(console.error);
     }
     setWebPreviewModal(null);
     setWebPreviewLoading(false);
@@ -4646,16 +4728,72 @@ raise RuntimeError('\\n'.join(lines))`;
                             </div>
 
                             <div style={{ flex: 1, minHeight: 0, background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--color-surface-light)', position: 'relative' }}>
-                              <iframe
-                                ref={previewIframeRef}
-                                src={directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl}
-                                style={{
-                                  width: '100%',
+                              {!webPreviewModal.url ? (
+                                <iframe
+                                  ref={previewIframeRef}
+                                  src={directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    border: 'none',
+                                    background: 'white'
+                                  }}
+                                />
+                              ) : (
+                                <div style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
                                   height: '100%',
-                                  border: 'none',
-                                  background: 'white'
-                                }}
-                              />
+                                  gap: '16px',
+                                  background: 'var(--color-surface)',
+                                  padding: '30px',
+                                  textAlign: 'center',
+                                  boxSizing: 'border-box'
+                                }}>
+                                  <span style={{ fontSize: '2.5rem' }}>🚀</span>
+                                  <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+                                    Đường hầm kết nối (Tunnel) hoạt động!
+                                  </h4>
+                                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', maxWidth: '450px', margin: 0, lineHeight: 1.5 }}>
+                                    Trang cấu hình máy in <span style={{ fontFamily: 'monospace', color: 'var(--color-text)' }}>{webPreviewModal.ip}</span> đã được mở trong một tab mới của trình duyệt.
+                                  </p>
+                                  <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+                                    <button
+                                      onClick={() => window.open(webPreviewModal.url, '_blank')}
+                                      style={{
+                                        padding: '10px 20px',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 600,
+                                        background: 'var(--color-primary)',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        color: 'white',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 4px 12px rgba(124, 106, 247, 0.2)'
+                                      }}
+                                    >
+                                      🌐 Mở lại tab trang quản trị
+                                    </button>
+                                    <button
+                                      onClick={handleCloseWebPreview}
+                                      style={{
+                                        padding: '10px 20px',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 600,
+                                        background: 'rgba(255, 255, 255, 0.05)',
+                                        border: '1px solid var(--color-surface-light)',
+                                        borderRadius: '6px',
+                                        color: 'var(--color-text-secondary)',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      🛑 Ngắt kết nối & Đóng
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                               {webPreviewLoading && (
                                 <div style={{
                                   position: 'absolute',

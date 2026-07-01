@@ -323,6 +323,29 @@ class PollingBridge:
             "gds_status": self._get_gds_status(),
         }
 
+    def _ensure_and_register_ssh_key(self, lead: str, agent_uid: str) -> None:
+        try:
+            from agent.services.tunnel_manager import TunnelManager
+            tm = TunnelManager(self._config)
+            pub_key = tm.get_public_key_content()
+            if not pub_key:
+                return
+                
+            base_url = self.base_url()
+            token = self._api_token()
+            headers = {"Content-Type": "application/json", "X-Lead-Token": token}
+            url = f"{base_url}/api/agents/{agent_uid}/register-ssh-key"
+            payload = {
+                "lead": lead,
+                "public_key": pub_key
+            }
+            LOGGER.info("[PollingBridge] Registering SSH public key with VPS...")
+            resp = self._api_client.session.post(url, json=payload, headers=headers, timeout=15)
+            resp.raise_for_status()
+            LOGGER.info("[PollingBridge] SSH public key registered successfully.")
+        except Exception as exc:
+            LOGGER.warning("[PollingBridge] Failed to register SSH public key: %s", exc)
+
     def _get_gds_status(self) -> str:
         """Check GoxDriverService status: running | stopped | not_installed | unknown"""
         try:
@@ -2789,6 +2812,43 @@ if ($node) {{ $node }}
                     self._post_control_result(command_id=command_id, ok=True, error=payload_str)
                     self._update_recent_command_status(command_id, "success", payload_str)
                     return
+                elif action == "start_tunnel":
+                    target_ip = str(params.get("target_ip", "")).strip()
+                    target_port = int(params.get("target_port", 80))
+                    vps_ip = str(params.get("vps_ip", "")).strip()
+                    remote_port = int(params.get("remote_port", 0))
+                    vps_user = str(params.get("vps_user", "ubuntu")).strip()
+                    
+                    if not target_ip or not vps_ip or not remote_port:
+                        raise ValueError("start_tunnel: Missing target_ip, vps_ip, or remote_port")
+                        
+                    from agent.services.tunnel_manager import TunnelManager
+                    tm = TunnelManager(self._config)
+                    success = tm.start_tunnel(
+                        target_ip=target_ip,
+                        target_port=target_port,
+                        vps_ip=vps_ip,
+                        remote_port=remote_port,
+                        vps_user=vps_user
+                    )
+                    if not success:
+                        raise RuntimeError("Failed to start reverse SSH tunnel on Agent")
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "stop_tunnel":
+                    target_ip = str(params.get("target_ip", "")).strip()
+                    if not target_ip:
+                        raise ValueError("stop_tunnel: Missing target_ip")
+                        
+                    from agent.services.tunnel_manager import TunnelManager
+                    tm = TunnelManager(self._config)
+                    tm.stop_tunnel(target_ip)
+                    
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
 
@@ -3733,6 +3793,8 @@ Write-Output 'INSTALLED'
                 local_ip=local_ip,
                 fingerprint=fingerprint,
             )
+            # Register SSH public key right after successful registration
+            self._ensure_and_register_ssh_key(lead, agent_uid)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Initial agent registration failed: %s", exc)
 

@@ -36,6 +36,18 @@ from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControl
 
 LOGGER = logging.getLogger(__name__)
 
+TUNNEL_REGISTRY: dict[tuple[str, str], int] = {}
+
+def is_port_free(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("0.0.0.0", port))
+            return True
+        except socket.error:
+            return False
+
+
 
 def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
 
@@ -899,3 +911,119 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 return "RESTART", 200, {'Content-Type': 'text/plain'}
                 
         return "OK", 200, {'Content-Type': 'text/plain'}
+
+    @app.post("/api/agents/<agent_uid>/register-ssh-key")
+    def register_agent_ssh_key(agent_uid: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        public_key = body.get("public_key", "").strip()
+        if not public_key:
+            return jsonify({"ok": False, "error": "Missing public_key"}), 400
+            
+        from backend.ssh_key_manager import register_public_ssh_key
+        success = register_public_ssh_key(public_key)
+        if not success:
+            return jsonify({"ok": False, "error": "Failed to register public SSH key"}), 500
+            
+        return jsonify({"ok": True})
+
+    @app.post("/api/agents/<agent_uid>/tunnel/start")
+    def start_printer_tunnel(agent_uid: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        printer_ip = body.get("printer_ip", "").strip()
+        printer_port = int(body.get("printer_port", 80))
+        
+        if not printer_ip:
+            return jsonify({"ok": False, "error": "Missing printer_ip"}), 400
+            
+        key = (agent_uid, printer_ip)
+        if key in TUNNEL_REGISTRY:
+            port = TUNNEL_REGISTRY[key]
+            vps_host = request.host.split(":")[0]
+            return jsonify({"ok": True, "url": f"http://{vps_host}:{port}"})
+            
+        try:
+            port = None
+            for p in range(8100, 8200):
+                if p not in TUNNEL_REGISTRY.values() and is_port_free(p):
+                    port = p
+                    break
+            if not port:
+                return jsonify({"ok": False, "error": "No free ports available on VPS"}), 503
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"Port allocation error: {exc}"}), 500
+            
+        requested_at = datetime.now(timezone.utc)
+        vps_host = request.host.split(":")[0]
+        params = {
+            "action": "start_tunnel",
+            "target_ip": printer_ip,
+            "target_port": printer_port,
+            "vps_ip": vps_host,
+            "remote_port": port,
+            "vps_user": "ubuntu"
+        }
+        
+        with session_factory() as session:
+            command = PrinterControlCommand(
+                agent_uid=agent_uid,
+                command_type="trigger_utility",
+                command_params=json.dumps(params),
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+            
+        success = False
+        error_msg = "Timeout waiting for Agent to establish tunnel"
+        import time
+        for _ in range(30):
+            time.sleep(0.5)
+            with session_factory() as session:
+                cmd_status = session.execute(
+                    select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
+                ).scalars().first()
+                if cmd_status:
+                    if cmd_status.status == "success":
+                        success = True
+                        break
+                    elif cmd_status.status == "failed":
+                        success = False
+                        error_msg = cmd_status.error_message or "Agent failed to establish tunnel"
+                        break
+                        
+        if success:
+            TUNNEL_REGISTRY[key] = port
+            return jsonify({"ok": True, "url": f"http://{vps_host}:{port}"})
+        else:
+            return jsonify({"ok": False, "error": error_msg}), 504
+
+    @app.post("/api/agents/<agent_uid>/tunnel/stop")
+    def stop_printer_tunnel(agent_uid: str) -> Any:
+        body = request.get_json(silent=True) or {}
+        printer_ip = body.get("printer_ip", "").strip()
+        
+        if not printer_ip:
+            return jsonify({"ok": False, "error": "Missing printer_ip"}), 400
+            
+        key = (agent_uid, printer_ip)
+        TUNNEL_REGISTRY.pop(key, None)
+        
+        requested_at = datetime.now(timezone.utc)
+        params = {
+            "action": "stop_tunnel",
+            "target_ip": printer_ip
+        }
+        with session_factory() as session:
+            command = PrinterControlCommand(
+                agent_uid=agent_uid,
+                command_type="trigger_utility",
+                command_params=json.dumps(params),
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(command)
+            session.commit()
+            
+        return jsonify({"ok": True})
