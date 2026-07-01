@@ -1848,10 +1848,10 @@ class QuickSetupUI:
         self.root.configure(bg="#F8FAFC")
         self.root.resizable(False, False)
 
-        self.name_var = tk.StringVar(value="")
-        self.email_var = tk.StringVar(value="")
+        self.name_var = tk.StringVar(master=self.root, value="")
+        self.email_var = tk.StringVar(master=self.root, value="")
         self.printers_list = []
-        self.selected_printer_var = tk.StringVar()
+        self.selected_printer_var = tk.StringVar(master=self.root)
 
         self._setup_layout()
         self._load_ips()
