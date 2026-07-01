@@ -19,6 +19,17 @@ from agent.services.api_client import APIClient, Printer
 
 LOGGER = logging.getLogger(__name__)
 
+class TextHandler(logging.Handler):
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.callback(msg)
+        except Exception:
+            pass
+
 _gui_lock = threading.Lock()
 _gui_root: tk.Tk | None = None
 
@@ -1766,4 +1777,752 @@ def show_gui_window(app_version: str) -> None:
         # Start GUI in daemon thread
         t = threading.Thread(target=run_tk, daemon=True, name="agent-gui-window")
         t.start()
+
+
+def show_quick_setup_dialog(app_version: str) -> None:
+    global _gui_root
+    with _gui_lock:
+        if _gui_root is not None:
+            try:
+                _gui_root.after(0, lambda: _create_quick_setup_toplevel(_gui_root, app_version))
+                return
+            except Exception:
+                _gui_root = None
+
+        def run_tk() -> None:
+            global _gui_root
+            try:
+                root = tk.Tk()
+                _gui_root = root
+
+                def on_close() -> None:
+                    global _gui_root
+                    with _gui_lock:
+                        _gui_root = None
+                    root.destroy()
+                root.protocol("WM_DELETE_WINDOW", on_close)
+
+                icon_path = Path("agent/icon.ico")
+                if icon_path.exists():
+                    try:
+                        root.iconbitmap(str(icon_path))
+                    except Exception:
+                        pass
+
+                QuickSetupUI(root, app_version, is_toplevel=False)
+                center_window(root, 480, 435)
+                root.mainloop()
+            except Exception as exc:
+                LOGGER.exception("Error in Quick Setup GUI thread: %s", exc)
+            finally:
+                with _gui_lock:
+                    _gui_root = None
+
+        t = threading.Thread(target=run_tk, daemon=True, name="agent-quick-setup")
+        t.start()
+
+
+def _create_quick_setup_toplevel(parent: tk.Tk, app_version: str) -> None:
+    top = tk.Toplevel(parent)
+    top.transient(parent)
+    top.grab_set()
+
+    icon_path = Path("agent/icon.ico")
+    if icon_path.exists():
+        try:
+            top.iconbitmap(str(icon_path))
+        except Exception:
+            pass
+
+    QuickSetupUI(top, app_version, is_toplevel=True)
+    center_window(top, 480, 435)
+
+
+class QuickSetupUI:
+    def __init__(self, root: tk.Tk | tk.Toplevel, app_version: str, is_toplevel: bool = False) -> None:
+        self.root = root
+        self.app_version = app_version
+        self.is_toplevel = is_toplevel
+        self.config = AppConfig.load()
+        self.root.title("GoPrinx PrintAgent - Cài đặt nhanh")
+        self.root.configure(bg="#F8FAFC")
+        self.root.resizable(False, False)
+
+        self.name_var = tk.StringVar(value="")
+        self.email_var = tk.StringVar(value="")
+        self.printers_list = []
+        self.selected_printer_var = tk.StringVar()
+
+        self._setup_layout()
+        self._load_ips()
+        self._async_load_printers()
+
+    def _create_tailwind_button(self, parent, text, bg, fg, command, hover_bg=None):
+        btn = tk.Button(
+            parent,
+            text=text,
+            bg=bg,
+            fg=fg,
+            font=("Segoe UI", 10, "bold"),
+            activebackground=hover_bg or bg,
+            activeforeground=fg,
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=8,
+            command=command
+        )
+        if hover_bg:
+            btn.bind("<Enter>", lambda e: btn.config(bg=hover_bg))
+            btn.bind("<Leave>", lambda e: btn.config(bg=bg))
+        return btn
+
+    def _bind_focus_effects(self, entry: tk.Entry, border_frame: tk.Frame) -> None:
+        def on_focus_in(e):
+            border_frame.config(bg="#4F46E5")
+        def on_focus_out(e):
+            border_frame.config(bg="#CBD5E1")
+            
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
+
+    def _setup_layout(self) -> None:
+        main_frame = tk.Frame(self.root, bg="#F8FAFC", padx=20, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        header_frame = tk.Frame(main_frame, bg="#F8FAFC")
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        title_label = tk.Label(
+            header_frame, 
+            text=f"GoPrinx PrintAgent v{self.app_version} — Cài đặt nhanh", 
+            font=("Segoe UI", 11, "bold"), 
+            bg="#F8FAFC", 
+            fg="#1E293B"
+        )
+        title_label.pack(anchor=tk.W)
+
+        ip_frame = tk.Frame(main_frame, bg="#F1F5F9", padx=12, pady=8)
+        ip_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        self.local_ip_label = tk.Label(
+            ip_frame, 
+            text="💻 IP Cục bộ: Đang xác định...", 
+            font=("Segoe UI", 9, "bold"), 
+            bg="#F1F5F9", 
+            fg="#475569"
+        )
+        self.local_ip_label.pack(anchor=tk.W, pady=1)
+        
+        self.public_ip_label = tk.Label(
+            ip_frame, 
+            text="🌍 IP Công cộng: Đang tải...", 
+            font=("Segoe UI", 9, "bold"), 
+            bg="#F1F5F9", 
+            fg="#475569"
+        )
+        self.public_ip_label.pack(anchor=tk.W, pady=1)
+
+        form_frame = tk.Frame(main_frame, bg="#FFFFFF", bd=1, relief="solid", highlightthickness=0)
+        form_frame.config(highlightbackground="#E2E8F0")
+        form_frame.pack(fill=tk.X, pady=(0, 15), padx=1)
+        
+        form_content = tk.Frame(form_frame, bg="#FFFFFF", padx=15, pady=10)
+        form_content.pack(fill=tk.X)
+        
+        form_title = tk.Label(
+            form_content,
+            text="THÔNG TIN CẤU HÌNH SCAN (FTP)",
+            font=("Segoe UI", 9, "bold"),
+            bg="#FFFFFF",
+            fg="#475569"
+        )
+        form_title.pack(anchor=tk.W, pady=(0, 8))
+
+        name_lbl = tk.Label(form_content, text="Tên người dùng (viết liền không dấu):", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
+        name_lbl.pack(anchor=tk.W, pady=(4, 2))
+        
+        self.name_border_frame = tk.Frame(form_content, bg="#CBD5E1", bd=1)
+        self.name_border_frame.pack(fill=tk.X, pady=(0, 6))
+        self.name_entry = tk.Entry(self.name_border_frame, textvariable=self.name_var, font=("Segoe UI", 10), bd=0, bg="#FFFFFF", fg="#1E293B", relief="flat")
+        self.name_entry.pack(padx=8, pady=5, fill=tk.X)
+        self._bind_focus_effects(self.name_entry, self.name_border_frame)
+
+        email_lbl = tk.Label(form_content, text="Địa chỉ Email:", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
+        email_lbl.pack(anchor=tk.W, pady=(4, 2))
+        
+        self.email_border_frame = tk.Frame(form_content, bg="#CBD5E1", bd=1)
+        self.email_border_frame.pack(fill=tk.X, pady=(0, 6))
+        self.email_entry = tk.Entry(self.email_border_frame, textvariable=self.email_var, font=("Segoe UI", 10), bd=0, bg="#FFFFFF", fg="#1E293B", relief="flat")
+        self.email_entry.pack(padx=8, pady=5, fill=tk.X)
+        self._bind_focus_effects(self.email_entry, self.email_border_frame)
+
+        printer_lbl = tk.Label(form_content, text="Chọn máy in (Ricoh/Toshiba):", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
+        printer_lbl.pack(anchor=tk.W, pady=(4, 2))
+        
+        self.printer_cb = ttk.Combobox(form_content, textvariable=self.selected_printer_var, state="readonly", font=("Segoe UI", 9))
+        self.printer_cb.pack(fill=tk.X, pady=(0, 4))
+        self.printer_cb.set("Đang tải danh sách máy in...")
+
+        buttons_container = tk.Frame(main_frame, bg="#F8FAFC")
+        buttons_container.pack(fill=tk.X, pady=(0, 15))
+        
+        buttons_container.columnconfigure(0, weight=1)
+        buttons_container.columnconfigure(1, weight=1)
+        buttons_container.columnconfigure(2, weight=1)
+
+        self.btn_driver = self._create_tailwind_button(
+            buttons_container, "1. Cài Driver", 
+            bg="#4F46E5", fg="#FFFFFF", hover_bg="#4338CA",
+            command=self.install_driver_action
+        )
+        self.btn_driver.grid(row=0, column=0, padx=4, sticky=tk.EW)
+
+        self.btn_scan = self._create_tailwind_button(
+            buttons_container, "2. Cài Scan", 
+            bg="#059669", fg="#FFFFFF", hover_bg="#047857",
+            command=self.install_scan_action
+        )
+        self.btn_scan.grid(row=0, column=1, padx=4, sticky=tk.EW)
+
+        self.btn_auto = self._create_tailwind_button(
+            buttons_container, "⚡ Tự động cả hai", 
+            bg="#D97706", fg="#FFFFFF", hover_bg="#B45309",
+            command=self.auto_both_action
+        )
+        self.btn_auto.grid(row=0, column=2, padx=4, sticky=tk.EW)
+
+        log_frame = tk.Frame(main_frame, bg="#F8FAFC")
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        
+        log_lbl = tk.Label(log_frame, text="Nhật ký tiến trình (Progress Log):", font=("Segoe UI", 9, "bold"), bg="#F8FAFC", fg="#475569")
+        log_lbl.pack(anchor=tk.W, pady=(0, 2))
+        
+        self.log_text = tk.Text(
+            log_frame, 
+            height=6, 
+            font=("Consolas", 9), 
+            bg="#1E293B", 
+            fg="#F8FAFC", 
+            bd=0, 
+            padx=8, 
+            pady=6,
+            state=tk.DISABLED
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+
+    def _set_buttons_state(self, state: str) -> None:
+        self.btn_driver.config(state=state)
+        self.btn_scan.config(state=state)
+        self.btn_auto.config(state=state)
+
+    def log_message(self, message: str) -> None:
+        def append():
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.insert(tk.END, message + "\n")
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        self.root.after(0, append)
+
+    def _load_ips(self) -> None:
+        try:
+            from agent.utils.scanner import SubnetScanner
+            local_ip = SubnetScanner.get_local_ip()
+            self.local_ip_label.config(text=f"💻 IP Cục bộ: {local_ip}")
+        except Exception:
+            self.local_ip_label.config(text="💻 IP Cục bộ: Không xác định")
+
+        def fetch_ip():
+            import urllib.request
+            import ssl
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request('https://api.ipify.org', headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, context=ctx, timeout=5) as r:
+                    ip = r.read().decode('utf-8').strip()
+                self.root.after(0, lambda: self.public_ip_label.config(text=f"🌍 IP Công cộng: {ip}"))
+            except Exception:
+                self.root.after(0, lambda: self.public_ip_label.config(text="🌍 IP Công cộng: Không lấy được IP"))
+
+        threading.Thread(target=fetch_ip, daemon=True).start()
+
+    def _async_load_printers(self) -> None:
+        def run():
+            try:
+                api_client = APIClient(self.config)
+                printers = api_client.get_printers()
+                self.printers_list = []
+                options = []
+                for p in printers:
+                    self.printers_list.append({
+                        "id": p.id,
+                        "name": p.name,
+                        "ip": p.ip,
+                        "user": p.user,
+                        "password": p.password,
+                        "printer_type": p.printer_type,
+                        "mac_address": p.mac_address
+                    })
+                    options.append(f"{p.name} ({p.ip})")
+                
+                def update_cb():
+                    if options:
+                        self.printer_cb.config(state="readonly")
+                        self.printer_cb["values"] = options
+                        self.printer_cb.current(0)
+                    else:
+                        self.printer_cb.set("Không tìm thấy máy in nào trên VPS")
+                
+                self.root.after(0, update_cb)
+            except Exception as exc:
+                LOGGER.warning("Failed to fetch printers for QuickSetup: %s", exc)
+                self.root.after(0, lambda: self.printer_cb.set("Lỗi tải danh sách máy in từ VPS"))
+        
+        threading.Thread(target=run, daemon=True).start()
+
+    def install_driver_action(self) -> None:
+        self._set_buttons_state(tk.DISABLED)
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
+        
+        self.log_message("[QuickSetup] Bắt đầu quét mạng LAN để tìm thiết bị in...")
+        
+        def task():
+            handler = TextHandler(self.log_message)
+            bridge_logger = logging.getLogger("agent.services.polling_bridge")
+            bridge_logger.addHandler(handler)
+            try:
+                from agent.utils.scanner import SubnetScanner
+                scanner = SubnetScanner()
+                discovered = scanner.scan_subnet()
+                
+                active_ips = [d["ip"] for d in discovered if d.get("has_printer_ports")]
+                self.log_message(f"[QuickSetup] Quét hoàn tất. Tìm thấy {len(active_ips)} thiết bị in đang online trong LAN.")
+                
+                if not active_ips:
+                    self.log_message("[QuickSetup] ❌ Không phát hiện thiết bị in nào hoạt động trong dải mạng LAN.")
+                    return
+                
+                from flask import current_app
+                bridge = None
+                try:
+                    if current_app:
+                        bridge = current_app.config.get("POLLING_BRIDGE")
+                except Exception:
+                    pass
+                
+                if not bridge:
+                    self.log_message("[QuickSetup] ❌ Lỗi: Không kết nối được với dịch vụ PollingBridge.")
+                    return
+                
+                installed_count = 0
+                for ip in active_ips:
+                    self.log_message(f"\n[QuickSetup] 🔍 Xử lý thiết bị tại IP: {ip}...")
+                    
+                    matched_printer = None
+                    for p in self.printers_list:
+                        if p["ip"] == ip:
+                            matched_printer = p
+                            break
+                            
+                    brand = "ricoh"
+                    model = ""
+                    
+                    if matched_printer:
+                        brand = matched_printer["printer_type"] or "ricoh"
+                        model = matched_printer["name"]
+                        self.log_message(f"[QuickSetup] Khớp với máy photocopy đã đăng ký: {model}")
+                    else:
+                        self.log_message(f"[QuickSetup] Thiết bị mới chưa đăng ký trên VPS, đang thăm dò...")
+                        printer_type, is_p = scanner.detect_printer_type(ip)
+                        if is_p:
+                            brand = printer_type or "ricoh"
+                        model = "RICOH MP Copier" if brand == "ricoh" else "TOSHIBA e-Studio Copier"
+                        self.log_message(f"[QuickSetup] Phát hiện thiết bị {brand.upper()}")
+
+                    self.log_message(f"[QuickSetup] Truy vấn Catalog driver cho hãng {brand.upper()}...")
+                    import requests
+                    try:
+                        catalog_resp = requests.get(f"{self.config.api_url}/drivers/{brand}", timeout=10)
+                        catalog_data = catalog_resp.json()
+                        drivers_list = catalog_data.get("data") or []
+                    except Exception as e:
+                        self.log_message(f"[QuickSetup] ⚠️ Không lấy được catalog: {e}")
+                        drivers_list = []
+                        
+                    driver_name = ""
+                    driver_url = ""
+                    
+                    if drivers_list and model:
+                        model_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', model) if len(t) >= 2]
+                        best_match = None
+                        best_score = 0
+                        for drv_item in drivers_list:
+                            drv_model = drv_item.get("model") or drv_item.get("name") or ""
+                            drv_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', drv_model)]
+                            score = len(set(model_tokens) & set(drv_tokens))
+                            if score > best_score:
+                                best_score = score
+                                best_match = drv_item
+                                
+                        if best_match and best_score > 0:
+                            sub_drivers = best_match.get("drivers") or []
+                            if sub_drivers:
+                                selected_drv = sub_drivers[0]
+                                for sd in sub_drivers:
+                                    if "pcl" in sd.get("name", "").lower():
+                                        selected_drv = sd
+                                        break
+                                driver_name = selected_drv.get("name")
+                                driver_url = selected_drv.get("url")
+                                self.log_message(f"[QuickSetup] Khớp driver phù hợp: {driver_name}")
+                                
+                    if not driver_url:
+                        self.log_message(f"[QuickSetup] ⚠️ Sử dụng driver hệ thống cho '{model}'...")
+                        driver_name = model
+                        driver_url = ""
+
+                    try:
+                        bridge._handle_install_driver(
+                            command_id=0,
+                            printer_ip=ip,
+                            brand=brand,
+                            model=model,
+                            driver_name=driver_name,
+                            driver_url=driver_url
+                        )
+                        installed_count += 1
+                    except Exception as inst_exc:
+                        self.log_message(f"[QuickSetup] ❌ Lỗi cài đặt driver cho {ip}: {inst_exc}")
+                
+                self.log_message(f"\n[QuickSetup] 🎉 Hoàn tất cài đặt Driver. Đã cấu hình {installed_count} máy in.")
+                self.root.after(0, lambda: messagebox.showinfo("Hoàn thành", f"Đã hoàn tất cài đặt driver cho {installed_count} máy in!"))
+            except Exception as exc:
+                self.log_message(f"[QuickSetup] ❌ Lỗi: {exc}")
+                self.root.after(0, lambda: messagebox.showerror("Lỗi", str(exc)))
+            finally:
+                bridge_logger.removeHandler(handler)
+                self.root.after(0, lambda: self._set_buttons_state(tk.NORMAL))
+                
+        threading.Thread(target=task, daemon=True).start()
+
+    def install_scan_action(self, on_finish_callback=None) -> None:
+        name = self.name_var.get().strip()
+        email = self.email_var.get().strip()
+        
+        if not name:
+            messagebox.showerror("Lỗi", "Vui lòng nhập Tên người dùng!", parent=self.root)
+            self._set_buttons_state(tk.NORMAL)
+            return
+            
+        if not email or "@" not in email:
+            messagebox.showerror("Lỗi", "Vui lòng nhập Email hợp lệ!", parent=self.root)
+            self._set_buttons_state(tk.NORMAL)
+            return
+            
+        selected_index = self.printer_cb.current()
+        if selected_index < 0 or selected_index >= len(self.printers_list):
+            messagebox.showerror("Lỗi", "Vui lòng chọn máy in để cài đặt Scan!", parent=self.root)
+            self._set_buttons_state(tk.NORMAL)
+            return
+            
+        printer_data = self.printers_list[selected_index]
+        printer = Printer(
+            id=printer_data["id"],
+            name=printer_data["name"],
+            ip=printer_data["ip"],
+            user=printer_data["user"],
+            password=printer_data["password"],
+            printer_type=printer_data["printer_type"],
+            status="online",
+            mac_address=printer_data["mac_address"]
+        )
+        
+        if not on_finish_callback:
+            self._set_buttons_state(tk.DISABLED)
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.delete("1.0", tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        
+        self.log_message(f"[QuickSetup] Bắt đầu cài đặt Scan cho {name} ({email}) trên máy in {printer.name} ({printer.ip})...")
+        
+        def task():
+            try:
+                from agent.modules.ricoh.service import RicohService
+                api_client = APIClient(self.config)
+                ricoh_service = RicohService(api_client, config=self.config)
+                
+                self.log_message("[QuickSetup] 🔗 Kết nối và xác thực với máy in...")
+                session = ricoh_service.create_http_client(printer, authenticated=True)
+                
+                self.log_message(f"[QuickSetup] 📂 Cấu hình thư mục FTP cục bộ: /ftp/{name}")
+                setup_res = ricoh_service.setup_scan_destination(
+                    printer=None,
+                    username=name,
+                    session=session,
+                    email=email,
+                )
+                
+                ftp_upload_url = ""
+                ftp_user = ""
+                ftp_password = ""
+                if setup_res.get("ok"):
+                    ftp_upload_url = setup_res.get("ftp_upload_url", "")
+                    ftp_info = setup_res.get("ftp", {})
+                    ftp_user = ftp_info.get("ftp_user", "")
+                    ftp_password = ftp_info.get("ftp_password", "")
+                    self.log_message(f"[QuickSetup] ✅ FTP Server đang chạy tại: {setup_res.get('ftp_url')}")
+                else:
+                    raise RuntimeError(setup_res.get("error") or "FTP local folder setup failed")
+                
+                self.log_message("[QuickSetup] 🖨️ Đang ghi thông tin FTP vào danh bạ máy in...")
+                fields = {}
+                if ftp_user:
+                    fields["folderAuthUserNameIn"] = ftp_user
+                    fields["folderAuthUserName"] = ftp_user
+                if ftp_password:
+                    fields["folderPasswordIn"] = ftp_password
+                    fields["wk_folderPasswordIn"] = ftp_password
+                    fields["folderPasswordConfirmIn"] = ftp_password
+                    fields["wk_folderPasswordConfirmIn"] = ftp_password
+                    
+                res = ricoh_service.create_address_user_wizard(
+                    printer=printer,
+                    name=name,
+                    email="",
+                    folder=ftp_upload_url,
+                    fields=fields,
+                    session=session
+                )
+                
+                try:
+                    ricoh_service._reset_web_session(session, printer)
+                    session.close()
+                except Exception:
+                    pass
+                
+                if res and res.get("ok"):
+                    self.log_message(f"[QuickSetup] 🎉 Cài đặt Scan thành công!")
+                    if on_finish_callback:
+                        on_finish_callback(True, None)
+                    else:
+                        self.root.after(0, lambda: messagebox.showinfo("Thành công", f"Đã cấu hình Scan FTP thành công cho '{name}' trên máy in!"))
+                else:
+                    err = res.get("error") or "Address registration failed"
+                    raise RuntimeError(err)
+            except Exception as exc:
+                self.log_message(f"[QuickSetup] ❌ Cài đặt Scan thất bại: {exc}")
+                if on_finish_callback:
+                    on_finish_callback(False, str(exc))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Lỗi", f"Không thể cấu hình Scan: {exc}"))
+            finally:
+                if not on_finish_callback:
+                    self.root.after(0, lambda: self._set_buttons_state(tk.NORMAL))
+                    
+        threading.Thread(target=task, daemon=True).start()
+
+    def auto_both_action(self) -> None:
+        name = self.name_var.get().strip()
+        email = self.email_var.get().strip()
+        
+        if not name:
+            messagebox.showerror("Lỗi", "Vui lòng nhập Tên người dùng!", parent=self.root)
+            return
+            
+        if not email or "@" not in email:
+            messagebox.showerror("Lỗi", "Vui lòng nhập Email hợp lệ!", parent=self.root)
+            return
+            
+        selected_index = self.printer_cb.current()
+        if selected_index < 0 or selected_index >= len(self.printers_list):
+            messagebox.showerror("Lỗi", "Vui lòng chọn máy in để cài đặt Scan!", parent=self.root)
+            return
+            
+        self._set_buttons_state(tk.DISABLED)
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
+        
+        self.log_message("[QuickSetup] === BẮT ĐẦU CÀI ĐẶT TỰ ĐỘNG CẢ HAI (DRIVER & SCAN) ===")
+        
+        def run_all():
+            try:
+                handler = TextHandler(self.log_message)
+                bridge_logger = logging.getLogger("agent.services.polling_bridge")
+                bridge_logger.addHandler(handler)
+                
+                from agent.utils.scanner import SubnetScanner
+                scanner = SubnetScanner()
+                discovered = scanner.scan_subnet()
+                active_ips = [d["ip"] for d in discovered if d.get("has_printer_ports")]
+                
+                self.log_message(f"[QuickSetup] 🔍 Phát hiện {len(active_ips)} thiết bị in online.")
+                
+                from flask import current_app
+                bridge = None
+                try:
+                    if current_app:
+                        bridge = current_app.config.get("POLLING_BRIDGE")
+                except Exception:
+                    pass
+                
+                if not bridge:
+                    self.log_message("[QuickSetup] ❌ Lỗi: Không kết nối được với dịch vụ PollingBridge.")
+                    bridge_logger.removeHandler(handler)
+                    self.root.after(0, lambda: self._set_buttons_state(tk.NORMAL))
+                    return
+                
+                for ip in active_ips:
+                    self.log_message(f"\n[QuickSetup] 🖨️ Đang cấu hình máy in & driver cho IP: {ip}...")
+                    
+                    matched_printer = None
+                    for p in self.printers_list:
+                        if p["ip"] == ip:
+                            matched_printer = p
+                            break
+                            
+                    brand = "ricoh"
+                    model = ""
+                    if matched_printer:
+                        brand = matched_printer["printer_type"] or "ricoh"
+                        model = matched_printer["name"]
+                    else:
+                        printer_type, is_p = scanner.detect_printer_type(ip)
+                        if is_p:
+                            brand = printer_type or "ricoh"
+                        model = "RICOH MP Copier" if brand == "ricoh" else "TOSHIBA e-Studio Copier"
+                        
+                    driver_name = model
+                    driver_url = ""
+                    
+                    import requests
+                    try:
+                        catalog_resp = requests.get(f"{self.config.api_url}/drivers/{brand}", timeout=10)
+                        catalog_data = catalog_resp.json()
+                        drivers_list = catalog_data.get("data") or []
+                        
+                        if drivers_list and model:
+                            model_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', model) if len(t) >= 2]
+                            best_match = None
+                            best_score = 0
+                            for drv_item in drivers_list:
+                                drv_model = drv_item.get("model") or drv_item.get("name") or ""
+                                drv_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', drv_model)]
+                                score = len(set(model_tokens) & set(drv_tokens))
+                                if score > best_score:
+                                    best_score = score
+                                    best_match = drv_item
+                                    
+                            if best_match and best_score > 0:
+                                sub_drivers = best_match.get("drivers") or []
+                                if sub_drivers:
+                                    selected_drv = sub_drivers[0]
+                                    for sd in sub_drivers:
+                                        if "pcl" in sd.get("name", "").lower():
+                                            selected_drv = sd
+                                            break
+                                    driver_name = selected_drv.get("name")
+                                    driver_url = selected_drv.get("url")
+                    except Exception:
+                        pass
+                    
+                    try:
+                        bridge._handle_install_driver(
+                            command_id=0,
+                            printer_ip=ip,
+                            brand=brand,
+                            model=model,
+                            driver_name=driver_name,
+                            driver_url=driver_url
+                        )
+                    except Exception as e:
+                        self.log_message(f"[QuickSetup] ⚠️ Cài driver thất bại cho {ip}: {e}")
+                
+                bridge_logger.removeHandler(handler)
+                
+                self.log_message("\n[QuickSetup] 📂 Chuyển sang Bước 2: Cài đặt Scan (FTP) lên máy in...")
+                
+                printer_data = self.printers_list[selected_index]
+                printer = Printer(
+                    id=printer_data["id"],
+                    name=printer_data["name"],
+                    ip=printer_data["ip"],
+                    user=printer_data["user"],
+                    password=printer_data["password"],
+                    printer_type=printer_data["printer_type"],
+                    status="online",
+                    mac_address=printer_data["mac_address"]
+                )
+                
+                from agent.modules.ricoh.service import RicohService
+                api_client = APIClient(self.config)
+                ricoh_service = RicohService(api_client, config=self.config)
+                
+                session = ricoh_service.create_http_client(printer, authenticated=True)
+                setup_res = ricoh_service.setup_scan_destination(
+                    printer=None,
+                    username=name,
+                    session=session,
+                    email=email,
+                )
+                
+                ftp_upload_url = ""
+                ftp_user = ""
+                ftp_password = ""
+                if setup_res.get("ok"):
+                    ftp_upload_url = setup_res.get("ftp_upload_url", "")
+                    ftp_info = setup_res.get("ftp", {})
+                    ftp_user = ftp_info.get("ftp_user", "")
+                    ftp_password = ftp_info.get("ftp_password", "")
+                    self.log_message(f"[QuickSetup] ✅ Đã cấu hình FTP Scan local folder cho '{name}'")
+                else:
+                    raise RuntimeError("Cấu hình FTP local folder thất bại")
+                
+                fields = {}
+                if ftp_user:
+                    fields["folderAuthUserNameIn"] = ftp_user
+                    fields["folderAuthUserName"] = ftp_user
+                if ftp_password:
+                    fields["folderPasswordIn"] = ftp_password
+                    fields["wk_folderPasswordIn"] = ftp_password
+                    fields["folderPasswordConfirmIn"] = ftp_password
+                    fields["wk_folderPasswordConfirmIn"] = ftp_password
+                    
+                res = ricoh_service.create_address_user_wizard(
+                    printer=printer,
+                    name=name,
+                    email="",
+                    folder=ftp_upload_url,
+                    fields=fields,
+                    session=session
+                )
+                
+                try:
+                    ricoh_service._reset_web_session(session, printer)
+                    session.close()
+                except Exception:
+                    pass
+                
+                if res and res.get("ok"):
+                    self.log_message(f"\n[QuickSetup] 🎉 HOÀN TẤT TẤT CẢ! Đã cài thành công cả Driver và Scan cho {name}!")
+                    self.root.after(0, lambda: messagebox.showinfo("Thành công", f"Đã tự động cài đặt hoàn tất cả Driver và Scan cho {name}!"))
+                else:
+                    raise RuntimeError(res.get("error") or "Address Book registration failed")
+            except Exception as exc:
+                self.log_message(f"\n[QuickSetup] ❌ Cài đặt tự động thất bại: {exc}")
+                self.root.after(0, lambda: messagebox.showerror("Lỗi", f"Quá trình cài đặt tự động thất bại: {exc}"))
+            finally:
+                self.root.after(0, lambda: self._set_buttons_state(tk.NORMAL))
+                
+        threading.Thread(target=run_all, daemon=True).start()
+
 
