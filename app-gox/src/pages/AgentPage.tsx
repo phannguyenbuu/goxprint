@@ -4306,6 +4306,34 @@ raise RuntimeError('\\n'.join(lines))`;
                                 </ul>
                               </div>
                             )}
+                            
+                            {!directLan && (
+                              <div style={{
+                                color: 'var(--color-text-secondary)',
+                                background: 'rgba(255, 255, 255, 0.02)',
+                                border: '1px solid var(--color-surface-light)',
+                                borderRadius: '8px',
+                                padding: '10px 14px',
+                                fontSize: '0.72rem',
+                                lineHeight: 1.4
+                              }}>
+                                <strong style={{ color: 'var(--color-primary)' }}>🛠️ Nhật ký & Thông số kết nối ngược (SSH Reverse Tunnel):</strong>
+                                <div style={{ marginTop: '6px', fontFamily: 'monospace', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <div>• <strong>Máy khách (Agent Uid):</strong> {webPreviewModal.agentUid}</div>
+                                  <div>• <strong>Địa chỉ IP Máy in:</strong> {webPreviewModal.ip}</div>
+                                  <div>• <strong>Cổng dịch vụ máy in:</strong> 80</div>
+                                  <div>• <strong>Máy chủ VPS:</strong> 31.97.76.62</div>
+                                  <div>• <strong>Cổng kết nối trên VPS (Assigned Port):</strong> {webPreviewModal.url ? webPreviewModal.url.split(':').pop() : 'Đang cấp phát...'}</div>
+                                  <div>• <strong>Phương thức xác thực:</strong> SSH Key pair (Root User)</div>
+                                  <div>• <strong>Đường dẫn kết nối:</strong> <span style={{ color: 'var(--color-text)' }}>{webPreviewModal.url || 'N/A'}</span></div>
+                                  {webPreviewModal.url && (
+                                    <div style={{ color: '#fbbf24', marginTop: '4px' }}>
+                                      ⚠️ Nếu Iframe hiển thị màn hình trắng / lỗi kết nối, có thể do trình duyệt chặn nội dung Mixed Content (HTTP trên trang HTTPS). Hãy click nút <strong>🔗 Mở tab mới ↗</strong> ở thanh điều khiển phía dưới để xem trực tiếp.
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 

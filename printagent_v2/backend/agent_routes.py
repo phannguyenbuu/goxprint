@@ -960,7 +960,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "target_port": printer_port,
             "vps_ip": vps_host,
             "remote_port": port,
-            "vps_user": "ubuntu"
+            "vps_user": "root"
         }
         
         with session_factory() as session:
