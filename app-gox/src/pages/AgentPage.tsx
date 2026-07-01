@@ -319,7 +319,7 @@ export function AgentPage() {
     }
 
     try {
-      const response = await fetch(`/api/agents/${activeAgentUid}/tunnel/start`, {
+      const response = await fetch(`${BASE_URL}/api/agents/${activeAgentUid}/tunnel/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ printer_ip: printerIp, printer_port: 80 })
@@ -791,7 +791,7 @@ export function AgentPage() {
 
   const handleCloseWebPreview = () => {
     if (webPreviewModal && webPreviewModal.agentUid) {
-      fetch(`/api/agents/${webPreviewModal.agentUid}/tunnel/stop`, {
+      fetch(`${BASE_URL}/api/agents/${webPreviewModal.agentUid}/tunnel/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ printer_ip: webPreviewModal.ip })
