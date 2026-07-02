@@ -986,7 +986,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 token = f"wim{int(time.time())}{port}"
                 TUNNEL_KEYS[key] = token
                 TUNNEL_TOKENS[token] = port
-            return jsonify({"ok": True, "url": f"http://{token}.app.goxprint.com"})
+            vps_host = request.host.split(":")[0]
+            url_wildcard = f"https://{token}.app.goxprint.com"
+            url_port = f"http://{vps_host}:{port}"
+            return jsonify({"ok": True, "url": url_wildcard, "url_port": url_port})
             
         try:
             port = None
@@ -1081,7 +1084,9 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             token = f"wim{int(time.time())}{port}"
             TUNNEL_KEYS[key] = token
             TUNNEL_TOKENS[token] = port
-            return jsonify({"ok": True, "url": f"http://{token}.app.goxprint.com"})
+            url_wildcard = f"https://{token}.app.goxprint.com"
+            url_port = f"http://{vps_host}:{port}"
+            return jsonify({"ok": True, "url": url_wildcard, "url_port": url_port})
         else:
             return jsonify({"ok": False, "error": error_msg}), 504
 
