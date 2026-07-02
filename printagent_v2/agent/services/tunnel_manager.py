@@ -126,7 +126,11 @@ class TunnelManager:
                     try:
                         for line in iter(stream.readline, ""):
                             if line.strip():
-                                LOGGER.error("[TunnelSSH STDERR] %s", line.strip())
+                                clean_line = line.strip()
+                                if "warning:" in clean_line.lower() or "permanently added" in clean_line.lower():
+                                    LOGGER.warning("[TunnelSSH STDERR] %s", clean_line)
+                                else:
+                                    LOGGER.error("[TunnelSSH STDERR] %s", clean_line)
                     except Exception as e:
                         LOGGER.debug("[TunnelSSH] Exception reading stderr: %s", e)
                     finally:
