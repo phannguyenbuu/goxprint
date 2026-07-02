@@ -37,6 +37,8 @@ from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControl
 LOGGER = logging.getLogger(__name__)
 
 TUNNEL_REGISTRY: dict[tuple[str, str], int] = {}
+TUNNEL_TOKENS: dict[str, int] = {}
+TUNNEL_KEYS: dict[tuple[str, str], str] = {}
 
 def is_port_free(port: int) -> bool:
     import socket
