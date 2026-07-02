@@ -2373,6 +2373,9 @@ if ($node) {{ $node }}
         if auth_password:
             printer.password = auth_password
 
+        if command_type == "trigger_utility":
+            return self._apply_agent_command(command)
+
         if command_type == "install_driver":
             try:
                 driver_brand = str(command.get("driver_brand", "") or "").strip()
@@ -2655,6 +2658,9 @@ if ($node) {{ $node }}
         command_type = str(command.get("command_type", "")).strip()
         if command_id <= 0:
             return
+            
+        import socket
+        agent_uid = self._agent_uid or socket.gethostname()
             
         self._update_recent_command_status(command_id, "processing")
         self._post_command_ack(command_id)
