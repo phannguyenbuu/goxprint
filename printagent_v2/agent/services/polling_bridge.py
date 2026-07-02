@@ -332,8 +332,8 @@ class PollingBridge:
                 LOGGER.error("[PollingBridge] SSH public key content is empty!")
                 return
                 
-            base_url = self.base_url()
-            token = self._api_token()
+            base_url = self._polling_base_url()
+            token = self._config.get_string("polling.token").strip()
             headers = {"Content-Type": "application/json", "X-Lead-Token": token}
             url = f"{base_url}/api/agents/{agent_uid}/register-ssh-key"
             payload = {
