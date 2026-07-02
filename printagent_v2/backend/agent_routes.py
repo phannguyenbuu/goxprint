@@ -51,6 +51,46 @@ def is_port_free(port: int) -> bool:
 
 def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
 
+    @app.before_request
+    def handle_subdomain_proxy():
+        host = request.host
+        if host.endswith(".app.goxprint.com") and host != "app.goxprint.com":
+            subdomain = host.split(".")[0]
+            port = TUNNEL_TOKENS.get(subdomain)
+            if port:
+                import requests
+                from flask import Response
+                
+                path = request.path
+                if request.query_string:
+                    path += "?" + request.query_string.decode("utf-8", errors="ignore")
+                
+                url = f"http://127.0.0.1:{port}{path}"
+                headers = {key: value for key, value in request.headers.items() if key.lower() not in ("host", "content-length", "connection", "transfer-encoding")}
+                
+                try:
+                    resp = requests.request(
+                        method=request.method,
+                        url=url,
+                        headers=headers,
+                        data=request.get_data(),
+                        cookies=request.cookies,
+                        allow_redirects=False,
+                        stream=True,
+                        timeout=30
+                    )
+                    
+                    excluded_headers = ["content-length", "transfer-encoding", "connection"]
+                    resp_headers = [(name, val) for name, val in resp.raw.headers.items() if name.lower() not in excluded_headers]
+                    
+                    return Response(
+                        resp.iter_content(chunk_size=1024*64),
+                        status=resp.status_code,
+                        headers=resp_headers
+                    )
+                except Exception as exc:
+                    return f"Tunnel Proxy Error: Failed to connect to local port {port}: {exc}", 502
+
     @app.get("/agents")
     def agents_page() -> Any:
         manifest = _load_agent_release_manifest()
@@ -938,8 +978,13 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         key = (agent_uid, printer_ip)
         if key in TUNNEL_REGISTRY:
             port = TUNNEL_REGISTRY[key]
-            vps_host = request.host.split(":")[0]
-            return jsonify({"ok": True, "url": f"http://{vps_host}:{port}"})
+            token = TUNNEL_KEYS.get(key)
+            if not token:
+                import time
+                token = f"wim{int(time.time())}{port}"
+                TUNNEL_KEYS[key] = token
+                TUNNEL_TOKENS[token] = port
+            return jsonify({"ok": True, "url": f"http://{token}.app.goxprint.com"})
             
         try:
             port = None
@@ -1030,7 +1075,11 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         
         if success:
             TUNNEL_REGISTRY[key] = port
-            return jsonify({"ok": True, "url": f"http://{vps_host}:{port}"})
+            import time
+            token = f"wim{int(time.time())}{port}"
+            TUNNEL_KEYS[key] = token
+            TUNNEL_TOKENS[token] = port
+            return jsonify({"ok": True, "url": f"http://{token}.app.goxprint.com"})
         else:
             return jsonify({"ok": False, "error": error_msg}), 504
 
@@ -1044,6 +1093,9 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             
         key = (agent_uid, printer_ip)
         TUNNEL_REGISTRY.pop(key, None)
+        token = TUNNEL_KEYS.pop(key, None)
+        if token:
+            TUNNEL_TOKENS.pop(token, None)
         
         requested_at = datetime.now(timezone.utc)
         params = {
