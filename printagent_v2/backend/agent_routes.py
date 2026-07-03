@@ -961,7 +961,11 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         if not public_key:
             return jsonify({"ok": False, "error": "Missing public_key"}), 400
             
-        from backend.ssh_key_manager import register_public_ssh_key
+        try:
+            from ssh_key_manager import register_public_ssh_key
+        except ModuleNotFoundError:
+            from backend.ssh_key_manager import register_public_ssh_key
+            
         success = register_public_ssh_key(public_key)
         if not success:
             return jsonify({"ok": False, "error": "Failed to register public SSH key"}), 500
