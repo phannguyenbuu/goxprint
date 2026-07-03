@@ -103,6 +103,8 @@ class PollingBridge:
         self._scan_uploaded_fingerprints: dict[str, str] = {}
         self._scan_lock = threading.Lock()
         self._trigger_event = threading.Event()
+        self._last_camera_scan_at: datetime | None = None
+        self._last_discovered_cameras: list[dict] = []
         self._is_master = False
         self._emails = []
         self._last_discovered_printers = []
@@ -1784,6 +1786,209 @@ if ($node) {{ $node }}
             "agent_commands": payload.get("agent_commands", []) if isinstance(payload, dict) else [],
         }
 
+    def _trigger_background_camera_scan(self) -> None:
+        def run_scan():
+            try:
+                import socket
+                import urllib.request
+                import re
+                from concurrent.futures import ThreadPoolExecutor
+                from agent.services.camera_manager import CameraManager
+                cm = CameraManager()
+                
+                # 1. Discover subnets
+                subnets = []
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    ip = s.getsockname()[0]
+                    s.close()
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        subnets.append(f"{parts[0]}.{parts[1]}.{parts[2]}")
+                except Exception:
+                    pass
+                if not subnets:
+                    subnets.append("192.168.1")
+                    subnets.append("192.168.0")
+                
+                # SOAP info query
+                def get_onvif_info(ip_addr: str) -> dict[str, str]:
+                    endpoints = [
+                        f"http://{ip_addr}/onvif/device_service",
+                        f"http://{ip_addr}:80/onvif/device_service",
+                        f"http://{ip_addr}:888/onvif/device_service",
+                        f"http://{ip_addr}:8080/onvif/device_service",
+                    ]
+                    soap_msg = (
+                        '<?xml version="1.0" encoding="utf-8"?>'
+                        '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
+                        'xmlns:tds="http://www.onvif.org/ver10/device/wsdl">'
+                        '<soap:Body>'
+                        '<tds:GetDeviceInformation/>'
+                        '</soap:Body>'
+                        '</soap:Envelope>'
+                    )
+                    headers = {
+                        'Content-Type': 'application/soap+xml; charset=utf-8',
+                        'Content-Length': str(len(soap_msg))
+                    }
+                    for url in endpoints:
+                        try:
+                            req = urllib.request.Request(url, data=soap_msg.encode('utf-8'), headers=headers, method='POST')
+                            with urllib.request.urlopen(req, timeout=0.8) as response:
+                                html = response.read().decode('utf-8', errors='ignore')
+                                manufacturer = "Generic"
+                                model = "Camera IP"
+                                m_match = re.search(r'<[^:>]*Manufacturer[^>]*>([^<]+)</[^>]*Manufacturer[^>]*>', html)
+                                if m_match:
+                                    manufacturer = m_match.group(1).strip()
+                                mo_match = re.search(r'<[^:>]*Model[^>]*>([^<]+)</[^>]*Model[^>]*>', html)
+                                if mo_match:
+                                    model = mo_match.group(1).strip()
+                                return {"manufacturer": manufacturer, "model": model}
+                        except Exception:
+                            continue
+                    return {"manufacturer": "Generic", "model": "Camera IP"}
+
+                # Port scan helper
+                def scan_ip_port(ip_addr: str) -> bool:
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(0.6)
+                        res = s.connect_ex((ip_addr, 554))
+                        s.close()
+                        return res == 0
+                    except Exception:
+                        return False
+
+                # Dynamic MAC lookup
+                def get_mac_address(ip_addr: str) -> str:
+                    try:
+                        import subprocess
+                        output = subprocess.check_output(f"arp -a {ip_addr}", shell=True, timeout=0.8).decode('utf-8', errors='ignore')
+                        mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', output)
+                        if mac_match:
+                            return mac_match.group(0).upper().replace("-", ":")
+                    except Exception:
+                        pass
+                    return "Unknown"
+
+                # 2. Multicast WS-Discovery
+                discovered_ips = []
+                MCAST_GRP = '239.255.255.250'
+                MCAST_PORT = 3702
+                probe_msg = (
+                    '<?xml version="1.0" encoding="utf-8"?>'
+                    '<Envelope xmlns:tds="http://www.onvif.org/ver10/device/wsdl" '
+                    'xmlns:dn="http://www.onvif.org/ver10/network/wsdl" '
+                    'xmlns="http://www.w3.org/2003/05/soap-envelope">'
+                    '<Header>'
+                    '<MessageID xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">'
+                    'uuid:a801e0c8-1111-a8a8-b8b8-0123456789ab'
+                    '</MessageID>'
+                    '<To xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">urn:schemas-xmlsoap-org:ws:2004:08:d_d</To>'
+                    '<Action xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</Action>'
+                    '</Header>'
+                    '<Body>'
+                    '<Probe xmlns="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
+                    '<Types>tds:Device</Types>'
+                    '</Probe>'
+                    '</Body>'
+                    '</Envelope>'
+                )
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    sock.settimeout(1.0)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+                    sock.sendto(probe_msg.encode('utf-8'), (MCAST_GRP, MCAST_PORT))
+                    while True:
+                        try:
+                            data, addr = sock.recvfrom(65535)
+                            response = data.decode('utf-8', errors='ignore')
+                            ipv4_pattern = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+                            urls = re.findall(r'https?://[^\s<>"]+', response)
+                            for url in urls:
+                                ip_match = re.search(r'https?://([^:/]+)', url)
+                                if ip_match:
+                                    ip_found = ip_match.group(1)
+                                    if ipv4_pattern.match(ip_found) and ip_found not in discovered_ips and not ip_found.startswith("127."):
+                                        discovered_ips.append(ip_found)
+                        except socket.timeout:
+                            break
+                    sock.close()
+                except Exception:
+                    pass
+
+                # 3. Subnet Port Scan
+                for subnet_prefix in subnets:
+                    ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255) if f"{subnet_prefix}.{i}" not in discovered_ips]
+                    with ThreadPoolExecutor(max_workers=50) as executor:
+                        futures = {executor.submit(scan_ip_port, ip_addr): ip_addr for ip_addr in ips_to_scan}
+                        for future in futures:
+                            ip_addr = futures[future]
+                            try:
+                                if future.result():
+                                    discovered_ips.append(ip_addr)
+                            except Exception:
+                                pass
+
+                # Compile results
+                cameras_payload = []
+                for ip_addr in discovered_ips:
+                    info = get_onvif_info(ip_addr)
+                    mac_addr = get_mac_address(ip_addr)
+                    
+                    camera_name = f"Camera {ip_addr}"
+                    rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                    
+                    cameras_payload.append({
+                        "ip": ip_addr,
+                        "mac_address": mac_addr,
+                        "camera_name": camera_name,
+                        "manufacturer": info.get("manufacturer", "Generic"),
+                        "model": info.get("model", "Camera IP"),
+                        "rtsp_url": rtsp_url,
+                        "is_online": True
+                    })
+                
+                # Check status of configured cameras not found in discovery
+                import json
+                from pathlib import Path
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    try:
+                        with cfg_path.open("r", encoding="utf-8") as f:
+                            configs = json.load(f)
+                    except Exception:
+                        configs = []
+                        
+                for c in configs:
+                    rtsp = c.get("rtsp_url", "")
+                    ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                    if ip_match:
+                        ip_addr = ip_match.group(1)
+                        if not any(item["ip"] == ip_addr for item in cameras_payload):
+                            is_online, _ = cm.test_rtsp_connection(rtsp)
+                            mac_addr = get_mac_address(ip_addr)
+                            cameras_payload.append({
+                                "ip": ip_addr,
+                                "mac_address": mac_addr,
+                                "camera_name": c.get("camera_name"),
+                                "manufacturer": "Generic",
+                                "model": "Camera IP",
+                                "rtsp_url": rtsp,
+                                "is_online": is_online
+                            })
+                            
+                self._last_discovered_cameras = cameras_payload
+                LOGGER.info("[PollingBridge] Camera discovery completed: found %d cameras", len(cameras_payload))
+            except Exception as e:
+                LOGGER.exception("[PollingBridge] Camera background scan failed")
+                
+        threading.Thread(target=run_scan, daemon=True, name="polling-camera-discovery").start()
+
     def _push_inventory(self, printers: list[Printer], hostname: str, local_ip: str, lan_uid: str, fingerprint: str = "") -> None:
         base_url = self._polling_base_url()
         if not base_url:
@@ -1811,6 +2016,7 @@ if ($node) {{ $node }}
             "local_ip": local_ip,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "devices": devices,
+            "cameras": getattr(self, "_last_discovered_cameras", []),
             "fingerprint_signature": fingerprint,
         }
         payload.update(self._agent_runtime_metadata())
@@ -4034,6 +4240,14 @@ Write-Output 'INSTALLED'
                     LOGGER.warning("Runtime LAN re-registration failed: %s", exc)
             cycle_started_at = self._now_iso()
             self._last_cycle_at = self._now_iso()
+            
+            # Run camera scan periodically (every 5 minutes / 300 seconds)
+            now_dt = datetime.now(timezone.utc)
+            if (not self._last_camera_scan_at or 
+                (now_dt - self._last_camera_scan_at).total_seconds() > 300):
+                self._last_camera_scan_at = now_dt
+                self._trigger_background_camera_scan()
+                
             printers = self._load_printers()
             try:
                 self._push_inventory(printers, hostname=hostname, local_ip=local_ip, lan_uid=lan_uid, fingerprint=fingerprint)

@@ -3081,16 +3081,39 @@ export function AgentPage() {
                               >
                                 <div>
                                   <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{c.camera_name}</div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '2px', wordBreak: 'break-all' }}>
-                                    {c.rtsp_url.substring(0, 40)}...
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                                    IP: {c.ip || '—'} · MAC: {c.mac_address || '—'}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', marginTop: '1px' }}>
+                                    Hãng: {c.manufacturer || 'Generic'} · Dòng máy: {c.model || 'Camera IP'}
+                                  </div>
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '2px', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                                    {c.rtsp_url}
                                   </div>
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  {c.is_recording ? (
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff4757', boxShadow: '0 0 6px #ff4757' }} />
-                                  ) : (
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-text-secondary)' }} />
-                                  )}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                                  <span style={{
+                                    fontSize: '0.65rem',
+                                    fontWeight: 700,
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    border: '1px solid',
+                                    color: c.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                    borderColor: c.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
+                                    background: c.is_online ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
+                                  }}>
+                                    {c.is_online ? 'ONLINE' : 'OFFLINE'}
+                                  </span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)' }}>
+                                      {c.is_recording ? 'Đang ghi' : 'Chờ'}
+                                    </span>
+                                    {c.is_recording ? (
+                                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff4757', boxShadow: '0 0 6px #ff4757' }} />
+                                    ) : (
+                                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-text-secondary)' }} />
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );

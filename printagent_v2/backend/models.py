@@ -331,6 +331,8 @@ class CameraConfig(Base):
     __tablename__ = "CameraConfig"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    lan_uid: Mapped[str] = mapped_column(String(128), default="default", index=True)
     agent_uid: Mapped[str] = mapped_column(String(128), index=True)
     camera_name: Mapped[str] = mapped_column(String(255))
     rtsp_url: Mapped[str] = mapped_column(Text)
@@ -340,6 +342,11 @@ class CameraConfig(Base):
     audio_codec: Mapped[str] = mapped_column(String(64), default="copy")
     no_audio: Mapped[bool] = mapped_column(Boolean, default=True)
     is_recording: Mapped[bool] = mapped_column(Boolean, default=False)
+    ip: Mapped[str | None] = mapped_column(String(64), default="", nullable=True)
+    mac_address: Mapped[str | None] = mapped_column(String(64), default="", nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(128), default="Generic", nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), default="Camera IP", nullable=True)
+    is_online: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
 

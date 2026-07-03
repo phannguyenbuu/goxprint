@@ -1163,6 +1163,11 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "audio_codec": c.audio_codec,
                     "no_audio": c.no_audio,
                     "is_recording": c.is_recording,
+                    "ip": c.ip or "",
+                    "mac_address": c.mac_address or "",
+                    "manufacturer": c.manufacturer or "Generic",
+                    "model": c.model or "Camera IP",
+                    "is_online": bool(c.is_online),
                 })
             return jsonify({"ok": True, "cameras": results})
 

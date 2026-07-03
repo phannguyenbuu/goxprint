@@ -558,6 +558,53 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     inserted += 1
                 else:
                     updated += 1
+            # Ingest cameras inventory
+            cameras = body.get("cameras") if isinstance(body.get("cameras"), list) else []
+            from models import CameraConfig
+            for item in cameras:
+                if not isinstance(item, dict):
+                    continue
+                ip = _to_text(item.get("ip"))
+                mac = _to_text(item.get("mac_address")) or _to_text(item.get("mac"))
+                camera_name = _to_text(item.get("camera_name")) or f"Camera {ip}"
+                manufacturer = _to_text(item.get("manufacturer")) or "Generic"
+                model = _to_text(item.get("model")) or "Camera IP"
+                rtsp_url = _to_text(item.get("rtsp_url")) or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+                is_online = bool(item.get("is_online", True))
+                
+                existed_cam = None
+                if mac:
+                    existed_cam = session.execute(
+                        select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid, CameraConfig.mac_address == mac)
+                    ).scalars().first()
+                if not existed_cam and ip:
+                    existed_cam = session.execute(
+                        select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid, CameraConfig.ip == ip)
+                    ).scalars().first()
+                    
+                if existed_cam:
+                    existed_cam.ip = ip
+                    if mac:
+                        existed_cam.mac_address = mac
+                    existed_cam.manufacturer = manufacturer
+                    existed_cam.model = model
+                    existed_cam.is_online = is_online
+                else:
+                    new_cam = CameraConfig(
+                        lead=lead,
+                        lan_uid=lan_uid,
+                        agent_uid=agent_uid,
+                        camera_name=camera_name,
+                        ip=ip,
+                        mac_address=mac,
+                        manufacturer=manufacturer,
+                        model=model,
+                        rtsp_url=rtsp_url,
+                        is_online=is_online,
+                        is_recording=False
+                    )
+                    session.add(new_cam)
+                    
             session.commit()
 
         LOGGER.info(

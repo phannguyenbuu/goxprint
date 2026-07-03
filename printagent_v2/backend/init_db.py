@@ -23,6 +23,15 @@ def main() -> None:
         conn.execute(text("ALTER TABLE \"AgentNode\" ADD COLUMN IF NOT EXISTS gds_status VARCHAR(32) DEFAULT 'unknown'"))
         conn.execute(text('ALTER TABLE "AgentPresenceLog" ADD COLUMN IF NOT EXISTS scan_auto_open_file BOOLEAN DEFAULT TRUE'))
         conn.execute(text('ALTER TABLE "AgentPresenceLog" ADD COLUMN IF NOT EXISTS scan_auto_open_dir BOOLEAN DEFAULT TRUE'))
+        
+        # Add new columns to CameraConfig
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS lead VARCHAR(64) DEFAULT \'default\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS lan_uid VARCHAR(128) DEFAULT \'default\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS ip VARCHAR(64) DEFAULT \'\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS mac_address VARCHAR(64) DEFAULT \'\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(128) DEFAULT \'Generic\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS model VARCHAR(128) DEFAULT \'Camera IP\''))
+        conn.execute(text('ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT TRUE'))
         conn.commit()
         
     print("Database initialized:", cfg.database_url)
