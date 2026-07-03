@@ -241,6 +241,89 @@ class CameraDialog(tk.Toplevel):
         self.destroy()
 
 
+class CameraScanResultsDialog(tk.Toplevel):
+    def __init__(self, parent: tk.Tk, found_ips: list[str]) -> None:
+        super().__init__(parent)
+        self.title("Kết quả dò quét Camera (Port 554)")
+        self.transient(parent)
+        self.grab_set()
+        
+        self.result: dict[str, Any] | None = None
+        self.resizable(False, False)
+        
+        frame = ttk.Frame(self, padding="15 15 15 15")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Discovered IPs list
+        ttk.Label(frame, text="Thiết bị mở cổng 554 (RTSP) được tìm thấy:").grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+        
+        self.ip_listbox = tk.Listbox(frame, width=32, height=6, font=("Segoe UI", 9))
+        self.ip_listbox.grid(row=1, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E)
+        
+        for ip in found_ips:
+            self.ip_listbox.insert(tk.END, ip)
+            
+        if not found_ips:
+            self.ip_listbox.insert(tk.END, "(Không tìm thấy thiết bị nào)")
+            
+        # Details inputs
+        ttk.Label(frame, text="Tên Camera:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.name_var = tk.StringVar(value="Camera LAN")
+        self.name_entry = ttk.Entry(frame, textvariable=self.name_var, width=22)
+        self.name_entry.grid(row=2, column=1, sticky=tk.W, pady=5)
+        
+        ttk.Label(frame, text="Đường dẫn RTSP:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.path_var = tk.StringVar(value="/Streaming/Channels/101")
+        self.path_entry = ttk.Entry(frame, textvariable=self.path_var, width=22)
+        self.path_entry.grid(row=3, column=1, sticky=tk.W, pady=5)
+        
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=15, sticky=tk.E)
+        
+        cancel_btn = ttk.Button(btn_frame, text="Cancel (Hủy)", command=self.destroy, width=12)
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+        
+        save_btn = ttk.Button(btn_frame, text="Thêm Camera", command=self.save, width=12)
+        save_btn.pack(side=tk.LEFT, padx=5)
+        
+        center_window(self, 350, 310)
+        
+    def save(self) -> None:
+        selection = self.ip_listbox.curselection()
+        if not selection:
+            messagebox.showerror("Error", "Vui lòng chọn một địa chỉ IP từ danh sách!", parent=self)
+            return
+            
+        ip = self.ip_listbox.get(selection[0])
+        if "(Không tìm" in ip:
+            return
+            
+        name = self.name_var.get().strip()
+        path = self.path_var.get().strip()
+        
+        if not name:
+            messagebox.showerror("Error", "Vui lòng nhập tên camera!", parent=self)
+            return
+            
+        # Ensure path starts with slash
+        if path and not path.startswith("/"):
+            path = "/" + path
+            
+        rtsp_url = f"rtsp://{ip}:554{path}"
+        
+        self.result = {
+            "camera_name": name,
+            "rtsp_url": rtsp_url,
+            "segment_duration": 60,
+            "prefix": "rec",
+            "no_audio": True,
+            "video_codec": "copy",
+            "audio_codec": "copy"
+        }
+        self.destroy()
+
+
 class PrinterDestinationDialog(tk.Toplevel):
     def __init__(self, parent: tk.Tk, title: str = "Add Scan Destination", dest_data: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
@@ -1835,6 +1918,7 @@ class PrintAgentGui:
         ttk.Button(btn_frame, text="Delete Cam (Xoá)", command=self.gui_delete_camera, width=18).pack(pady=4)
         
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+        ttk.Button(btn_frame, text="Scan Net (Dò tìm)", command=self.gui_scan_network_cameras, width=18).pack(pady=4)
         ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_cameras, width=18).pack(pady=4)
 
     def refresh_cameras(self) -> None:
@@ -2086,6 +2170,91 @@ class PrintAgentGui:
             messagebox.showerror("Error", str(exc))
         finally:
             self.refresh_cameras()
+
+    def gui_scan_network_cameras(self) -> None:
+        progress = ProgressDialog(self.root, "Scanning Network", "Đang dò quét các địa chỉ IP mở cổng 554 (RTSP) trong mạng LAN...")
+        
+        def run() -> None:
+            found_ips = []
+            try:
+                # Detect subnets
+                subnets = []
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    ip = s.getsockname()[0]
+                    s.close()
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        subnets.append(f"{parts[0]}.{parts[1]}.{parts[2]}")
+                except Exception:
+                    pass
+                    
+                if not subnets:
+                    subnets.append("192.168.1")
+                    subnets.append("192.168.0")
+                
+                # Scan each subnet
+                for subnet_prefix in subnets:
+                    ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255)]
+                    
+                    with ThreadPoolExecutor(max_workers=60) as executor:
+                        futures = {executor.submit(scan_ip_port, ip): ip for ip in ips_to_scan}
+                        for future in futures:
+                            ip = futures[future]
+                            try:
+                                if future.result():
+                                    found_ips.append(ip)
+                            except Exception:
+                                pass
+            except Exception as e:
+                LOGGER.exception("Failed to scan network cameras")
+            finally:
+                self.root.after(0, progress.destroy)
+                self.root.after(0, lambda: self.show_scan_results_dialog(found_ips))
+                
+        def scan_ip_port(ip: str) -> bool:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.7)
+                res = s.connect_ex((ip, 554))
+                s.close()
+                return res == 0
+            except Exception:
+                return False
+                
+        threading.Thread(target=run, daemon=True, name="gui-camera-scanner").start()
+
+    def show_scan_results_dialog(self, found_ips: list[str]) -> None:
+        dlg = CameraScanResultsDialog(self.root, found_ips)
+        self.root.wait_window(dlg)
+        
+        if dlg.result:
+            try:
+                import json
+                from pathlib import Path
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    try:
+                        with cfg_path.open("r", encoding="utf-8") as f:
+                            configs = json.load(f)
+                    except Exception:
+                        configs = []
+                        
+                # Check duplication
+                if any(c.get("camera_name") == dlg.result["camera_name"] for c in configs):
+                    messagebox.showerror("Error", f"Camera name '{dlg.result['camera_name']}' already exists.")
+                    return
+                    
+                configs.append(dlg.result)
+                with cfg_path.open("w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=2, ensure_ascii=False)
+                messagebox.showinfo("Success", f"Camera '{dlg.result['camera_name']}' added successfully!")
+            except Exception as exc:
+                messagebox.showerror("Error", str(exc))
+            finally:
+                self.refresh_cameras()
 
 
 def show_gui_window(app_version: str) -> None:
