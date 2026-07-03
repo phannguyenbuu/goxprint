@@ -1891,6 +1891,8 @@ class PrintAgentGui:
                         'Content-Type': 'application/soap+xml; charset=utf-8',
                         'Content-Length': str(len(soap_msg))
                     }
+                    
+                    last_error = "ONVIF tắt/Không kết nối"
                     for url in endpoints:
                         try:
                             req = urllib.request.Request(url, data=soap_msg.encode('utf-8'), headers=headers, method='POST')
@@ -1905,9 +1907,25 @@ class PrintAgentGui:
                                 if mo_match:
                                     model = mo_match.group(1).strip()
                                 return {"manufacturer": manufacturer, "model": model}
-                        except Exception:
-                            continue
-                    return {"manufacturer": "Generic", "model": "Camera IP"}
+                        except urllib.error.HTTPError as he:
+                            if he.code == 401:
+                                last_error = "Yêu cầu mật khẩu (401)"
+                            else:
+                                last_error = f"Lỗi HTTP {he.code}"
+                        except urllib.error.URLError as ue:
+                            import socket
+                            if isinstance(ue.reason, socket.timeout):
+                                last_error = "ONVIF Timeout (Hết hạn)"
+                            elif isinstance(ue.reason, ConnectionRefusedError):
+                                last_error = "Từ chối kết nối (Cổng đóng)"
+                            else:
+                                last_error = "Sai cổng/Cổng đóng"
+                        except socket.timeout:
+                            last_error = "ONVIF Timeout (Hết hạn)"
+                        except Exception as e:
+                            last_error = f"Lỗi kết nối: {type(e).__name__}"
+                            
+                    return {"manufacturer": "Generic", "model": last_error}
 
                 # Helper to scan port 554
                 def scan_ip_port(ip_addr: str) -> bool:
