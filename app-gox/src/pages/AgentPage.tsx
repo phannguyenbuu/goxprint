@@ -1799,18 +1799,22 @@ export function AgentPage() {
     }
   };
 
-  const handleQueryVideo = async (agentUid: string, cameraId: number) => {
+  const handleQueryVideo = async (agentUid: string, cameraId: number, customTimestamp?: string, customDuration?: number) => {
+    const ts = customTimestamp || queryTimestamp;
+    const dur = customDuration || queryDuration;
+    if (!ts) return;
+
     setQueryVideoLoading(true);
     setQueriedVideoUrl('');
     try {
       const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/query-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timestamp: queryTimestamp, duration: queryDuration })
+        body: JSON.stringify({ timestamp: ts, duration: dur })
       });
       const data = await response.json();
       if (data.ok) {
-        const cleanTs = queryTimestamp.replace(/[- :]/g, '');
+        const cleanTs = ts.replace(/[- :]/g, '');
         const formattedTs = cleanTs.substring(0, 8) + '_' + cleanTs.substring(8, 14);
         setQueriedVideoUrl(`clip_${selectedCamera.camera_name}_${formattedTs}.mp4`);
       } else {
@@ -1820,6 +1824,25 @@ export function AgentPage() {
       showToast('Lỗi kết nối render: ' + err.message, 'error');
     } finally {
       setQueryVideoLoading(false);
+    }
+  };
+
+  const handlePlaySegmentFile = (filename: string) => {
+    const match = filename.match(/_(\d{8}_\d{6})\.mp4$/);
+    if (match) {
+      const rawTs = match[1]; // e.g. 20260704_043000
+      const formattedTs = `${rawTs.substring(0, 4)}-${rawTs.substring(4, 6)}-${rawTs.substring(6, 8)} ${rawTs.substring(9, 11)}:${rawTs.substring(11, 13)}:${rawTs.substring(13, 15)}`;
+      
+      setQueryTimestamp(formattedTs);
+      setQueryDuration(60);
+      
+      handleQueryVideo(activeAgentUid, selectedCamera.id, formattedTs, 60);
+      
+      setTimeout(() => {
+        document.getElementById('video-playback-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    } else {
+      showToast('Không parse được thời gian từ tên tệp', 'error');
     }
   };
 
@@ -3293,9 +3316,23 @@ export function AgentPage() {
                               <h3 style={{ fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 📹 {selectedCamera.camera_name}
                                 {cameraStatus?.running ? (
-                                  <span style={{ fontSize: '0.75rem', color: '#ff4757', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4757', display: 'inline-block' }} />
-                                    Đang ghi hình...
+                                  <span style={{ fontSize: '0.75rem', color: '#ff4757', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{
+                                      width: '8px',
+                                      height: '8px',
+                                      borderRadius: '50%',
+                                      background: '#ff4757',
+                                      display: 'inline-block',
+                                      animation: 'pulse-red 1.2s infinite ease-in-out'
+                                    }} />
+                                    Đang ghi hình... {cameraStatus.current_file ? `(${cameraStatus.current_file})` : ''}
+                                    <style>{`
+                                      @keyframes pulse-red {
+                                        0% { opacity: 0.4; transform: scale(0.9); }
+                                        50% { opacity: 1; transform: scale(1.1); }
+                                        100% { opacity: 0.4; transform: scale(0.9); }
+                                      }
+                                    `}</style>
                                   </span>
                                 ) : (
                                   <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Chờ</span>
@@ -3386,50 +3423,75 @@ export function AgentPage() {
                         </GlowCard>
 
                         {/* Playback Query Block */}
-                        <GlowCard>
-                          <h4 style={{ ...styles.cardTitle, marginBottom: '12px' }}>🎬 Truy xuất & Xem lại Video (Render & Playback)</h4>
-                          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px' }}>
-                            <div style={{ ...styles.formGroup, flex: 2 }}>
-                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Chọn thời điểm truy xuất</label>
-                              <input
-                                type="text"
-                                style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
-                                placeholder="VD: 2026-07-03 16:15:00"
-                                value={queryTimestamp}
-                                onChange={(e) => setQueryTimestamp(e.target.value)}
-                              />
-                            </div>
-                            <div style={{ ...styles.formGroup, flex: 1 }}>
-                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Độ dài (giây)</label>
-                              <input
-                                type="number"
-                                style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
-                                value={queryDuration}
-                                onChange={(e) => setQueryDuration(parseInt(e.target.value) || 10)}
-                              />
-                            </div>
-                            <button
-                              style={{ ...styles.smallBtn, background: 'var(--color-primary)', height: '34px', padding: '0 16px' }}
-                              onClick={() => handleQueryVideo(activeAgentUid, selectedCamera.id)}
-                              disabled={queryVideoLoading || !queryTimestamp}
-                            >
-                              {queryVideoLoading ? '⏳ Đang render...' : '🎬 Xem lại'}
-                            </button>
-                          </div>
-
-                          {queriedVideoUrl && (
-                            <div style={{ marginTop: '14px', background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
-                              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-success)', marginBottom: '8px' }}>
-                                  ✅ Video đã được render thành công từ Agent!
+                        <div id="video-playback-card">
+                          <GlowCard>
+                            <h4 style={{ ...styles.cardTitle, marginBottom: '12px' }}>🎬 Truy xuất & Xem lại Video (Render & Playback)</h4>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px' }}>
+                              <div style={{ ...styles.formGroup, flex: 2 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Chọn thời điểm truy xuất</label>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                  <input
+                                    type="text"
+                                    style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px', flex: 1 }}
+                                    placeholder="VD: 2026-07-03 16:15:00"
+                                    value={queryTimestamp}
+                                    onChange={(e) => setQueryTimestamp(e.target.value)}
+                                  />
+                                  <input
+                                    type="datetime-local"
+                                    style={{
+                                      background: 'var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      border: '1px solid var(--color-surface-border)',
+                                      borderRadius: '6px',
+                                      padding: '5px 8px',
+                                      fontSize: '0.8rem',
+                                      outline: 'none',
+                                      colorScheme: 'dark',
+                                      cursor: 'pointer'
+                                    }}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val) {
+                                        const formatted = val.replace('T', ' ') + ':00';
+                                        setQueryTimestamp(formatted);
+                                      }
+                                    }}
+                                  />
+                                </div>
                               </div>
-                              <video
-                                controls
-                                src={`${BASE_URL}/api/agents/${activeAgentUid}/cameras/clips/${queriedVideoUrl}`}
-                                style={{ width: '100%', borderRadius: '6px', outline: 'none' }}
-                              />
+                              <div style={{ ...styles.formGroup, flex: 1 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Độ dài (giây)</label>
+                                <input
+                                  type="number"
+                                  style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                                  value={queryDuration}
+                                  onChange={(e) => setQueryDuration(parseInt(e.target.value) || 10)}
+                                />
+                              </div>
+                              <button
+                                style={{ ...styles.smallBtn, background: 'var(--color-primary)', height: '34px', padding: '0 16px' }}
+                                onClick={() => handleQueryVideo(activeAgentUid, selectedCamera.id)}
+                                disabled={queryVideoLoading || !queryTimestamp}
+                              >
+                                {queryVideoLoading ? '⏳ Đang render...' : '🎬 Xem lại'}
+                              </button>
                             </div>
-                          )}
-                        </GlowCard>
+
+                            {queriedVideoUrl && (
+                              <div style={{ marginTop: '14px', background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-success)', marginBottom: '8px' }}>
+                                    ✅ Video đã được render thành công từ Agent!
+                                </div>
+                                <video
+                                  controls
+                                  src={`${BASE_URL}/api/agents/${activeAgentUid}/cameras/clips/${queriedVideoUrl}`}
+                                  style={{ width: '100%', borderRadius: '6px', outline: 'none' }}
+                                />
+                              </div>
+                            )}
+                          </GlowCard>
+                        </div>
 
                         {/* Recordings Files Table */}
                         <GlowCard>
@@ -3444,6 +3506,7 @@ export function AgentPage() {
                                     <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Tên tệp</th>
                                     <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Dung lượng</th>
                                     <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Ngày ghi</th>
+                                    <th style={{ padding: '6px 10px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Xem lại</th>
                                     <th style={{ padding: '6px 10px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Xoá</th>
                                   </tr>
                                 </thead>
@@ -3453,6 +3516,15 @@ export function AgentPage() {
                                       <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{f.name}</td>
                                       <td style={{ padding: '6px 10px' }}>{f.size_mb} MB</td>
                                       <td style={{ padding: '6px 10px' }}>{f.mtime}</td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                        <button
+                                          style={{ background: 'none', border: 'none', color: 'var(--color-success)', cursor: 'pointer', fontSize: '0.85rem' }}
+                                          onClick={() => handlePlaySegmentFile(f.name)}
+                                          title="Xem lại tệp này"
+                                        >
+                                          ▶️
+                                        </button>
+                                      </td>
                                       <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                                         <button
                                           style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}
