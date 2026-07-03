@@ -1229,11 +1229,18 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "camera_name": camera_name,
             **params
         }
+        from models import AgentNode
         with session_factory() as session:
+            agent = session.execute(
+                select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+            ).scalars().first()
+            lead_val = agent.lead if agent else "default"
+            lan_uid_val = agent.lan_uid if agent else ""
+            
             command = PrinterControlCommand(
                 printer_id=0,
-                lead="",
-                lan_uid="",
+                lead=lead_val,
+                lan_uid=lan_uid_val,
                 agent_uid=agent_uid,
                 printer_name="",
                 ip="",
