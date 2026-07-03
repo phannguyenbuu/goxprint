@@ -92,9 +92,9 @@ export function AgentPage() {
     return localStorage.getItem('goxprint_selected_lan_uid') || '';
   });
   const [lanSitesLoading, setLanSitesLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'agents' | 'copiers'>(() => {
+  const [activeTab, setActiveTab] = useState<'agents' | 'copiers' | 'cameras'>(() => {
     const saved = localStorage.getItem('goxprint_active_tab');
-    return (saved === 'agents' || saved === 'copiers') ? saved : 'agents';
+    return (saved === 'agents' || saved === 'copiers' || saved === 'cameras') ? saved : 'agents';
   });
 
   // Polling / Command Status Map (key: printerId or entryRegNo, value: status message)
@@ -121,6 +121,31 @@ export function AgentPage() {
 
   // Live (uncached) address books loaded from agents (key: printerId)
   const [liveAddressBooks, setLiveAddressBooks] = useState<Record<string, any>>({});
+
+  // Camera States
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [camerasLoading, setCamerasLoading] = useState(false);
+  const [selectedCamera, setSelectedCamera] = useState<any | null>(null);
+  const [cameraForm, setCameraForm] = useState({
+    id: null as number | null,
+    camera_name: 'Camera mới',
+    rtsp_url: '',
+    segment_duration: 60,
+    prefix: 'rec',
+    video_codec: 'copy',
+    audio_codec: 'copy',
+    no_audio: true
+  });
+  const [cameraStatus, setCameraStatus] = useState<any>(null);
+  const [cameraLogs, setCameraLogs] = useState<any[]>([]);
+  const [cameraFiles, setCameraFiles] = useState<any[]>([]);
+  const [cameraTestResult, setCameraTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [cameraTestLoading, setCameraTestLoading] = useState(false);
+  const [cameraActionLoading, setCameraActionLoading] = useState<Record<string, boolean>>({});
+  const [queryTimestamp, setQueryTimestamp] = useState('');
+  const [queryDuration, setQueryDuration] = useState(10);
+  const [queriedVideoUrl, setQueriedVideoUrl] = useState('');
+  const [queryVideoLoading, setQueryVideoLoading] = useState(false);
 
   // Register parent window dummy functions for Ricoh iframe scripts
   useEffect(() => {
@@ -911,10 +936,36 @@ export function AgentPage() {
     fetchLanSitesData(true);
   }, []);
 
+  const fetchCameras = useCallback(async (agentUid: string) => {
+    if (!agentUid) return;
+    setCamerasLoading(true);
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras`);
+      const data = await response.json();
+      if (data.ok) {
+        setCameras(data.cameras || []);
+      } else {
+        showToast('Không tải được danh sách camera: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi tải camera: ' + err.message, 'error');
+    } finally {
+      setCamerasLoading(false);
+    }
+  }, [showToast]);
+
   // Computed active LAN
   const selectedLan = useMemo(() => {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
+
+  const activeAgentUid = selectedLan?.agents?.[0]?.agent_uid;
+
+  useEffect(() => {
+    if (activeTab === 'cameras' && activeAgentUid) {
+      fetchCameras(activeAgentUid);
+    }
+  }, [activeTab, activeAgentUid, fetchCameras]);
 
   const getTargetAgentUid = useCallback((printerId: string | number) => {
     const pId = Number(printerId);
@@ -1594,6 +1645,162 @@ export function AgentPage() {
     }
   };
 
+  // ── CAMERA HANDLERS ──
+  const fetchCameraStatus = async (agentUid: string, cameraId: number) => {
+    setCameraActionLoading((prev) => ({ ...prev, status: true }));
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/status`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok && data.status) {
+        setCameraStatus(data.status);
+        setCameraLogs(data.status.logs || []);
+      } else {
+        showToast('Không lấy được trạng thái camera: ' + (data.error || 'Lỗi kết nối'), 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi lấy trạng thái: ' + err.message, 'error');
+    } finally {
+      setCameraActionLoading((prev) => ({ ...prev, status: false }));
+    }
+  };
+
+  const fetchCameraFiles = async (agentUid: string, cameraId: number) => {
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/files`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok) {
+        setCameraFiles(data.files || []);
+      }
+    } catch (err) {
+      // silent fail
+    }
+  };
+
+  const handleTestCameraConnection = async (agentUid: string) => {
+    setCameraTestLoading(true);
+    setCameraTestResult(null);
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/0/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rtsp_url: cameraForm.rtsp_url })
+      });
+      const data = await response.json();
+      if (data.ok && data.result) {
+        setCameraTestResult(data.result);
+      } else {
+        setCameraTestResult({ ok: false, msg: data.error || 'Lỗi kiểm tra kết nối' });
+      }
+    } catch (err: any) {
+      setCameraTestResult({ ok: false, msg: 'Lỗi: ' + err.message });
+    } finally {
+      setCameraTestLoading(false);
+    }
+  };
+
+  const handleSaveCameraConfig = async (agentUid: string) => {
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cameraForm)
+      });
+      const data = await response.json();
+      if (data.ok) {
+        showToast('Đã lưu cấu hình camera thành công!', 'success');
+        fetchCameras(agentUid);
+        setSelectedCamera(null);
+      } else {
+        showToast('Lỗi lưu cấu hình: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi hệ thống: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteCamera = async (agentUid: string, cameraId: number) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa cấu hình camera này?')) return;
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/delete`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok) {
+        showToast('Đã xóa camera thành công!', 'success');
+        fetchCameras(agentUid);
+        setSelectedCamera(null);
+      } else {
+        showToast('Lỗi xóa camera: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi hệ thống: ' + err.message, 'error');
+    }
+  };
+
+  const handleToggleRecording = async (agentUid: string, cameraId: number, start: boolean) => {
+    setCameraActionLoading((prev) => ({ ...prev, toggle: true }));
+    const action = start ? 'start' : 'stop';
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/${action}`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok) {
+        showToast(start ? 'Đã kích hoạt ghi hình camera ngầm!' : 'Đã dừng ghi hình camera.', 'success');
+        setTimeout(() => {
+          fetchCameraStatus(agentUid, cameraId);
+          fetchCameraFiles(agentUid, cameraId);
+        }, 1500);
+      } else {
+        showToast('Lỗi thao tác ghi hình: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi kết nối: ' + err.message, 'error');
+    } finally {
+      setCameraActionLoading((prev) => ({ ...prev, toggle: false }));
+    }
+  };
+
+  const handleDeleteCameraFile = async (agentUid: string, cameraId: number, filename: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa tệp video này khỏi máy trạm?\nFile: ${filename}`)) return;
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/delete-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename })
+      });
+      const data = await response.json();
+      if (data.ok) {
+        showToast('Đã xóa tệp video thành công!', 'success');
+        fetchCameraFiles(agentUid, cameraId);
+      } else {
+        showToast('Lỗi xóa tệp: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi hệ thống: ' + err.message, 'error');
+    }
+  };
+
+  const handleQueryVideo = async (agentUid: string, cameraId: number) => {
+    setQueryVideoLoading(true);
+    setQueriedVideoUrl('');
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/query-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timestamp: queryTimestamp, duration: queryDuration })
+      });
+      const data = await response.json();
+      if (data.ok) {
+        const cleanTs = queryTimestamp.replace(/[- :]/g, '');
+        const formattedTs = cleanTs.substring(0, 8) + '_' + cleanTs.substring(8, 14);
+        setQueriedVideoUrl(`clip_${selectedCamera.camera_name}_${formattedTs}.mp4`);
+      } else {
+        showToast('Không truy xuất được video: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi kết nối render: ' + err.message, 'error');
+    } finally {
+      setQueryVideoLoading(false);
+    }
+  };
+
   // ── DELETE DESTINATION ──
   const handleDeleteDest = (printerId: string, entry: any) => {
     const emailVal = entry.email_address || entry.email || '';
@@ -2029,6 +2236,16 @@ export function AgentPage() {
           >
             🖨️ Photocopy ({filteredPrinters.length})
           </button>
+          <button
+            style={{
+              ...styles.tabBtn,
+              color: activeTab === 'cameras' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              borderBottom: activeTab === 'cameras' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            }}
+            onClick={() => setActiveTab('cameras')}
+          >
+            📷 Camera ({cameras.length})
+          </button>
         </div>
       </div>
 
@@ -2042,7 +2259,7 @@ export function AgentPage() {
 
         {!lanSitesLoading && selectedLan && (
           <AnimatePresence mode="wait">
-            {activeTab === 'agents' ? (
+            {activeTab === 'agents' && (
               <motion.div
                 key="agents-tab"
                 initial={{ opacity: 0, x: -10 }}
@@ -2269,7 +2486,8 @@ export function AgentPage() {
                   )}
                 </AnimatedList>
               </motion.div>
-            ) : (
+            )}
+            {activeTab === 'copiers' && (
               <motion.div
                 key="copiers-tab"
                 initial={{ opacity: 0, x: 10 }}
@@ -2807,6 +3025,392 @@ export function AgentPage() {
                     })
                   )}
                 </AnimatedList>
+              </motion.div>
+            )}
+
+            {activeTab === 'cameras' && (
+              <motion.div
+                key="cameras-tab"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                style={styles.tabContent}
+              >
+                {!activeAgentUid ? (
+                  <div style={styles.emptyText}>Không tìm thấy Máy tính nào hoạt động trong dải LAN này để quản lý camera.</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px', alignItems: 'start' }}>
+                    {/* Left Pane: Camera List and Config Form */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <GlowCard>
+                        <div style={styles.cardHeader}>
+                          <h4 style={styles.cardTitle}>📹 Danh sách Camera</h4>
+                          <button
+                            style={{ ...styles.smallBtn, background: 'var(--color-primary)' }}
+                            onClick={() => {
+                              setSelectedCamera(null);
+                              setCameraForm({
+                                id: null,
+                                camera_name: 'Camera mới',
+                                rtsp_url: '',
+                                segment_duration: 60,
+                                prefix: 'rec',
+                                video_codec: 'copy',
+                                audio_codec: 'copy',
+                                no_audio: true
+                              });
+                              setCameraTestResult(null);
+                            }}
+                          >
+                            ➕ Thêm
+                          </button>
+                        </div>
+                        {camerasLoading ? (
+                          <div style={styles.loadingWrapper}>Đang tải...</div>
+                        ) : cameras.length === 0 ? (
+                          <div style={styles.emptyText}>Chưa cấu hình camera nào.</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                            {cameras.map((c) => {
+                              const isSelected = selectedCamera?.id === c.id;
+                              return (
+                                <div
+                                  key={c.id}
+                                  onClick={() => {
+                                    setSelectedCamera(c);
+                                    setCameraForm(c);
+                                    setCameraTestResult(null);
+                                    setCameraStatus(null);
+                                    setCameraLogs([]);
+                                    setCameraFiles([]);
+                                    setQueriedVideoUrl('');
+                                    fetchCameraFiles(activeAgentUid, c.id);
+                                    fetchCameraStatus(activeAgentUid, c.id);
+                                  }}
+                                  style={{
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    background: isSelected ? 'var(--color-surface-light)' : 'var(--color-inset-bg)',
+                                    border: isSelected ? '1px solid var(--color-primary)' : '1px solid var(--color-surface-light)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'all 0.2s'
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{c.camera_name}</div>
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '2px', wordBreak: 'break-all' }}>
+                                      {c.rtsp_url.substring(0, 40)}...
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    {c.is_recording ? (
+                                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff4757', boxShadow: '0 0 6px #ff4757' }} />
+                                    ) : (
+                                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-text-secondary)' }} />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </GlowCard>
+
+                      {/* Config Form */}
+                      <GlowCard>
+                        <h4 style={{ ...styles.cardTitle, marginBottom: '12px' }}>
+                          {cameraForm.id ? '⚙️ Cấu hình Camera' : '➕ Thêm Camera mới'}
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div style={styles.formGroup}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Tên Camera</label>
+                            <input
+                              type="text"
+                              style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                              value={cameraForm.camera_name}
+                              onChange={(e) => setCameraForm({ ...cameraForm, camera_name: e.target.value })}
+                            />
+                          </div>
+                          <div style={styles.formGroup}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>RTSP URL</label>
+                            <input
+                              type="text"
+                              style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px', fontFamily: 'monospace' }}
+                              placeholder="rtsp://admin:pass@ip:port/h264"
+                              value={cameraForm.rtsp_url}
+                              onChange={(e) => setCameraForm({ ...cameraForm, rtsp_url: e.target.value })}
+                            />
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                            <div style={styles.formGroup}>
+                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Độ dài segment (s)</label>
+                              <input
+                                type="number"
+                                style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                                value={cameraForm.segment_duration}
+                                onChange={(e) => setCameraForm({ ...cameraForm, segment_duration: parseInt(e.target.value) || 60 })}
+                              />
+                            </div>
+                            <div style={styles.formGroup}>
+                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Tiền tố file</label>
+                              <input
+                                type="text"
+                                style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                                value={cameraForm.prefix}
+                                onChange={(e) => setCameraForm({ ...cameraForm, prefix: e.target.value })}
+                              />
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-surface-light)' }}>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>Tắt âm thanh (No Audio)</span>
+                            <input
+                              type="checkbox"
+                              checked={cameraForm.no_audio}
+                              onChange={(e) => setCameraForm({ ...cameraForm, no_audio: e.target.checked })}
+                            />
+                          </div>
+
+                          {cameraTestResult && (
+                            <div
+                              style={{
+                                padding: '8px 10px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                background: cameraTestResult.ok ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+                                border: cameraTestResult.ok ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(239,68,68,0.2)',
+                                color: cameraTestResult.ok ? '#6ee7b7' : '#fca5a5'
+                              }}
+                            >
+                              {cameraTestResult.msg}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                            <button
+                              style={{ ...styles.smallBtn, flex: 1, background: 'var(--color-surface-light)', color: 'var(--color-text)' }}
+                              onClick={() => handleTestCameraConnection(activeAgentUid)}
+                              disabled={cameraTestLoading || !cameraForm.rtsp_url}
+                            >
+                              {cameraTestLoading ? '⏳ Kiểm tra...' : '🔌 Test'}
+                            </button>
+                            <button
+                              style={{ ...styles.smallBtn, flex: 1, background: 'var(--color-success)' }}
+                              onClick={() => handleSaveCameraConfig(activeAgentUid)}
+                              disabled={!cameraForm.rtsp_url}
+                            >
+                              💾 Lưu
+                            </button>
+                            {cameraForm.id && (
+                              <button
+                                style={{ ...styles.smallBtn, background: 'var(--color-danger)' }}
+                                onClick={() => handleDeleteCamera(activeAgentUid, cameraForm.id!)}
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </GlowCard>
+                    </div>
+
+                    {/* Right Pane: Selected Camera Details, Controls, Logs Console & Playback */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {selectedCamera ? (
+                        <>
+                          <GlowCard>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                              <div>
+                                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  📹 {selectedCamera.camera_name}
+                                  {cameraStatus?.running ? (
+                                    <span style={{ fontSize: '0.75rem', color: '#ff4757', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4757', display: 'inline-block' }} />
+                                      Đang ghi hình...
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Chờ</span>
+                                  )}
+                                </h3>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '2px', fontFamily: 'monospace' }}>
+                                  {selectedCamera.rtsp_url}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  style={{ ...styles.smallBtn, background: cameraStatus?.running ? 'var(--color-danger)' : 'var(--color-primary)' }}
+                                  onClick={() => handleToggleRecording(activeAgentUid, selectedCamera.id, !cameraStatus?.running)}
+                                  disabled={cameraActionLoading['toggle']}
+                                >
+                                  {cameraActionLoading['toggle'] ? '⏳...' : cameraStatus?.running ? '⏹️ Dừng ghi' : '▶️ Bắt đầu ghi'}
+                                </button>
+                                <button
+                                  style={{ ...styles.smallBtn, background: 'var(--color-surface-light)', color: 'var(--color-text)' }}
+                                  onClick={() => {
+                                    fetchCameraStatus(activeAgentUid, selectedCamera.id);
+                                    fetchCameraFiles(activeAgentUid, selectedCamera.id);
+                                  }}
+                                  disabled={cameraActionLoading['status']}
+                                >
+                                  {cameraActionLoading['status'] ? '⏳...' : '↻ Refresh'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Stats */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+                              <div style={{ background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--color-surface-light)' }}>
+                                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+                                  {cameraStatus?.segment_count ?? 0}
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Phân đoạn</div>
+                              </div>
+                              <div style={{ background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--color-surface-light)' }}>
+                                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-primary)', fontFamily: 'monospace' }}>
+                                  {cameraStatus?.elapsed_seconds ? `${Math.floor(cameraStatus.elapsed_seconds / 60)}m ${cameraStatus.elapsed_seconds % 60}s` : '--'}
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Thời gian chạy</div>
+                              </div>
+                              <div style={{ background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--color-surface-light)' }}>
+                                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+                                  {cameraFiles.length}
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>File MP4</div>
+                              </div>
+                            </div>
+
+                            {/* Log console */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>📋 NHẬT KÝ GHI HÌNH (AGENT LOGS)</div>
+                              <div
+                                style={{
+                                  background: '#070b14',
+                                  border: '1px solid var(--color-surface-light)',
+                                  borderRadius: '8px',
+                                  height: '140px',
+                                  overflowY: 'auto',
+                                  padding: '8px 12px',
+                                  fontFamily: 'monospace',
+                                  fontSize: '0.75rem',
+                                  lineHeight: 1.5
+                                }}
+                              >
+                                {cameraLogs.length === 0 ? (
+                                  <div style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>Chưa có log. Khởi động ghi để xem hoạt động...</div>
+                                ) : (
+                                  cameraLogs.map((l: any, idx: number) => {
+                                    let color = 'var(--color-text)';
+                                    if (l.level === 'success') color = '#10b981';
+                                    if (l.level === 'error') color = '#ef4444';
+                                    if (l.level === 'warn') color = '#f59e0b';
+                                    return (
+                                      <div key={idx} style={{ display: 'flex', gap: '8px', padding: '1px 0', color }}>
+                                        <span style={{ color: 'var(--color-text-secondary)' }}>[{l.time}]</span>
+                                        <span>{l.msg}</span>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          </GlowCard>
+
+                          {/* Playback Query Block */}
+                          <GlowCard>
+                            <h4 style={{ ...styles.cardTitle, marginBottom: '12px' }}>🎬 Truy xuất & Xem lại Video (Render & Playback)</h4>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px' }}>
+                              <div style={{ ...styles.formGroup, flex: 2 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Chọn thời điểm truy xuất</label>
+                                <input
+                                  type="text"
+                                  style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                                  placeholder="VD: 2026-07-03 16:15:00"
+                                  value={queryTimestamp}
+                                  onChange={(e) => setQueryTimestamp(e.target.value)}
+                                />
+                              </div>
+                              <div style={{ ...styles.formGroup, flex: 1 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Độ dài (giây)</label>
+                                <input
+                                  type="number"
+                                  style={{ ...styles.modalInput, fontSize: '0.8rem', padding: '6px 8px' }}
+                                  value={queryDuration}
+                                  onChange={(e) => setQueryDuration(parseInt(e.target.value) || 10)}
+                                />
+                              </div>
+                              <button
+                                style={{ ...styles.smallBtn, background: 'var(--color-primary)', height: '34px', padding: '0 16px' }}
+                                onClick={() => handleQueryVideo(activeAgentUid, selectedCamera.id)}
+                                disabled={queryVideoLoading || !queryTimestamp}
+                              >
+                                {queryVideoLoading ? '⏳ Đang render...' : '🎬 Xem lại'}
+                              </button>
+                            </div>
+
+                            {queriedVideoUrl && (
+                              <div style={{ marginTop: '14px', background: 'var(--color-inset-bg)', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-success)', marginBottom: '8px' }}>
+                                  ✅ Video đã được render thành công từ Agent!
+                                </div>
+                                <video
+                                  controls
+                                  src={`${BASE_URL}/api/agents/${activeAgentUid}/cameras/clips/${queriedVideoUrl}`}
+                                  style={{ width: '100%', borderRadius: '6px', outline: 'none' }}
+                                />
+                              </div>
+                            )}
+                          </GlowCard>
+
+                          {/* Recordings Files Table */}
+                          <GlowCard>
+                            <h4 style={{ ...styles.cardTitle, marginBottom: '10px' }}>📁 Các tệp tin phân đoạn trên Agent</h4>
+                            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--color-surface-light)', borderRadius: '8px' }}>
+                              {cameraFiles.length === 0 ? (
+                                <div style={styles.emptyText}>Chưa ghi nhận tệp tin nào.</div>
+                              ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                                  <thead>
+                                    <tr style={{ background: 'var(--color-inset-bg)', borderBottom: '1px solid var(--color-surface-light)' }}>
+                                      <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Tên tệp</th>
+                                      <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Dung lượng</th>
+                                      <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--color-text-secondary)' }}>Ngày ghi</th>
+                                      <th style={{ padding: '6px 10px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Xoá</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {cameraFiles.map((f: any, idx: number) => (
+                                      <tr key={idx} style={{ borderBottom: '1px solid var(--color-surface-light)' }}>
+                                        <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{f.name}</td>
+                                        <td style={{ padding: '6px 10px' }}>{f.size_mb} MB</td>
+                                        <td style={{ padding: '6px 10px' }}>{f.mtime}</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                          <button
+                                            style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}
+                                            onClick={() => handleDeleteCameraFile(activeAgentUid, selectedCamera.id, f.name)}
+                                          >
+                                            &times;
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </GlowCard>
+                        </>
+                      ) : (
+                        <div style={{ ...styles.emptyText, background: 'var(--color-inset-bg)', border: '1px solid var(--color-surface-light)', borderRadius: '12px', padding: '40px' }}>
+                          Chọn một camera trong danh sách bên trái để cấu hình và xem nhật ký.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

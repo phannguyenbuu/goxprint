@@ -327,6 +327,25 @@ class PrinterControlCommand(Base):
 
 
 
+class CameraConfig(Base):
+    __tablename__ = "CameraConfig"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_uid: Mapped[str] = mapped_column(String(128), index=True)
+    camera_name: Mapped[str] = mapped_column(String(255))
+    rtsp_url: Mapped[str] = mapped_column(Text)
+    segment_duration: Mapped[int] = mapped_column(Integer, default=60)
+    prefix: Mapped[str] = mapped_column(String(64), default="rec")
+    video_codec: Mapped[str] = mapped_column(String(64), default="copy")
+    audio_codec: Mapped[str] = mapped_column(String(64), default="copy")
+    no_audio: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_recording: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+
+
+
+
 class UserRole(str, Enum):
     WORKER = "worker"
     LEADER = "leader"

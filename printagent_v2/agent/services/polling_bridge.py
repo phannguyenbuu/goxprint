@@ -2859,6 +2859,135 @@ if ($node) {{ $node }}
                     self._post_control_result(command_id=command_id, ok=True, error="")
                     self._update_recent_command_status(command_id, "success")
                     return
+                elif action == "start_camera_recorder":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    rtsp_url = str(params.get("rtsp_url", "")).strip()
+                    segment_duration = int(params.get("segment_duration", 60))
+                    video_codec = str(params.get("video_codec", "copy")).strip()
+                    audio_codec = str(params.get("audio_codec", "copy")).strip()
+                    no_audio = bool(params.get("no_audio", True))
+                    prefix = str(params.get("prefix", "rec")).strip()
+                    
+                    if not camera_name or not rtsp_url:
+                        raise ValueError("start_camera_recorder: Missing camera_name or rtsp_url")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    success = cm.start_recording(
+                        camera_name=camera_name,
+                        rtsp_url=rtsp_url,
+                        output_dir=output_dir,
+                        segment_duration=segment_duration,
+                        video_codec=video_codec,
+                        audio_codec=audio_codec,
+                        no_audio=no_audio,
+                        prefix=prefix
+                    )
+                    if not success:
+                        raise RuntimeError("Failed to start camera recorder")
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "stop_camera_recorder":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    if not camera_name:
+                        raise ValueError("stop_camera_recorder: Missing camera_name")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    cm.stop_recording(camera_name)
+                    
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "get_camera_status":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    if not camera_name:
+                        raise ValueError("get_camera_status: Missing camera_name")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    status_data = cm.get_status(camera_name)
+                    status_data["logs"] = cm.get_logs(camera_name)
+                    
+                    payload_str = json.dumps(status_data)
+                    self._post_control_result(command_id=command_id, ok=True, error=payload_str)
+                    self._update_recent_command_status(command_id, "success", payload_str)
+                    return
+                elif action == "list_camera_files":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    if not camera_name:
+                        raise ValueError("list_camera_files: Missing camera_name")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    files = cm.list_recordings(camera_name, output_dir)
+                    
+                    payload_str = json.dumps({"files": files})
+                    self._post_control_result(command_id=command_id, ok=True, error=payload_str)
+                    self._update_recent_command_status(command_id, "success", payload_str)
+                    return
+                elif action == "delete_camera_file":
+                    filename = str(params.get("filename", "")).strip()
+                    if not filename:
+                        raise ValueError("delete_camera_file: Missing filename")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    success = cm.delete_recording(output_dir, filename)
+                    if not success:
+                        raise RuntimeError("Failed to delete recording file")
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "test_camera_rtsp":
+                    rtsp_url = str(params.get("rtsp_url", "")).strip()
+                    if not rtsp_url:
+                        raise ValueError("test_camera_rtsp: Missing rtsp_url")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    ok, msg = cm.test_rtsp_connection(rtsp_url)
+                    
+                    payload_str = json.dumps({"ok": ok, "msg": msg})
+                    self._post_control_result(command_id=command_id, ok=True, error=payload_str)
+                    self._update_recent_command_status(command_id, "success", payload_str)
+                    return
+                elif action == "query_camera_video":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    timestamp = str(params.get("timestamp", "")).strip()
+                    duration = int(params.get("duration", 10))
+                    
+                    if not camera_name or not timestamp:
+                        raise ValueError("query_camera_video: Missing camera_name or timestamp")
+                        
+                    from agent.services.camera_manager import CameraManager
+                    cm = CameraManager()
+                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    clip_path = cm.render_video_clip(camera_name, output_dir, timestamp, duration)
+                    if not clip_path or not os.path.exists(clip_path):
+                        raise FileNotFoundError("Video clip could not be rendered for the given timestamp")
+                        
+                    base_url = self._polling_base_url()
+                    token = self._config.get_string("polling.token").strip()
+                    headers = {"X-Lead-Token": token}
+                    url = f"{base_url}/api/agents/{agent_uid}/cameras/upload-video"
+                    
+                    import requests
+                    with open(clip_path, "rb") as f:
+                        files = {"file": (os.path.basename(clip_path), f, "video/mp4")}
+                        data = {"camera_name": camera_name, "timestamp": timestamp}
+                        resp = requests.post(url, files=files, data=data, headers=headers, timeout=60)
+                        resp.raise_for_status()
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
 

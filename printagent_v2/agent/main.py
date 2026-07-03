@@ -417,8 +417,46 @@ def main() -> int:
             default=os.getenv("FLASK_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"},
             help="Enable Flask debug mode (env: FLASK_DEBUG=true/false)",
         )
+        parser.add_argument(
+            "--get-video",
+            action="store_true",
+            help="Slice and render a video clip from camera recordings for a specific timestamp",
+        )
+        parser.add_argument(
+            "--name",
+            default="",
+            help="Camera name for video query",
+        )
+        parser.add_argument(
+            "--time",
+            default="",
+            help="Timestamp for video query",
+        )
+        parser.add_argument(
+            "--duration",
+            default=10,
+            type=int,
+            help="Duration of the sliced clip in seconds",
+        )
         args = parser.parse_args()
-        log_debug(f"Arguments parsed: mode={args.mode}, host={args.host}, port={args.port}, debug={args.debug}")
+        log_debug(f"Arguments parsed: mode={args.mode}, host={args.host}, port={args.port}, debug={args.debug}, get_video={getattr(args, 'get_video', False)}")
+
+        if getattr(args, "get_video", False):
+            from agent.services.camera_manager import CameraManager
+            cm = CameraManager()
+            output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+            clip_path = cm.render_video_clip(
+                camera_name=args.name,
+                output_dir=output_dir,
+                timestamp_str=args.time,
+                duration_seconds=args.duration
+            )
+            if clip_path and os.path.exists(clip_path):
+                print(f"SUCCESS: {clip_path}")
+                sys.exit(0)
+            else:
+                print("FAILED")
+                sys.exit(1)
 
         # Check config overrides for run modes
         if args.mode == "web" and not config.get_bool("modules.web.enabled", True):

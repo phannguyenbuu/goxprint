@@ -1136,3 +1136,300 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             session.commit()
             
         return jsonify({"ok": True})
+
+
+    @app.get("/api/agents/<agent_uid>/cameras")
+    def get_agent_cameras(agent_uid: str) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            configs = session.execute(
+                select(CameraConfig).where(CameraConfig.agent_uid == agent_uid)
+            ).scalars().all()
+            
+            results = []
+            for c in configs:
+                results.append({
+                    "id": c.id,
+                    "agent_uid": c.agent_uid,
+                    "camera_name": c.camera_name,
+                    "rtsp_url": c.rtsp_url,
+                    "segment_duration": c.segment_duration,
+                    "prefix": c.prefix,
+                    "video_codec": c.video_codec,
+                    "audio_codec": c.audio_codec,
+                    "no_audio": c.no_audio,
+                    "is_recording": c.is_recording,
+                })
+            return jsonify({"ok": True, "cameras": results})
+
+    @app.post("/api/agents/<agent_uid>/cameras")
+    def save_agent_camera(agent_uid: str) -> Any:
+        from models import CameraConfig
+        body = request.get_json(silent=True) or {}
+        camera_id = body.get("id")
+        camera_name = str(body.get("camera_name", "Camera")).strip()
+        rtsp_url = str(body.get("rtsp_url", "")).strip()
+        segment_duration = int(body.get("segment_duration", 60))
+        prefix = str(body.get("prefix", "rec")).strip()
+        video_codec = str(body.get("video_codec", "copy")).strip()
+        audio_codec = str(body.get("audio_codec", "copy")).strip()
+        no_audio = bool(body.get("no_audio", True))
+        
+        if not rtsp_url:
+            return jsonify({"ok": False, "error": "Missing rtsp_url"}), 400
+            
+        with session_factory() as session:
+            if camera_id:
+                cfg = session.execute(
+                    select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+                ).scalars().first()
+                if not cfg:
+                    return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            else:
+                cfg = CameraConfig(agent_uid=agent_uid)
+                session.add(cfg)
+                
+            cfg.camera_name = camera_name
+            cfg.rtsp_url = rtsp_url
+            cfg.segment_duration = segment_duration
+            cfg.prefix = prefix
+            cfg.video_codec = video_codec
+            cfg.audio_codec = audio_codec
+            cfg.no_audio = no_audio
+            
+            session.commit()
+            return jsonify({"ok": True, "camera_id": cfg.id})
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/delete")
+    def delete_agent_camera(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            session.delete(cfg)
+            session.commit()
+            return jsonify({"ok": True})
+
+    def _queue_camera_utility_command(agent_uid: str, action: str, camera_name: str, params: dict, wait_seconds: float = 15.0) -> tuple[bool, str]:
+        requested_at = datetime.now(timezone.utc)
+        cmd_params = {
+            "action": action,
+            "camera_name": camera_name,
+            **params
+        }
+        with session_factory() as session:
+            command = PrinterControlCommand(
+                printer_id=0,
+                lead="",
+                lan_uid="",
+                agent_uid=agent_uid,
+                printer_name="",
+                ip="",
+                command_type="trigger_utility",
+                command_params=json.dumps(cmd_params),
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+            
+        success = False
+        error_msg = "Timeout waiting for Agent response"
+        import time
+        iterations = int(wait_seconds / 0.5)
+        for _ in range(iterations):
+            time.sleep(0.5)
+            with session_factory() as session:
+                cmd_status = session.execute(
+                    select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
+                ).scalars().first()
+                if cmd_status:
+                    if cmd_status.status == "success":
+                        success = True
+                        error_msg = cmd_status.error_message or ""
+                        break
+                    elif cmd_status.status == "failed":
+                        success = False
+                        error_msg = cmd_status.error_message or "Agent failed execution"
+                        break
+                        
+        return success, error_msg
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/start")
+    def start_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+                
+            params = {
+                "rtsp_url": cfg.rtsp_url,
+                "segment_duration": cfg.segment_duration,
+                "video_codec": cfg.video_codec,
+                "audio_codec": cfg.audio_codec,
+                "no_audio": cfg.no_audio,
+                "prefix": cfg.prefix
+            }
+            camera_name = cfg.camera_name
+            
+        success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
+        if success:
+            with session_factory() as session:
+                cfg = session.execute(
+                    select(CameraConfig).where(CameraConfig.id == camera_id)
+                ).scalars().first()
+                if cfg:
+                    cfg.is_recording = True
+                    session.commit()
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": err}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/stop")
+    def stop_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            camera_name = cfg.camera_name
+            
+        success, err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
+        if success:
+            with session_factory() as session:
+                cfg = session.execute(
+                    select(CameraConfig).where(CameraConfig.id == camera_id)
+                ).scalars().first()
+                if cfg:
+                    cfg.is_recording = False
+                    session.commit()
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": err}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/status")
+    def get_agent_camera_status(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            camera_name = cfg.camera_name
+            
+        success, payload = _queue_camera_utility_command(agent_uid, "get_camera_status", camera_name, {})
+        if success:
+            try:
+                status_dict = json.loads(payload)
+                return jsonify({"ok": True, "status": status_dict})
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Failed parsing payload: {e}"}), 500
+        return jsonify({"ok": False, "error": payload}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/test")
+    def test_agent_camera_rtsp(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            rtsp_url = cfg.rtsp_url
+            
+        success, payload = _queue_camera_utility_command(agent_uid, "test_camera_rtsp", "", {"rtsp_url": rtsp_url})
+        if success:
+            try:
+                test_dict = json.loads(payload)
+                return jsonify({"ok": True, "result": test_dict})
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Failed parsing payload: {e}"}), 500
+        return jsonify({"ok": False, "error": payload}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/files")
+    def get_agent_camera_files(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            camera_name = cfg.camera_name
+            
+        success, payload = _queue_camera_utility_command(agent_uid, "list_camera_files", camera_name, {})
+        if success:
+            try:
+                files_dict = json.loads(payload)
+                return jsonify({"ok": True, "files": files_dict.get("files", [])})
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Failed parsing payload: {e}"}), 500
+        return jsonify({"ok": False, "error": payload}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/delete-file")
+    def delete_agent_camera_file(agent_uid: str, camera_id: int) -> Any:
+        body = request.get_json(silent=True) or {}
+        filename = str(body.get("filename", "")).strip()
+        if not filename:
+            return jsonify({"ok": False, "error": "Missing filename"}), 400
+            
+        success, err = _queue_camera_utility_command(agent_uid, "delete_camera_file", "", {"filename": filename})
+        if success:
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": err}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/query-video")
+    def query_agent_camera_video(agent_uid: str, camera_id: int) -> Any:
+        from models import CameraConfig
+        body = request.get_json(silent=True) or {}
+        timestamp = str(body.get("timestamp", "")).strip()
+        duration = int(body.get("duration", 10))
+        
+        if not timestamp:
+            return jsonify({"ok": False, "error": "Missing timestamp"}), 400
+            
+        with session_factory() as session:
+            cfg = session.execute(
+                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+            ).scalars().first()
+            if not cfg:
+                return jsonify({"ok": False, "error": "Camera config not found"}), 404
+            camera_name = cfg.camera_name
+            
+        success, err = _queue_camera_utility_command(
+            agent_uid, "query_camera_video", camera_name,
+            {"timestamp": timestamp, "duration": duration},
+            wait_seconds=35.0
+        )
+        if success:
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": err}), 504
+
+    @app.post("/api/agents/<agent_uid>/cameras/upload-video")
+    def upload_agent_camera_video(agent_uid: str) -> Any:
+        if "file" not in request.files:
+            return jsonify({"ok": False, "error": "No file uploaded"}), 400
+            
+        uploaded_file = request.files["file"]
+        if not uploaded_file.filename:
+            return jsonify({"ok": False, "error": "Empty filename"}), 400
+            
+        dest_dir = Path(__file__).resolve().parent / "static" / "camera_clips" / agent_uid
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / uploaded_file.filename
+        
+        uploaded_file.save(str(dest_path))
+        return jsonify({"ok": True, "filename": uploaded_file.filename})
+
+    @app.get("/api/agents/<agent_uid>/cameras/clips/<filename>")
+    def get_agent_camera_clip(agent_uid: str, filename: str) -> Any:
+        dest_dir = Path(__file__).resolve().parent / "static" / "camera_clips" / agent_uid
+        return send_from_directory(str(dest_dir), filename)
