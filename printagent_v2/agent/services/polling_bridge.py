@@ -1792,10 +1792,66 @@ if ($node) {{ $node }}
                 import socket
                 import urllib.request
                 import re
+                import json
+                from pathlib import Path
                 from concurrent.futures import ThreadPoolExecutor
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
                 
+                # 0. Pre-load configurations to access RTSP credentials
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    try:
+                        with cfg_path.open("r", encoding="utf-8") as f:
+                            configs = json.load(f)
+                    except Exception:
+                        configs = []
+
+                # Helper to find credentials from configs
+                def find_credentials(ip_addr: str) -> tuple[str | None, str | None]:
+                    for c in configs:
+                        rtsp = c.get("rtsp_url", "")
+                        ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                        if ip_match and ip_match.group(1) == ip_addr:
+                            cred_match = re.search(r'rtsp://([^:@]+):([^:@]+)@', rtsp)
+                            if cred_match:
+                                return cred_match.group(1), cred_match.group(2)
+                    return None, None
+
+                # Helper to detect manufacturer brand from landing page keywords
+                def detect_manufacturer_from_web(ip_addr: str) -> str | None:
+                    ports = [80, 81, 8080, 88]
+                    keywords = {
+                        "Hikvision": ["hikvision", "hik-connect", "hik_client", "hiddns"],
+                        "Dahua": ["dahua", "netdvr", "quickddns", "dss express"],
+                        "Ezviz": ["ezviz"],
+                        "Imou": ["imou"],
+                        "Yoosee": ["yoosee", "ycc365"],
+                        "KBVision": ["kbvision"],
+                        "Uniview": ["uniview", "unv", "mycloud"],
+                        "TP-Link / Tapo": ["tp-link", "tapo"],
+                        "Xiaomi": ["mi home", "xiaomi"],
+                        "Axis": ["axis communications", "axis camera"],
+                        "Hanwha Wisenet": ["wisenet", "hanwha"],
+                        "Vivotek": ["vivotek"],
+                    }
+                    for port in ports:
+                        try:
+                            url = f"http://{ip_addr}:{port}"
+                            req = urllib.request.Request(url, method='GET')
+                            with urllib.request.urlopen(req, timeout=0.8) as response:
+                                content = response.read().decode('utf-8', errors='ignore').lower()
+                                server_header = response.headers.get("Server", "").lower()
+                                for brand, kw_list in keywords.items():
+                                    if any(kw in server_header for kw in kw_list):
+                                        return brand
+                                    if any(kw in content for kw in kw_list):
+                                        return brand
+                        except Exception:
+                            continue
+                    return None
+
                 # 1. Discover subnets
                 subnets = []
                 try:
@@ -1812,44 +1868,93 @@ if ($node) {{ $node }}
                     subnets.append("192.168.1")
                     subnets.append("192.168.0")
                 
-                # SOAP info query
+                # SOAP info query with WS-Security and fallback mechanisms
                 def get_onvif_info(ip_addr: str) -> dict[str, str]:
+                    username, password = find_credentials(ip_addr)
+                    credentials_candidates = []
+                    if username and password:
+                        credentials_candidates.append((username, password))
+                    credentials_candidates.extend([
+                        (None, None),
+                        ("admin", "admin"),
+                        ("admin", "12345"),
+                        ("admin", "123456"),
+                        ("admin", "admin123"),
+                        ("admin", ""),
+                    ])
                     endpoints = [
                         f"http://{ip_addr}/onvif/device_service",
                         f"http://{ip_addr}:80/onvif/device_service",
                         f"http://{ip_addr}:888/onvif/device_service",
                         f"http://{ip_addr}:8080/onvif/device_service",
                     ]
-                    soap_msg = (
-                        '<?xml version="1.0" encoding="utf-8"?>'
-                        '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
-                        'xmlns:tds="http://www.onvif.org/ver10/device/wsdl">'
-                        '<soap:Body>'
-                        '<tds:GetDeviceInformation/>'
-                        '</soap:Body>'
-                        '</soap:Envelope>'
-                    )
-                    headers = {
-                        'Content-Type': 'application/soap+xml; charset=utf-8',
-                        'Content-Length': str(len(soap_msg))
-                    }
-                    for url in endpoints:
-                        try:
-                            req = urllib.request.Request(url, data=soap_msg.encode('utf-8'), headers=headers, method='POST')
-                            with urllib.request.urlopen(req, timeout=0.8) as response:
-                                html = response.read().decode('utf-8', errors='ignore')
-                                manufacturer = "Generic"
-                                model = "Camera IP"
-                                m_match = re.search(r'<[^:>]*Manufacturer[^>]*>([^<]+)</[^>]*Manufacturer[^>]*>', html)
-                                if m_match:
-                                    manufacturer = m_match.group(1).strip()
-                                mo_match = re.search(r'<[^:>]*Model[^>]*>([^<]+)</[^>]*Model[^>]*>', html)
-                                if mo_match:
-                                    model = mo_match.group(1).strip()
-                                return {"manufacturer": manufacturer, "model": model}
-                        except Exception:
-                            continue
-                    return {"manufacturer": "Generic", "model": "Camera IP"}
+                    last_error = "ONVIF tắt/Không kết nối"
+                    
+                    for user, pwd in credentials_candidates:
+                        if user and pwd:
+                            soap_msg = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" 
+               xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+  <soap:Header>
+    <Security xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+      <UsernameToken>
+        <Username>{user}</Username>
+        <Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{pwd}</Password>
+      </UsernameToken>
+    </Security>
+  </soap:Header>
+  <soap:Body>
+    <tds:GetDeviceInformation/>
+  </soap:Body>
+</soap:Envelope>"""
+                        else:
+                            soap_msg = (
+                                '<?xml version="1.0" encoding="utf-8"?>'
+                                '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
+                                'xmlns:tds="http://www.onvif.org/ver10/device/wsdl">'
+                                '<soap:Body>'
+                                '<tds:GetDeviceInformation/>'
+                                '</soap:Body>'
+                                '</soap:Envelope>'
+                            )
+                        headers = {
+                            'Content-Type': 'application/soap+xml; charset=utf-8',
+                            'Content-Length': str(len(soap_msg))
+                        }
+                        for url in endpoints:
+                            try:
+                                req = urllib.request.Request(url, data=soap_msg.encode('utf-8'), headers=headers, method='POST')
+                                with urllib.request.urlopen(req, timeout=0.8) as response:
+                                    html = response.read().decode('utf-8', errors='ignore')
+                                    manufacturer = "Generic"
+                                    model = "Camera IP"
+                                    m_match = re.search(r'<[^:>]*Manufacturer[^>]*>([^<]+)</[^>]*Manufacturer[^>]*>', html)
+                                    if m_match:
+                                        manufacturer = m_match.group(1).strip()
+                                    mo_match = re.search(r'<[^:>]*Model[^>]*>([^<]+)</[^>]*Model[^>]*>', html)
+                                    if mo_match:
+                                        model = mo_match.group(1).strip()
+                                    return {"manufacturer": manufacturer, "model": model}
+                            except urllib.error.HTTPError as he:
+                                if he.code == 401:
+                                    last_error = "Yêu cầu mật khẩu (401)"
+                                else:
+                                    last_error = f"Lỗi HTTP {he.code}"
+                            except urllib.error.URLError as ue:
+                                import socket as sk
+                                if isinstance(ue.reason, sk.timeout):
+                                    last_error = "ONVIF Timeout"
+                                elif isinstance(ue.reason, ConnectionRefusedError):
+                                    last_error = "Cổng đóng"
+                                else:
+                                    last_error = "Lỗi kết nối"
+                            except Exception as e:
+                                last_error = f"Lỗi: {type(e).__name__}"
+                                
+                    web_brand = detect_manufacturer_from_web(ip_addr)
+                    if web_brand:
+                        return {"manufacturer": web_brand, "model": last_error}
+                    return {"manufacturer": "Generic", "model": last_error}
 
                 # Port scan helper
                 def scan_ip_port(ip_addr: str) -> bool:
@@ -1953,17 +2058,6 @@ if ($node) {{ $node }}
                     })
                 
                 # Check status of configured cameras not found in discovery
-                import json
-                from pathlib import Path
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    try:
-                        with cfg_path.open("r", encoding="utf-8") as f:
-                            configs = json.load(f)
-                    except Exception:
-                        configs = []
-                        
                 for c in configs:
                     rtsp = c.get("rtsp_url", "")
                     ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
@@ -1972,12 +2066,13 @@ if ($node) {{ $node }}
                         if not any(item["ip"] == ip_addr for item in cameras_payload):
                             is_online, _ = cm.test_rtsp_connection(rtsp)
                             mac_addr = get_mac_address(ip_addr)
+                            info = get_onvif_info(ip_addr)
                             cameras_payload.append({
                                 "ip": ip_addr,
                                 "mac_address": mac_addr,
                                 "camera_name": c.get("camera_name"),
-                                "manufacturer": "Generic",
-                                "model": "Camera IP",
+                                "manufacturer": info.get("manufacturer", "Generic"),
+                                "model": info.get("model", "Camera IP"),
                                 "rtsp_url": rtsp,
                                 "is_online": is_online
                             })
