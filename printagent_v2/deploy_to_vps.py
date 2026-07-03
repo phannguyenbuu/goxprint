@@ -27,8 +27,9 @@ if not key_filename:
 print("Initializing SSH client...")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-print(f"Connecting to VPS at 31.97.76.62 using key: {key_filename}...")
-ssh.connect('31.97.76.62', username='root', key_filename=key_filename)
+deploy_host = os.environ.get("DEPLOY_HOST", "31.97.76.62")
+print(f"Connecting to VPS at {deploy_host} using key: {key_filename}...")
+ssh.connect(deploy_host, username='root', key_filename=key_filename)
 
 print("Opening SFTP session...")
 sftp = ssh.open_sftp()
@@ -36,9 +37,21 @@ print("SFTP session opened successfully.")
 
 remote_backend = "/opt/printagent"
 
+def ensure_remote_parent_dir(remote_filepath):
+    remote_dir = str(Path(remote_filepath).parent).replace("\\", "/")
+    parts = remote_dir.strip("/").split("/")
+    current = ""
+    for part in parts:
+        current += "/" + part
+        try:
+            sftp.mkdir(current)
+        except IOError:
+            pass
+
 # Upload all .py files in backend
 for py_file in local_backend.glob("*.py"):
     remote_path = f"{remote_backend}/{py_file.name}"
+    ensure_remote_parent_dir(remote_path)
     print(f"Uploading {py_file} to {remote_path}...")
     sftp.put(str(py_file), remote_path)
 
@@ -46,12 +59,14 @@ for py_file in local_backend.glob("*.py"):
 local_api_md = local_backend / "PUBLIC_API.md"
 if local_api_md.exists():
     remote_path = f"{remote_backend}/PUBLIC_API.md"
+    ensure_remote_parent_dir(remote_path)
     print(f"Uploading {local_api_md} to {remote_path}...")
     sftp.put(str(local_api_md), remote_path)
 
 # HTML templates
 for html_file in local_backend.glob("templates/*.html"):
     remote_path = f"{remote_backend}/templates/{html_file.name}"
+    ensure_remote_parent_dir(remote_path)
     print(f"Uploading {html_file} to {remote_path}...")
     sftp.put(str(html_file), remote_path)
 
@@ -78,6 +93,7 @@ files_to_copy = [
 
 for local_file, remote_file in files_to_copy:
     if os.path.exists(local_file):
+        ensure_remote_parent_dir(remote_file)
         print(f"Uploading {local_file} to {remote_file}...")
         sftp.put(local_file, remote_file)
 
