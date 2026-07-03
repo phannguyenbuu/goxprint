@@ -1795,11 +1795,12 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("IP", "Manufacturer", "Model", "RTSP", "Status", "Recording")
+        cols = ("IP", "MAC", "Manufacturer", "Model", "RTSP", "Status", "Recording")
         self.camera_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
         self.camera_tree.heading("#0", text="Tên Camera / Thiết Bị")
         self.camera_tree.heading("IP", text="Địa chỉ IP")
+        self.camera_tree.heading("MAC", text="Địa chỉ MAC")
         self.camera_tree.heading("Manufacturer", text="Hãng")
         self.camera_tree.heading("Model", text="Dòng máy")
         self.camera_tree.heading("RTSP", text="Địa chỉ RTSP")
@@ -1808,6 +1809,7 @@ class PrintAgentGui:
         
         self.camera_tree.column("#0", width=180, anchor=tk.W)
         self.camera_tree.column("IP", width=110, anchor=tk.W)
+        self.camera_tree.column("MAC", width=120, anchor=tk.W)
         self.camera_tree.column("Manufacturer", width=100, anchor=tk.W)
         self.camera_tree.column("Model", width=100, anchor=tk.W)
         self.camera_tree.column("RTSP", width=220, anchor=tk.W)
@@ -1842,7 +1844,7 @@ class PrintAgentGui:
         for item in self.camera_tree.get_children():
             self.camera_tree.delete(item)
             
-        self.camera_tree.insert("", tk.END, text="Scanning network for cameras...", values=("", "", "", "", "", ""))
+        self.camera_tree.insert("", tk.END, text="Scanning network for cameras...", values=("", "", "", "", "", "", ""))
         
         def run() -> None:
             try:
@@ -1850,6 +1852,7 @@ class PrintAgentGui:
                 import socket
                 import urllib.request
                 import re
+                import subprocess
                 from pathlib import Path
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
@@ -1938,6 +1941,17 @@ class PrintAgentGui:
                     except Exception:
                         return False
 
+                # Helper to get MAC from ARP table
+                def get_mac_address(ip_addr: str) -> str:
+                    try:
+                        output = subprocess.check_output(f"arp -a {ip_addr}", shell=True, timeout=0.8).decode('utf-8', errors='ignore')
+                        mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', output)
+                        if mac_match:
+                            return mac_match.group(0).upper().replace("-", ":")
+                    except Exception:
+                        pass
+                    return "Unknown"
+
                 # 2. Run ONVIF multicast WS-Discovery
                 discovered_ips = []
                 MCAST_GRP = '239.255.255.250'
@@ -2020,6 +2034,7 @@ class PrintAgentGui:
                 results = []
                 for ip_addr in discovered_ips:
                     info = get_onvif_info(ip_addr)
+                    mac_addr = get_mac_address(ip_addr)
                     
                     matched_cfg = None
                     for c in configs:
@@ -2044,6 +2059,7 @@ class PrintAgentGui:
                     results.append((
                         camera_name,
                         ip_addr,
+                        mac_addr,
                         info.get("manufacturer", "Generic"),
                         info.get("model", "Camera IP"),
                         rtsp_display,
@@ -2059,10 +2075,10 @@ class PrintAgentGui:
                             "",
                             tk.END,
                             text=item[0],
-                            values=(item[1], item[2], item[3], item[4], item[5], item[6])
+                            values=(item[1], item[2], item[3], item[4], item[5], item[6], item[7])
                         )
                     if not self.camera_tree.get_children():
-                        self.camera_tree.insert("", tk.END, text="Không tìm thấy camera nào", values=("", "", "", "", "", ""))
+                        self.camera_tree.insert("", tk.END, text="Không tìm thấy camera nào", values=("", "", "", "", "", "", ""))
                         
                 self.root.after(0, lambda: update_ui(results))
             except Exception as exc:
@@ -2082,7 +2098,7 @@ class PrintAgentGui:
             return
             
         ip_addr = values[0]
-        rtsp_url = values[3]
+        rtsp_url = values[4]
         
         import json
         from pathlib import Path
@@ -2191,7 +2207,7 @@ class PrintAgentGui:
         if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
             return
             
-        rtsp_url = values[3]
+        rtsp_url = values[4]
         if not rtsp_url:
             return
             
@@ -2220,7 +2236,7 @@ class PrintAgentGui:
             return
             
         ip_addr = values[0]
-        rtsp_url = values[3]
+        rtsp_url = values[4]
         
         import json
         from pathlib import Path
