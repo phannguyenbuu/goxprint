@@ -1952,12 +1952,13 @@ class PrintAgentGui:
                         try:
                             data, addr = sock.recvfrom(65535)
                             response = data.decode('utf-8', errors='ignore')
+                            ipv4_pattern = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
                             urls = re.findall(r'https?://[^\s<>"]+', response)
                             for url in urls:
                                 ip_match = re.search(r'https?://([^:/]+)', url)
                                 if ip_match:
                                     ip_found = ip_match.group(1)
-                                    if ip_found not in discovered_ips and not ip_found.startswith("127."):
+                                    if ipv4_pattern.match(ip_found) and ip_found not in discovered_ips and not ip_found.startswith("127."):
                                         discovered_ips.append(ip_found)
                         except socket.timeout:
                             break
