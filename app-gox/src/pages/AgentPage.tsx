@@ -972,6 +972,18 @@ export function AgentPage() {
     return onlineAgents[0]?.agent_uid || '';
   }, [selectedCameraAgentUid, onlineAgents]);
 
+  const getLiveQueryTimestamp = () => {
+    const now = new Date();
+    const targetTime = new Date(now.getTime() - 45 * 1000);
+    const YYYY = targetTime.getFullYear();
+    const MM = String(targetTime.getMonth() + 1).padStart(2, '0');
+    const DD = String(targetTime.getDate()).padStart(2, '0');
+    const hh = String(targetTime.getHours()).padStart(2, '0');
+    const mm = String(targetTime.getMinutes()).padStart(2, '0');
+    const ss = String(targetTime.getSeconds()).padStart(2, '0');
+    return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}`;
+  };
+
   useEffect(() => {
     setSelectedCamera(null);
     setCameraForm({
@@ -3151,6 +3163,12 @@ export function AgentPage() {
                                   setQueriedVideoUrl('');
                                   fetchCameraFiles(activeAgentUid, c.id);
                                   fetchCameraStatus(activeAgentUid, c.id);
+                                  
+                                  // Auto-trigger Option B: Live Video clip (last 30 seconds)
+                                  const liveTs = getLiveQueryTimestamp();
+                                  setQueryTimestamp(liveTs);
+                                  setQueryDuration(30);
+                                  handleQueryVideo(activeAgentUid, c.id, liveTs, 30);
                                 }}
                                 style={{
                                   padding: '10px 12px',
@@ -3556,6 +3574,18 @@ export function AgentPage() {
                                     >
                                       {queryVideoLoading ? '⏳...' : '🎬 Xem'}
                                     </button>
+                                     <button
+                                       style={{ ...styles.smallBtn, background: 'var(--color-success)', height: '30px', padding: '0 12px', marginLeft: '6px' }}
+                                       onClick={() => {
+                                         const liveTs = getLiveQueryTimestamp();
+                                         setQueryTimestamp(liveTs);
+                                         setQueryDuration(30);
+                                         handleQueryVideo(activeAgentUid, selectedCamera.id, liveTs, 30);
+                                       }}
+                                       disabled={queryVideoLoading}
+                                      >
+                                       {queryVideoLoading ? '⏳...' : '📺 Xem Live'}
+                                      </button>
                                   </div>
 
                                   {queriedVideoUrl && (
