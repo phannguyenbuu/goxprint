@@ -2874,6 +2874,49 @@ if ($node) {{ $node }}
                     from agent.services.camera_manager import CameraManager
                     cm = CameraManager()
                     output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    
+                    # Upsert config locally for the Local UI / Desktop GUI
+                    try:
+                        import json
+                        from pathlib import Path
+                        local_cfg_path = Path("storage/camera_configs.json")
+                        local_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                        configs = []
+                        if local_cfg_path.exists():
+                            try:
+                                with local_cfg_path.open("r", encoding="utf-8") as f:
+                                    configs = json.load(f)
+                            except Exception:
+                                configs = []
+                        
+                        found = False
+                        for c in configs:
+                            if c.get("camera_name") == camera_name:
+                                c.update({
+                                    "rtsp_url": rtsp_url,
+                                    "segment_duration": segment_duration,
+                                    "prefix": prefix,
+                                    "video_codec": video_codec,
+                                    "audio_codec": audio_codec,
+                                    "no_audio": no_audio
+                                })
+                                found = True
+                                break
+                        if not found:
+                            configs.append({
+                                "camera_name": camera_name,
+                                "rtsp_url": rtsp_url,
+                                "segment_duration": segment_duration,
+                                "prefix": prefix,
+                                "video_codec": video_codec,
+                                "audio_codec": audio_codec,
+                                "no_audio": no_audio
+                            })
+                        with local_cfg_path.open("w", encoding="utf-8") as f:
+                            json.dump(configs, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        LOGGER.error("Failed to save local camera config: %s", e)
+
                     success = cm.start_recording(
                         camera_name=camera_name,
                         rtsp_url=rtsp_url,
