@@ -1780,6 +1780,313 @@ class PrintAgentGui:
                 
         threading.Thread(target=task, daemon=True).start()
 
+    def create_camera_tab(self) -> None:
+        self.camera_tab = ttk.Frame(self.notebook, padding="10 10 10 10")
+        self.notebook.add(self.camera_tab, text=" Cameras (Camera ghi hình) ")
+        
+        main_frame = ttk.Frame(self.camera_tab)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Action Buttons frame packed first on the right
+        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Treeview frame
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        cols = ("Name", "RTSP", "Status", "Duration", "Audio", "Prefix")
+        self.camera_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
+        
+        self.camera_tree.heading("Name", text="Tên Camera")
+        self.camera_tree.heading("RTSP", text="Địa chỉ RTSP")
+        self.camera_tree.heading("Status", text="Trạng thái")
+        self.camera_tree.heading("Duration", text="Phân đoạn")
+        self.camera_tree.heading("Audio", text="Âm thanh")
+        self.camera_tree.heading("Prefix", text="Tiền tố")
+        
+        self.camera_tree.column("Name", width=120, anchor=tk.W)
+        self.camera_tree.column("RTSP", width=250, anchor=tk.W)
+        self.camera_tree.column("Status", width=90, anchor=tk.CENTER)
+        self.camera_tree.column("Duration", width=70, anchor=tk.CENTER)
+        self.camera_tree.column("Audio", width=80, anchor=tk.CENTER)
+        self.camera_tree.column("Prefix", width=80, anchor=tk.CENTER)
+        
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.camera_tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.camera_tree.xview)
+        self.camera_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        
+        self.camera_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        
+        # Action Buttons
+        ttk.Button(btn_frame, text="Start Rec (Bắt đầu)", command=self.gui_start_camera_rec, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Stop Rec (Dừng ghi)", command=self.gui_stop_camera_rec, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Test Cam (Kiểm tra)", command=self.gui_test_camera_conn, width=18).pack(pady=4)
+        
+        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+        
+        ttk.Button(btn_frame, text="Add Cam (Thêm)", command=self.gui_add_camera, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Edit Cam (Sửa)", command=self.gui_edit_camera, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Delete Cam (Xoá)", command=self.gui_delete_camera, width=18).pack(pady=4)
+        
+        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+        ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_cameras, width=18).pack(pady=4)
+
+    def refresh_cameras(self) -> None:
+        for item in self.camera_tree.get_children():
+            self.camera_tree.delete(item)
+            
+        self.camera_tree.insert("", tk.END, values=("Loading cameras...", "", "", "", "", ""))
+        
+        def run() -> None:
+            try:
+                import json
+                from pathlib import Path
+                from agent.services.camera_manager import CameraManager
+                cm = CameraManager()
+                
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    try:
+                        with cfg_path.open("r", encoding="utf-8") as f:
+                            configs = json.load(f)
+                    except Exception:
+                        configs = []
+                        
+                results = []
+                for c in configs:
+                    name = c.get("camera_name", "")
+                    status = cm.get_status(name)
+                    is_rec = status.get("running", False)
+                    status_str = "Ghi hình" if is_rec else "Chờ"
+                    audio_str = "No Audio" if c.get("no_audio", True) else "With Audio"
+                    
+                    results.append((
+                        name,
+                        c.get("rtsp_url", ""),
+                        status_str,
+                        f"{c.get('segment_duration', 60)}s",
+                        audio_str,
+                        c.get("prefix", "rec")
+                    ))
+                    
+                def update_ui(items) -> None:
+                    for item in self.camera_tree.get_children():
+                        self.camera_tree.delete(item)
+                    for item in items:
+                        self.camera_tree.insert("", tk.END, values=item)
+                    if not self.camera_tree.get_children():
+                        self.camera_tree.insert("", tk.END, values=("Chưa cấu hình camera nào", "", "", "", "", ""))
+                        
+                self.root.after(0, lambda: update_ui(results))
+            except Exception as exc:
+                LOGGER.exception("Failed to refresh cameras in GUI")
+                self.root.after(0, lambda: update_ui([]))
+                
+        threading.Thread(target=run, daemon=True, name="gui-camera-refresh").start()
+
+    def gui_start_camera_rec(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to start recording.")
+            return
+        values = self.camera_tree.item(selected, "values")
+        camera_name = values[0]
+        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+            return
+            
+        def run() -> None:
+            try:
+                import json
+                from pathlib import Path
+                from agent.services.camera_manager import CameraManager
+                cm = CameraManager()
+                
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    with cfg_path.open("r", encoding="utf-8") as f:
+                        configs = json.load(f)
+                cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
+                if not cfg:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "Camera configuration not found."))
+                    return
+                    
+                output_dir = self.config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                success = cm.start_recording(
+                    camera_name=camera_name,
+                    rtsp_url=cfg["rtsp_url"],
+                    output_dir=output_dir,
+                    segment_duration=cfg.get("segment_duration", 60),
+                    video_codec=cfg.get("video_codec", "copy"),
+                    audio_codec=cfg.get("audio_codec", "copy"),
+                    no_audio=cfg.get("no_audio", True),
+                    prefix=cfg.get("prefix", "rec")
+                )
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("Success", f"Started recording camera '{camera_name}'!"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to start recording camera '{camera_name}'."))
+            except Exception as exc:
+                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", str(exc)))
+            finally:
+                self.refresh_cameras()
+                
+        threading.Thread(target=run, daemon=True).start()
+
+    def gui_stop_camera_rec(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to stop recording.")
+            return
+        values = self.camera_tree.item(selected, "values")
+        camera_name = values[0]
+        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+            return
+            
+        try:
+            from agent.services.camera_manager import CameraManager
+            cm = CameraManager()
+            cm.stop_recording(camera_name)
+            messagebox.showinfo("Success", f"Stopped recording camera '{camera_name}'.")
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc))
+        finally:
+            self.refresh_cameras()
+
+    def gui_test_camera_conn(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to test connection.")
+            return
+        values = self.camera_tree.item(selected, "values")
+        camera_name = values[0]
+        rtsp_url = values[1]
+        if not rtsp_url:
+            return
+            
+        def run() -> None:
+            try:
+                from agent.services.camera_manager import CameraManager
+                cm = CameraManager()
+                ok, msg = cm.test_rtsp_connection(rtsp_url)
+                if ok:
+                    self.root.after(0, lambda: messagebox.showinfo("Connection Test Success", f"✅ Kết nối thành công tới camera '{camera_name}'!\n\n{msg}"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Connection Test Failed", f"❌ Kết nối thất bại tới camera '{camera_name}':\n\n{msg}"))
+            except Exception as exc:
+                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", str(exc)))
+                
+        threading.Thread(target=run, daemon=True).start()
+
+    def gui_add_camera(self) -> None:
+        dlg = CameraDialog(self.root, "Add New Camera")
+        self.root.wait_window(dlg)
+        
+        if dlg.result:
+            try:
+                import json
+                from pathlib import Path
+                cfg_path = Path("storage/camera_configs.json")
+                configs = []
+                if cfg_path.exists():
+                    try:
+                        with cfg_path.open("r", encoding="utf-8") as f:
+                            configs = json.load(f)
+                    except Exception:
+                        configs = []
+                if any(c.get("camera_name") == dlg.result["camera_name"] for c in configs):
+                    messagebox.showerror("Error", f"Camera name '{dlg.result['camera_name']}' already exists.")
+                    return
+                    
+                configs.append(dlg.result)
+                with cfg_path.open("w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=2, ensure_ascii=False)
+                messagebox.showinfo("Success", f"Camera '{dlg.result['camera_name']}' added successfully!")
+            except Exception as exc:
+                messagebox.showerror("Error", str(exc))
+            finally:
+                self.refresh_cameras()
+
+    def gui_edit_camera(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to edit.")
+            return
+        values = self.camera_tree.item(selected, "values")
+        camera_name = values[0]
+        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+            return
+            
+        try:
+            import json
+            from pathlib import Path
+            cfg_path = Path("storage/camera_configs.json")
+            configs = []
+            if cfg_path.exists():
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
+            if not cfg:
+                messagebox.showerror("Error", f"Configuration for camera '{camera_name}' not found.")
+                return
+                
+            dlg = CameraDialog(self.root, f"Edit Camera: {camera_name}", cfg)
+            self.root.wait_window(dlg)
+            
+            if dlg.result:
+                for c in configs:
+                    if c.get("camera_name") == camera_name:
+                        c.update(dlg.result)
+                        break
+                with cfg_path.open("w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=2, ensure_ascii=False)
+                messagebox.showinfo("Success", f"Camera '{camera_name}' updated successfully!")
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc))
+        finally:
+            self.refresh_cameras()
+
+    def gui_delete_camera(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to delete.")
+            return
+        values = self.camera_tree.item(selected, "values")
+        camera_name = values[0]
+        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+            return
+            
+        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete camera '{camera_name}'?"):
+            return
+            
+        try:
+            import json
+            from pathlib import Path
+            from agent.services.camera_manager import CameraManager
+            cm = CameraManager()
+            cm.stop_recording(camera_name)
+            
+            cfg_path = Path("storage/camera_configs.json")
+            configs = []
+            if cfg_path.exists():
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            configs = [c for c in configs if c.get("camera_name") != camera_name]
+            with cfg_path.open("w", encoding="utf-8") as f:
+                json.dump(configs, f, indent=2, ensure_ascii=False)
+            messagebox.showinfo("Success", f"Camera '{camera_name}' deleted.")
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc))
+        finally:
+            self.refresh_cameras()
+
 
 def show_gui_window(app_version: str) -> None:
     global _gui_root
@@ -2622,312 +2929,5 @@ class QuickSetupUI:
                 self.root.after(0, lambda: self._set_buttons_state(tk.NORMAL))
                 
         threading.Thread(target=run_all, daemon=True).start()
-
-    def create_camera_tab(self) -> None:
-        self.camera_tab = ttk.Frame(self.notebook, padding="10 10 10 10")
-        self.notebook.add(self.camera_tab, text=" Cameras (Camera ghi hình) ")
-        
-        main_frame = ttk.Frame(self.camera_tab)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Action Buttons frame packed first on the right
-        btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Treeview frame
-        tree_frame = ttk.Frame(main_frame)
-        tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        cols = ("Name", "RTSP", "Status", "Duration", "Audio", "Prefix")
-        self.camera_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
-        
-        self.camera_tree.heading("Name", text="Tên Camera")
-        self.camera_tree.heading("RTSP", text="Địa chỉ RTSP")
-        self.camera_tree.heading("Status", text="Trạng thái")
-        self.camera_tree.heading("Duration", text="Phân đoạn")
-        self.camera_tree.heading("Audio", text="Âm thanh")
-        self.camera_tree.heading("Prefix", text="Tiền tố")
-        
-        self.camera_tree.column("Name", width=120, anchor=tk.W)
-        self.camera_tree.column("RTSP", width=250, anchor=tk.W)
-        self.camera_tree.column("Status", width=90, anchor=tk.CENTER)
-        self.camera_tree.column("Duration", width=70, anchor=tk.CENTER)
-        self.camera_tree.column("Audio", width=80, anchor=tk.CENTER)
-        self.camera_tree.column("Prefix", width=80, anchor=tk.CENTER)
-        
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.camera_tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.camera_tree.xview)
-        self.camera_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        self.camera_tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        
-        tree_frame.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)
-        
-        # Action Buttons
-        ttk.Button(btn_frame, text="Start Rec (Bắt đầu)", command=self.gui_start_camera_rec, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Stop Rec (Dừng ghi)", command=self.gui_stop_camera_rec, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Test Cam (Kiểm tra)", command=self.gui_test_camera_conn, width=18).pack(pady=4)
-        
-        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
-        
-        ttk.Button(btn_frame, text="Add Cam (Thêm)", command=self.gui_add_camera, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Edit Cam (Sửa)", command=self.gui_edit_camera, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Delete Cam (Xoá)", command=self.gui_delete_camera, width=18).pack(pady=4)
-        
-        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
-        ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_cameras, width=18).pack(pady=4)
-
-    def refresh_cameras(self) -> None:
-        for item in self.camera_tree.get_children():
-            self.camera_tree.delete(item)
-            
-        self.camera_tree.insert("", tk.END, values=("Loading cameras...", "", "", "", "", ""))
-        
-        def run() -> None:
-            try:
-                import json
-                from pathlib import Path
-                from agent.services.camera_manager import CameraManager
-                cm = CameraManager()
-                
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    try:
-                        with cfg_path.open("r", encoding="utf-8") as f:
-                            configs = json.load(f)
-                    except Exception:
-                        configs = []
-                        
-                results = []
-                for c in configs:
-                    name = c.get("camera_name", "")
-                    status = cm.get_status(name)
-                    is_rec = status.get("running", False)
-                    status_str = "Ghi hình" if is_rec else "Chờ"
-                    audio_str = "No Audio" if c.get("no_audio", True) else "With Audio"
-                    
-                    results.append((
-                        name,
-                        c.get("rtsp_url", ""),
-                        status_str,
-                        f"{c.get('segment_duration', 60)}s",
-                        audio_str,
-                        c.get("prefix", "rec")
-                    ))
-                    
-                def update_ui(items) -> None:
-                    for item in self.camera_tree.get_children():
-                        self.camera_tree.delete(item)
-                    for item in items:
-                        self.camera_tree.insert("", tk.END, values=item)
-                    if not self.camera_tree.get_children():
-                        self.camera_tree.insert("", tk.END, values=("Chưa cấu hình camera nào", "", "", "", "", ""))
-                        
-                self.root.after(0, lambda: update_ui(results))
-            except Exception as exc:
-                LOGGER.exception("Failed to refresh cameras in GUI")
-                self.root.after(0, lambda: update_ui([]))
-                
-        threading.Thread(target=run, daemon=True, name="gui-camera-refresh").start()
-
-    def gui_start_camera_rec(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to start recording.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
-            return
-            
-        def run() -> None:
-            try:
-                import json
-                from pathlib import Path
-                from agent.services.camera_manager import CameraManager
-                cm = CameraManager()
-                
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    with cfg_path.open("r", encoding="utf-8") as f:
-                        configs = json.load(f)
-                cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
-                if not cfg:
-                    self.root.after(0, lambda: messagebox.showerror("Error", "Camera configuration not found."))
-                    return
-                    
-                output_dir = self.config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
-                success = cm.start_recording(
-                    camera_name=camera_name,
-                    rtsp_url=cfg["rtsp_url"],
-                    output_dir=output_dir,
-                    segment_duration=cfg.get("segment_duration", 60),
-                    video_codec=cfg.get("video_codec", "copy"),
-                    audio_codec=cfg.get("audio_codec", "copy"),
-                    no_audio=cfg.get("no_audio", True),
-                    prefix=cfg.get("prefix", "rec")
-                )
-                if success:
-                    self.root.after(0, lambda: messagebox.showinfo("Success", f"Started recording camera '{camera_name}'!"))
-                else:
-                    self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to start recording camera '{camera_name}'."))
-            except Exception as exc:
-                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", str(exc)))
-            finally:
-                self.refresh_cameras()
-                
-        threading.Thread(target=run, daemon=True).start()
-
-    def gui_stop_camera_rec(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to stop recording.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
-            return
-            
-        try:
-            from agent.services.camera_manager import CameraManager
-            cm = CameraManager()
-            cm.stop_recording(camera_name)
-            messagebox.showinfo("Success", f"Stopped recording camera '{camera_name}'.")
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-        finally:
-            self.refresh_cameras()
-
-    def gui_test_camera_conn(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to test connection.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        rtsp_url = values[1]
-        if not rtsp_url:
-            return
-            
-        def run() -> None:
-            try:
-                from agent.services.camera_manager import CameraManager
-                cm = CameraManager()
-                ok, msg = cm.test_rtsp_connection(rtsp_url)
-                if ok:
-                    self.root.after(0, lambda: messagebox.showinfo("Connection Test Success", f"✅ Kết nối thành công tới camera '{camera_name}'!\n\n{msg}"))
-                else:
-                    self.root.after(0, lambda: messagebox.showerror("Connection Test Failed", f"❌ Kết nối thất bại tới camera '{camera_name}':\n\n{msg}"))
-            except Exception as exc:
-                self.root.after(0, lambda exc=exc: messagebox.showerror("Error", str(exc)))
-                
-        threading.Thread(target=run, daemon=True).start()
-
-    def gui_add_camera(self) -> None:
-        dlg = CameraDialog(self.root, "Add New Camera")
-        self.root.wait_window(dlg)
-        
-        if dlg.result:
-            try:
-                import json
-                from pathlib import Path
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    try:
-                        with cfg_path.open("r", encoding="utf-8") as f:
-                            configs = json.load(f)
-                    except Exception:
-                        configs = []
-                if any(c.get("camera_name") == dlg.result["camera_name"] for c in configs):
-                    messagebox.showerror("Error", f"Camera name '{dlg.result['camera_name']}' already exists.")
-                    return
-                    
-                configs.append(dlg.result)
-                with cfg_path.open("w", encoding="utf-8") as f:
-                    json.dump(configs, f, indent=2, ensure_ascii=False)
-                messagebox.showinfo("Success", f"Camera '{dlg.result['camera_name']}' added successfully!")
-            except Exception as exc:
-                messagebox.showerror("Error", str(exc))
-            finally:
-                self.refresh_cameras()
-
-    def gui_edit_camera(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to edit.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
-            return
-            
-        try:
-            import json
-            from pathlib import Path
-            cfg_path = Path("storage/camera_configs.json")
-            configs = []
-            if cfg_path.exists():
-                with cfg_path.open("r", encoding="utf-8") as f:
-                    configs = json.load(f)
-            cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
-            if not cfg:
-                messagebox.showerror("Error", f"Configuration for camera '{camera_name}' not found.")
-                return
-                
-            dlg = CameraDialog(self.root, f"Edit Camera: {camera_name}", cfg)
-            self.root.wait_window(dlg)
-            
-            if dlg.result:
-                for c in configs:
-                    if c.get("camera_name") == camera_name:
-                        c.update(dlg.result)
-                        break
-                with cfg_path.open("w", encoding="utf-8") as f:
-                    json.dump(configs, f, indent=2, ensure_ascii=False)
-                messagebox.showinfo("Success", f"Camera '{camera_name}' updated successfully!")
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-        finally:
-            self.refresh_cameras()
-
-    def gui_delete_camera(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to delete.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
-            return
-            
-        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete camera '{camera_name}'?"):
-            return
-            
-        try:
-            import json
-            from pathlib import Path
-            from agent.services.camera_manager import CameraManager
-            cm = CameraManager()
-            cm.stop_recording(camera_name)
-            
-            cfg_path = Path("storage/camera_configs.json")
-            configs = []
-            if cfg_path.exists():
-                with cfg_path.open("r", encoding="utf-8") as f:
-                    configs = json.load(f)
-            configs = [c for c in configs if c.get("camera_name") != camera_name]
-            with cfg_path.open("w", encoding="utf-8") as f:
-                json.dump(configs, f, indent=2, ensure_ascii=False)
-            messagebox.showinfo("Success", f"Camera '{camera_name}' deleted.")
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-        finally:
-            self.refresh_cameras()
 
 
