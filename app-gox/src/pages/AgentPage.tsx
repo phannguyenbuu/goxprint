@@ -92,6 +92,7 @@ export function AgentPage() {
     return localStorage.getItem('goxprint_selected_lan_uid') || '';
   });
   const [lanSitesLoading, setLanSitesLoading] = useState(false);
+  const [selectedCameraAgentUid, setSelectedCameraAgentUid] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'agents' | 'copiers' | 'cameras'>(() => {
     const saved = localStorage.getItem('goxprint_active_tab');
     return (saved === 'agents' || saved === 'copiers' || saved === 'cameras') ? saved : 'agents';
@@ -959,7 +960,28 @@ export function AgentPage() {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
 
-  const activeAgentUid = selectedLan?.agents?.[0]?.agent_uid;
+  const activeAgentUid = useMemo(() => {
+    if (selectedCameraAgentUid) {
+      const exists = selectedLan?.agents?.some((a: any) => a.agent_uid === selectedCameraAgentUid);
+      if (exists) return selectedCameraAgentUid;
+    }
+    const onlineAgents = (selectedLan?.agents || []).filter((a: any) => a.is_online);
+    return onlineAgents[0]?.agent_uid || selectedLan?.agents?.[0]?.agent_uid || '';
+  }, [selectedCameraAgentUid, selectedLan]);
+
+  useEffect(() => {
+    setSelectedCamera(null);
+    setCameraForm({
+      id: null,
+      camera_name: '',
+      rtsp_url: '',
+      segment_duration: 60,
+      prefix: 'rec',
+      video_codec: 'copy',
+      audio_codec: 'copy',
+      no_audio: true,
+    });
+  }, [activeAgentUid]);
 
   useEffect(() => {
     if (activeTab === 'cameras' && activeAgentUid) {
@@ -3040,6 +3062,43 @@ export function AgentPage() {
                   <div style={styles.emptyText}>Không tìm thấy Máy tính nào hoạt động trong dải LAN này để quản lý camera.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* Agent Selector Dropdown */}
+                    {selectedLan?.agents && selectedLan.agents.length > 1 && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        background: 'var(--color-surface-card)',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        border: '1px solid var(--color-surface-light)',
+                        boxShadow: 'var(--shadow-subtle)'
+                      }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)' }}>💻 Chọn Máy tính quản lý Camera:</span>
+                        <select
+                          value={activeAgentUid}
+                          onChange={(e) => setSelectedCameraAgentUid(e.target.value)}
+                          style={{
+                            background: 'var(--color-surface-light)',
+                            color: 'var(--color-text)',
+                            border: '1px solid var(--color-surface-border)',
+                            borderRadius: '6px',
+                            padding: '6px 12px',
+                            fontSize: '0.8rem',
+                            fontWeight: 500,
+                            outline: 'none',
+                            cursor: 'pointer',
+                            minWidth: '200px'
+                          }}
+                        >
+                          {selectedLan.agents.map((a: any) => (
+                            <option key={a.agent_uid} value={a.agent_uid}>
+                              {a.hostname} ({a.agent_uid}) {a.is_online ? '• Online' : '• Offline'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     {/* 1. Camera List Card */}
                     <GlowCard>
                       <div style={styles.cardHeader}>
