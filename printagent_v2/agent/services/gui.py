@@ -241,89 +241,6 @@ class CameraDialog(tk.Toplevel):
         self.destroy()
 
 
-class CameraScanResultsDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Tk, found_ips: list[str]) -> None:
-        super().__init__(parent)
-        self.title("Kết quả dò quét Camera (Port 554)")
-        self.transient(parent)
-        self.grab_set()
-        
-        self.result: dict[str, Any] | None = None
-        self.resizable(False, False)
-        
-        frame = ttk.Frame(self, padding="15 15 15 15")
-        frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Discovered IPs list
-        ttk.Label(frame, text="Thiết bị mở cổng 554 (RTSP) được tìm thấy:").grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
-        
-        self.ip_listbox = tk.Listbox(frame, width=32, height=6, font=("Segoe UI", 9))
-        self.ip_listbox.grid(row=1, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E)
-        
-        for ip in found_ips:
-            self.ip_listbox.insert(tk.END, ip)
-            
-        if not found_ips:
-            self.ip_listbox.insert(tk.END, "(Không tìm thấy thiết bị nào)")
-            
-        # Details inputs
-        ttk.Label(frame, text="Tên Camera:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        self.name_var = tk.StringVar(value="Camera LAN")
-        self.name_entry = ttk.Entry(frame, textvariable=self.name_var, width=22)
-        self.name_entry.grid(row=2, column=1, sticky=tk.W, pady=5)
-        
-        ttk.Label(frame, text="Đường dẫn RTSP:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        self.path_var = tk.StringVar(value="/Streaming/Channels/101")
-        self.path_entry = ttk.Entry(frame, textvariable=self.path_var, width=22)
-        self.path_entry.grid(row=3, column=1, sticky=tk.W, pady=5)
-        
-        # Buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=15, sticky=tk.E)
-        
-        cancel_btn = ttk.Button(btn_frame, text="Cancel (Hủy)", command=self.destroy, width=12)
-        cancel_btn.pack(side=tk.LEFT, padx=5)
-        
-        save_btn = ttk.Button(btn_frame, text="Thêm Camera", command=self.save, width=12)
-        save_btn.pack(side=tk.LEFT, padx=5)
-        
-        center_window(self, 350, 310)
-        
-    def save(self) -> None:
-        selection = self.ip_listbox.curselection()
-        if not selection:
-            messagebox.showerror("Error", "Vui lòng chọn một địa chỉ IP từ danh sách!", parent=self)
-            return
-            
-        ip = self.ip_listbox.get(selection[0])
-        if "(Không tìm" in ip:
-            return
-            
-        name = self.name_var.get().strip()
-        path = self.path_var.get().strip()
-        
-        if not name:
-            messagebox.showerror("Error", "Vui lòng nhập tên camera!", parent=self)
-            return
-            
-        # Ensure path starts with slash
-        if path and not path.startswith("/"):
-            path = "/" + path
-            
-        rtsp_url = f"rtsp://{ip}:554{path}"
-        
-        self.result = {
-            "camera_name": name,
-            "rtsp_url": rtsp_url,
-            "segment_duration": 60,
-            "prefix": "rec",
-            "no_audio": True,
-            "video_codec": "copy",
-            "audio_codec": "copy"
-        }
-        self.destroy()
-
-
 class PrinterDestinationDialog(tk.Toplevel):
     def __init__(self, parent: tk.Tk, title: str = "Add Scan Destination", dest_data: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
@@ -1878,22 +1795,24 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("Name", "RTSP", "Status", "Duration", "Audio", "Prefix")
-        self.camera_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
+        cols = ("IP", "Manufacturer", "Model", "RTSP", "Status", "Recording")
+        self.camera_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
-        self.camera_tree.heading("Name", text="Tên Camera")
+        self.camera_tree.heading("#0", text="Tên Camera / Thiết Bị")
+        self.camera_tree.heading("IP", text="Địa chỉ IP")
+        self.camera_tree.heading("Manufacturer", text="Hãng")
+        self.camera_tree.heading("Model", text="Dòng máy")
         self.camera_tree.heading("RTSP", text="Địa chỉ RTSP")
-        self.camera_tree.heading("Status", text="Trạng thái")
-        self.camera_tree.heading("Duration", text="Phân đoạn")
-        self.camera_tree.heading("Audio", text="Âm thanh")
-        self.camera_tree.heading("Prefix", text="Tiền tố")
+        self.camera_tree.heading("Status", text="Kết nối")
+        self.camera_tree.heading("Recording", text="Trạng thái")
         
-        self.camera_tree.column("Name", width=120, anchor=tk.W)
-        self.camera_tree.column("RTSP", width=250, anchor=tk.W)
-        self.camera_tree.column("Status", width=90, anchor=tk.CENTER)
-        self.camera_tree.column("Duration", width=70, anchor=tk.CENTER)
-        self.camera_tree.column("Audio", width=80, anchor=tk.CENTER)
-        self.camera_tree.column("Prefix", width=80, anchor=tk.CENTER)
+        self.camera_tree.column("#0", width=180, anchor=tk.W)
+        self.camera_tree.column("IP", width=110, anchor=tk.W)
+        self.camera_tree.column("Manufacturer", width=100, anchor=tk.W)
+        self.camera_tree.column("Model", width=100, anchor=tk.W)
+        self.camera_tree.column("RTSP", width=220, anchor=tk.W)
+        self.camera_tree.column("Status", width=80, anchor=tk.CENTER)
+        self.camera_tree.column("Recording", width=90, anchor=tk.CENTER)
         
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.camera_tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.camera_tree.xview)
@@ -1913,27 +1832,153 @@ class PrintAgentGui:
         
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
         
-        ttk.Button(btn_frame, text="Add Cam (Thêm)", command=self.gui_add_camera, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Edit Cam (Sửa)", command=self.gui_edit_camera, width=18).pack(pady=4)
-        ttk.Button(btn_frame, text="Delete Cam (Xoá)", command=self.gui_delete_camera, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Cấu hình (Edit)", command=self.gui_edit_camera, width=18).pack(pady=4)
+        ttk.Button(btn_frame, text="Xoá cấu hình (Delete)", command=self.gui_delete_camera, width=18).pack(pady=4)
         
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
-        ttk.Button(btn_frame, text="Scan Net (Dò tìm)", command=self.gui_scan_network_cameras, width=18).pack(pady=4)
         ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_cameras, width=18).pack(pady=4)
 
     def refresh_cameras(self) -> None:
         for item in self.camera_tree.get_children():
             self.camera_tree.delete(item)
             
-        self.camera_tree.insert("", tk.END, values=("Loading cameras...", "", "", "", "", ""))
+        self.camera_tree.insert("", tk.END, text="Scanning network for cameras...", values=("", "", "", "", "", ""))
         
         def run() -> None:
             try:
                 import json
+                import socket
+                import urllib.request
+                import re
                 from pathlib import Path
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
                 
+                # 1. Discover local subnet
+                subnets = []
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    ip = s.getsockname()[0]
+                    s.close()
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        subnets.append(f"{parts[0]}.{parts[1]}.{parts[2]}")
+                except Exception:
+                    pass
+                if not subnets:
+                    subnets.append("192.168.1")
+                    subnets.append("192.168.0")
+                
+                # Helper for SOAP ONVIF request
+                def get_onvif_info(ip_addr: str) -> dict[str, str]:
+                    endpoints = [
+                        f"http://{ip_addr}/onvif/device_service",
+                        f"http://{ip_addr}:80/onvif/device_service",
+                        f"http://{ip_addr}:888/onvif/device_service",
+                        f"http://{ip_addr}:8080/onvif/device_service",
+                    ]
+                    soap_msg = (
+                        '<?xml version="1.0" encoding="utf-8"?>'
+                        '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
+                        'xmlns:tds="http://www.onvif.org/ver10/device/wsdl">'
+                        '<soap:Body>'
+                        '<tds:GetDeviceInformation/>'
+                        '</soap:Body>'
+                        '</soap:Envelope>'
+                    )
+                    headers = {
+                        'Content-Type': 'application/soap+xml; charset=utf-8',
+                        'Content-Length': str(len(soap_msg))
+                    }
+                    for url in endpoints:
+                        try:
+                            req = urllib.request.Request(url, data=soap_msg.encode('utf-8'), headers=headers, method='POST')
+                            with urllib.request.urlopen(req, timeout=0.8) as response:
+                                html = response.read().decode('utf-8', errors='ignore')
+                                manufacturer = "Generic"
+                                model = "Camera IP"
+                                m_match = re.search(r'<[^:>]*Manufacturer[^>]*>([^<]+)</[^>]*Manufacturer[^>]*>', html)
+                                if m_match:
+                                    manufacturer = m_match.group(1).strip()
+                                mo_match = re.search(r'<[^:>]*Model[^>]*>([^<]+)</[^>]*Model[^>]*>', html)
+                                if mo_match:
+                                    model = mo_match.group(1).strip()
+                                return {"manufacturer": manufacturer, "model": model}
+                        except Exception:
+                            continue
+                    return {"manufacturer": "Generic", "model": "Camera IP"}
+
+                # Helper to scan port 554
+                def scan_ip_port(ip_addr: str) -> bool:
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(0.6)
+                        res = s.connect_ex((ip_addr, 554))
+                        s.close()
+                        return res == 0
+                    except Exception:
+                        return False
+
+                # 2. Run ONVIF multicast WS-Discovery
+                discovered_ips = []
+                MCAST_GRP = '239.255.255.250'
+                MCAST_PORT = 3702
+                probe_msg = (
+                    '<?xml version="1.0" encoding="utf-8"?>'
+                    '<Envelope xmlns:tds="http://www.onvif.org/ver10/device/wsdl" '
+                    'xmlns:dn="http://www.onvif.org/ver10/network/wsdl" '
+                    'xmlns="http://www.w3.org/2003/05/soap-envelope">'
+                    '<Header>'
+                    '<MessageID xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">'
+                    'uuid:a801e0c8-1111-a8a8-b8b8-0123456789ab'
+                    '</MessageID>'
+                    '<To xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">urn:schemas-xmlsoap-org:ws:2004:08:d_d</To>'
+                    '<Action xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</Action>'
+                    '</Header>'
+                    '<Body>'
+                    '<Probe xmlns="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
+                    '<Types>tds:Device</Types>'
+                    '</Probe>'
+                    '</Body>'
+                    '</Envelope>'
+                )
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    sock.settimeout(1.0)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+                    sock.sendto(probe_msg.encode('utf-8'), (MCAST_GRP, MCAST_PORT))
+                    while True:
+                        try:
+                            data, addr = sock.recvfrom(65535)
+                            response = data.decode('utf-8', errors='ignore')
+                            urls = re.findall(r'https?://[^\s<>"]+', response)
+                            for url in urls:
+                                ip_match = re.search(r'https?://([^:/]+)', url)
+                                if ip_match:
+                                    ip_found = ip_match.group(1)
+                                    if ip_found not in discovered_ips and not ip_found.startswith("127."):
+                                        discovered_ips.append(ip_found)
+                        except socket.timeout:
+                            break
+                    sock.close()
+                except Exception:
+                    pass
+
+                # 3. Scan subnet port 554 for RTSP cameras
+                for subnet_prefix in subnets:
+                    ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255) if f"{subnet_prefix}.{i}" not in discovered_ips]
+                    with ThreadPoolExecutor(max_workers=50) as executor:
+                        futures = {executor.submit(scan_ip_port, ip_addr): ip_addr for ip_addr in ips_to_scan}
+                        for future in futures:
+                            ip_addr = futures[future]
+                            try:
+                                if future.result():
+                                    discovered_ips.append(ip_addr)
+                            except Exception:
+                                pass
+                                
+                # 4. Load configured cameras
                 cfg_path = Path("storage/camera_configs.json")
                 configs = []
                 if cfg_path.exists():
@@ -1942,35 +1987,67 @@ class PrintAgentGui:
                             configs = json.load(f)
                     except Exception:
                         configs = []
-                        
-                results = []
+                
+                # Add any configured camera IP not in discovered_ips
                 for c in configs:
-                    name = c.get("camera_name", "")
-                    status = cm.get_status(name)
-                    is_rec = status.get("running", False)
-                    status_str = "Ghi hình" if is_rec else "Chờ"
-                    audio_str = "No Audio" if c.get("no_audio", True) else "With Audio"
+                    rtsp_url = c.get("rtsp_url", "")
+                    ip_match = re.search(r'rtsp://([^:/]+)', rtsp_url)
+                    if ip_match:
+                        ip_addr = ip_match.group(1)
+                        if ip_addr not in discovered_ips:
+                            discovered_ips.append(ip_addr)
+
+                # 5. Retrieve device info and status
+                results = []
+                for ip_addr in discovered_ips:
+                    info = get_onvif_info(ip_addr)
                     
+                    matched_cfg = None
+                    for c in configs:
+                        rtsp_url = c.get("rtsp_url", "")
+                        if ip_addr in rtsp_url:
+                            matched_cfg = c
+                            break
+                            
+                    if matched_cfg:
+                        camera_name = matched_cfg.get("camera_name", "Camera")
+                        rtsp_display = matched_cfg.get("rtsp_url", "")
+                        status_rec = cm.get_status(camera_name)
+                        is_rec = status_rec.get("running", False)
+                        rec_str = "Đang ghi" if is_rec else "Chờ"
+                        status_conn = "Online" if cm.test_rtsp_connection(rtsp_display)[0] else "Offline"
+                    else:
+                        camera_name = f"Camera {ip_addr}"
+                        rtsp_display = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                        rec_str = "Chờ (Chưa cấu hình)"
+                        status_conn = "Online"
+                        
                     results.append((
-                        name,
-                        c.get("rtsp_url", ""),
-                        status_str,
-                        f"{c.get('segment_duration', 60)}s",
-                        audio_str,
-                        c.get("prefix", "rec")
+                        camera_name,
+                        ip_addr,
+                        info.get("manufacturer", "Generic"),
+                        info.get("model", "Camera IP"),
+                        rtsp_display,
+                        status_conn,
+                        rec_str
                     ))
                     
                 def update_ui(items) -> None:
                     for item in self.camera_tree.get_children():
                         self.camera_tree.delete(item)
                     for item in items:
-                        self.camera_tree.insert("", tk.END, values=item)
+                        self.camera_tree.insert(
+                            "",
+                            tk.END,
+                            text=item[0],
+                            values=(item[1], item[2], item[3], item[4], item[5], item[6])
+                        )
                     if not self.camera_tree.get_children():
-                        self.camera_tree.insert("", tk.END, values=("Chưa cấu hình camera nào", "", "", "", "", ""))
+                        self.camera_tree.insert("", tk.END, text="Không tìm thấy camera nào", values=("", "", "", "", "", ""))
                         
                 self.root.after(0, lambda: update_ui(results))
             except Exception as exc:
-                LOGGER.exception("Failed to refresh cameras in GUI")
+                LOGGER.exception("Failed to scan and refresh cameras")
                 self.root.after(0, lambda: update_ui([]))
                 
         threading.Thread(target=run, daemon=True, name="gui-camera-refresh").start()
@@ -1980,31 +2057,54 @@ class PrintAgentGui:
         if not selected:
             messagebox.showwarning("Warning", "Please select a camera to start recording.")
             return
+        camera_name = self.camera_tree.item(selected, "text")
         values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+        if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
             return
             
+        ip_addr = values[0]
+        rtsp_url = values[3]
+        
+        import json
+        from pathlib import Path
+        cfg_path = Path("storage/camera_configs.json")
+        configs = []
+        if cfg_path.exists():
+            try:
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            except Exception:
+                configs = []
+                
+        cfg = next((c for c in configs if ip_addr in c.get("rtsp_url", "")), None)
+        if not cfg:
+            prefill = {
+                "camera_name": camera_name,
+                "rtsp_url": rtsp_url,
+                "segment_duration": 60,
+                "prefix": "rec",
+                "no_audio": True
+            }
+            dlg = CameraDialog(self.root, f"Cấu hình ghi hình: {camera_name}", prefill)
+            self.root.wait_window(dlg)
+            if not dlg.result:
+                return
+            cfg = dlg.result
+            configs.append(cfg)
+            try:
+                with cfg_path.open("w", encoding="utf-8") as f:
+                    json.dump(configs, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save configuration: {e}")
+                return
+                
         def run() -> None:
             try:
-                import json
-                from pathlib import Path
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
-                
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    with cfg_path.open("r", encoding="utf-8") as f:
-                        configs = json.load(f)
-                cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
-                if not cfg:
-                    self.root.after(0, lambda: messagebox.showerror("Error", "Camera configuration not found."))
-                    return
-                    
                 output_dir = self.config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
                 success = cm.start_recording(
-                    camera_name=camera_name,
+                    camera_name=cfg["camera_name"],
                     rtsp_url=cfg["rtsp_url"],
                     output_dir=output_dir,
                     segment_duration=cfg.get("segment_duration", 60),
@@ -2014,9 +2114,9 @@ class PrintAgentGui:
                     prefix=cfg.get("prefix", "rec")
                 )
                 if success:
-                    self.root.after(0, lambda: messagebox.showinfo("Success", f"Started recording camera '{camera_name}'!"))
+                    self.root.after(0, lambda: messagebox.showinfo("Success", f"Started recording camera '{cfg['camera_name']}'!"))
                 else:
-                    self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to start recording camera '{camera_name}'."))
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to start recording camera '{cfg['camera_name']}'."))
             except Exception as exc:
                 self.root.after(0, lambda exc=exc: messagebox.showerror("Error", str(exc)))
             finally:
@@ -2029,16 +2129,34 @@ class PrintAgentGui:
         if not selected:
             messagebox.showwarning("Warning", "Please select a camera to stop recording.")
             return
+        camera_name = self.camera_tree.item(selected, "text")
         values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+        if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
+            return
+            
+        ip_addr = values[0]
+        
+        import json
+        from pathlib import Path
+        from agent.services.camera_manager import CameraManager
+        cm = CameraManager()
+        
+        cfg_path = Path("storage/camera_configs.json")
+        configs = []
+        if cfg_path.exists():
+            try:
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            except Exception:
+                configs = []
+                
+        cfg = next((c for c in configs if ip_addr in c.get("rtsp_url", "")), None)
+        if not cfg:
             return
             
         try:
-            from agent.services.camera_manager import CameraManager
-            cm = CameraManager()
-            cm.stop_recording(camera_name)
-            messagebox.showinfo("Success", f"Stopped recording camera '{camera_name}'.")
+            cm.stop_recording(cfg["camera_name"])
+            messagebox.showinfo("Success", f"Stopped recording camera '{cfg['camera_name']}'.")
         except Exception as exc:
             messagebox.showerror("Error", str(exc))
         finally:
@@ -2049,9 +2167,12 @@ class PrintAgentGui:
         if not selected:
             messagebox.showwarning("Warning", "Please select a camera to test connection.")
             return
+        camera_name = self.camera_tree.item(selected, "text")
         values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        rtsp_url = values[1]
+        if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
+            return
+            
+        rtsp_url = values[3]
         if not rtsp_url:
             return
             
@@ -2069,192 +2190,108 @@ class PrintAgentGui:
                 
         threading.Thread(target=run, daemon=True).start()
 
-    def gui_add_camera(self) -> None:
-        dlg = CameraDialog(self.root, "Add New Camera")
+    def gui_edit_camera(self) -> None:
+        selected = self.camera_tree.focus()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a camera to edit configuration.")
+            return
+        camera_name = self.camera_tree.item(selected, "text")
+        values = self.camera_tree.item(selected, "values")
+        if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
+            return
+            
+        ip_addr = values[0]
+        rtsp_url = values[3]
+        
+        import json
+        from pathlib import Path
+        cfg_path = Path("storage/camera_configs.json")
+        configs = []
+        if cfg_path.exists():
+            try:
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            except Exception:
+                configs = []
+                
+        cfg = next((c for c in configs if ip_addr in c.get("rtsp_url", "")), None)
+        is_new = False
+        if not cfg:
+            is_new = True
+            cfg = {
+                "camera_name": camera_name,
+                "rtsp_url": rtsp_url,
+                "segment_duration": 60,
+                "prefix": "rec",
+                "no_audio": True,
+                "video_codec": "copy",
+                "audio_codec": "copy"
+            }
+            
+        dlg = CameraDialog(self.root, f"Cấu hình Camera: {cfg['camera_name']}", cfg)
         self.root.wait_window(dlg)
         
         if dlg.result:
-            try:
-                import json
-                from pathlib import Path
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    try:
-                        with cfg_path.open("r", encoding="utf-8") as f:
-                            configs = json.load(f)
-                    except Exception:
-                        configs = []
-                if any(c.get("camera_name") == dlg.result["camera_name"] for c in configs):
-                    messagebox.showerror("Error", f"Camera name '{dlg.result['camera_name']}' already exists.")
-                    return
-                    
+            if is_new:
                 configs.append(dlg.result)
+            else:
+                for c in configs:
+                    if ip_addr in c.get("rtsp_url", ""):
+                        c.update(dlg.result)
+                        break
+            try:
                 with cfg_path.open("w", encoding="utf-8") as f:
                     json.dump(configs, f, indent=2, ensure_ascii=False)
-                messagebox.showinfo("Success", f"Camera '{dlg.result['camera_name']}' added successfully!")
+                messagebox.showinfo("Success", f"Cấu hình camera '{cfg['camera_name']}' thành công!")
             except Exception as exc:
                 messagebox.showerror("Error", str(exc))
             finally:
                 self.refresh_cameras()
-
-    def gui_edit_camera(self) -> None:
-        selected = self.camera_tree.focus()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to edit.")
-            return
-        values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
-            return
-            
-        try:
-            import json
-            from pathlib import Path
-            cfg_path = Path("storage/camera_configs.json")
-            configs = []
-            if cfg_path.exists():
-                with cfg_path.open("r", encoding="utf-8") as f:
-                    configs = json.load(f)
-            cfg = next((c for c in configs if c.get("camera_name") == camera_name), None)
-            if not cfg:
-                messagebox.showerror("Error", f"Configuration for camera '{camera_name}' not found.")
-                return
-                
-            dlg = CameraDialog(self.root, f"Edit Camera: {camera_name}", cfg)
-            self.root.wait_window(dlg)
-            
-            if dlg.result:
-                for c in configs:
-                    if c.get("camera_name") == camera_name:
-                        c.update(dlg.result)
-                        break
-                with cfg_path.open("w", encoding="utf-8") as f:
-                    json.dump(configs, f, indent=2, ensure_ascii=False)
-                messagebox.showinfo("Success", f"Camera '{camera_name}' updated successfully!")
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-        finally:
-            self.refresh_cameras()
 
     def gui_delete_camera(self) -> None:
         selected = self.camera_tree.focus()
         if not selected:
-            messagebox.showwarning("Warning", "Please select a camera to delete.")
+            messagebox.showwarning("Warning", "Please select a camera to delete configuration.")
             return
+        camera_name = self.camera_tree.item(selected, "text")
         values = self.camera_tree.item(selected, "values")
-        camera_name = values[0]
-        if not camera_name or "Loading" in camera_name or "Chưa cấu hình" in camera_name:
+        if not camera_name or "Loading" in camera_name or "Không tìm thấy" in camera_name:
             return
             
-        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete camera '{camera_name}'?"):
+        ip_addr = values[0]
+        
+        import json
+        from pathlib import Path
+        from agent.services.camera_manager import CameraManager
+        cm = CameraManager()
+        
+        cfg_path = Path("storage/camera_configs.json")
+        configs = []
+        if cfg_path.exists():
+            try:
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+            except Exception:
+                configs = []
+                
+        cfg = next((c for c in configs if ip_addr in c.get("rtsp_url", "")), None)
+        if not cfg:
+            messagebox.showwarning("Warning", "Camera này chưa được cấu hình ghi hình.")
+            return
+            
+        if not messagebox.askyesno("Confirm Delete", f"Bạn có chắc muốn xoá cấu hình và dừng ghi hình cho camera '{cfg['camera_name']}'?"):
             return
             
         try:
-            import json
-            from pathlib import Path
-            from agent.services.camera_manager import CameraManager
-            cm = CameraManager()
-            cm.stop_recording(camera_name)
-            
-            cfg_path = Path("storage/camera_configs.json")
-            configs = []
-            if cfg_path.exists():
-                with cfg_path.open("r", encoding="utf-8") as f:
-                    configs = json.load(f)
-            configs = [c for c in configs if c.get("camera_name") != camera_name]
+            cm.stop_recording(cfg["camera_name"])
+            configs = [c for c in configs if ip_addr not in c.get("rtsp_url", "")]
             with cfg_path.open("w", encoding="utf-8") as f:
                 json.dump(configs, f, indent=2, ensure_ascii=False)
-            messagebox.showinfo("Success", f"Camera '{camera_name}' deleted.")
+            messagebox.showinfo("Success", f"Đã xoá cấu hình camera '{cfg['camera_name']}'.")
         except Exception as exc:
             messagebox.showerror("Error", str(exc))
         finally:
             self.refresh_cameras()
-
-    def gui_scan_network_cameras(self) -> None:
-        progress = ProgressDialog(self.root, "Scanning Network", "Đang dò quét các địa chỉ IP mở cổng 554 (RTSP) trong mạng LAN...")
-        
-        def run() -> None:
-            found_ips = []
-            try:
-                # Detect subnets
-                subnets = []
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.connect(("8.8.8.8", 80))
-                    ip = s.getsockname()[0]
-                    s.close()
-                    parts = ip.split(".")
-                    if len(parts) == 4:
-                        subnets.append(f"{parts[0]}.{parts[1]}.{parts[2]}")
-                except Exception:
-                    pass
-                    
-                if not subnets:
-                    subnets.append("192.168.1")
-                    subnets.append("192.168.0")
-                
-                # Scan each subnet
-                for subnet_prefix in subnets:
-                    ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255)]
-                    
-                    with ThreadPoolExecutor(max_workers=60) as executor:
-                        futures = {executor.submit(scan_ip_port, ip): ip for ip in ips_to_scan}
-                        for future in futures:
-                            ip = futures[future]
-                            try:
-                                if future.result():
-                                    found_ips.append(ip)
-                            except Exception:
-                                pass
-            except Exception as e:
-                LOGGER.exception("Failed to scan network cameras")
-            finally:
-                self.root.after(0, progress.destroy)
-                self.root.after(0, lambda: self.show_scan_results_dialog(found_ips))
-                
-        def scan_ip_port(ip: str) -> bool:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.7)
-                res = s.connect_ex((ip, 554))
-                s.close()
-                return res == 0
-            except Exception:
-                return False
-                
-        threading.Thread(target=run, daemon=True, name="gui-camera-scanner").start()
-
-    def show_scan_results_dialog(self, found_ips: list[str]) -> None:
-        dlg = CameraScanResultsDialog(self.root, found_ips)
-        self.root.wait_window(dlg)
-        
-        if dlg.result:
-            try:
-                import json
-                from pathlib import Path
-                cfg_path = Path("storage/camera_configs.json")
-                configs = []
-                if cfg_path.exists():
-                    try:
-                        with cfg_path.open("r", encoding="utf-8") as f:
-                            configs = json.load(f)
-                    except Exception:
-                        configs = []
-                        
-                # Check duplication
-                if any(c.get("camera_name") == dlg.result["camera_name"] for c in configs):
-                    messagebox.showerror("Error", f"Camera name '{dlg.result['camera_name']}' already exists.")
-                    return
-                    
-                configs.append(dlg.result)
-                with cfg_path.open("w", encoding="utf-8") as f:
-                    json.dump(configs, f, indent=2, ensure_ascii=False)
-                messagebox.showinfo("Success", f"Camera '{dlg.result['camera_name']}' added successfully!")
-            except Exception as exc:
-                messagebox.showerror("Error", str(exc))
-            finally:
-                self.refresh_cameras()
 
 
 def show_gui_window(app_version: str) -> None:
