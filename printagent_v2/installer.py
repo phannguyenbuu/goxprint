@@ -198,6 +198,34 @@ def download_printagent(dest_path: Path, api_url: str) -> bool:
         print(f"\n Lỗi khi tải xuống PrintAgent: {e}")
         return False
 
+def configure_settings_json():
+    settings_path = INSTALL_DIR / "settings.json"
+    import json
+    
+    data = {}
+    if settings_path.exists():
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+            
+    if not isinstance(data, dict):
+        data = {}
+        
+    if "polling" not in data or not isinstance(data["polling"], dict):
+        data["polling"] = {}
+        
+    data["polling"]["device_interval_seconds"] = 60
+    data["polling"]["interval_seconds"] = 60
+    
+    try:
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        print(" Đã cập nhật polling status và counter thành 60 giây trong settings.json.")
+    except Exception as e:
+        print(f" Không thể cập nhật settings.json: {e}")
+
 def main():
     print("==============================================")
     print("      TRÌNH CÀI ĐẶT GOX PRINT AGENT           ")
@@ -249,6 +277,7 @@ def main():
             sys.exit(1)
             
     print("\nCài đặt file thành công!")
+    configure_settings_json()
     
     # Configure startup
     target_vbs = INSTALL_DIR / "run_watchdog.vbs"
