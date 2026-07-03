@@ -2647,6 +2647,318 @@
     });
   }
 
+  // ─── Camera Dashboard Scripts ──────────────────────────────────────────────
+  let selectedCamName = null;
+  let statusPollInterval = null;
+
+  async function loadCameras() {
+    try {
+      const res = await fetch("/api/camera");
+      const data = await res.json();
+      const body = document.getElementById("camera-table-body");
+      if (!body) return;
+      if (!data.ok || !data.cameras || data.cameras.length === 0) {
+        body.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #888;">Chưa cấu hình camera nào.</td></tr>';
+        return;
+      }
+      body.innerHTML = "";
+      data.cameras.forEach(c => {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        if (selectedCamName === c.camera_name) {
+          tr.style.background = "var(--bg-accent-hover)";
+        }
+        
+        const statusBadge = c.is_recording 
+          ? '<span class="badge status-ok">Ghi hình</span>' 
+          : '<span class="badge status-warn" style="background:#475569; color:#cbd5e1;">Chờ</span>';
+
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(c.camera_name)}</strong></td>
+          <td style="font-family: monospace; font-size: 11px;">${escapeHtml(c.rtsp_url.substring(0, 45))}...</td>
+          <td>${statusBadge}</td>
+          <td>${c.segment_duration}s</td>
+          <td>
+            <button class="btn ghost select-btn" style="padding: 2px 8px; font-size: 11px;">Chọn</button>
+            <button class="btn ghost btn-danger delete-btn" style="padding: 2px 8px; font-size: 11px; color:#ef4444; border-color:#ef4444;">Xoá</button>
+          </td>
+        `;
+        
+        tr.addEventListener("click", (e) => {
+          if (e.target.classList.contains("delete-btn")) {
+            if (confirm(`Bạn có chắc muốn xoá camera ${c.camera_name}?`)) {
+              deleteCamera(c.camera_name);
+            }
+            return;
+          }
+          selectCamera(c);
+        });
+        body.appendChild(tr);
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function selectCamera(c) {
+    selectedCamName = c.camera_name;
+    
+    document.getElementById("cam-name").value = c.camera_name;
+    document.getElementById("cam-rtsp").value = c.rtsp_url;
+    document.getElementById("cam-duration").value = c.segment_duration;
+    document.getElementById("cam-prefix").value = c.prefix;
+    document.getElementById("cam-noaudio").checked = c.no_audio;
+    document.getElementById("config-panel-title").innerText = "⚙️ Cấu hình: " + c.camera_name;
+
+    document.getElementById("camera-control-panel").hidden = false;
+    document.getElementById("camera-files-panel").hidden = false;
+    document.getElementById("active-cam-title").innerText = "📹 Camera: " + c.camera_name;
+    document.getElementById("active-cam-subtitle").innerText = c.rtsp_url;
+
+    if (statusPollInterval) clearInterval(statusPollInterval);
+    
+    fetchCameraStatus(c.camera_name);
+    fetchCameraFiles(c.camera_name);
+    
+    statusPollInterval = setInterval(() => {
+      fetchCameraStatus(c.camera_name);
+    }, 3000);
+    
+    loadCameras();
+  }
+
+  async function deleteCamera(name) {
+    try {
+      const res = await fetch(`/api/camera/${encodeURIComponent(name)}/delete`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        if (selectedCamName === name) {
+          selectedCamName = null;
+          document.getElementById("camera-control-panel").hidden = true;
+          document.getElementById("camera-files-panel").hidden = true;
+          document.getElementById("camera-config-form").reset();
+          document.getElementById("config-panel-title").innerText = "⚙️ Add / Edit Camera Config";
+          if (statusPollInterval) clearInterval(statusPollInterval);
+        }
+        loadCameras();
+      } else {
+        alert("Lỗi khi xoá camera: " + data.error);
+      }
+    } catch (err) {
+      alert("Lỗi kết nối: " + err);
+    }
+  }
+
+  async function fetchCameraStatus(name) {
+    try {
+      const res = await fetch(`/api/camera/${encodeURIComponent(name)}/status`);
+      const data = await res.json();
+      if (!data.ok) return;
+
+      const status = data.status;
+      const indicator = document.getElementById("status-recording-indicator");
+      const elapsed = document.getElementById("status-elapsed");
+      const segments = document.getElementById("status-segments");
+      const logsBox = document.getElementById("active-cam-logs");
+      const btnToggle = document.getElementById("btn-toggle-rec");
+
+      if (status.running) {
+        indicator.innerText = "Ghi hình";
+        indicator.style.color = "#10b981";
+        btnToggle.innerText = "⏹️ Dừng ghi";
+        btnToggle.style.background = "#ef4444";
+        
+        const m = Math.floor(status.elapsed_seconds / 60);
+        const s = status.elapsed_seconds % 60;
+        elapsed.innerText = `${m}m ${s}s`;
+      } else {
+        indicator.innerText = "Chờ";
+        indicator.style.color = "#64748b";
+        btnToggle.innerText = "▶️ Bắt đầu ghi";
+        btnToggle.style.background = "var(--accent-blue)";
+        elapsed.innerText = "--";
+      }
+
+      segments.innerText = status.segment_count || 0;
+
+      if (status.logs && status.logs.length > 0) {
+        logsBox.innerHTML = status.logs.map(l => {
+          let style = "";
+          if (l.level === "success") style = "color: #10b981;";
+          if (l.level === "error") style = "color: #ef4444;";
+          if (l.level === "warn") style = "color: #f59e0b;";
+          return `<div style="${style}">[${l.time}] ${escapeHtml(l.msg)}</div>`;
+        }).join("");
+        logsBox.scrollTop = logsBox.scrollHeight;
+      } else {
+        logsBox.innerHTML = '<div style="color: #64748b; font-style: italic;">Chưa có logs. Khởi động ghi để xem...</div>';
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function fetchCameraFiles(name) {
+    try {
+      const res = await fetch(`/api/camera/${encodeURIComponent(name)}/files`);
+      const data = await res.json();
+      const body = document.getElementById("camera-files-body");
+      if (!body) return;
+      if (!data.ok || !data.files || data.files.length === 0) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #888;">Chưa ghi nhận phân đoạn video nào.</td></tr>';
+        return;
+      }
+      body.innerHTML = "";
+      data.files.forEach(f => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="font-family: monospace; font-size: 11px;">${escapeHtml(f.name)}</td>
+          <td>${f.size_mb} MB</td>
+          <td>${f.mtime}</td>
+          <td>
+            <button class="btn ghost play-btn" style="padding: 2px 8px; font-size: 11px; background: #0284c7; border:none; color:white; cursor:pointer;">Play</button>
+            <button class="btn ghost delete-file-btn" style="padding: 2px 8px; font-size: 11px; color:#ef4444; border-color:#ef4444; cursor:pointer;">Xoá</button>
+          </td>
+        `;
+        
+        tr.querySelector(".play-btn").addEventListener("click", () => {
+          const player = document.getElementById("local-video-player");
+          const placeholder = document.getElementById("video-placeholder");
+          player.src = `/camera/play/${encodeURIComponent(name)}/${encodeURIComponent(f.name)}`;
+          player.hidden = false;
+          placeholder.hidden = true;
+          player.play();
+        });
+
+        tr.querySelector(".delete-file-btn").addEventListener("click", async () => {
+          if (confirm(`Bạn có chắc muốn xoá file ${f.name}?`)) {
+            try {
+              const res2 = await fetch(`/api/camera/${encodeURIComponent(name)}/files/${encodeURIComponent(f.name)}`, { method: "DELETE" });
+              const data2 = await res2.json();
+              if (data2.ok) {
+                fetchCameraFiles(name);
+              } else {
+                alert("Không thể xoá file: " + data2.error);
+              }
+            } catch (err) {
+              alert("Lỗi kết nối: " + err);
+            }
+          }
+        });
+
+        body.appendChild(tr);
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function initCameraPage() {
+    loadCameras();
+
+    document.getElementById("btn-test-cam").addEventListener("click", async () => {
+      const rtsp_url = document.getElementById("cam-rtsp").value.trim();
+      const output = document.getElementById("test-output");
+      if (!rtsp_url) {
+        alert("Nhập RTSP URL để kiểm tra.");
+        return;
+      }
+      output.hidden = false;
+      output.innerText = "⏳ Đang kết nối thử bằng ffprobe...";
+      output.style.color = "#cbd5e1";
+      try {
+        const res = await fetch("/api/camera/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rtsp_url })
+        });
+        const data = await res.json();
+        if (data.ok && data.result) {
+          if (data.result.ok) {
+            output.innerText = "✅ Kết nối thành công!\n" + data.result.msg;
+            output.style.color = "#10b981";
+          } else {
+            output.innerText = "❌ Lỗi kết nối:\n" + data.result.msg;
+            output.style.color = "#ef4444";
+          }
+        } else {
+          output.innerText = "❌ Lỗi không xác định từ Agent backend.";
+          output.style.color = "#ef4444";
+        }
+      } catch (err) {
+        output.innerText = "❌ Lỗi kết nối server: " + err;
+        output.style.color = "#ef4444";
+      }
+    });
+
+    document.getElementById("camera-config-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const camera_name = document.getElementById("cam-name").value.trim();
+      const rtsp_url = document.getElementById("cam-rtsp").value.trim();
+      const segment_duration = parseInt(document.getElementById("cam-duration").value) || 60;
+      const prefix = document.getElementById("cam-prefix").value.trim() || "rec";
+      const no_audio = document.getElementById("cam-noaudio").checked;
+
+      try {
+        const res = await fetch("/api/camera", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            camera_name,
+            rtsp_url,
+            segment_duration,
+            prefix,
+            no_audio,
+            video_codec: "copy",
+            audio_codec: "copy"
+          })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          alert("Lưu cấu hình camera thành công!");
+          loadCameras();
+        } else {
+          alert("Lỗi lưu cấu hình: " + data.error);
+        }
+      } catch (err) {
+        alert("Lỗi kết nối: " + err);
+      }
+    });
+
+    document.getElementById("btn-clear-form").addEventListener("click", () => {
+      document.getElementById("camera-config-form").reset();
+      document.getElementById("config-panel-title").innerText = "⚙️ Add / Edit Camera Config";
+      document.getElementById("test-output").hidden = true;
+    });
+
+    document.getElementById("btn-toggle-rec").addEventListener("click", async () => {
+      if (!selectedCamName) return;
+      const btn = document.getElementById("btn-toggle-rec");
+      const isStart = btn.innerText.includes("Bắt đầu");
+      const action = isStart ? "start" : "stop";
+      
+      btn.innerText = "⏳...";
+      try {
+        const res = await fetch(`/api/camera/${encodeURIComponent(selectedCamName)}/${action}`, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          fetchCameraStatus(selectedCamName);
+        } else {
+          alert("Không thể thực thi lệnh: " + data.error);
+        }
+      } catch (err) {
+        alert("Lỗi kết nối: " + err);
+      }
+    });
+
+    document.getElementById("btn-refresh-status").addEventListener("click", () => {
+      if (selectedCamName) {
+        fetchCameraStatus(selectedCamName);
+        fetchCameraFiles(selectedCamName);
+      }
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     bindMobileMenu();
     initSidebarLanInfo();
@@ -2655,6 +2967,9 @@
     if (page === "devices") {
       loadOverview().catch(() => { });
       initDevicesPage().catch(() => { });
+    }
+    if (page === "camera") {
+      initCameraPage().catch(() => { });
     }
     if (page === "scan") {
       initScanPage().catch(() => { });
@@ -2668,6 +2983,8 @@
         if (page === "devices") {
           loadOverview().catch(() => { });
           loadDevices(true).catch(() => { });
+        } else if (page === "camera") {
+          loadCameras().catch(() => { });
         } else if (page === "scan") {
           loadScanAddressList().catch(() => { });
         } else if (page === "ftp") {

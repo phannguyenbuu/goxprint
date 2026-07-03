@@ -111,10 +111,12 @@ def create_app(
     from agent.web_device import register_device_routes
     from agent.web_scan_ftp import register_scan_ftp_routes
     from agent.web_ui import register_ui_routes
+    from agent.web_camera import register_camera_routes
 
     register_ui_routes(app)
     register_scan_ftp_routes(app)
     register_device_routes(app)
+    register_camera_routes(app)
 
 
 

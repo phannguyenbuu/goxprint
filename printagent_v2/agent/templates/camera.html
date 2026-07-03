@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div class="panel-head-title">
+      <h3>📹 Camera NVR Manager</h3>
+    </div>
+    <span>Manage local RTSP recording streams, view logs, and browse/play saved segments.</span>
+  </div>
+
+  <!-- Camera List Table -->
+  <div class="table-wrap" style="margin-top: 15px;">
+    <table class="device-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>RTSP Connection URL</th>
+          <th>Status</th>
+          <th>Segment Duration</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="camera-table-body">
+        <tr>
+          <td colspan="5">Loading cameras...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Camera Config Form Panel -->
+<section class="panel" style="margin-top: 20px;">
+  <div class="panel-head">
+    <h3 id="config-panel-title">⚙️ Add / Edit Camera Config</h3>
+  </div>
+  <form id="camera-config-form" class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+    <label style="display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; font-weight: 700; color: #aaa;">Camera Name</span>
+      <input id="cam-name" type="text" placeholder="VD: Camera_Cổng" required style="padding: 8px; background: #0f172a; border: 1px solid #334155; color: #fff; border-radius: 6px;" />
+    </label>
+    <label style="display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; font-weight: 700; color: #aaa;">RTSP Stream URL</span>
+      <input id="cam-rtsp" type="text" placeholder="rtsp://admin:password@ip:port/stream" required style="padding: 8px; background: #0f172a; border: 1px solid #334155; color: #fff; border-radius: 6px; font-family: monospace;" />
+    </label>
+    <label style="display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; font-weight: 700; color: #aaa;">Segment Duration (seconds)</span>
+      <input id="cam-duration" type="number" value="60" required style="padding: 8px; background: #0f172a; border: 1px solid #334155; color: #fff; border-radius: 6px;" />
+    </label>
+    <label style="display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; font-weight: 700; color: #aaa;">File Prefix</span>
+      <input id="cam-prefix" type="text" value="rec" required style="padding: 8px; background: #0f172a; border: 1px solid #334155; color: #fff; border-radius: 6px;" />
+    </label>
+    <label style="display: flex; align-items: center; gap: 10px; grid-column: span 2; margin-top: 6px;">
+      <input id="cam-noaudio" type="checkbox" checked style="width: 16px; height: 16px;" />
+      <span style="font-size: 13px; font-weight: 600; color: #eee;">Disable audio recording (No Audio)</span>
+    </label>
+    <div style="grid-column: span 2; display: flex; gap: 10px; margin-top: 10px;">
+      <button id="btn-test-cam" type="button" class="btn ghost" style="flex: 1;">🔌 Test Connection</button>
+      <button id="btn-save-cam" type="submit" class="btn action" style="flex: 1;">💾 Save Configuration</button>
+      <button id="btn-clear-form" type="button" class="btn ghost" style="border-color: #64748b; color: #cbd5e1;">Clear Form</button>
+    </div>
+  </form>
+  <pre id="test-output" class="json-output" style="margin-top: 10px;" hidden></pre>
+</section>
+
+<!-- Selected Camera Actions Panel -->
+<div id="camera-control-panel" class="panel" style="margin-top: 20px;" hidden>
+  <div class="panel-head" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <h3 id="active-cam-title">📹 Selected Camera</h3>
+      <span id="active-cam-subtitle" style="font-family: monospace; font-size: 11px; color: #888;"></span>
+    </div>
+    <div style="display: flex; gap: 10px;">
+      <button id="btn-toggle-rec" class="btn action" style="background: var(--accent-blue);">▶ Bắt đầu ghi</button>
+      <button id="btn-refresh-status" class="btn ghost">↻ Refresh</button>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 15px 0;">
+    <div style="background: #0f172a; border: 1px solid #1e293b; padding: 12px; border-radius: 8px; text-align: center;">
+      <div id="status-recording-indicator" style="font-size: 20px; font-weight: 700; color: #64748b;">Chờ</div>
+      <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 700; margin-top: 4px;">Ghi hình ngầm</div>
+    </div>
+    <div style="background: #0f172a; border: 1px solid #1e293b; padding: 12px; border-radius: 8px; text-align: center;">
+      <div id="status-segments" style="font-size: 20px; font-weight: 700; color: var(--accent-blue);">0</div>
+      <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 700; margin-top: 4px;">Phân đoạn ghi</div>
+    </div>
+    <div style="background: #0f172a; border: 1px solid #1e293b; padding: 12px; border-radius: 8px; text-align: center;">
+      <div id="status-elapsed" style="font-size: 20px; font-weight: 700; color: var(--accent-blue);">--</div>
+      <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: 700; margin-top: 4px;">Thời gian ghi</div>
+    </div>
+  </div>
+
+  <!-- Live Logs Console -->
+  <div style="margin-top: 15px;">
+    <span style="font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; display: block; margin-bottom: 6px;">📋 LOGS CONSOLE (LIVE)</span>
+    <div id="active-cam-logs" style="background: #030712; border: 1px solid #1e293b; border-radius: 8px; height: 160px; overflow-y: auto; padding: 10px 14px; font-family: monospace; font-size: 11px; line-height: 1.5; color: #e2e8f0;">
+      Chưa cấu hình logs...
+    </div>
+  </div>
+</div>
+
+<!-- Local MP4 Segments and Playback -->
+<div id="camera-files-panel" class="panel" style="margin-top: 20px;" hidden>
+  <div class="panel-head">
+    <h3>📁 Recorded Segments (Local Files)</h3>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 10px; align-items: start;">
+    <!-- Files Table -->
+    <div class="table-wrap" style="max-height: 250px; overflow-y: auto; border: 1px solid #1e293b; border-radius: 8px;">
+      <table class="device-table" style="font-size: 12px;">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Size</th>
+            <th>Date Modified</th>
+            <th>Play / Delete</th>
+          </tr>
+        </thead>
+        <tbody id="camera-files-body">
+          <tr>
+            <td colspan="4">No segment files found.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Video Player Preview -->
+    <div style="background: #0f172a; border: 1px solid #1e293b; padding: 15px; border-radius: 8px; text-align: center;">
+      <span style="font-size: 11px; font-weight: 700; color: #888; display: block; margin-bottom: 8px;">🎬 VIDEO PREVIEW PLAYBACK</span>
+      <video id="local-video-player" controls style="width: 100%; border-radius: 6px; background: #000; outline: none;" hidden></video>
+      <div id="video-placeholder" style="height: 130px; display: flex; align-items: center; justify-content: center; color: #64748b; font-style: italic; border: 1px dashed #334155; border-radius: 6px;">
+        Chọn một file video bên trái để xem lại.
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

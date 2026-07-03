@@ -28,6 +28,7 @@ python build_and_deploy.py [version]</div>
         </div>
         <nav class="side-nav">
           <a class="side-link {% if active_tab == 'devices' %}active{% endif %}" href="{{ url_for('devices') }}">Devices</a>
+          <a class="side-link {% if active_tab == 'camera' %}active{% endif %}" href="{{ url_for('camera_page') }}">Camera</a>
           <a class="side-link {% if active_tab == 'scan' %}active{% endif %}" href="{{ url_for('scan') }}">Scan</a>
           <a class="side-link {% if active_tab == 'ftp' %}active{% endif %}" href="{{ url_for('ftp_page') }}">FTP</a>
           <a class="side-link {% if active_tab == 'utilities' %}active{% endif %}" href="{{ url_for('utilities_page') }}">Utilities</a>
@@ -48,6 +49,7 @@ python build_and_deploy.py [version]</div>
 
         <div class="nav-tabs">
           <a id="nav-tab-devices" class="tab {% if active_tab == 'devices' %}active{% endif %}" href="{{ url_for('devices') }}">Devices</a>
+          <a class="tab {% if active_tab == 'camera' %}active{% endif %}" href="{{ url_for('camera_page') }}">Camera</a>
           <a class="tab {% if active_tab == 'scan' %}active{% endif %}" href="{{ url_for('scan') }}">Scan</a>
           <a class="tab {% if active_tab == 'ftp' %}active{% endif %}" href="{{ url_for('ftp_page') }}">FTP</a>
           <a class="tab {% if active_tab == 'utilities' %}active{% endif %}" href="{{ url_for('utilities_page') }}">Utilities</a>
