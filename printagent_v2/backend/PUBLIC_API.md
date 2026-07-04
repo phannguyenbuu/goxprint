@@ -116,6 +116,16 @@ Response:
   "counter": {
     "total": "3653272"
   },
+  "ok": true,
+  "mac_id": "00:26:73:7D:78:F9",
+  "lead": "default",
+  "lan_uid": "lanf-33ef2446897e0a57",
+  "agent_uid": "agent-pc-01",
+  "printer_name": "Aficio MP 9002",
+  "ip": "192.168.1.224",
+  "counter": {
+    "total": "3653272"
+  },
   "status": {
     "system_status": "Status OK"
   },
@@ -124,6 +134,26 @@ Response:
   "updated_at": "2026-03-02T00:00:00+00:00"
 }
 ```
+
+## 4b) Query real-time device infor by MAC ID (Force fresh check)
+- Method: `GET`
+- Path: `/api/public/device/by-mac-now`
+- Query params (required):
+  - `mac_id` (or `mac`) – MAC address, any format: `00:26:73:7D:78:F9`, `00-26-73-7D-78-F9`, or `0026737D78F9`
+
+Example:
+```bash
+curl -s "https://agentapi.quanlymay.com/api/public/device/by-mac-now?mac_id=0026737D78F9"
+```
+
+Notes:
+- Unlike `/api/public/device/by-mac` which returns cached database values, this endpoint actively triggers an on-demand SNMP/status query command on the managing Agent.
+- The request blocks (long-polls) and waits up to 10 seconds for the Agent response.
+- Success responses contain fresh, real-time counters and status.
+- Automatically updates the database cache for subsequent passive queries.
+- Returns `504` on Agent communication timeout, or `400` if the managing Agent is offline.
+
+Response: Same format as `/api/public/device/by-mac` but with real-time data.
 
 ## 5) Check online status by MAC ID
 - Method: `GET`
