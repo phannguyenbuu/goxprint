@@ -1270,7 +1270,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         from models import AgentNode
         with session_factory() as session:
             agent = session.execute(
-                select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                .limit(1)
             ).scalars().first()
             lead_val = agent.lead if agent else "default"
             lan_uid_val = agent.lan_uid if agent else ""

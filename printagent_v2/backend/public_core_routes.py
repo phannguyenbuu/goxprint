@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -226,7 +227,10 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
         with session_factory() as session:
             agent = session.execute(
-                select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                .limit(1)
             ).scalars().first()
             if not agent or not agent.is_online:
                 return jsonify({"ok": False, "error": "Agent managing this device is offline"}), 400
