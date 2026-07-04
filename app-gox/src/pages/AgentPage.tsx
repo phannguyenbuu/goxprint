@@ -150,6 +150,8 @@ export function AgentPage() {
   const [queryVideoLoading, setQueryVideoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeLoadingFile, setActiveLoadingFile] = useState<string | null>(null);
+  const [isRecording30s, setIsRecording30s] = useState(false);
+  const [recording30sCountdown, setRecording30sCountdown] = useState(30);
 
   useEffect(() => {
     if (!queryVideoLoading) {
@@ -1969,6 +1971,73 @@ except Exception as e:
     }
   };
 
+  const handleRecord30s = async (agentUid: string, cameraId: number) => {
+    if (isRecording30s) return;
+    setIsRecording30s(true);
+    setRecording30sCountdown(30);
+
+    const cameraName = cameras.find((c: any) => c.id === cameraId)?.name || '';
+    const isDup = await isDuplicatePending(agentUid, 'trigger_utility', {
+      action: 'start_camera_recorder',
+      camera_name: cameraName
+    });
+    if (isDup) {
+      showToast('Lệnh ghi hình đang chờ phản hồi từ Agent!', 'info');
+      setIsRecording30s(false);
+      return;
+    }
+
+    try {
+      showToast('Bắt đầu ghi hình 30s...', 'info');
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/start`, { method: 'POST' });
+      const data = await response.json();
+      if (!data.ok) {
+        showToast('Lỗi khởi động ghi: ' + data.error, 'error');
+        setIsRecording30s(false);
+        return;
+      }
+      
+      fetchCameraStatus(agentUid, cameraId);
+
+      // Start the countdown
+      let count = 30;
+      const interval = setInterval(() => {
+        count -= 1;
+        setRecording30sCountdown(count);
+        if (count <= 0) {
+          clearInterval(interval);
+          // Auto-stop recording
+          stopRecordAfter30s(agentUid, cameraId);
+        }
+      }, 1000);
+
+    } catch (err: any) {
+      showToast('Lỗi: ' + err.message, 'error');
+      setIsRecording30s(false);
+    }
+  };
+
+  const stopRecordAfter30s = async (agentUid: string, cameraId: number) => {
+    try {
+      showToast('Hết 30s! Đang ngắt ghi hình...', 'info');
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/stop`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok) {
+        showToast('Ghi hình 30s hoàn tất! Đang cập nhật danh sách...', 'success');
+      } else {
+        showToast('Lỗi dừng ghi: ' + data.error, 'error');
+      }
+    } catch (err: any) {
+      showToast('Lỗi dừng ghi: ' + err.message, 'error');
+    } finally {
+      setIsRecording30s(false);
+      setTimeout(() => {
+        fetchCameraStatus(agentUid, cameraId);
+        fetchCameraFiles(agentUid, cameraId);
+      }, 2000);
+    }
+  };
+
   const handleDeleteCameraFile = async (agentUid: string, cameraId: number, filename: string) => {
     if (!window.confirm(`Bạn có chắc chắn muốn xóa tệp video này khỏi máy trạm?\nFile: ${filename}`)) return;
     try {
@@ -3514,10 +3583,25 @@ except Exception as e:
                                     <button
                                       style={{ ...styles.smallBtn, background: cameraStatus?.running ? 'var(--color-danger)' : 'var(--color-primary)' }}
                                       onClick={() => handleToggleRecording(activeAgentUid, selectedCamera.id, !cameraStatus?.running)}
-                                      disabled={cameraActionLoading['toggle']}
+                                      disabled={cameraActionLoading['toggle'] || isRecording30s}
                                     >
                                       {cameraActionLoading['toggle'] ? '⏳...' : cameraStatus?.running ? '⏹️ Dừng ghi' : '▶️ Bắt đầu'}
                                     </button>
+                                    {(!cameraStatus?.running || isRecording30s) && (
+                                      <button
+                                        style={{
+                                          ...styles.smallBtn,
+                                          background: isRecording30s ? 'var(--color-danger)' : 'var(--color-warning)',
+                                          color: isRecording30s ? '#fff' : '#000',
+                                          fontWeight: 600,
+                                          border: '1px solid var(--color-surface-border)'
+                                        }}
+                                        onClick={() => handleRecord30s(activeAgentUid, selectedCamera.id)}
+                                        disabled={isRecording30s}
+                                      >
+                                        {isRecording30s ? `🔴 Ghi (${recording30sCountdown}s)` : '⏱️ Ghi hình 30s'}
+                                      </button>
+                                    )}
                                     <button
                                       style={{ ...styles.smallBtn, background: 'var(--color-surface-light)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
                                       onClick={() => {
