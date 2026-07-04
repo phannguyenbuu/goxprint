@@ -444,7 +444,9 @@ def main() -> int:
         if getattr(args, "get_video", False):
             from agent.services.camera_manager import CameraManager
             cm = CameraManager()
-            output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+            import tempfile
+            default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+            output_dir = config.get_string("camera.output_dir", default_out)
             clip_path = cm.render_video_clip(
                 camera_name=args.name,
                 output_dir=output_dir,

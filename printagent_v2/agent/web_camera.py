@@ -120,7 +120,9 @@ def register_camera_routes(app: Flask):
         if not cfg:
             return jsonify({"ok": False, "error": "Camera not configured"}), 404
 
-        output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+        import tempfile
+        default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+        output_dir = config.get_string("camera.output_dir", default_out)
         success = cm.start_recording(
             camera_name=name,
             rtsp_url=cfg["rtsp_url"],
@@ -148,13 +150,17 @@ def register_camera_routes(app: Flask):
 
     @app.get("/api/camera/<name>/files")
     def get_camera_files(name: str) -> Any:
-        output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+        import tempfile
+        default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+        output_dir = config.get_string("camera.output_dir", default_out)
         files = cm.list_recordings(name, output_dir)
         return jsonify({"ok": True, "files": files})
 
     @app.delete("/api/camera/<name>/files/<filename>")
     def delete_camera_file(name: str, filename: str) -> Any:
-        output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+        import tempfile
+        default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+        output_dir = config.get_string("camera.output_dir", default_out)
         success = cm.delete_recording(output_dir, filename)
         if success:
             return jsonify({"ok": True})
@@ -162,5 +168,7 @@ def register_camera_routes(app: Flask):
 
     @app.get("/camera/play/<name>/<filename>")
     def serve_recording_file(name: str, filename: str) -> Any:
-        output_dir = config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+        import tempfile
+        default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+        output_dir = config.get_string("camera.output_dir", default_out)
         return send_from_directory(output_dir, filename)

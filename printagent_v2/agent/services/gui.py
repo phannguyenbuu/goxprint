@@ -2137,7 +2137,10 @@ class PrintAgentGui:
             try:
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
-                output_dir = self.config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                import tempfile
+                from pathlib import Path
+                default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                output_dir = self.config.get_string("camera.output_dir", default_out)
                 success = cm.start_recording(
                     camera_name=cfg["camera_name"],
                     rtsp_url=cfg["rtsp_url"],

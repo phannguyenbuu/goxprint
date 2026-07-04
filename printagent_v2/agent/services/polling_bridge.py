@@ -3174,7 +3174,9 @@ if ($node) {{ $node }}
                         
                     from agent.services.camera_manager import CameraManager
                     cm = CameraManager()
-                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    import tempfile
+                    default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                    output_dir = self._config.get_string("camera.output_dir", default_out)
                     
                     # Upsert config locally for the Local UI / Desktop GUI
                     try:
@@ -3266,7 +3268,9 @@ if ($node) {{ $node }}
                         
                     from agent.services.camera_manager import CameraManager
                     cm = CameraManager()
-                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    import tempfile
+                    default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                    output_dir = self._config.get_string("camera.output_dir", default_out)
                     files = cm.list_recordings(camera_name, output_dir)
                     
                     payload_str = json.dumps({"files": files})
@@ -3280,7 +3284,9 @@ if ($node) {{ $node }}
                         
                     from agent.services.camera_manager import CameraManager
                     cm = CameraManager()
-                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    import tempfile
+                    default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                    output_dir = self._config.get_string("camera.output_dir", default_out)
                     success = cm.delete_recording(output_dir, filename)
                     if not success:
                         raise RuntimeError("Failed to delete recording file")
@@ -3311,7 +3317,9 @@ if ($node) {{ $node }}
                         
                     from agent.services.camera_manager import CameraManager
                     cm = CameraManager()
-                    output_dir = self._config.get_string("camera.output_dir", "E:\\app\\camera\\recordings")
+                    import tempfile
+                    default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                    output_dir = self._config.get_string("camera.output_dir", default_out)
                     clip_path = cm.render_video_clip(camera_name, output_dir, timestamp, duration)
                     if not clip_path or not os.path.exists(clip_path):
                         raise FileNotFoundError("Video clip could not be rendered for the given timestamp")
