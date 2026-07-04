@@ -210,12 +210,19 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 agent_uid = row.agent_uid
                 ip = row.ip
                 printer_name = row.printer_name
-                printer_type = "ricoh"
             else:
                 agent_uid = printer.agent_uid
                 ip = printer.ip
-                printer_name = printer.name
-                printer_type = printer.printer_type
+                printer_name = printer.printer_name
+
+            # Determine printer_type from printer_name
+            name_lower = printer_name.lower() if printer_name else ""
+            if "toshiba" in name_lower:
+                printer_type = "toshiba"
+            elif "epson" in name_lower:
+                printer_type = "epson"
+            else:
+                printer_type = "ricoh"
 
         with session_factory() as session:
             agent = session.execute(
