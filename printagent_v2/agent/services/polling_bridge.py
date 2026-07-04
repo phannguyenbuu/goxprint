@@ -998,7 +998,6 @@ Get-NetNeighbor -AddressFamily IPv4 |
             return
         
         import os
-        from pathlib import Path
         temp_dir = os.environ.get("TEMP")
         if temp_dir:
             scripts_dir = Path(temp_dir) / "GoPrinxAgent" / "scripts"
@@ -1793,7 +1792,6 @@ if ($node) {{ $node }}
                 import urllib.request
                 import re
                 import json
-                from pathlib import Path
                 from concurrent.futures import ThreadPoolExecutor
                 from agent.services.camera_manager import CameraManager
                 cm = CameraManager()
@@ -3008,7 +3006,6 @@ if ($node) {{ $node }}
                         
                 elif action == "open_scan_folder":
                     scan_dir = self._config.get_string("polling.scan_dirs", "").strip()
-                    from pathlib import Path
                     if not scan_dir:
                         scan_path = user_temp_root() / "ftp"
                     else:
@@ -3365,7 +3362,6 @@ if ($node) {{ $node }}
         """
         import subprocess
         import time as _time
-        from pathlib import Path
 
         PIPE_NAME    = r"\\.\pipe\GoxDriverService"
         SERVICE_NAME = "GoxDriverService"
@@ -3515,7 +3511,6 @@ Write-Output 'INSTALLED'
         import shutil
         import subprocess
         import os
-        from pathlib import Path
 
         LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
