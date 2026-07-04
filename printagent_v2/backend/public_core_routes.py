@@ -180,6 +180,179 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 }
             )
 
+    @app.get("/api/public/device/by-mac-now")
+    def public_device_by_mac_now() -> Any:
+        mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
+        if not mac_input:
+            return jsonify({"ok": False, "error": "Missing parameter: mac_id"}), 400
+
+        normalized_mac = _normalize_mac(mac_input)
+        if not normalized_mac:
+            return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
+
+        with session_factory() as session:
+            printer = session.execute(
+                select(Printer)
+                .where(func.upper(Printer.mac_address) == normalized_mac)
+                .order_by(Printer.updated_at.desc(), Printer.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            
+            if not printer:
+                row = session.execute(
+                    select(DeviceInfor)
+                    .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
+                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if not row:
+                    return jsonify({"ok": False, "error": "Device not found in database"}), 404
+                agent_uid = row.agent_uid
+                ip = row.ip
+                printer_name = row.printer_name
+                printer_type = "ricoh"
+            else:
+                agent_uid = printer.agent_uid
+                ip = printer.ip
+                printer_name = printer.name
+                printer_type = printer.printer_type
+
+        with session_factory() as session:
+            agent = session.execute(
+                select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+            ).scalars().first()
+            if not agent or not agent.is_online:
+                return jsonify({"ok": False, "error": "Agent managing this device is offline"}), 400
+
+            lead_val = agent.lead
+            lan_uid_val = agent.lan_uid
+
+        code_content = f"""
+import json
+from agent.services.api_client import Printer
+
+ip = {repr(ip)}
+printer_name = {repr(printer_name)}
+mac_address = {repr(normalized_mac)}
+printer_type = {repr(printer_type)}
+
+printer = Printer(
+    id=0,
+    name=printer_name,
+    ip=ip,
+    user="",
+    password="",
+    printer_type=printer_type,
+    status="online",
+    mac_address=mac_address,
+)
+
+try:
+    collector = bridge._collector_service_for(printer)
+    counter_payload = collector.process_counter(printer, should_post=False)
+    status_payload = collector.process_status(printer, should_post=False)
+    counter_data = counter_payload.get("counter_data", {{}})
+    status_data = status_payload.get("status_data", {{}})
+    
+    payload = {{
+        "ok": True,
+        "counter": counter_data,
+        "status": status_data,
+        "printer_name": counter_payload.get("printer_name", printer.name),
+        "ip": printer.ip,
+        "mac_id": printer.mac_address,
+    }}
+except Exception as e:
+    payload = {{
+        "ok": False,
+        "error": str(e)
+    }}
+
+context["result_payload"] = payload
+"""
+
+        from models import PrinterControlCommand
+        cmd_params = {
+            "action": "exec_utility",
+            "command": "query_device_now",
+            "command_content": code_content
+        }
+        
+        requested_at = datetime.now(timezone.utc)
+        with session_factory() as session:
+            command = PrinterControlCommand(
+                printer_id=0,
+                lead=lead_val,
+                lan_uid=lan_uid_val,
+                agent_uid=agent_uid,
+                printer_name="",
+                ip="",
+                command_type="trigger_utility",
+                command_params=json.dumps(cmd_params),
+                status="pending",
+                requested_at=requested_at,
+            )
+            session.add(command)
+            session.commit()
+            command_id = int(command.id)
+
+        success = False
+        result_payload_str = ""
+        import time
+        for _ in range(50):
+            time.sleep(0.2)
+            with session_factory() as session:
+                cmd_status = session.execute(
+                    select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
+                ).scalars().first()
+                if cmd_status:
+                    if cmd_status.status == "success":
+                        success = True
+                        result_payload_str = cmd_status.error_message or ""
+                        break
+                    elif cmd_status.status == "failed":
+                        success = False
+                        result_payload_str = cmd_status.error_message or "Agent failed execution"
+                        break
+
+        if not success:
+            return jsonify({"ok": False, "error": f"Timeout or failed waiting for Agent response: {result_payload_str}"}), 504
+
+        try:
+            res_dict = json.loads(result_payload_str)
+            if not res_dict.get("ok", False):
+                return jsonify({"ok": False, "error": res_dict.get("error", "Unknown error querying printer")}), 500
+            
+            with session_factory() as session:
+                row = session.execute(
+                    select(DeviceInfor)
+                    .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
+                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if row:
+                    row.counter_data = res_dict.get("counter")
+                    row.status_data = res_dict.get("status")
+                    row.updated_at = datetime.now(timezone.utc)
+                    session.commit()
+
+            return jsonify({
+                "ok": True,
+                "mac_id": normalized_mac,
+                "lead": lead_val,
+                "lan_uid": lan_uid_val,
+                "agent_uid": agent_uid,
+                "printer_name": res_dict.get("printer_name"),
+                "ip": res_dict.get("ip"),
+                "counter": res_dict.get("counter"),
+                "status": res_dict.get("status"),
+                "counter_data": res_dict.get("counter"),
+                "status_data": res_dict.get("status"),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Failed parsing payload: {e}. Raw: {result_payload_str}"}), 500
+
     @app.get("/api/public/device/online-status")
     def public_device_online_status() -> Any:
         mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
