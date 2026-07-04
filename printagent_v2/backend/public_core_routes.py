@@ -238,14 +238,40 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             lead_val = agent.lead
             lan_uid_val = agent.lan_uid
 
-        code_content = f"""
+        code_content = """
 import json
+import subprocess
 from agent.services.api_client import Printer
 
-ip = {repr(ip)}
-printer_name = {repr(printer_name)}
-mac_address = {repr(normalized_mac)}
-printer_type = {repr(printer_type)}
+def resolve_ip(mac, default_ip):
+    try:
+        # Check if default_ip is responding first (ping with 1 packet, timeout 1s)
+        ping_cmd = f"ping -n 1 -w 1000 {default_ip}"
+        res = subprocess.run(ping_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0:
+            arp_out = subprocess.check_output(f"arp -a {default_ip}", shell=True, timeout=2).decode('ansi', errors='ignore')
+            cleaned_mac = mac.replace(':', '-').lower()
+            if cleaned_mac in arp_out.replace(':', '-').lower():
+                return default_ip
+    except:
+        pass
+
+    try:
+        out = subprocess.check_output("arp -a", shell=True, timeout=3).decode('ansi', errors='ignore')
+        cleaned_mac = mac.replace(':', '-').lower()
+        for line in out.splitlines():
+            if cleaned_mac in line.replace(':', '-').lower():
+                parts = line.split()
+                if parts and len(parts) >= 2:
+                    return parts[0]
+    except:
+        pass
+    return default_ip
+
+ip = resolve_ip("__MAC__", "__IP__")
+printer_name = "__NAME__"
+mac_address = "__MAC__"
+printer_type = "__TYPE__"
 
 printer = Printer(
     id=0,
@@ -262,25 +288,28 @@ try:
     collector = bridge._collector_service_for(printer)
     counter_payload = collector.process_counter(printer, should_post=False)
     status_payload = collector.process_status(printer, should_post=False)
-    counter_data = counter_payload.get("counter_data", {{}})
-    status_data = status_payload.get("status_data", {{}})
+    counter_data = counter_payload.get("counter_data", {})
+    status_data = status_payload.get("status_data", {})
     
-    payload = {{
+    payload = {
         "ok": True,
         "counter": counter_data,
         "status": status_data,
         "printer_name": counter_payload.get("printer_name", printer.name),
         "ip": printer.ip,
         "mac_id": printer.mac_address,
-    }}
+    }
 except Exception as e:
-    payload = {{
+    payload = {
         "ok": False,
         "error": str(e)
-    }}
+    }
 
 context["result_payload"] = payload
-"""
+""".replace("__MAC__", normalized_mac)\
+   .replace("__IP__", ip)\
+   .replace("__NAME__", printer_name)\
+   .replace("__TYPE__", printer_type)
 
         from models import PrinterControlCommand
         cmd_params = {
@@ -344,8 +373,22 @@ context["result_payload"] = payload
                 if row:
                     row.counter_data = res_dict.get("counter")
                     row.status_data = res_dict.get("status")
+                    if res_dict.get("ip"):
+                        row.ip = res_dict.get("ip")
                     row.updated_at = datetime.now(timezone.utc)
-                    session.commit()
+                
+                from models import Printer
+                printer_row = session.execute(
+                    select(Printer)
+                    .where(func.upper(Printer.mac_address) == normalized_mac)
+                    .order_by(Printer.updated_at.desc(), Printer.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if printer_row and res_dict.get("ip"):
+                    printer_row.ip = res_dict.get("ip")
+                    printer_row.updated_at = datetime.now(timezone.utc)
+
+                session.commit()
 
             return jsonify({
                 "ok": True,
