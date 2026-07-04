@@ -1184,6 +1184,34 @@ except Exception as e:
     }
   }, [viewOutputModal.isOpen, viewOutputModal.title, viewOutputModal.content]);
 
+  const isDuplicatePending = async (agentUid: string, commandType: string, paramsToCheck: any): Promise<boolean> => {
+    try {
+      const res = await getJobs(undefined, undefined, agentUid);
+      if (res.ok && res.jobs) {
+        const pendingJobs = res.jobs.filter((job: any) => job.status === 'pending');
+        for (const job of pendingJobs) {
+          if (job.command_type !== commandType) continue;
+          try {
+            const jobParams = JSON.parse(job.command_params);
+            let match = true;
+            for (const key of Object.keys(paramsToCheck)) {
+              if (jobParams[key] !== paramsToCheck[key]) {
+                match = false;
+                break;
+              }
+            }
+            if (match) return true;
+          } catch {
+            if (job.command_params === JSON.stringify(paramsToCheck)) return true;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check duplicate pending jobs", e);
+    }
+    return false;
+  };
+
   // Commands that return content via RuntimeError — show in view modal instead of error
   const VIEW_COMMANDS = new Set(['view_settings_json', 'view_stout', 'view_sterror', 'get_public_ip', 'check_watchdog', 'open_web_setting']);
   const VIEW_COMMAND_TITLES: Record<string, string> = {
@@ -1265,23 +1293,18 @@ except Exception as e:
   const handleTriggerUtility = useCallback(async (action: 'printers' | 'scan' | 'dxdiag' | 'change_ip' | 'run_command', payload?: any) => {
     if (!selectedUtilityAgent) return;
 
-    try {
-      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
-      if (jobsRes.ok && jobsRes.jobs) {
-        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
-        if (hasPending) {
-          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to check pending jobs", e);
+    const backendAction = action === 'printers' ? 'devices_and_printers' : (action === 'scan' ? 'open_scan_folder' : (action === 'change_ip' ? 'change_ip' : (action === 'run_command' ? 'run_command' : 'dxdiag')));
+    const isDup = await isDuplicatePending(selectedUtilityAgent.agent_uid, 'trigger_utility', {
+      action: backendAction,
+      ...(payload || {})
+    });
+    if (isDup) {
+      showToast('Lệnh tiện ích này đang chờ phản hồi từ Agent!', 'info');
+      return;
     }
 
     setUtilityActionPending(action);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
-    
-    const backendAction = action === 'printers' ? 'devices_and_printers' : (action === 'scan' ? 'open_scan_folder' : (action === 'change_ip' ? 'change_ip' : (action === 'run_command' ? 'run_command' : 'dxdiag')));
     
     try {
       const res = await triggerAgentUtility(selectedUtilityAgent.agent_uid, backendAction, payload);
@@ -1339,17 +1362,13 @@ except Exception as e:
   const handleTriggerUtilityExec = useCallback(async (command: string, commandContent: string) => {
     if (!selectedUtilityAgent) return;
 
-    try {
-      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
-      if (jobsRes.ok && jobsRes.jobs) {
-        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
-        if (hasPending) {
-          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to check pending jobs", e);
+    const isDup = await isDuplicatePending(selectedUtilityAgent.agent_uid, 'trigger_utility', {
+      action: 'exec_utility',
+      command: command
+    });
+    if (isDup) {
+      showToast('Yêu cầu chạy script/lệnh này đang chờ phản hồi từ Agent!', 'info');
+      return;
     }
     
     // Find cmd in local state utilityCommands
@@ -1510,17 +1529,12 @@ except Exception as e:
   const handleEmergencyRestart = useCallback(async () => {
     if (!selectedUtilityAgent) return;
 
-    try {
-      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
-      if (jobsRes.ok && jobsRes.jobs) {
-        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
-        if (hasPending) {
-          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to check pending jobs", e);
+    const isDup = await isDuplicatePending(selectedUtilityAgent.agent_uid, 'emergency_restart', {
+      action: 'emergency_restart'
+    });
+    if (isDup) {
+      showToast('Yêu cầu khởi động lại Agent đang chờ phản hồi từ Agent!', 'info');
+      return;
     }
 
     setConfirmModal({
@@ -1916,17 +1930,14 @@ except Exception as e:
   };
 
   const handleToggleRecording = async (agentUid: string, cameraId: number, start: boolean) => {
-    try {
-      const jobsRes = await getJobs(undefined, undefined, agentUid);
-      if (jobsRes.ok && jobsRes.jobs) {
-        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
-        if (hasPending) {
-          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to check pending jobs", e);
+    const cameraName = cameras.find((c: any) => c.id === cameraId)?.name || '';
+    const isDup = await isDuplicatePending(agentUid, 'trigger_utility', {
+      action: start ? 'start_camera_recorder' : 'stop_camera_recorder',
+      camera_name: cameraName
+    });
+    if (isDup) {
+      showToast('Lệnh kích hoạt/dừng ghi hình cho camera này đang chờ phản hồi từ Agent!', 'info');
+      return;
     }
 
     setCameraActionLoading((prev) => ({ ...prev, toggle: true }));
@@ -1975,17 +1986,16 @@ except Exception as e:
     const dur = customDuration || queryDuration;
     if (!ts) return;
 
-    try {
-      const jobsRes = await getJobs(undefined, undefined, agentUid);
-      if (jobsRes.ok && jobsRes.jobs) {
-        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
-        if (hasPending) {
-          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to check pending jobs", e);
+    const cameraName = cameras.find((c: any) => c.id === cameraId)?.name || '';
+    const isDup = await isDuplicatePending(agentUid, 'trigger_utility', {
+      action: 'query_camera_video',
+      camera_name: cameraName,
+      timestamp: ts,
+      duration: dur
+    });
+    if (isDup) {
+      showToast('Yêu cầu truy xuất đoạn video này đang chờ phản hồi từ Agent!', 'info');
+      return;
     }
 
     setQueryVideoLoading(true);
