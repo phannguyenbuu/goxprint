@@ -1422,7 +1422,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 return jsonify({"ok": False, "error": "Camera config not found"}), 404
             camera_name = cfg.camera_name
             
-        success, payload = _queue_camera_utility_command(agent_uid, "list_camera_files", camera_name, {})
+        success, payload = _queue_camera_utility_command(agent_uid, "list_camera_files", camera_name, {}, wait_seconds=30.0)
         if success:
             try:
                 files_dict = json.loads(payload)
@@ -1464,7 +1464,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         success, err = _queue_camera_utility_command(
             agent_uid, "query_camera_video", camera_name,
             {"timestamp": timestamp, "duration": duration},
-            wait_seconds=35.0
+            wait_seconds=65.0
         )
         if success:
             return jsonify({"ok": True})

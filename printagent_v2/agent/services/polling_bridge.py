@@ -3180,7 +3180,6 @@ if ($node) {{ $node }}
                     
                     # Upsert config locally for the Local UI / Desktop GUI
                     try:
-                        from pathlib import Path
                         local_cfg_path = Path("storage/camera_configs.json")
                         local_cfg_path.parent.mkdir(parents=True, exist_ok=True)
                         configs = []
