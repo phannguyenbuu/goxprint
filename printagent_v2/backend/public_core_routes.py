@@ -377,7 +377,6 @@ context["result_payload"] = payload
                         row.ip = res_dict.get("ip")
                     row.updated_at = datetime.now(timezone.utc)
                 
-                from models import Printer
                 printer_row = session.execute(
                     select(Printer)
                     .where(func.upper(Printer.mac_address) == normalized_mac)
