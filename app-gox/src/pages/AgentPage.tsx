@@ -21,6 +21,7 @@ import {
   getAgentUtilityCommands,
   triggerAgentUtilityExec,
   triggerEmergencyRestart,
+  getJobs,
 } from '../api/mockAgentApi';
 import type { LanSiteInfo } from '../api/mockAgentApi';
 
@@ -1161,6 +1162,20 @@ export function AgentPage() {
 
   const handleTriggerUtility = useCallback(async (action: 'printers' | 'scan' | 'dxdiag' | 'change_ip' | 'run_command', payload?: any) => {
     if (!selectedUtilityAgent) return;
+
+    try {
+      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
+      if (jobsRes.ok && jobsRes.jobs) {
+        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
+        if (hasPending) {
+          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check pending jobs", e);
+    }
+
     setUtilityActionPending(action);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
     
@@ -1219,9 +1234,21 @@ export function AgentPage() {
     }
   }, [selectedUtilityAgent]);
 
-  // Dynamic exec: gửi command_content từ JSON đến agent để exec()
   const handleTriggerUtilityExec = useCallback(async (command: string, commandContent: string) => {
     if (!selectedUtilityAgent) return;
+
+    try {
+      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
+      if (jobsRes.ok && jobsRes.jobs) {
+        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
+        if (hasPending) {
+          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check pending jobs", e);
+    }
     
     // Find cmd in local state utilityCommands
     const cmdObj = utilityCommands.find(c => c.command === command);
@@ -1380,6 +1407,20 @@ export function AgentPage() {
 
   const handleEmergencyRestart = useCallback(async () => {
     if (!selectedUtilityAgent) return;
+
+    try {
+      const jobsRes = await getJobs(undefined, undefined, selectedUtilityAgent.agent_uid);
+      if (jobsRes.ok && jobsRes.jobs) {
+        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
+        if (hasPending) {
+          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check pending jobs", e);
+    }
+
     setConfirmModal({
       isOpen: true,
       title: '🚨 Kích hoạt Khởi động khẩn cấp',
@@ -1773,6 +1814,19 @@ export function AgentPage() {
   };
 
   const handleToggleRecording = async (agentUid: string, cameraId: number, start: boolean) => {
+    try {
+      const jobsRes = await getJobs(undefined, undefined, agentUid);
+      if (jobsRes.ok && jobsRes.jobs) {
+        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
+        if (hasPending) {
+          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check pending jobs", e);
+    }
+
     setCameraActionLoading((prev) => ({ ...prev, toggle: true }));
     const action = start ? 'start' : 'stop';
     try {
@@ -1818,6 +1872,19 @@ export function AgentPage() {
     const ts = customTimestamp || queryTimestamp;
     const dur = customDuration || queryDuration;
     if (!ts) return;
+
+    try {
+      const jobsRes = await getJobs(undefined, undefined, agentUid);
+      if (jobsRes.ok && jobsRes.jobs) {
+        const hasPending = jobsRes.jobs.some((job: any) => job.status === 'pending');
+        if (hasPending) {
+          showToast('Không thể gửi lệnh mới khi đang có lệnh khác chờ phản hồi từ Agent!', 'error');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check pending jobs", e);
+    }
 
     setQueryVideoLoading(true);
     setQueriedVideoUrl('');

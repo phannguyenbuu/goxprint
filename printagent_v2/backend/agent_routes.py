@@ -375,6 +375,44 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             }
         )
 
+    @app.get("/api/jobs")
+    def list_jobs() -> Any:
+        lead = _to_text(request.args.get("lead"))
+        lan_uid = _to_text(request.args.get("lan_uid"))
+        agent_uid = _to_text(request.args.get("agent_uid"))
+        limit = _to_int(request.args.get("limit")) or 100
+        limit = max(1, min(limit, 1000))
+        
+        with session_factory() as session:
+            stmt = select(PrinterControlCommand).order_by(PrinterControlCommand.id.desc())
+            if lead:
+                stmt = stmt.where(PrinterControlCommand.lead == lead)
+            if lan_uid:
+                stmt = stmt.where(PrinterControlCommand.lan_uid == lan_uid)
+            if agent_uid:
+                stmt = stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+                
+            rows = session.execute(stmt.limit(limit)).scalars().all()
+            
+            jobs = []
+            for row in rows:
+                jobs.append({
+                    "id": int(row.id),
+                    "lead": row.lead,
+                    "lan_uid": row.lan_uid,
+                    "agent_uid": row.agent_uid,
+                    "printer_id": int(row.printer_id or 0),
+                    "printer_name": row.printer_name,
+                    "ip": row.ip,
+                    "command_type": row.command_type,
+                    "command_params": row.command_params,
+                    "status": row.status,
+                    "error_message": row.error_message,
+                    "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
+                    "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",
+                })
+        return jsonify({"ok": True, "jobs": jobs})
+
     @app.get("/api/agents/history/export")
     def export_agent_history() -> Any:
         lead = _to_text(request.args.get("lead"))
