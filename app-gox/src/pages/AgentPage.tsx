@@ -1082,6 +1082,108 @@ export function AgentPage() {
     isOpen: false, title: '', content: '',
   });
 
+  const [editableSettingsText, setEditableSettingsText] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState<string | null>(null);
+
+  const handleSaveSettings = async () => {
+    if (!selectedUtilityAgent) return;
+    try {
+      JSON.parse(editableSettingsText);
+    } catch (e: any) {
+      setSettingsSaveStatus(`❌ Lỗi định dạng JSON: ${e.message}`);
+      return;
+    }
+    setIsSavingSettings(true);
+    setSettingsSaveStatus('⌛ Đang gửi cấu hình mới tới Agent...');
+    const pythonScript = `import os, sys, json
+new_content = """${editableSettingsText.replace(/"""/g, '\\"\\"\\""')}"""
+try:
+    parsed = json.loads(new_content)
+    exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
+    candidates = [
+        os.path.join(exe_dir, 'settings.json'),
+        os.path.join(os.getcwd(), 'settings.json'),
+        'settings.json',
+    ]
+    found = None
+    for p in candidates:
+        if os.path.exists(p):
+            found = p
+            break
+    if not found:
+        found = candidates[0]
+
+    with open(found + '.bak', 'w', encoding='utf-8') as f_bak:
+        try:
+            with open(found, 'r', encoding='utf-8') as f_orig:
+                f_bak.write(f_orig.read())
+        except:
+            pass
+
+    with open(found, 'w', encoding='utf-8') as f:
+        json.dump(parsed, f, ensure_ascii=False, indent=2)
+
+    try:
+        if 'bridge' in globals():
+            globals()['bridge']._config.reload()
+    except Exception as e:
+        pass
+
+    msg = "Đã lưu cấu hình thành công!"
+    if globals().get('context'):
+        globals()['context']['result_payload'] = msg
+    else:
+        raise RuntimeError(msg)
+except Exception as e:
+    raise RuntimeError(str(e))
+`;
+    try {
+      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'save_settings_json', pythonScript);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const startTime = Date.now();
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            setSettingsSaveStatus('❌ Lưu thất bại: Hết thời gian chờ (60s)');
+            setIsSavingSettings(false);
+            return;
+          }
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            setSettingsSaveStatus('✔️ Đã lưu cấu hình và tự động reload thành công!');
+            setIsSavingSettings(false);
+            setViewOutputModal(prev => ({ ...prev, content: editableSettingsText }));
+            setTimeout(() => setSettingsSaveStatus(null), 3000);
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            setSettingsSaveStatus(`❌ Lỗi từ máy trạm: ${statusRes.error || 'Lưu thất bại'}`);
+            setIsSavingSettings(false);
+          }
+        } catch (pollErr: any) {
+          console.error('Poll error:', pollErr);
+        }
+      }, 1000);
+    } catch (err: any) {
+      setSettingsSaveStatus(`❌ Lỗi kết nối: ${err.message}`);
+      setIsSavingSettings(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewOutputModal.isOpen && viewOutputModal.title.includes('settings.json')) {
+      setEditableSettingsText(viewOutputModal.content);
+      setSettingsSaveStatus(null);
+    }
+  }, [viewOutputModal.isOpen, viewOutputModal.title, viewOutputModal.content]);
+
   // Commands that return content via RuntimeError — show in view modal instead of error
   const VIEW_COMMANDS = new Set(['view_settings_json', 'view_stout', 'view_sterror', 'get_public_ip', 'check_watchdog', 'open_web_setting']);
   const VIEW_COMMAND_TITLES: Record<string, string> = {
@@ -4927,28 +5029,81 @@ raise RuntimeError('\\n'.join(lines))`;
                 </button>
               </div>
 
-              <pre
-                style={{
-                  flex: 1,
-                  overflow: 'auto',
-                  margin: 0,
-                  padding: '12px',
-                  background: 'var(--color-background)',
-                  border: '1px solid var(--color-surface-light)',
-                  borderRadius: '8px',
-                  fontSize: '0.68rem',
-                  lineHeight: 1.55,
-                  fontFamily: "'Consolas', 'Monaco', monospace",
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  color: 'var(--color-text)',
-                  minHeight: 0,
-                }}
-              >
-                {viewOutputModal.content}
-              </pre>
+              {viewOutputModal.title.includes('settings.json') ? (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                  <textarea
+                    value={editableSettingsText}
+                    onChange={(e) => setEditableSettingsText(e.target.value)}
+                    style={{
+                      flex: 1,
+                      overflow: 'auto',
+                      margin: 0,
+                      padding: '12px',
+                      background: 'var(--color-background)',
+                      border: '1px solid var(--color-surface-light)',
+                      borderRadius: '8px',
+                      fontSize: '0.72rem',
+                      lineHeight: 1.55,
+                      fontFamily: "'Consolas', 'Monaco', monospace",
+                      color: 'var(--color-text)',
+                      minHeight: '380px',
+                      outline: 'none',
+                      resize: 'none',
+                    }}
+                  />
+                  {settingsSaveStatus && (
+                    <div style={{
+                      marginTop: 8, fontSize: 11,
+                      padding: '6px 10px', borderRadius: 6,
+                      background: settingsSaveStatus.startsWith('❌') ? 'rgba(239,68,68,0.1)' : (settingsSaveStatus.startsWith('✔️') ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)'),
+                      color: settingsSaveStatus.startsWith('❌') ? '#f87171' : (settingsSaveStatus.startsWith('✔️') ? '#4ade80' : 'var(--color-warning)'),
+                      border: `1px solid ${settingsSaveStatus.startsWith('❌') ? 'rgba(239,68,68,0.15)' : (settingsSaveStatus.startsWith('✔️') ? 'rgba(34,197,94,0.15)' : 'rgba(234,179,8,0.15)')}`
+                    }}>
+                      {settingsSaveStatus}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <pre
+                  style={{
+                    flex: 1,
+                    overflow: 'auto',
+                    margin: 0,
+                    padding: '12px',
+                    background: 'var(--color-background)',
+                    border: '1px solid var(--color-surface-light)',
+                    borderRadius: '8px',
+                    fontSize: '0.68rem',
+                    lineHeight: 1.55,
+                    fontFamily: "'Consolas', 'Monaco', monospace",
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    color: 'var(--color-text)',
+                    minHeight: 0,
+                  }}
+                >
+                  {viewOutputModal.content}
+                </pre>
+              )}
 
               <div style={{ ...styles.modalFooter, marginTop: '10px' }}>
+                {viewOutputModal.title.includes('settings.json') && (
+                  <button
+                    disabled={isSavingSettings}
+                    style={{
+                      ...styles.smallBtn,
+                      padding: '8px 14px',
+                      fontSize: '0.78rem',
+                      background: isSavingSettings ? 'rgba(99,102,241,0.6)' : 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#fff',
+                      cursor: isSavingSettings ? 'not-allowed' : 'pointer'
+                    }}
+                    onClick={handleSaveSettings}
+                  >
+                    {isSavingSettings ? '⌛ Đang lưu...' : '💾 Lưu cấu hình'}
+                  </button>
+                )}
                 <button
                   style={{
                     ...styles.smallBtn,
@@ -4956,7 +5111,7 @@ raise RuntimeError('\\n'.join(lines))`;
                     fontSize: '0.78rem',
                   }}
                   onClick={() => {
-                    navigator.clipboard.writeText(viewOutputModal.content).catch(() => {});
+                    navigator.clipboard.writeText(viewOutputModal.title.includes('settings.json') ? editableSettingsText : viewOutputModal.content).catch(() => {});
                   }}
                 >
                   📋 Copy
