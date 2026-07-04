@@ -29,6 +29,7 @@ def _find_bin(name: str) -> str:
 
     # Fallback: check standard folders
     common_roots = [
+        Path("storage/bin"),
         Path.home() / "AppData/Local/Microsoft/WinGet/Packages",
         Path("C:/ProgramData/chocolatey/bin"),
         Path.home() / "scoop/shims",
@@ -44,8 +45,12 @@ def _find_bin(name: str) -> str:
     return name
 
 
-FFMPEG = _find_bin("ffmpeg")
-FFPROBE = _find_bin("ffprobe")
+def get_ffmpeg_path() -> str:
+    return _find_bin("ffmpeg")
+
+
+def get_ffprobe_path() -> str:
+    return _find_bin("ffprobe")
 
 
 class CameraManager:
@@ -70,6 +75,68 @@ class CameraManager:
         self.segment_counts: dict[str, int] = {}
         self.current_files: dict[str, str] = {}
         self._initialized = True
+        
+        # Start background check & download of binaries
+        threading.Thread(target=self._ensure_binaries_bg, daemon=True, name="ffmpeg-downloader").start()
+
+    def _ensure_binaries_bg(self):
+        try:
+            ffmpeg_path = get_ffmpeg_path()
+            ffprobe_path = get_ffprobe_path()
+            
+            # Check if working
+            ffmpeg_ok = False
+            try:
+                subprocess.run([ffmpeg_path, "-version"], capture_output=True, timeout=2)
+                ffmpeg_ok = True
+            except Exception:
+                pass
+                
+            ffprobe_ok = False
+            try:
+                subprocess.run([ffprobe_path, "-version"], capture_output=True, timeout=2)
+                ffprobe_ok = True
+            except Exception:
+                pass
+                
+            if ffmpeg_ok and ffprobe_ok:
+                return  # Binaries exist and are working!
+
+            # If not found or not working, download them!
+            dest_dir = Path("storage/bin")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            
+            local_ffmpeg = dest_dir / "ffmpeg.exe"
+            local_ffprobe = dest_dir / "ffprobe.exe"
+            
+            # Try loading AppConfig for base_url
+            from agent.config import AppConfig
+            config = AppConfig.load()
+            base_url = config.get_string("polling.url", "https://agentapi.quanlymay.com").rstrip("/")
+            
+            import urllib.request
+            
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            
+            if not local_ffmpeg.exists():
+                LOGGER.info("Downloading ffmpeg.exe from server...")
+                url = f"{base_url}/static/releases/ffmpeg.exe"
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    local_ffmpeg.write_bytes(response.read())
+                LOGGER.info("ffmpeg.exe downloaded.")
+                
+            if not local_ffprobe.exists():
+                LOGGER.info("Downloading ffprobe.exe from server...")
+                url = f"{base_url}/static/releases/ffprobe.exe"
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    local_ffprobe.write_bytes(response.read())
+                LOGGER.info("ffprobe.exe downloaded.")
+                
+            LOGGER.info("Binaries verification completed.")
+        except Exception as exc:
+            LOGGER.error("Failed downloading FFmpeg/FFprobe binaries: %s", exc)
 
     def add_log(self, camera_name: str, level: str, msg: str):
         with self.lock:
@@ -108,7 +175,7 @@ class CameraManager:
             return False, "URL trống"
         try:
             result = subprocess.run(
-                [FFPROBE, "-v", "error", "-rtsp_transport", "tcp",
+                [get_ffprobe_path(), "-v", "error", "-rtsp_transport", "tcp",
                  "-show_entries", "stream=codec_name,width,height,r_frame_rate",
                  "-of", "json", "-i", rtsp_url],
                 capture_output=True, text=True, timeout=15,
@@ -136,7 +203,7 @@ class CameraManager:
         except subprocess.TimeoutExpired:
             return False, "Timeout — camera không phản hồi sau 15 giây"
         except FileNotFoundError:
-            return False, f"FFprobe không tìm thấy ({FFPROBE})"
+            return False, f"FFprobe không tìm thấy ({get_ffprobe_path()})"
         except Exception as e:
             return False, f"Lỗi: {e}"
 
@@ -223,7 +290,7 @@ class CameraManager:
             self.add_log(camera_name, "info", f"🎬 Segment #{seg_num}: {filename}")
 
             cmd = [
-                FFMPEG,
+                get_ffmpeg_path(),
                 "-loglevel", "error",
                 "-rtsp_transport", "tcp",
                 "-i", rtsp_url,
@@ -238,9 +305,9 @@ class CameraManager:
 
             try:
                 # Check if FFMPEG exists
-                subprocess.run([FFMPEG, "-version"], capture_output=True, timeout=2)
+                subprocess.run([get_ffmpeg_path(), "-version"], capture_output=True, timeout=2)
             except FileNotFoundError:
-                self.add_log(camera_name, "error", f"❌ FFmpeg không tìm thấy! ({FFMPEG})")
+                self.add_log(camera_name, "error", f"❌ FFmpeg không tìm thấy! ({get_ffmpeg_path()})")
                 break
 
             try:
@@ -391,7 +458,7 @@ class CameraManager:
 
             # FFmpeg slice command (copy stream for maximum performance, no transcoding)
             cmd = [
-                FFMPEG, "-y",
+                get_ffmpeg_path(), "-y",
                 "-ss", str(offset),
                 "-i", str(matched_file),
                 "-t", str(duration_seconds),
