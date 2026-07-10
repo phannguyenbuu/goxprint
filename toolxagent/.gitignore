@@ -1,0 +1,10 @@
+.build-venv/
+build/
+dist/
+__pycache__/
+*.spec
+*.pyc
+temp_core/
+recover.py
+update_version.py
+safe_replace.py
