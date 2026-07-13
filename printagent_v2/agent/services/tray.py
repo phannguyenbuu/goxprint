@@ -167,13 +167,7 @@ class TrayController:
             if target:
                 webbrowser.open_new_tab(target)
 
-    def _show_quick_setup(self) -> None:
-        LOGGER.info("Tray quick setup requested (opening Quick Setup Dialog)")
-        try:
-            from agent.services.gui import show_quick_setup_dialog
-            show_quick_setup_dialog(self.app_version)
-        except Exception as exc:
-            LOGGER.exception("Failed to launch Quick Setup GUI: %s", exc)
+
 
     def _close(self) -> None:
         if self._closed:
@@ -343,7 +337,7 @@ class TrayController:
                 return 0
             if msg == WM_USER + 20:
                 if lparam in (WM_LBUTTONDBLCLK, WM_LBUTTONUP):
-                    self._show_quick_setup()
+                    self._show()
                 elif lparam == WM_RBUTTONUP:
                     self._show_menu()
                 return 0
