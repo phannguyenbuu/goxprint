@@ -79,10 +79,11 @@ def _iter_backend_files() -> list[tuple[Path, str]]:
     backend_dir = ROOT_DIR / "backend"
     items: list[tuple[Path, str]] = []
 
-    for name in ROOT_FILES:
-        local = backend_dir / name
-        if local.exists():
-            items.append((local, f"{REMOTE_BASE}/{name}"))
+    # Upload all python and metadata files in the root of the backend directory
+    for path in backend_dir.iterdir():
+        if path.is_file():
+            if path.suffix in (".py", ".txt", ".md") or path.name == "__init__.py":
+                items.append((path, f"{REMOTE_BASE}/{path.name}"))
 
     for local_subdir, remote_subdir in DIRECTORIES:
         source_dir = backend_dir / local_subdir
@@ -90,6 +91,8 @@ def _iter_backend_files() -> list[tuple[Path, str]]:
             continue
         for path in source_dir.rglob("*"):
             if not path.is_file():
+                continue
+            if "__pycache__" in path.parts:
                 continue
             rel = path.relative_to(source_dir).as_posix()
             items.append((path, f"{REMOTE_BASE}/{remote_subdir}/{rel}"))

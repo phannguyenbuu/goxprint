@@ -27,7 +27,7 @@ if not key_filename:
 print("Initializing SSH client...")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-deploy_host = os.environ.get("DEPLOY_HOST", "31.97.76.62")
+deploy_host = os.environ.get("DEPLOY_HOST", "157.66.80.125")
 print(f"Connecting to VPS at {deploy_host} using key: {key_filename}...")
 ssh.connect(deploy_host, username='root', key_filename=key_filename)
 
@@ -88,7 +88,11 @@ files_to_copy = [
     (str(root_dir / 'dist' / 'printagentinstall.exe'), '/opt/printagent/static/releases/printagentinstall.exe'),
     (str(local_backend / 'static' / 'releases' / 'GoxDriverService.exe'), '/opt/printagent/static/releases/GoxDriverService.exe'),
     (str(local_backend / 'static' / 'releases' / 'install_gox_driver_service.ps1'), '/opt/printagent/static/releases/install_gox_driver_service.ps1'),
-    (str(local_backend / 'static' / 'releases' / 'diagnose.py'), '/opt/printagent/static/releases/diagnose.py')
+    (str(local_backend / 'static' / 'releases' / 'diagnose.py'), '/opt/printagent/static/releases/diagnose.py'),
+    (str(local_backend / 'storage' / 'drivers' / 'toshiba.json'), '/opt/printagent/storage/drivers/toshiba.json'),
+    (str(local_backend / 'storage' / 'drivers' / 'ricoh.json'), '/opt/printagent/storage/drivers/ricoh.json'),
+    (str(local_backend / 'storage' / 'drivers' / 'fujifilm.json'), '/opt/printagent/storage/drivers/fujifilm.json'),
+    (str(local_backend / 'static' / 'logo.png'), '/opt/printagent/static/logo.png')
 ]
 
 for local_file, remote_file in files_to_copy:

@@ -78,8 +78,8 @@ class TunnelManager:
 
     def start_tunnel(self, target_ip: str, target_port: int, vps_ip: str, remote_port: int, vps_user: str = "ubuntu") -> bool:
         with self.tunnels_lock:
-            # Stop existing tunnel for this IP first
-            self._stop_tunnel_unlocked(target_ip)
+            # Stop existing tunnel for this IP:Port first
+            self._stop_tunnel_unlocked(target_ip, target_port)
             
             null_device = "NUL" if sys.platform == "win32" else "/dev/null"
             ssh_cmd = [
@@ -147,36 +147,55 @@ class TunnelManager:
                     LOGGER.error("[TunnelManager] SSH tunnel failed to start immediately. Exit code: %s", proc.returncode)
                     return False
                     
-                self.active_tunnels[target_ip] = proc
-                LOGGER.info("[TunnelManager] SSH tunnel established for printer %s forwarding to VPS port %d", target_ip, remote_port)
+                key = (target_ip, target_port)
+                self.active_tunnels[key] = proc
+                LOGGER.info("[TunnelManager] SSH tunnel established for printer %s:%d forwarding to VPS port %d", target_ip, target_port, remote_port)
                 
-                threading.Thread(target=self._monitor_tunnel, args=(target_ip, proc), daemon=True).start()
+                threading.Thread(target=self._monitor_tunnel, args=(target_ip, target_port, proc), daemon=True).start()
                 return True
             except Exception as exc:
                 LOGGER.exception("[TunnelManager] Error starting SSH tunnel: %s", exc)
                 return False
 
-    def stop_tunnel(self, target_ip: str) -> None:
+    def stop_tunnel(self, target_ip: str, target_port: int | None = None) -> None:
         with self.tunnels_lock:
-            self._stop_tunnel_unlocked(target_ip)
+            self._stop_tunnel_unlocked(target_ip, target_port)
 
-    def _stop_tunnel_unlocked(self, target_ip: str) -> None:
-        proc = self.active_tunnels.pop(target_ip, None)
-        if proc:
-            LOGGER.info("[TunnelManager] Stopping SSH tunnel for printer %s", target_ip)
-            try:
-                proc.terminate()
-                proc.wait(timeout=2.0)
-            except Exception:
+    def _stop_tunnel_unlocked(self, target_ip: str, target_port: int | None = None) -> None:
+        if target_port is not None:
+            key = (target_ip, target_port)
+            proc = self.active_tunnels.pop(key, None)
+            if proc:
+                LOGGER.info("[TunnelManager] Stopping SSH tunnel for printer %s:%d", target_ip, target_port)
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=2.0)
                 except Exception:
-                    pass
-            LOGGER.info("[TunnelManager] SSH tunnel process terminated for %s", target_ip)
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                LOGGER.info("[TunnelManager] SSH tunnel process terminated for %s:%d", target_ip, target_port)
+        else:
+            keys_to_stop = [k for k in self.active_tunnels.keys() if k[0] == target_ip]
+            for k in keys_to_stop:
+                proc = self.active_tunnels.pop(k, None)
+                if proc:
+                    LOGGER.info("[TunnelManager] Stopping SSH tunnel for printer %s:%d", k[0], k[1])
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=2.0)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    LOGGER.info("[TunnelManager] SSH tunnel process terminated for %s:%d", k[0], k[1])
 
-    def _monitor_tunnel(self, target_ip: str, proc: subprocess.Popen) -> None:
+    def _monitor_tunnel(self, target_ip: str, target_port: int, proc: subprocess.Popen) -> None:
         proc.wait()
         with self.tunnels_lock:
-            if self.active_tunnels.get(target_ip) == proc:
-                LOGGER.warning("[TunnelManager] SSH tunnel for %s exited unexpectedly with code %s", target_ip, proc.returncode)
-                self.active_tunnels.pop(target_ip, None)
+            key = (target_ip, target_port)
+            if self.active_tunnels.get(key) == proc:
+                LOGGER.warning("[TunnelManager] SSH tunnel for %s:%d exited unexpectedly with code %s", target_ip, target_port, proc.returncode)
+                self.active_tunnels.pop(key, None)

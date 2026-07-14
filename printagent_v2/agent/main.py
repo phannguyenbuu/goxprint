@@ -367,7 +367,7 @@ def main() -> int:
         # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
         is_ftp_worker = False
         for i, arg in enumerate(sys.argv):
-            if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] == "":
+            if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] in ("", '""', "''"):
                 is_ftp_worker = True
                 break
             elif arg == '--mode=""' or arg == "--mode=''":
@@ -395,7 +395,7 @@ def main() -> int:
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--mode",
-            choices=["web", "service", "test", ""],
+            choices=["web", "service", "test", "", "gui"],
             default="web",
             help="Run mode: web (Flask UI), service (scheduler), test (interactive menu),  (persistent FTP host)",
         )
@@ -466,7 +466,13 @@ def main() -> int:
             logging.info("Web module disabled by configuration modules.web.enabled=false; switching to service mode")
             args.mode = "service"
 
-        instance_name = "Global\\GoPrinxAgentFtpWorker" if args.mode == "" else "Global\\GoPrinxAgentMain"
+        if args.mode == "":
+            instance_name = "Global\\GoPrinxAgentFtpWorker"
+        elif args.mode == "gui":
+            instance_name = "Global\\GoPrinxAgentGui"
+        else:
+            instance_name = "Global\\GoPrinxAgentMain"
+
         log_debug(f"Acquiring single instance lock for: {instance_name}...")
         instance_lock, is_primary = acquire_single_instance(instance_name)
         log_debug(f"Single instance lock acquisition complete: is_primary={is_primary}")
@@ -475,37 +481,38 @@ def main() -> int:
             logging.debug("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
             return 0
 
-        log_debug("Performing startup registration...")
         startup_ok = False
         startup_note = "skipped"
-        ftp_enabled = config.get_bool("modules.ftp.enabled", True)
-        if args.mode == "":
-            if ftp_enabled:
-                worker_cmd = startup_command_for_current_exe("")
-                startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+        if args.mode != "gui":
+            log_debug("Performing startup registration...")
+            ftp_enabled = config.get_bool("modules.ftp.enabled", True)
+            if args.mode == "":
+                if ftp_enabled:
+                    worker_cmd = startup_command_for_current_exe("")
+                    startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+                else:
+                    log_debug("FTP worker is disabled; skipping startup registration")
+                    logging.info("FTP worker is disabled; skipping startup registration")
             else:
-                log_debug("FTP worker is disabled; skipping startup registration")
-                logging.info("FTP worker is disabled; skipping startup registration")
-        else:
-            if args.mode == "web":
-                main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-            elif args.mode == "service":
-                main_cmd = startup_command_for_current_exe("service")
-            else:
-                main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-            startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
-            
-            if ftp_enabled:
-                worker_cmd = startup_command_for_current_exe("")
-                worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-                log_debug(f"FTP worker startup registration: {worker_ok} ({worker_note})")
-                logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
-            else:
-                log_debug("FTP worker is disabled; skipping FTP worker registration")
-                logging.info("FTP worker is disabled; skipping FTP worker registration")
+                if args.mode == "web":
+                    main_cmd = startup_command_for_current_exe("web", args.host, args.port)
+                elif args.mode == "service":
+                    main_cmd = startup_command_for_current_exe("service")
+                else:
+                    main_cmd = startup_command_for_current_exe("web", args.host, args.port)
+                startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
                 
-        log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
-        logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
+                if ftp_enabled:
+                    worker_cmd = startup_command_for_current_exe("")
+                    worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
+                    log_debug(f"FTP worker startup registration: {worker_ok} ({worker_note})")
+                    logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
+                else:
+                    log_debug("FTP worker is disabled; skipping FTP worker registration")
+                    logging.info("FTP worker is disabled; skipping FTP worker registration")
+                    
+            log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
+            logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
         
 
 
@@ -590,6 +597,13 @@ def main() -> int:
                 log_debug("Running in FTP worker mode...")
                 run_ftp_worker_mode(config)
                 log_debug("FTP worker mode finished.")
+                return 0
+
+            if args.mode == "gui":
+                log_debug("Running standalone GUI mode...")
+                from agent.services.gui import run_gui_standalone
+                run_gui_standalone(updater.current_version)
+                log_debug("Standalone GUI mode finished.")
                 return 0
      
             log_debug("Running in API client / Services mode...")

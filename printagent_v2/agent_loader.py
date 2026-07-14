@@ -22,6 +22,19 @@ try:
 except Exception:
     pass
 
+# Monkey patch subprocess to always hide console window on Windows
+try:
+    import subprocess
+    if sys.platform == "win32":
+        _orig_Popen_init = subprocess.Popen.__init__
+        def _patched_Popen_init(self, *args, **kwargs):
+            creationflags = kwargs.get("creationflags", 0)
+            kwargs["creationflags"] = creationflags | 0x08000000
+            _orig_Popen_init(self, *args, **kwargs)
+        subprocess.Popen.__init__ = _patched_Popen_init
+except Exception:
+    pass
+
 try:
     log_debug("Starting initial CWD and console setup...")
     # Change CWD to the executable parent directory when frozen to prevent write errors in default CWD (like system32)
@@ -51,10 +64,14 @@ try:
                 log_debug("Redirected stdout/stderr to loader.txt")
             except Exception as e:
                 log_debug(f"Failed to redirect stdout: {e}")
-                class DummyWriter:
-                    def write(self, *args, **kwargs): pass
-                    def flush(self, *args, **kwargs): pass
-                sys.stdout = DummyWriter()
+                try:
+                    import os
+                    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+                except Exception:
+                    class DummyWriter:
+                        def write(self, *args, **kwargs): pass
+                        def flush(self, *args, **kwargs): pass
+                    sys.stdout = DummyWriter()
                 sys.stderr = sys.stdout
 except Exception as e:
     log_debug(f"Error during console/CWD setup: {e}")

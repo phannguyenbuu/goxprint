@@ -143,7 +143,7 @@ export function AgentPage() {
   const [cameraFiles, setCameraFiles] = useState<any[]>([]);
   const [cameraTestResult, setCameraTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [cameraTestLoading, setCameraTestLoading] = useState(false);
-  const [cameraActionLoading, setCameraActionLoading] = useState<Record<string, boolean>>({});
+
   const [queryTimestamp, setQueryTimestamp] = useState('');
   const [queryDuration, setQueryDuration] = useState(10);
   const [queriedVideoUrl, setQueriedVideoUrl] = useState('');
@@ -152,6 +152,8 @@ export function AgentPage() {
   const [activeLoadingFile, setActiveLoadingFile] = useState<string | null>(null);
   const [isRecording30s, setIsRecording30s] = useState(false);
   const [recording30sCountdown, setRecording30sCountdown] = useState(30);
+  const [customRecordDuration, setCustomRecordDuration] = useState(30);
+
 
   useEffect(() => {
     if (!queryVideoLoading) {
@@ -179,10 +181,13 @@ export function AgentPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals
-  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | 'remote_lock' | null>(null);
+  const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | 'remote_lock' | 'toshiba_vnc' | null>(null);
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
   const [remoteLockPrinter, setRemoteLockPrinter] = useState<{ ip: string; name: string; id: string | number; agentUid: string } | null>(null);
+  const [toshibaVncData, setToshibaVncData] = useState<{ ip: string; printerName: string; agentUid: string } | null>(null);
+  const [allocatedVncAddr, setAllocatedVncAddr] = useState<string>('');
+  const [vncTunnelLoading, setVncTunnelLoading] = useState<boolean>(false);
   const [webPreviewModal, setWebPreviewModal] = useState<{ isOpen: boolean; title: string; html: string; ip: string; path: string; agentUid: string; url?: string } | null>(null);
   const [webPreviewLoading, setWebPreviewLoading] = useState<boolean>(false);
   const [directLan, setDirectLan] = useState<boolean>(() => {
@@ -192,6 +197,30 @@ export function AgentPage() {
   useEffect(() => {
     localStorage.setItem('goxprint_direct_lan', String(directLan));
   }, [directLan]);
+
+  const detectBrand = (name: string): 'ricoh' | 'toshiba' | 'other' => {
+    const lower = (name || '').toLowerCase();
+    if (
+      lower.includes('ricoh') ||
+      lower.includes('savin') ||
+      lower.includes('aficio') ||
+      lower.includes('gestetner') ||
+      lower.includes('lanier') ||
+      lower.includes('infotec') ||
+      lower.includes('mp ') ||
+      lower.startsWith('mp') ||
+      lower.includes('im ') ||
+      lower.startsWith('im') ||
+      lower.includes('pro ') ||
+      lower.startsWith('pro')
+    ) {
+      return 'ricoh';
+    }
+    if (lower.includes('toshiba')) {
+      return 'toshiba';
+    }
+    return 'other';
+  };
 
   const [webPreviewTab, setWebPreviewTab] = useState<'iframe' | 'html'>('iframe');
   const [showPreviewDetails, setShowPreviewDetails] = useState<boolean>(() => {
@@ -324,7 +353,8 @@ export function AgentPage() {
     _method: string = 'GET',
     _postData?: any,
     _isHistoryNav: boolean = false,
-    agentUidParam?: string
+    agentUidParam?: string,
+    printerPort: number = 80
   ) => {
     const activeAgentUid = agentUidParam || webPreviewModal?.agentUid;
     if (!activeAgentUid) {
@@ -335,7 +365,7 @@ export function AgentPage() {
 
     if (directLan) {
       // Direct LAN mode: Open directly in a new tab immediately
-      window.open(`http://${printerIp}${targetPath || '/'}`, '_blank');
+      window.open(`http://${printerIp}:${printerPort}${targetPath || '/'}`, '_blank');
       return;
     }
 
@@ -391,7 +421,7 @@ export function AgentPage() {
       const response = await fetch(`${BASE_URL}/api/agents/${activeAgentUid}/tunnel/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_ip: printerIp, printer_port: 80 })
+        body: JSON.stringify({ printer_ip: printerIp, printer_port: printerPort })
       });
       const data = await response.json();
       if (data.ok) {
@@ -1106,8 +1136,9 @@ export function AgentPage() {
     }
     setIsSavingSettings(true);
     setSettingsSaveStatus('⌛ Đang gửi cấu hình mới tới Agent...');
-    const pythonScript = `import os, sys, json
-new_content = """${editableSettingsText.replace(/"""/g, '\\"\\"\\""')}"""
+    const base64Content = btoa(unescape(encodeURIComponent(editableSettingsText)));
+    const pythonScript = `import os, sys, json, base64
+new_content = base64.b64decode("${base64Content}").decode("utf-8")
 try:
     parsed = json.loads(new_content)
     exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
@@ -1187,9 +1218,35 @@ except Exception as e:
     }
   };
 
+  const formatJsonText = (raw: string): string => {
+    try {
+      let parsed = raw;
+      while (typeof parsed === 'string') {
+        const trimmed = parsed.trim();
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+          parsed = JSON.parse(parsed);
+        } else {
+          break;
+        }
+      }
+      if (typeof parsed === 'object' && parsed !== null) {
+        return JSON.stringify(parsed, null, 2);
+      }
+      if (typeof parsed === 'string') {
+        parsed = parsed.replace(/\\n/g, '\n')
+                       .replace(/\\t/g, '\t')
+                       .replace(/\\"/g, '"')
+                       .replace(/\\\\/g, '\\');
+      }
+      return String(parsed);
+    } catch (e) {
+      return raw;
+    }
+  };
+
   useEffect(() => {
     if (viewOutputModal.isOpen && viewOutputModal.title.includes('settings.json')) {
-      setEditableSettingsText(viewOutputModal.content);
+      setEditableSettingsText(formatJsonText(viewOutputModal.content));
       setSettingsSaveStatus(null);
     }
   }, [viewOutputModal.isOpen, viewOutputModal.title, viewOutputModal.content]);
@@ -1851,7 +1908,6 @@ except Exception as e:
 
   // ── CAMERA HANDLERS ──
   const fetchCameraStatus = async (agentUid: string, cameraId: number) => {
-    setCameraActionLoading((prev) => ({ ...prev, status: true }));
     try {
       const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/status`, { method: 'POST' });
       const data = await response.json();
@@ -1863,8 +1919,6 @@ except Exception as e:
       }
     } catch (err: any) {
       showToast('Lỗi lấy trạng thái: ' + err.message, 'error');
-    } finally {
-      setCameraActionLoading((prev) => ({ ...prev, status: false }));
     }
   };
 
@@ -1939,102 +1993,60 @@ except Exception as e:
     }
   };
 
-  const handleToggleRecording = async (agentUid: string, cameraId: number, start: boolean) => {
-    const cameraName = cameras.find((c: any) => c.id === cameraId)?.name || '';
-    const isDup = await isDuplicatePending(agentUid, 'trigger_utility', {
-      action: start ? 'start_camera_recorder' : 'stop_camera_recorder',
-      camera_name: cameraName
-    });
-    if (isDup) {
-      showToast('Lệnh kích hoạt/dừng ghi hình cho camera này đang chờ phản hồi từ Agent!', 'info');
-      return;
-    }
 
-    setCameraActionLoading((prev) => ({ ...prev, toggle: true }));
-    const action = start ? 'start' : 'stop';
-    try {
-      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/${action}`, { method: 'POST' });
-      const data = await response.json();
-      if (data.ok) {
-        showToast(start ? 'Đã kích hoạt ghi hình camera ngầm!' : 'Đã dừng ghi hình camera.', 'success');
-        setTimeout(() => {
-          fetchCameraStatus(agentUid, cameraId);
-          fetchCameraFiles(agentUid, cameraId);
-        }, 1500);
-      } else {
-        showToast('Lỗi thao tác ghi hình: ' + data.error, 'error');
-      }
-    } catch (err: any) {
-      showToast('Lỗi kết nối: ' + err.message, 'error');
-    } finally {
-      setCameraActionLoading((prev) => ({ ...prev, toggle: false }));
-    }
-  };
 
   const handleRecord30s = async (agentUid: string, cameraId: number) => {
     if (isRecording30s) return;
-    setIsRecording30s(true);
-    setRecording30sCountdown(30);
-
-    const cameraName = cameras.find((c: any) => c.id === cameraId)?.name || '';
-    const isDup = await isDuplicatePending(agentUid, 'trigger_utility', {
-      action: 'start_camera_recorder',
-      camera_name: cameraName
-    });
-    if (isDup) {
-      showToast('Lệnh ghi hình đang chờ phản hồi từ Agent!', 'info');
-      setIsRecording30s(false);
+    
+    const camera = cameras.find((c: any) => c.id === cameraId);
+    const macAddress = camera?.mac_address || '';
+    
+    if (!macAddress) {
+      showToast('Camera không có thông tin MAC ID để điều khiển!', 'error');
       return;
     }
 
-    try {
-      showToast('Bắt đầu ghi hình 30s...', 'info');
-      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/start`, { method: 'POST' });
-      const data = await response.json();
-      if (!data.ok) {
-        showToast('Lỗi khởi động ghi: ' + data.error, 'error');
-        setIsRecording30s(false);
-        return;
+    setIsRecording30s(true);
+    setRecording30sCountdown(customRecordDuration);
+
+    // Start visual countdown timer
+    let count = customRecordDuration;
+    const interval = setInterval(() => {
+      count -= 1;
+      setRecording30sCountdown(Math.max(count, 0));
+      if (count <= 0) {
+        clearInterval(interval);
       }
+    }, 1000);
+
+    try {
+      showToast(`Đang gửi yêu cầu ghi hình ${customRecordDuration}s...`, 'info');
+      const response = await fetch(`${BASE_URL}/api/cameras/record-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mac_id: macAddress,
+          action: 'record',
+          duration: customRecordDuration
+        })
+      });
+      const data = await response.json();
+      clearInterval(interval);
       
-      fetchCameraStatus(agentUid, cameraId);
-
-      // Start the countdown
-      let count = 30;
-      const interval = setInterval(() => {
-        count -= 1;
-        setRecording30sCountdown(count);
-        if (count <= 0) {
-          clearInterval(interval);
-          // Auto-stop recording
-          stopRecordAfter30s(agentUid, cameraId);
-        }
-      }, 1000);
-
-    } catch (err: any) {
-      showToast('Lỗi: ' + err.message, 'error');
-      setIsRecording30s(false);
-    }
-  };
-
-  const stopRecordAfter30s = async (agentUid: string, cameraId: number) => {
-    try {
-      showToast('Hết 30s! Đang ngắt ghi hình...', 'info');
-      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/stop`, { method: 'POST' });
-      const data = await response.json();
       if (data.ok) {
-        showToast('Ghi hình 30s hoàn tất! Đang cập nhật danh sách...', 'success');
+        showToast(data.message || `Ghi hình ${customRecordDuration}s hoàn tất!`, 'success');
       } else {
-        showToast('Lỗi dừng ghi: ' + data.error, 'error');
+        showToast('Lỗi ghi hình: ' + data.error, 'error');
       }
     } catch (err: any) {
-      showToast('Lỗi dừng ghi: ' + err.message, 'error');
+      clearInterval(interval);
+      showToast('Lỗi kết nối ghi hình: ' + err.message, 'error');
     } finally {
       setIsRecording30s(false);
       setTimeout(() => {
         fetchCameraStatus(agentUid, cameraId);
         fetchCameraFiles(agentUid, cameraId);
-      }, 2000);
+      }, 1500);
     }
   };
 
@@ -2055,6 +2067,40 @@ except Exception as e:
       }
     } catch (err: any) {
       showToast('Lỗi hệ thống: ' + err.message, 'error');
+    }
+  };
+
+  // @ts-ignore
+  const handleStartToshibaVnc = async (printerIp: string, printerName: string, agentUid: string) => {
+    setToshibaVncData({ ip: printerIp, printerName: printerName, agentUid: agentUid });
+    setAllocatedVncAddr('');
+    setActiveModal('toshiba_vnc');
+
+    if (directLan) {
+      setAllocatedVncAddr(`${printerIp}:49105`);
+      return;
+    }
+
+    setVncTunnelLoading(true);
+    try {
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/tunnel/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_ip: printerIp, printer_port: 49105 })
+      });
+      const data = await response.json();
+      if (data.ok && data.url_port) {
+        const cleanAddr = data.url_port.replace('http://', '').replace('https://', '');
+        setAllocatedVncAddr(cleanAddr);
+      } else {
+        showToast('Không thể mở đường hầm VNC: ' + (data.error || 'Lỗi không xác định'), 'error');
+        setActiveModal(null);
+      }
+    } catch (err: any) {
+      showToast('Lỗi kết nối VPS: ' + (err.message || err), 'error');
+      setActiveModal(null);
+    } finally {
+      setVncTunnelLoading(false);
     }
   };
 
@@ -3100,10 +3146,10 @@ except Exception as e:
                                   showToast('Vui lòng chọn Target Agent trước', 'error');
                                   return;
                                 }
-                                fetchRemotePage(p.ip, '', 'GET', null, false, selectedAgentUid);
+                                fetchRemotePage(p.ip, '', 'GET', null, false, selectedAgentUid, 80);
                               }}
                               disabled={onlineAgents.length === 0 || !selectedAgentUid}
-                              title="Xem trực tiếp trang quản trị Web Image Monitor của máy photocopy này bằng iframe"
+                              title="Xem trực tiếp trang quản trị Web Setting (Port 80)"
                             >
                               🌐 Web setting
                             </button>
@@ -3131,6 +3177,28 @@ except Exception as e:
                             >
                               🔒 Khóa máy từ xa
                             </button>
+
+                            {detectBrand(p.name || p.printer_name || p.ip) === 'ricoh' && (p.name || p.printer_name || '').toLowerCase().includes('6503') && (
+                              <button
+                                style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#34d399', color: '#34d399', opacity: 0.5, cursor: 'not-allowed' }}
+                                onClick={() => showToast('Tính năng này đang được khóa', 'info')}
+                                disabled={true}
+                                title="Tính năng đang khóa"
+                              >
+                                🔒 Remote Panel
+                              </button>
+                            )}
+
+                            {detectBrand(p.name || p.printer_name || p.ip) === 'toshiba' && (
+                              <button
+                                style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#a78bfa', color: '#a78bfa', opacity: 0.5, cursor: 'not-allowed' }}
+                                onClick={() => showToast('Tính năng này đang được khóa', 'info')}
+                                disabled={true}
+                                title="Tính năng đang khóa"
+                              >
+                                🔒 VNC Remote
+                              </button>
+                            )}
                           </div>
 
                           {/* Copier Scan Destinations list */}
@@ -3356,48 +3424,117 @@ except Exception as e:
                   <div style={styles.emptyText}>Không tìm thấy Máy tính nào hoạt động trong dải LAN này để quản lý camera.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {/* Agent Selector Dropdown */}
-                    {onlineAgents && onlineAgents.length > 1 && (
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        background: 'var(--color-surface-card)',
-                        padding: '12px 16px',
-                        borderRadius: '12px',
-                        border: '1px solid var(--color-surface-light)',
-                        boxShadow: 'var(--shadow-subtle)'
-                      }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)' }}>💻 Chọn Máy tính quản lý Camera:</span>
-                        <select
-                          value={activeAgentUid}
-                          onChange={(e) => setSelectedCameraAgentUid(e.target.value)}
-                          style={{
-                            background: 'var(--color-surface-light)',
-                            color: 'var(--color-text)',
-                            border: '1px solid var(--color-surface-border)',
-                            borderRadius: '6px',
-                            padding: '6px 12px',
-                            fontSize: '0.8rem',
-                            fontWeight: 500,
-                            outline: 'none',
-                            cursor: 'pointer',
-                            minWidth: '200px'
-                          }}
-                        >
-                          {onlineAgents.map((a: any) => (
-                            <option key={a.agent_uid} value={a.agent_uid}>
-                              {a.hostname} ({a.agent_uid})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+
                     {/* 1. Camera List Card */}
                     <GlowCard>
                       <div style={styles.cardHeader}>
                         <h4 style={styles.cardTitle}>📹 Danh sách Camera</h4>
+                        <button
+                          onClick={async () => {
+                            if (!activeAgentUid) return;
+                            
+                            setUtilityActionPending('scan_cameras' as any);
+                            setUtilityStatusMsg({ text: '⌛ Đang yêu cầu Agent quét camera real-time...', isError: false });
+                            
+                            try {
+                              const res = await triggerAgentUtility(activeAgentUid, 'scan_cameras' as any);
+                              if (!res.ok || !res.command_id) {
+                                throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+                              }
+                              
+                              const commandId = res.command_id;
+                              const maxPollMs = 60000;
+                              const pollInterval = 1000;
+                              const startTime = Date.now();
+                              
+                              const timer = setInterval(async () => {
+                                try {
+                                  const elapsed = Date.now() - startTime;
+                                  if (elapsed > maxPollMs) {
+                                    clearInterval(timer);
+                                    setUtilityStatusMsg({ text: 'Quét camera quá thời gian chờ (60s)', isError: true });
+                                    setUtilityActionPending(null);
+                                    return;
+                                  }
+                                  
+                                  const statusRes = await getCommandStatus(commandId);
+                                  if (statusRes.status === 'success') {
+                                    clearInterval(timer);
+                                    setUtilityStatusMsg({ text: '⚡ Quét camera thành công!', isError: false });
+                                    setUtilityActionPending(null);
+                                    fetchCameras(activeAgentUid);
+                                  } else if (statusRes.status === 'failed' || !statusRes.ok) {
+                                    clearInterval(timer);
+                                    setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh quét thất bại từ Agent'}`, isError: true });
+                                    setUtilityActionPending(null);
+                                  } else {
+                                    const elapsedSec = Math.round(elapsed / 1000);
+                                    setUtilityStatusMsg({ text: `⌛ Đang quét camera... (${elapsedSec}s)`, isError: false });
+                                  }
+                                } catch (pollExc: any) {
+                                  clearInterval(timer);
+                                  setUtilityStatusMsg({ text: `❌ Lỗi kiểm tra trạng thái: ${pollExc.message}`, isError: true });
+                                  setUtilityActionPending(null);
+                                }
+                              }, pollInterval);
+                              
+                            } catch (err: any) {
+                              setUtilityStatusMsg({ text: `❌ Lỗi: ${err.message}`, isError: true });
+                              setUtilityActionPending(null);
+                            }
+                          }}
+                          disabled={utilityActionPending !== null}
+                          className="btn-glow"
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            borderRadius: '6px',
+                            background: 'var(--color-primary)',
+                            color: '#fff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          {utilityActionPending === ('scan_cameras' as any) ? '⌛ Đang quét...' : '⚡ Quét Camera'}
+                        </button>
                       </div>
+                      {utilityStatusMsg && utilityActionPending === ('scan_cameras' as any) && (
+                        <div
+                          style={{
+                            padding: '10px 12px',
+                            margin: '10px 0',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            lineHeight: 1.4,
+                            background: utilityStatusMsg.isError ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                            color: utilityStatusMsg.isError ? '#ef4444' : '#10b981',
+                            border: `1px solid ${utilityStatusMsg.isError ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <span>{utilityStatusMsg.text}</span>
+                          <button
+                            onClick={() => setUtilityStatusMsg(null)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'inherit',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                              fontSize: '1rem',
+                              padding: '0 4px'
+                            }}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      )}
                       {camerasLoading ? (
                         <div style={styles.loadingWrapper}>Đang tải...</div>
                       ) : cameras.length === 0 ? (
@@ -3410,7 +3547,9 @@ except Exception as e:
                               <div
                                 key={c.id}
                                 onClick={() => {
+                                  const initialAgentUid = c.agent_uid || activeAgentUid;
                                   setSelectedCamera(c);
+                                  setSelectedCameraAgentUid(initialAgentUid);
                                   setCameraForm(c);
                                   setCameraTestResult(null);
                                   setCameraStatus(null);
@@ -3419,14 +3558,14 @@ except Exception as e:
                                   setQueriedVideoUrl('');
                                   setShowSettings(false);
                                   setActiveLoadingFile(null);
-                                  fetchCameraFiles(activeAgentUid, c.id);
-                                  fetchCameraStatus(activeAgentUid, c.id);
+                                  fetchCameraFiles(initialAgentUid, c.id);
+                                  fetchCameraStatus(initialAgentUid, c.id);
                                   
                                   // Auto-trigger Option B: Live Video clip (last 30 seconds)
                                   const liveTs = getLiveQueryTimestamp();
                                   setQueryTimestamp(liveTs);
                                   setQueryDuration(30);
-                                  handleQueryVideo(activeAgentUid, c.id, liveTs, 30);
+                                  handleQueryVideo(initialAgentUid, c.id, liveTs, 30);
                                 }}
                                 style={{
                                   padding: '10px 12px',
@@ -3501,9 +3640,26 @@ except Exception as e:
                           >
                             {/* Modal Header */}
                             <div style={styles.modalHeader}>
-                              <div>
-                                <h3 style={styles.modalTitle}>📹 Quản lý Camera</h3>
-                                <div style={styles.modalSubtitle}>{selectedCamera.camera_name}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div>
+                                  <h3 style={styles.modalTitle}>📹 Quản lý Camera</h3>
+                                  <div style={styles.modalSubtitle}>{selectedCamera.camera_name}</div>
+                                </div>
+                                <button
+                                  style={{
+                                    ...styles.smallBtn,
+                                    background: showSettings ? 'var(--color-primary)' : 'var(--color-surface-light)',
+                                    color: showSettings ? '#fff' : 'var(--color-text)',
+                                    border: '1px solid var(--color-surface-border)',
+                                    padding: '4px 8px',
+                                    fontSize: '0.72rem',
+                                    height: '24px',
+                                    marginLeft: '12px'
+                                  }}
+                                  onClick={() => setShowSettings(!showSettings)}
+                                >
+                                  ⚙️ {showSettings ? 'Ẩn Cài đặt' : 'Cấu hình'}
+                                </button>
                               </div>
                               <button
                                 style={{
@@ -3543,80 +3699,107 @@ except Exception as e:
                                 }
                               `}</style>
 
+                              {/* Agent Selector Dropdown */}
+                              {((onlineAgents && onlineAgents.length > 0) || (selectedCamera && selectedCamera.agent_uid)) && (
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '12px',
+                                  background: 'var(--color-surface-card)',
+                                  padding: '10px 14px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--color-surface-light)',
+                                  boxShadow: 'var(--shadow-subtle)'
+                                }}>
+                                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text)' }}>💻 Lưu tại Máy tính (Agent):</span>
+                                  <select
+                                    value={activeAgentUid}
+                                    onChange={(e) => {
+                                      const newAgentUid = e.target.value;
+                                      setSelectedCameraAgentUid(newAgentUid);
+                                      if (selectedCamera) {
+                                        fetchCameraStatus(newAgentUid, selectedCamera.id);
+                                        fetchCameraFiles(newAgentUid, selectedCamera.id);
+                                        
+                                        // Also fetch the live query video for the new agent
+                                        const liveTs = getLiveQueryTimestamp();
+                                        setQueryTimestamp(liveTs);
+                                        setQueryDuration(30);
+                                        handleQueryVideo(newAgentUid, selectedCamera.id, liveTs, 30);
+                                      }
+                                    }}
+                                    style={{
+                                      background: 'var(--color-surface-light)',
+                                      color: 'var(--color-text)',
+                                      border: '1px solid var(--color-surface-border)',
+                                      borderRadius: '6px',
+                                      padding: '4px 8px',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 500,
+                                      outline: 'none',
+                                      cursor: 'pointer',
+                                      flex: 1
+                                    }}
+                                  >
+                                    {onlineAgents.map((a: any) => (
+                                      <option key={a.agent_uid} value={a.agent_uid}>
+                                        {a.hostname} ({a.agent_uid})
+                                      </option>
+                                    ))}
+                                    {selectedCamera && selectedCamera.agent_uid && !onlineAgents.some((a: any) => a.agent_uid === selectedCamera.agent_uid) && (
+                                      <option key={selectedCamera.agent_uid} value={selectedCamera.agent_uid}>
+                                        ⚠️ Offline: {selectedCamera.agent_uid}
+                                      </option>
+                                    )}
+                                  </select>
+                                </div>
+                              )}
+
                               {/* Status Indicator GlowCard */}
                               <GlowCard>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <div>
-                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      📹 {selectedCamera.camera_name}
-                                      {cameraStatus?.running ? (
-                                        <span style={{ fontSize: '0.75rem', color: '#ff4757', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                          <span style={{
-                                            width: '8px',
-                                            height: '8px',
-                                            borderRadius: '50%',
-                                            background: '#ff4757',
-                                            display: 'inline-block',
-                                            animation: 'pulse-red 1.2s infinite ease-in-out'
-                                          }} />
-                                          Đang ghi hình...
-                                          <style>{`
-                                            @keyframes pulse-red {
-                                              0% { opacity: 0.4; transform: scale(0.9); }
-                                              50% { opacity: 1; transform: scale(1.1); }
-                                              100% { opacity: 0.4; transform: scale(0.9); }
-                                            }
-                                          `}</style>
-                                        </span>
-                                      ) : (
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Chờ</span>
-                                      )}
-                                    </h3>
-                                    {cameraStatus?.running && cameraStatus.current_file && (
-                                      <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', marginTop: '4px', fontFamily: 'monospace' }}>
-                                        📄 Đang ghi: {cameraStatus.current_file}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                    <button
-                                      style={{ ...styles.smallBtn, background: cameraStatus?.running ? 'var(--color-danger)' : 'var(--color-primary)' }}
-                                      onClick={() => handleToggleRecording(activeAgentUid, selectedCamera.id, !cameraStatus?.running)}
-                                      disabled={cameraActionLoading['toggle'] || isRecording30s}
-                                    >
-                                      {cameraActionLoading['toggle'] ? '⏳...' : cameraStatus?.running ? '⏹️ Dừng ghi' : '▶️ Bắt đầu'}
-                                    </button>
-                                    {(!cameraStatus?.running || isRecording30s) && (
-                                      <button
-                                        style={{
-                                          ...styles.smallBtn,
-                                          background: isRecording30s ? 'var(--color-danger)' : 'var(--color-warning)',
-                                          color: isRecording30s ? '#fff' : '#000',
-                                          fontWeight: 600,
-                                          border: '1px solid var(--color-surface-border)'
-                                        }}
-                                        onClick={() => handleRecord30s(activeAgentUid, selectedCamera.id)}
-                                        disabled={isRecording30s}
-                                      >
-                                        {isRecording30s ? `🔴 Ghi (${recording30sCountdown}s)` : '⏱️ Ghi hình 30s'}
-                                      </button>
-                                    )}
-                                    <button
-                                      style={{ ...styles.smallBtn, background: 'var(--color-surface-light)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                                      onClick={() => {
-                                        fetchCameraStatus(activeAgentUid, selectedCamera.id);
-                                        fetchCameraFiles(activeAgentUid, selectedCamera.id);
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+                                    <select
+                                      style={{
+                                        background: 'var(--color-surface-light)',
+                                        color: 'var(--color-text)',
+                                        border: '1px solid var(--color-surface-border)',
+                                        borderRadius: '6px',
+                                        padding: '4px 8px',
+                                        fontSize: '0.75rem',
+                                        outline: 'none',
+                                        cursor: 'pointer',
+                                        height: '28px',
+                                        flex: 1
                                       }}
-                                      disabled={cameraActionLoading['status']}
+                                      value={customRecordDuration}
+                                      onChange={(e) => setCustomRecordDuration(Number(e.target.value))}
+                                      disabled={isRecording30s}
                                     >
-                                      ↻ Tải lại
-                                    </button>
+                                      <option value={5}>5s</option>
+                                      <option value={10}>10s</option>
+                                      <option value={15}>15s</option>
+                                      <option value={20}>20s</option>
+                                      <option value={25}>25s</option>
+                                      <option value={30}>30s</option>
+                                      <option value={45}>45s</option>
+                                      <option value={60}>60s</option>
+                                    </select>
                                     <button
-                                      style={{ ...styles.smallBtn, background: showSettings ? 'var(--color-primary)' : 'var(--color-surface-light)', color: showSettings ? '#fff' : 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                                      onClick={() => setShowSettings(!showSettings)}
+                                      style={{
+                                        ...styles.smallBtn,
+                                        background: isRecording30s ? 'var(--color-danger)' : 'var(--color-warning)',
+                                        color: isRecording30s ? '#fff' : '#000',
+                                        fontWeight: 600,
+                                        border: '1px solid var(--color-surface-border)',
+                                        height: '28px',
+                                        flex: 2,
+                                        justifyContent: 'center'
+                                      }}
+                                      onClick={() => handleRecord30s(activeAgentUid, selectedCamera.id)}
+                                      disabled={isRecording30s}
                                     >
-                                      ⚙️ {showSettings ? 'Ẩn Cài đặt' : 'Cấu hình'}
+                                      {isRecording30s ? `🔴 Ghi (${recording30sCountdown}s)` : `⏱️ Ghi hình ${customRecordDuration}s`}
                                     </button>
                                   </div>
                                 </div>
@@ -4961,6 +5144,202 @@ raise RuntimeError('\\n'.join(lines))`;
                   </div>
                 </>
               )}
+
+              {activeModal === 'toshiba_vnc' && toshibaVncData && (
+                <>
+                  <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>📺 Kết nối VNC - {toshibaVncData.printerName}</h3>
+                    <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
+                      &times;
+                    </button>
+                  </div>
+                  <div style={styles.modalBody}>
+                    {vncTunnelLoading ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 0', gap: '16px' }}>
+                        <div style={{
+                          border: '4px solid rgba(255,255,255,0.1)',
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          borderLeftColor: '#10b981',
+                          animation: 'spin 1s linear infinite'
+                        }}></div>
+                        <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+                          Đang khởi tạo đường hầm VNC bảo mật qua Agent...
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        {/* 1. Live Web VNC Viewport (Main Screen) */}
+                        <div style={{ border: '1px solid var(--color-surface-light)', borderRadius: '8px', padding: '14px', background: 'rgba(0,0,0,0.2)' }}>
+                          {directLan ? (
+                            <div style={{ textAlign: 'center', padding: '20px 10px' }}>
+                              <p style={{ color: '#34d399', fontWeight: 600, fontSize: '0.85rem', marginBottom: '14px' }}>
+                                🟢 Đang bật Direct LAN (kết nối nội mạng). Vui lòng click nút dưới đây để mở giao diện Web VNC nội bộ:
+                              </p>
+                              <button
+                                onClick={() => {
+                                  setActiveModal(null);
+                                  window.open(`http://${toshibaVncData.ip}:49106/top.html?p=55105&wp=55106&w=1024&h=600&pa=0&op=0&c=0&osid=null`, '_blank');
+                                }}
+                                style={{
+                                  background: '#3b82f6',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  padding: '10px 20px',
+                                  color: 'white',
+                                  fontSize: '0.85rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+                                }}
+                              >
+                                🌐 Mở Web VNC Nội Mạng
+                              </button>
+                            </div>
+                          ) : allocatedVncAddr ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                              <div 
+                                style={{ 
+                                  position: 'relative', 
+                                  border: '1px solid var(--color-surface-light)', 
+                                  borderRadius: '6px', 
+                                  overflow: 'hidden',
+                                  width: '100%',
+                                  maxWidth: '800px',
+                                  background: '#000',
+                                  cursor: 'crosshair',
+                                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                                }}
+                              >
+                                <img
+                                  id="vnc-live-viewport"
+                                  src={`${BASE_URL}/api/vnc/stream?agent_uid=${toshibaVncData.agentUid}&ip=${toshibaVncData.ip}&port=49105&t=${Date.now()}`}
+                                  alt="Màn hình Live VNC"
+                                  onClick={async (e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const clickX = e.clientX - rect.left;
+                                    const clickY = e.clientY - rect.top;
+                                    const x_percent = clickX / rect.width;
+                                    const y_percent = clickY / rect.height;
+                                    
+                                    const vncX = Math.round(x_percent * 1024);
+                                    const vncY = Math.round(y_percent * 600);
+                                    
+                                    try {
+                                      await fetch(`${BASE_URL}/api/vnc/click`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          agent_uid: toshibaVncData.agentUid,
+                                          ip: toshibaVncData.ip,
+                                          port: 49105,
+                                          x: vncX,
+                                          y: vncY
+                                        })
+                                      });
+                                    } catch (err) {
+                                      console.error("VNC Click error:", err);
+                                    }
+                                  }}
+                                  style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    height: 'auto',
+                                    pointerEvents: 'auto'
+                                  }}
+                                />
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: '#a78bfa', fontWeight: 500 }}>
+                                ⚡ Click chuột trực tiếp lên màn hình để tương tác (giống UltraViewer)
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', textAlign: 'center', padding: '10px' }}>
+                              Đang kết nối luồng hình ảnh...
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 2. Fallbacks & Connection details */}
+                        {!directLan && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                                Địa chỉ VPS: <strong style={{ color: 'white', fontFamily: 'monospace' }}>{allocatedVncAddr}</strong> (Pass: <strong style={{ color: 'white', fontFamily: 'monospace' }}>d9kvgn</strong>)
+                              </span>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(allocatedVncAddr);
+                                    showToast('Đã sao chép địa chỉ VNC', 'success');
+                                  }}
+                                  style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '4px', padding: '4px 8px', color: 'white', fontSize: '0.7rem', cursor: 'pointer' }}
+                                >
+                                  Sao chép IP
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText('d9kvgn');
+                                    showToast('Đã sao chép mật khẩu', 'success');
+                                  }}
+                                  style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '4px', padding: '4px 8px', color: 'white', fontSize: '0.7rem', cursor: 'pointer' }}
+                                >
+                                  Sao chép Pass
+                                </button>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                              <a
+                                href={`vnc://${allocatedVncAddr}`}
+                                style={{
+                                  flex: 1,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '6px',
+                                  textDecoration: 'none',
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  border: '1px solid #10b981',
+                                  borderRadius: '6px',
+                                  padding: '8px 12px',
+                                  color: '#10b981',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                🚀 Mở bằng VNC App ngoài
+                              </a>
+
+                              <button
+                                onClick={() => {
+                                  setActiveModal(null);
+                                  fetchRemotePage(toshibaVncData.ip, '', 'GET', null, false, toshibaVncData.agentUid, 49106);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  background: 'rgba(59, 130, 246, 0.1)',
+                                  border: '1px solid #3b82f6',
+                                  borderRadius: '6px',
+                                  padding: '8px 12px',
+                                  color: '#3b82f6',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                🌐 Thử mở Web noVNC
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
         )}
@@ -5231,7 +5610,7 @@ raise RuntimeError('\\n'.join(lines))`;
                     minHeight: 0,
                   }}
                 >
-                  {viewOutputModal.content}
+                  {formatJsonText(viewOutputModal.content)}
                 </pre>
               )}
 
@@ -5260,7 +5639,7 @@ raise RuntimeError('\\n'.join(lines))`;
                     fontSize: '0.78rem',
                   }}
                   onClick={() => {
-                    navigator.clipboard.writeText(viewOutputModal.title.includes('settings.json') ? editableSettingsText : viewOutputModal.content).catch(() => {});
+                    navigator.clipboard.writeText(viewOutputModal.title.includes('settings.json') ? editableSettingsText : formatJsonText(viewOutputModal.content)).catch(() => {});
                   }}
                 >
                   📋 Copy

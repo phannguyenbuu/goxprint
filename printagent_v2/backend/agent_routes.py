@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 from sqlalchemy import select
 
 from app_helpers import (
@@ -36,9 +36,9 @@ from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControl
 
 LOGGER = logging.getLogger(__name__)
 
-TUNNEL_REGISTRY: dict[tuple[str, str], int] = {}
+TUNNEL_REGISTRY: dict[tuple[str, str, int], int] = {}
 TUNNEL_TOKENS: dict[str, int] = {}
-TUNNEL_KEYS: dict[tuple[str, str], str] = {}
+TUNNEL_KEYS: dict[tuple[str, str, int], str] = {}
 
 def is_port_free(port: int) -> bool:
     import socket
@@ -69,21 +69,35 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 
                 url = f"http://127.0.0.1:{port}{path}"
                 headers = {key: value for key, value in request.headers.items() if key.lower() not in ("host", "content-length", "connection", "transfer-encoding")}
+                headers["Connection"] = "close"
+                
+                resp = None
+                last_exc = None
+                import time
+                for attempt in range(4):
+                    try:
+                        resp = requests.request(
+                            method=request.method,
+                            url=url,
+                            headers=headers,
+                            data=request.get_data(),
+                            cookies=request.cookies,
+                            allow_redirects=False,
+                            stream=True,
+                            timeout=10
+                        )
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        time.sleep(0.05 * (attempt + 1))
+                
+                if resp is None:
+                    return f"Tunnel Proxy Error: Failed to connect to local port {port} after retries: {last_exc}", 502
                 
                 try:
-                    resp = requests.request(
-                        method=request.method,
-                        url=url,
-                        headers=headers,
-                        data=request.get_data(),
-                        cookies=request.cookies,
-                        allow_redirects=False,
-                        stream=True,
-                        timeout=30
-                    )
-                    
-                    excluded_headers = ["content-length", "transfer-encoding", "connection"]
+                    excluded_headers = ["content-length", "transfer-encoding", "connection", "content-encoding"]
                     resp_headers = [(name, val) for name, val in resp.raw.headers.items() if name.lower() not in excluded_headers]
+                    resp_headers.append(("Connection", "close"))
                     
                     return Response(
                         resp.iter_content(chunk_size=1024*64),
@@ -91,7 +105,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         headers=resp_headers
                     )
                 except Exception as exc:
-                    return f"Tunnel Proxy Error: Failed to connect to local port {port}: {exc}", 502
+                    return f"Tunnel Proxy Error: Failed to read response from local port {port}: {exc}", 502
 
     @app.get("/agents")
     def agents_page() -> Any:
@@ -854,7 +868,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.post("/api/agents/<agent_uid>/utility/<action>")
     def trigger_agent_utility(agent_uid: str, action: str) -> Any:
-        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec", "run_command"}
+        valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec", "run_command", "scan_cameras"}
         if action not in valid_actions:
             return jsonify({"ok": False, "error": f"Invalid utility action: {action}"}), 400
             
@@ -870,7 +884,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 select(AgentNode).where(
                     AgentNode.lead == lead_valid,
                     AgentNode.agent_uid == agent_uid
-                ).order_by(AgentNode.updated_at.desc())
+                ).order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
             ).scalars().first()
             if agent is None:
                 return jsonify({"ok": False, "error": "Agent not found"}), 404
@@ -1019,19 +1033,25 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         if not printer_ip:
             return jsonify({"ok": False, "error": "Missing printer_ip"}), 400
             
-        key = (agent_uid, printer_ip)
+        key = (agent_uid, printer_ip, printer_port)
         if key in TUNNEL_REGISTRY:
             port = TUNNEL_REGISTRY[key]
-            token = TUNNEL_KEYS.get(key)
-            if not token:
-                import time
-                token = f"wim{int(time.time())}{port}"
-                TUNNEL_KEYS[key] = token
-                TUNNEL_TOKENS[token] = port
-            vps_host = request.host.split(":")[0]
-            url_wildcard = f"https://{token}.app.goxprint.com"
-            url_port = f"http://{vps_host}:{port}"
-            return jsonify({"ok": True, "url": url_wildcard, "url_port": url_port})
+            if is_port_free(port):
+                TUNNEL_REGISTRY.pop(key, None)
+                token = TUNNEL_KEYS.pop(key, None)
+                if token:
+                    TUNNEL_TOKENS.pop(token, None)
+            else:
+                token = TUNNEL_KEYS.get(key)
+                if not token:
+                    import time
+                    token = f"wim{int(time.time())}{port}"
+                    TUNNEL_KEYS[key] = token
+                    TUNNEL_TOKENS[token] = port
+                vps_host = request.host.split(":")[0]
+                url_wildcard = f"https://{token}.app.goxprint.com"
+                url_port = f"http://{vps_host}:{port}"
+                return jsonify({"ok": True, "url": url_wildcard, "url_port": url_port})
             
         try:
             port = None
@@ -1140,11 +1160,12 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         if not printer_ip:
             return jsonify({"ok": False, "error": "Missing printer_ip"}), 400
             
-        key = (agent_uid, printer_ip)
-        TUNNEL_REGISTRY.pop(key, None)
-        token = TUNNEL_KEYS.pop(key, None)
-        if token:
-            TUNNEL_TOKENS.pop(token, None)
+        keys_to_remove = [k for k in TUNNEL_REGISTRY.keys() if k[0] == agent_uid and k[1] == printer_ip]
+        for k in keys_to_remove:
+            TUNNEL_REGISTRY.pop(k, None)
+            token = TUNNEL_KEYS.pop(k, None)
+            if token:
+                TUNNEL_TOKENS.pop(token, None)
         
         requested_at = datetime.now(timezone.utc)
         params = {
@@ -1182,14 +1203,35 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.get("/api/agents/<agent_uid>/cameras")
     def get_agent_cameras(agent_uid: str) -> Any:
-        from models import CameraConfig
+        from models import CameraConfig, AgentNode
         with session_factory() as session:
-            configs = session.execute(
-                select(CameraConfig).where(CameraConfig.agent_uid == agent_uid)
-            ).scalars().all()
+            agent = session.execute(
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+            ).scalars().first()
             
+            if agent and agent.lan_uid and agent.lan_uid != "default":
+                configs = session.execute(
+                    select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid)
+                ).scalars().all()
+            else:
+                configs = session.execute(
+                    select(CameraConfig).where(CameraConfig.agent_uid == agent_uid)
+                ).scalars().all()
+            
+            seen_ips = set()
             results = []
-            for c in configs:
+            # Sort by ID descending so that the newest configuration for each IP takes precedence
+            sorted_configs = sorted(configs, key=lambda x: x.id, reverse=True)
+            for c in sorted_configs:
+                ip = (c.ip or "").strip()
+                if not ip or ip.lower() in ("admin", "generic", "unknown", "camera ip"):
+                    continue
+                if ip in seen_ips:
+                    continue
+                seen_ips.add(ip)
+                
                 results.append({
                     "id": c.id,
                     "agent_uid": c.agent_uid,
@@ -1201,7 +1243,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "audio_codec": c.audio_codec,
                     "no_audio": c.no_audio,
                     "is_recording": c.is_recording,
-                    "ip": c.ip or "",
+                    "ip": ip,
                     "mac_address": c.mac_address or "",
                     "manufacturer": c.manufacturer or "Generic",
                     "model": c.model or "Camera IP",
@@ -1211,7 +1253,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.post("/api/agents/<agent_uid>/cameras")
     def save_agent_camera(agent_uid: str) -> Any:
-        from models import CameraConfig
+        from models import CameraConfig, AgentNode
         body = request.get_json(silent=True) or {}
         camera_id = body.get("id")
         camera_name = str(body.get("camera_name", "Camera")).strip()
@@ -1226,14 +1268,23 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             return jsonify({"ok": False, "error": "Missing rtsp_url"}), 400
             
         with session_factory() as session:
+            agent = session.execute(
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+            ).scalars().first()
+            lan_uid = agent.lan_uid if agent else "default"
+            lead = agent.lead if agent else "default"
+
             if camera_id:
                 cfg = session.execute(
-                    select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+                    select(CameraConfig).where(CameraConfig.id == camera_id)
                 ).scalars().first()
                 if not cfg:
                     return jsonify({"ok": False, "error": "Camera config not found"}), 404
+                cfg.agent_uid = agent_uid
             else:
-                cfg = CameraConfig(agent_uid=agent_uid)
+                cfg = CameraConfig(agent_uid=agent_uid, lan_uid=lan_uid, lead=lead)
                 session.add(cfg)
                 
             cfg.camera_name = camera_name
@@ -1243,6 +1294,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             cfg.video_codec = video_codec
             cfg.audio_codec = audio_codec
             cfg.no_audio = no_audio
+            if lan_uid:
+                cfg.lan_uid = lan_uid
+            if lead:
+                cfg.lead = lead
             
             session.commit()
             return jsonify({"ok": True, "camera_id": cfg.id})
@@ -1252,7 +1307,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         from models import CameraConfig
         with session_factory() as session:
             cfg = session.execute(
-                select(CameraConfig).where(CameraConfig.id == camera_id, CameraConfig.agent_uid == agent_uid)
+                select(CameraConfig).where(CameraConfig.id == camera_id)
             ).scalars().first()
             if not cfg:
                 return jsonify({"ok": False, "error": "Camera config not found"}), 404
@@ -1460,15 +1515,33 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             if not cfg:
                 return jsonify({"ok": False, "error": "Camera config not found"}), 404
             camera_name = cfg.camera_name
+
+        # Instantly return success if the video clip is already cached on the server
+        target_ts = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+            try:
+                from datetime import datetime
+                target_ts = datetime.strptime(timestamp, fmt)
+                break
+            except ValueError:
+                continue
+
+        if target_ts:
+            expected_filename = f"clip_{camera_name}_{target_ts.strftime('%Y%m%d_%H%M%S')}.mp4"
+            dest_dir = Path(__file__).resolve().parent / "static" / "camera_clips" / agent_uid
+            dest_path = dest_dir / expected_filename
+            if dest_path.exists():
+                return jsonify({"ok": True})
             
         success, err = _queue_camera_utility_command(
             agent_uid, "query_camera_video", camera_name,
             {"timestamp": timestamp, "duration": duration},
-            wait_seconds=65.0
+            wait_seconds=110.0
         )
         if success:
             return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": err}), 504
+        status_code = 504 if err == "Timeout waiting for Agent response" else 400
+        return jsonify({"ok": False, "error": err}), status_code
 
     @app.post("/api/agents/<agent_uid>/cameras/upload-video")
     def upload_agent_camera_video(agent_uid: str) -> Any:
@@ -1490,3 +1563,131 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
     def get_agent_camera_clip(agent_uid: str, filename: str) -> Any:
         dest_dir = Path(__file__).resolve().parent / "static" / "camera_clips" / agent_uid
         return send_from_directory(str(dest_dir), filename)
+
+    @app.post("/api/cameras/record-control")
+    def control_camera_recording_by_mac() -> Any:
+        from models import CameraConfig, AgentNode
+        body = request.get_json(silent=True) or {}
+        mac_id = str(body.get("mac_id", "")).strip()
+        agent_uid_req = str(body.get("agent_uid", "")).strip()
+        action = str(body.get("action", "")).strip().lower()
+        duration = int(body.get("duration", 30))
+
+        if not mac_id:
+            return jsonify({"ok": False, "error": "Thiếu MAC ID của camera (mac_id)"}), 400
+        if action not in ("start", "stop", "record"):
+            return jsonify({"ok": False, "error": "Hành động không hợp lệ (action phải là start, stop hoặc record)"}), 400
+
+        # Normalize mac_id for robust matching
+        norm_mac_id = mac_id.replace(":", "").replace("-", "").lower()
+
+        with session_factory() as session:
+            # Query all camera configs ordered by ID descending to prefer newer configurations
+            cameras_list = session.execute(select(CameraConfig).order_by(CameraConfig.id.desc())).scalars().all()
+            
+            # Find candidates by MAC ID matching
+            candidates = []
+            for c in cameras_list:
+                if c.mac_address:
+                    c_norm = c.mac_address.replace(":", "").replace("-", "").lower()
+                    if c_norm == norm_mac_id:
+                        candidates.append(c)
+
+            if not candidates:
+                return jsonify({"ok": False, "error": f"Không tìm thấy cấu hình camera với MAC ID: {mac_id}"}), 404
+
+            # Candidate config to read parameters from
+            cfg = candidates[0]
+
+            # Determine the online agent to run the command on:
+            online_agent = None
+            
+            # 1. If explicit agent_uid was requested, check if it's online
+            if agent_uid_req:
+                agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == agent_uid_req)
+                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                ).scalars().first()
+                if agent and agent.is_online:
+                    online_agent = agent
+
+            # 2. Fallback: Find candidate whose managing agent is online
+            if not online_agent:
+                for cand in candidates:
+                    agent = session.execute(
+                        select(AgentNode)
+                        .where(AgentNode.agent_uid == cand.agent_uid)
+                        .order_by(AgentNode.last_seen_at.desc())
+                    ).scalars().first()
+                    if agent and agent.is_online:
+                        cfg = cand
+                        online_agent = agent
+                        break
+
+            # 3. Fallback: Find any online agent in the same LAN as the camera config
+            if not online_agent:
+                for cand in candidates:
+                    if cand.lan_uid and cand.lan_uid != "default":
+                        agent = session.execute(
+                            select(AgentNode)
+                            .where(AgentNode.lan_uid == cand.lan_uid, AgentNode.is_online == True)
+                            .order_by(AgentNode.last_seen_at.desc())
+                        ).scalars().first()
+                        if agent:
+                            cfg = cand
+                            online_agent = agent
+                            break
+
+            # 4. Fallback: First candidate's managing agent (offline)
+            if not online_agent:
+                online_agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == cfg.agent_uid)
+                    .order_by(AgentNode.last_seen_at.desc())
+                ).scalars().first()
+
+            if not online_agent or not online_agent.is_online:
+                return jsonify({"ok": False, "error": f"Không có Agent trực tuyến nào để thực hiện thao tác (Agent yêu cầu: {agent_uid_req or cfg.agent_uid} đang ngoại tuyến)"}), 400
+
+            agent_uid = online_agent.agent_uid
+            camera_name = cfg.camera_name
+            params = {
+                "rtsp_url": cfg.rtsp_url,
+                "segment_duration": cfg.segment_duration,
+                "video_codec": cfg.video_codec,
+                "audio_codec": cfg.audio_codec,
+                "no_audio": cfg.no_audio,
+                "prefix": cfg.prefix
+            }
+
+        if action == "start":
+            success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
+            if success:
+                return jsonify({"ok": True, "message": "Đã bắt đầu ghi hình thành công"})
+            return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
+
+        elif action == "stop":
+            success, err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
+            if success:
+                return jsonify({"ok": True, "message": "Đã dừng ghi hình thành công"})
+            return jsonify({"ok": False, "error": f"Không thể dừng ghi hình: {err}"}), 504
+
+        elif action == "record":
+            # Ensure the segment duration is long enough so FFmpeg does not split the recording
+            record_params = dict(params)
+            record_params["segment_duration"] = max(cfg.segment_duration, duration + 15)
+
+            success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, record_params)
+            if not success:
+                return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
+
+            import time
+            # Sleep longer than requested duration to compensate for polling and RTSP connection latency
+            time.sleep(duration + 8)
+
+            stop_success, stop_err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
+            if stop_success:
+                return jsonify({"ok": True, "message": f"Đã hoàn thành ghi hình {duration}s thành công"})
+            return jsonify({"ok": False, "error": f"Đã bắt đầu ghi nhưng lỗi khi dừng: {stop_err}"}), 504
+

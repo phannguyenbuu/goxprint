@@ -809,3 +809,89 @@ All task activity materializes in `Task`, while user assignment metadata lives i
       "command_id": 457
     }
     ```
+
+## 20) Camera Recording Control
+- **Camera Recording Control by MAC ID:** `POST /api/cameras/record-control`
+  - Headers: `Content-Type: application/json`
+  - Body params (required):
+    - `mac_id`: MAC address of the target camera (case-insensitive, separators like `:` and `-` are optional)
+    - `agent_uid`: (optional) ID of the managing agent to narrow down camera config resolution
+    - `action`: `'start'`, `'stop'`, or `'record'`
+    - `duration`: (optional, default: 30) recording length in seconds when action is `'record'`
+  - Responses:
+    - **Success (Start/Stop):**
+      ```json
+      {
+        "ok": true,
+        "message": "Đã bắt đầu ghi hình thành công"
+      }
+      ```
+    - **Success (Record 15s):**
+      ```json
+      {
+        "ok": true,
+        "message": "Đã hoàn thành ghi hình 15s thành công"
+      }
+      ```
+    - **Error (Gateway/Agent offline/Failed):**
+      ```json
+      {
+        "ok": false,
+        "error": "Agent quản lý camera này (kythuat02) đang ngoại tuyến (offline)"
+      }
+      ```
+
+## 21) Camera Configurations (CRUD)
+- **List LAN Cameras:** `GET /api/agents/<agent_uid>/cameras`
+  - Returns all camera configurations registered under the same LAN (`lan_uid`) as the requesting agent.
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "cameras": [
+        {
+          "id": 1,
+          "agent_uid": "agent_01",
+          "camera_name": "Camera 01",
+          "rtsp_url": "rtsp://...",
+          "segment_duration": 60,
+          "prefix": "rec",
+          "video_codec": "copy",
+          "audio_codec": "copy",
+          "no_audio": true,
+          "is_recording": false,
+          "ip": "192.168.1.67",
+          "mac_address": "AA-BB-CC-DD-EE-FF",
+          "is_online": true
+        }
+      ]
+    }
+    ```
+
+- **Save/Edit Camera:** `POST /api/agents/<agent_uid>/cameras`
+  - Headers: `Content-Type: application/json`
+  - Body params:
+    - `id`: (optional, for editing) configuration ID
+    - `camera_name`: (optional, default: "Camera")
+    - `rtsp_url`: (required) RTSP stream URL
+    - `segment_duration`: (optional, default: 60)
+    - `prefix`: (optional, default: "rec")
+    - `video_codec`: (optional, default: "copy")
+    - `audio_codec`: (optional, default: "copy")
+    - `no_audio`: (optional, default: true)
+  - Response:
+    ```json
+    {
+      "ok": true,
+      "camera_id": 1
+    }
+    ```
+
+- **Delete Camera:** `POST /api/agents/<agent_uid>/cameras/<int:camera_id>/delete`
+  - Response:
+    ```json
+    {
+      "ok": true
+    }
+    ```
+

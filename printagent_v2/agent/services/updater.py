@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.0.37"
+DEFAULT_APP_VERSION = "2.0.72"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -463,8 +463,6 @@ class AutoUpdater:
                 creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 env=fresh_pyinstaller_env(),
             )
-
-
             with self._lock:
                 self.state.last_success_at = _utc_now()
                 self.state.last_return_code = 0

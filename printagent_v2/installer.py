@@ -4,6 +4,14 @@ import shutil
 import time
 from pathlib import Path
 import urllib.request
+import ctypes
+
+def msg_box(title, text, is_error=False):
+    style = 0x10 if is_error else 0x40
+    try:
+        ctypes.windll.user32.MessageBoxW(0, text, title, style)
+    except Exception:
+        pass
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -28,11 +36,11 @@ WATCHDOG_BAT_CONTENT = (
     '    taskkill /F /IM printagent.exe >nul 2>&1\n'
     '    taskkill /F /IM agent_loader.exe >nul 2>&1\n'
     '    timeout /T 3 /nobreak >nul\n'
+    '    del /f /q "printagent.bak.exe" >nul 2>&1\n'
     '    if exist "printagent.exe" (\n'
     '        rename "printagent.exe" "printagent.bak.exe" >nul 2>&1\n'
     '    )\n'
-    '    rename "printagent.update.exe" "printagent.exe"\n'
-    '    del /f /q "printagent.bak.exe" >nul 2>&1\n'
+    '    move /Y "printagent.update.exe" "printagent.exe" >nul 2>&1\n'
     '    start /B "" "printagent.exe"\n'
     '    echo [Watchdog] Update applied successfully.\n'
     ')\n'
@@ -92,8 +100,12 @@ def kill_existing_processes():
             except Exception:
                 pass
     except Exception:
-        os.system("taskkill /F /IM printagent.exe >nul 2>&1")
-        os.system("taskkill /F /IM agent_loader.exe >nul 2>&1")
+        import subprocess
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "printagent.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+            subprocess.run(["taskkill", "/F", "/IM", "agent_loader.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+        except Exception:
+            pass
     time.sleep(2)
     
     # Try to rename existing exe to avoid "file in use" error
@@ -186,13 +198,25 @@ def download_printagent(dest_path: Path, api_url: str) -> bool:
                         percent = (downloaded / total_size) * 100
                         mb_downloaded = downloaded / (1024 * 1024)
                         mb_total = total_size / (1024 * 1024)
-                        sys.stdout.write(f"\r Đang tải: {percent:.1f}% ({mb_downloaded:.2f} MB / {mb_total:.2f} MB)...")
-                        sys.stdout.flush()
+                        if sys.stdout:
+                            try:
+                                sys.stdout.write(f"\r Đang tải: {percent:.1f}% ({mb_downloaded:.2f} MB / {mb_total:.2f} MB)...")
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
                     else:
                         mb_downloaded = downloaded / (1024 * 1024)
-                        sys.stdout.write(f"\r Đang tải: {mb_downloaded:.2f} MB...")
-                        sys.stdout.flush()
-            print("\n Tải xuống hoàn tất thành công!")
+                        if sys.stdout:
+                            try:
+                                sys.stdout.write(f"\r Đang tải: {mb_downloaded:.2f} MB...")
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+            if sys.stdout:
+                try:
+                    print("\n Tải xuống hoàn tất thành công!")
+                except Exception:
+                    pass
             return True
     except Exception as e:
         print(f"\n Lỗi khi tải xuống PrintAgent: {e}")
@@ -233,7 +257,7 @@ def main():
     
     if not INSTALL_DIR.parent.exists():
         print(" Lỗi: Không tìm thấy thư mục APPDATA.")
-        input("Nhấn Enter để thoát...")
+        msg_box("Lỗi cài đặt", "Không tìm thấy thư mục APPDATA của hệ thống.", is_error=True)
         sys.exit(1)
         
     print(f"Thư mục cài đặt: {INSTALL_DIR}")
@@ -253,8 +277,8 @@ def main():
             f.write(RUN_WATCHDOG_VBS_CONTENT)
         print(" Đã ghi: run_watchdog.vbs")
     except Exception as e:
-        print(f" Lỗi khi ghi tệp cấu hình: {e}")
-        input("Nhấn Enter để thoát...")
+        print(f" Lỗi: {e}")
+        msg_box("Lỗi cài đặt", f"Không thể ghi file cấu hình: {e}", is_error=True)
         sys.exit(1)
         
     # 2. Download printagent.exe with cache-busting from VPS
@@ -269,11 +293,12 @@ def main():
             try:
                 shutil.copy2(INSTALL_DIR / "printagent.old.exe", dest_exe)
                 print(" Cảnh báo: Sử dụng lại phiên bản cũ có sẵn do không tải được.")
+                msg_box("Cảnh báo", "Không tải được bản mới, sẽ sử dụng lại bản cũ.", is_error=False)
             except Exception:
-                input("Nhấn Enter để thoát...")
+                msg_box("Lỗi tải xuống", "Không thể tải xuống PrintAgent từ máy chủ và không có bản cũ.", is_error=True)
                 sys.exit(1)
         else:
-            input("Nhấn Enter để thoát...")
+            msg_box("Lỗi tải xuống", "Không thể tải xuống PrintAgent từ máy chủ.", is_error=True)
             sys.exit(1)
             
     print("\nCài đặt file thành công!")
@@ -297,8 +322,10 @@ def main():
     print(" cập nhật phiên bản mới thông qua Watchdog.")
     print("==============================================\n")
     
-    # Auto close after 3 seconds
-    time.sleep(3)
+    # Notify user it completed
+    msg_box("Hoàn tất", "Cài đặt Gox PrintAgent thành công!", is_error=False)
+    
+    time.sleep(1)
 
 if __name__ == "__main__":
     main()

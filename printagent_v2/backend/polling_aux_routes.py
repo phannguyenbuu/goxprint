@@ -176,6 +176,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 PrinterControlCommand.lead == lead_valid,
                 PrinterControlCommand.lan_uid == lan_uid,
                 PrinterControlCommand.printer_id == 0,
+                PrinterControlCommand.command_type != "emergency_restart",
                 PrinterControlCommand.status == "pending",
             )
             if agent_uid:
@@ -384,10 +385,84 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     command.status = "failed"
                     command.error_message = error_message or "Command failed"
                     command.responded_at = responded_at
-            else:
+            elif command.command_type == "trigger_utility":
                 if ok_value:
                     command.status = "success"
                     command.error_message = error_message or ""
+                    command.responded_at = responded_at
+                    
+                    try:
+                        import json as _json
+                        cp = _json.loads(command.command_params or "{}")
+                        action = cp.get("action", "")
+                    except Exception:
+                        action = ""
+                        
+                    if action == "scan_cameras":
+                        address_book_data = body.get("address_book_data")
+                        if isinstance(address_book_data, dict):
+                            cameras_data = address_book_data.get("cameras_data")
+                            if isinstance(cameras_data, list):
+                                from models import CameraConfig
+                                agent = session.execute(
+                                    select(AgentNode)
+                                    .where(AgentNode.agent_uid == command.agent_uid)
+                                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                                ).scalars().first()
+                                lan_uid_val = agent.lan_uid if agent else lan_uid
+                                
+                                for item in cameras_data:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    ip = _to_text(item.get("ip"))
+                                    mac = _to_text(item.get("mac_address")) or _to_text(item.get("mac"))
+                                    camera_name = _to_text(item.get("camera_name")) or f"Camera {ip}"
+                                    manufacturer = _to_text(item.get("manufacturer")) or "Generic"
+                                    model = _to_text(item.get("model")) or "Camera IP"
+                                    rtsp_url = _to_text(item.get("rtsp_url")) or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+                                    is_online = bool(item.get("is_online", True))
+                                    
+                                    existed_cam = None
+                                    if mac:
+                                        existed_cam = session.execute(
+                                            select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == command.agent_uid, CameraConfig.mac_address == mac)
+                                        ).scalars().first()
+                                    if not existed_cam and ip:
+                                        existed_cam = session.execute(
+                                            select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == command.agent_uid, CameraConfig.ip == ip)
+                                        ).scalars().first()
+                                        
+                                    if existed_cam:
+                                        existed_cam.ip = ip
+                                        if mac:
+                                            existed_cam.mac_address = mac
+                                        existed_cam.manufacturer = manufacturer
+                                        existed_cam.model = model
+                                        existed_cam.is_online = is_online
+                                    else:
+                                        new_cam = CameraConfig(
+                                            lead=lead,
+                                            lan_uid=lan_uid_val,
+                                            agent_uid=command.agent_uid,
+                                            camera_name=camera_name,
+                                            ip=ip,
+                                            mac_address=mac,
+                                            manufacturer=manufacturer,
+                                            model=model,
+                                            rtsp_url=rtsp_url,
+                                            is_online=is_online,
+                                            is_recording=False
+                                        )
+                                        session.add(new_cam)
+                else:
+                    command.status = "failed"
+                    command.error_message = error_message or "Agent command failed"
+                    command.responded_at = responded_at
+            else:
+                if ok_value:
+                    command.status = "success"
+                    if error_message:
+                        command.error_message = error_message
                     command.responded_at = responded_at
                     if printer is not None:
                         _apply_printer_enabled_state(session, printer, bool(command.desired_enabled), responded_at)

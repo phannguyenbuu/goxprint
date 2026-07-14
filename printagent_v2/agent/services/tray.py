@@ -336,7 +336,7 @@ class TrayController:
                     config.set_value(key, not current_val)
                 return 0
             if msg == WM_USER + 20:
-                if lparam in (WM_LBUTTONDBLCLK, WM_LBUTTONUP):
+                if lparam == WM_LBUTTONDBLCLK:
                     self._show()
                 elif lparam == WM_RBUTTONUP:
                     self._show_menu()

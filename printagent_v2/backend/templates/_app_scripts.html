@@ -1199,6 +1199,8 @@ function buildApiTestUrl(key, ctx) {
   if (key === "networklist") return "/networklist/";
   if (key === "infor") return "/api/infor/list";
   if (key === "by-mac") return mac ? `/api/public/device/by-mac?mac_id=${mac}` : "";
+  if (key === "by-mac-now") return mac ? `/api/public/device/by-mac-now?mac_id=${mac}` : "";
+  if (key === "camera-record") return "/api/cameras/record-control";
   if (key === "by-lan") return lan ? `/api/public/network/by-lan?lan_uid=${lan}` : "";
   if (key === "all") return "/all/";
   if (key === "agents-list") return "/api/agents";
@@ -1439,6 +1441,28 @@ async function runApiTest(key, ctx) {
       lan_uid: ctx.lan_uid || "api-docs-test-lan",
       email: "test-scan@example.com",
       filename: filename,
+    };
+  } else if (key === "by-mac-now") {
+    // GET request, no body or prompt needed
+    method = "GET";
+  } else if (key === "camera-record") {
+    const mac_id = window.prompt("Nhập MAC ID của camera (ví dụ: aabbccddeeff):", ctx.mac_id || "");
+    if (!mac_id) {
+      setApiTestStatus(key, "idle", "Cancelled");
+      if (output) output.textContent = `[${key}] Cancelled.`;
+      return false;
+    }
+    const duration = Number(window.prompt("Nhập thời gian ghi hình (giây):", "5"));
+    if (!duration) {
+      setApiTestStatus(key, "idle", "Cancelled");
+      if (output) output.textContent = `[${key}] Cancelled.`;
+      return false;
+    }
+    method = "POST";
+    body = {
+      mac_id: mac_id,
+      action: "record",
+      duration: duration
     };
   } else if (key === "agent-settings") {
     if (!ctx.agent_uid) {
@@ -1717,7 +1741,7 @@ async function initApiTests(resetStatuses = true) {
   const manualOnlyKeys = [
     "devices-unlock", "devices-lock", "ftp-queue-create", "ftp-queue-update", "ftp-queue-delete",
     "scans-files-delete", "agent-settings", "agent-utility-devices", "agent-utility-open-folder",
-    "agent-utility-dxdiag", "agent-utility-change-ip"
+    "agent-utility-dxdiag", "agent-utility-change-ip", "by-mac-now", "camera-record"
   ];
   if (resetStatuses) {
     [...keys, ...manualOnlyKeys].forEach((key) => setApiTestStatus(key, "idle", "-"));

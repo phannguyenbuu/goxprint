@@ -591,6 +591,13 @@ class PrintAgentGui:
         main_frame = ttk.Frame(self.printers_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Add Toolbar Frame ABOVE the Treeview
+        toolbar_frame = ttk.Frame(main_frame)
+        toolbar_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
+        ttk.Button(toolbar_frame, text="Cài Driver", command=self.gui_install_driver, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar_frame, text="Cài Scan", command=self.gui_install_scan, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar_frame, text="Cài Driver + Scan", command=lambda: self.gui_install_both(), width=20).pack(side=tk.LEFT, padx=5)
+        
         # Action Buttons frame packed first on the right so it gets sizing priority
         btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
         btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
@@ -637,6 +644,191 @@ class PrintAgentGui:
         
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_printers, width=18).pack(pady=5)
+        
+    def _get_selected_printer(self) -> dict | None:
+        selected = self.printer_tree.focus()
+        if not selected:
+            return None
+        ip_addr = self.printer_tree.item(selected, "values")[0]
+        for p in self.printers_list:
+            if p["ip"] == ip_addr:
+                return p
+        return None
+
+    def gui_install_driver(self) -> None:
+        printer = self._get_selected_printer()
+        if not printer:
+            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài driver.")
+            return
+        
+        import threading
+        def run_driver():
+            self._legacy_install_driver(printer)
+        threading.Thread(target=run_driver, daemon=True).start()
+        messagebox.showinfo("Đang cài đặt", f"Đang tiến hành cài đặt ngầm driver cho máy {printer['ip']}...")
+
+    def gui_install_scan(self) -> None:
+        printer = self._get_selected_printer()
+        if not printer:
+            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài scan.")
+            return
+            
+        import tkinter.simpledialog as simpledialog
+        name = simpledialog.askstring("Input", "Nhập tên Username hiển thị trên máy in:")
+        if not name:
+            return
+        email = simpledialog.askstring("Input", "Nhập Email (nếu cần):") or ""
+        
+        import threading
+        def run_scan():
+            self._legacy_install_scan(printer, name, email)
+        threading.Thread(target=run_scan, daemon=True).start()
+        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình scan ngầm cho máy {printer['ip']}...")
+
+    def gui_install_both(self) -> None:
+        printer = self._get_selected_printer()
+        if not printer:
+            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài đặt.")
+            return
+            
+        import tkinter.simpledialog as simpledialog
+        name = simpledialog.askstring("Input", "Nhập tên Username hiển thị trên máy in:")
+        if not name:
+            return
+        email = simpledialog.askstring("Input", "Nhập Email (nếu cần):") or ""
+        
+        import threading
+        def run_both():
+            self._legacy_install_driver(printer)
+            self._legacy_install_scan(printer, name, email)
+        threading.Thread(target=run_both, daemon=True).start()
+        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình driver và scan ngầm cho máy {printer['ip']}...")
+
+    def _legacy_install_driver(self, matched_printer: dict) -> None:
+        from flask import current_app
+        import requests, re
+        
+        bridge = None
+        try:
+            if current_app:
+                bridge = current_app.config.get("POLLING_BRIDGE")
+        except Exception:
+            pass
+            
+        if not bridge:
+            messagebox.showerror("Error", "Không kết nối được với dịch vụ PollingBridge.")
+            return
+            
+        ip = matched_printer["ip"]
+        brand = matched_printer["printer_type"] or "ricoh"
+        model = matched_printer["name"]
+        driver_name = model
+        driver_url = ""
+        
+        try:
+            catalog_resp = requests.get(f"{self.config.api_url}/drivers/{brand}", timeout=10)
+            catalog_data = catalog_resp.json()
+            drivers_list = catalog_data.get("data") or []
+            
+            if drivers_list and model:
+                model_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', model) if len(t) >= 2]
+                best_match = None
+                best_score = 0
+                for drv_item in drivers_list:
+                    drv_model = drv_item.get("model") or drv_item.get("name") or ""
+                    drv_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', drv_model)]
+                    score = len(set(model_tokens) & set(drv_tokens))
+                    if score > best_score:
+                        best_score = score
+                        best_match = drv_item
+                        
+                if best_match and best_score > 0:
+                    sub_drivers = best_match.get("drivers") or []
+                    if sub_drivers:
+                        selected_drv = sub_drivers[0]
+                        for sd in sub_drivers:
+                            if "pcl" in sd.get("name", "").lower():
+                                selected_drv = sd
+                                break
+                        driver_name = selected_drv.get("name")
+                        driver_url = selected_drv.get("url")
+        except Exception:
+            pass
+        
+        try:
+            bridge._handle_install_driver(
+                command_id=0,
+                printer_ip=ip,
+                brand=brand,
+                model=model,
+                driver_name=driver_name,
+                driver_url=driver_url
+            )
+        except Exception as e:
+            pass
+
+    def _legacy_install_scan(self, printer_data: dict, name: str, email: str) -> None:
+        from agent.modules.printer import Printer
+        from agent.modules.ricoh.service import RicohService
+        from agent.modules.base_api import APIClient
+        
+        printer = Printer(
+            id=printer_data["id"],
+            name=printer_data["name"],
+            ip=printer_data["ip"],
+            user=printer_data["user"],
+            password=printer_data["password"],
+            printer_type=printer_data["printer_type"],
+            status="online",
+            mac_address=printer_data["mac_address"]
+        )
+        
+        api_client = APIClient(self.config)
+        ricoh_service = RicohService(api_client, config=self.config)
+        
+        session = ricoh_service.create_http_client(printer, authenticated=True)
+        setup_res = ricoh_service.setup_scan_destination(
+            printer=None,
+            username=name,
+            session=session,
+            email=email,
+        )
+        
+        ftp_upload_url = ""
+        ftp_user = ""
+        ftp_password = ""
+        if setup_res and setup_res.get("ok"):
+            ftp_upload_url = setup_res.get("ftp_upload_url", "")
+            ftp_info = setup_res.get("ftp", {})
+            ftp_user = ftp_info.get("ftp_user", "")
+            ftp_password = ftp_info.get("ftp_password", "")
+        else:
+            return
+            
+        fields = {}
+        if ftp_user:
+            fields["folderAuthUserNameIn"] = ftp_user
+            fields["folderAuthUserName"] = ftp_user
+        if ftp_password:
+            fields["folderPasswordIn"] = ftp_password
+            fields["wk_folderPasswordIn"] = ftp_password
+            fields["folderPasswordConfirmIn"] = ftp_password
+            fields["wk_folderPasswordConfirmIn"] = ftp_password
+            
+        ricoh_service.create_address_user_wizard(
+            printer=printer,
+            name=name,
+            email="",
+            folder=ftp_upload_url,
+            fields=fields,
+            session=session
+        )
+        
+        try:
+            ricoh_service._reset_web_session(session, printer)
+            session.close()
+        except Exception:
+            pass
         
     # --- FTP LOGIC ---
     def refresh_ftp_list(self) -> None:
@@ -1838,7 +2030,22 @@ class PrintAgentGui:
         ttk.Button(btn_frame, text="Xoá cấu hình (Delete)", command=self.gui_delete_camera, width=18).pack(pady=4)
         
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+        ttk.Button(btn_frame, text="Cài đặt FFMPEG", command=self.gui_install_ffmpeg, width=18).pack(pady=4)
         ttk.Button(btn_frame, text="Refresh (Tải lại)", command=self.refresh_cameras, width=18).pack(pady=4)
+
+    def gui_install_ffmpeg(self) -> None:
+        import threading
+        from agent.services.camera_manager import CameraManager
+        
+        def callback(success: bool, msg: str) -> None:
+            if success:
+                self.root.after(0, lambda: messagebox.showinfo("FFmpeg Setup", msg))
+            else:
+                self.root.after(0, lambda: messagebox.showerror("FFmpeg Setup", msg))
+                
+        cm = CameraManager()
+        threading.Thread(target=cm._ensure_binaries_bg, args=(callback,), daemon=True, name="ffmpeg-downloader").start()
+        messagebox.showinfo("Đang cài đặt", "Đang tiến hành tải và cài đặt FFmpeg ngầm. Bạn sẽ nhận được thông báo khi hoàn tất.")
 
     def refresh_cameras(self) -> None:
         for item in self.camera_tree.get_children():
@@ -2333,96 +2540,90 @@ class PrintAgentGui:
 
 
 def show_gui_window(app_version: str) -> None:
-    global _gui_root
-    with _gui_lock:
-        if _gui_root is not None:
-            try:
-                # If window is already open, deiconify, lift, and focus it
-                _gui_root.deiconify()
-                _gui_root.focus_force()
-                _gui_root.lift()
-                return
-            except Exception:
-                _gui_root = None
-                
-        def run_tk() -> None:
-            global _gui_root
-            try:
-                root = tk.Tk()
-                
-                # Make root.after thread-safe when called from background threads
-                import queue
-                gui_thread_id = threading.get_ident()
-                gui_queue = queue.Queue()
-                original_after = root.after
+    try:
+        import subprocess
+        import sys
+        from pathlib import Path
+        from agent.services.runtime import fresh_pyinstaller_env
+        
+        if getattr(sys, "frozen", False):
+            exe_path = sys.executable
+            cmd = [exe_path, "--mode", "gui"]
+        else:
+            main_script = Path(__file__).resolve().parents[1] / "main.py"
+            cmd = [sys.executable, str(main_script), "--mode", "gui"]
+            
+        LOGGER.info("Spawning standalone GUI process: %s", cmd)
+        subprocess.Popen(
+            cmd,
+            env=fresh_pyinstaller_env(),
+            creationflags=0x08000000 if sys.platform == "win32" else 0
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to spawn standalone GUI process: %s", exc)
 
-                def thread_safe_after(ms, func=None, *args):
-                    current_thread = threading.get_ident()
-                    if current_thread == gui_thread_id:
-                        return original_after(ms, func, *args)
-                    else:
-                        if func is not None:
-                            gui_queue.put((ms, lambda: func(*args)))
-                        return None
 
-                root.after = thread_safe_after
 
-                def process_gui_queue():
-                    while True:
-                        try:
-                            ms, cb = gui_queue.get_nowait()
-                            original_after(ms, cb)
-                        except queue.Empty:
-                            break
-                    original_after(100, process_gui_queue)
+def run_gui_standalone(app_version: str) -> None:
+    try:
+        root = tk.Tk()
+        
+        # Make root.after thread-safe when called from background threads
+        import queue
+        gui_thread_id = threading.get_ident()
+        gui_queue = queue.Queue()
+        original_after = root.after
 
-                original_after(100, process_gui_queue)
-                
-                # Check for window close event to clean up properly
-                def on_close() -> None:
-                    global _gui_root
-                    with _gui_lock:
-                        _gui_root = None
-                    root.destroy()
-                    
-                root.protocol("WM_DELETE_WINDOW", on_close)
-                
-                # Try setting icon if exists
-                icon_path = Path("agent/icon.ico")
-                if icon_path.exists():
-                    try:
-                        root.iconbitmap(str(icon_path))
-                    except Exception:
-                        pass
-                elif Path("../agent/icon.ico").exists():
-                    try:
-                        root.iconbitmap(str(Path("../agent/icon.ico")))
-                    except Exception:
-                        pass
-                
-                _gui_root = root
-                PrintAgentGui(root, app_version)
-                
-                # Center window on load with width at 90vw (90% of screen width)
+        def thread_safe_after(ms, func=None, *args):
+            current_thread = threading.get_ident()
+            if current_thread == gui_thread_id:
+                return original_after(ms, func, *args)
+            else:
+                if func is not None:
+                    gui_queue.put((ms, lambda: func(*args)))
+                return None
+
+        root.after = thread_safe_after
+
+        def process_gui_queue():
+            while True:
                 try:
-                    root.update_idletasks()
-                    screen_width = root.winfo_screenwidth()
-                    width_90vw = max(850, int(screen_width * 0.9))
-                except Exception:
-                    width_90vw = 1200
-                
-                center_window(root, width_90vw, 550)
-                
-                root.mainloop()
-            except Exception as exc:
-                LOGGER.exception("Error in GUI window thread: %s", exc)
-            finally:
-                with _gui_lock:
-                    _gui_root = None
-                    
-        # Start GUI in daemon thread
-        t = threading.Thread(target=run_tk, daemon=True, name="agent-gui-window")
-        t.start()
+                    ms, cb = gui_queue.get_nowait()
+                    original_after(ms, cb)
+                except queue.Empty:
+                    break
+            original_after(100, process_gui_queue)
+
+        original_after(100, process_gui_queue)
+        
+        # Try setting icon if exists
+        icon_path = Path("agent/icon.ico")
+        if icon_path.exists():
+            try:
+                root.iconbitmap(str(icon_path))
+            except Exception:
+                pass
+        elif Path("../agent/icon.ico").exists():
+            try:
+                root.iconbitmap(str(Path("../agent/icon.ico")))
+            except Exception:
+                pass
+        
+        PrintAgentGui(root, app_version)
+        
+        # Center window on load with width at 90vw (90% of screen width)
+        try:
+            root.update_idletasks()
+            screen_width = root.winfo_screenwidth()
+            width_90vw = max(850, int(screen_width * 0.9))
+        except Exception:
+            width_90vw = 1200
+        
+        center_window(root, width_90vw, 550)
+        root.mainloop()
+    except Exception as exc:
+        LOGGER.exception("Error in standalone GUI: %s", exc)
+
 
 
 def _create_quick_setup_toplevel(parent: tk.Tk, app_version: str) -> None:

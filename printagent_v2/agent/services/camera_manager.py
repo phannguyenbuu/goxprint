@@ -49,8 +49,7 @@ def get_ffmpeg_path() -> str:
     return _find_bin("ffmpeg")
 
 
-def get_ffprobe_path() -> str:
-    return _find_bin("ffprobe")
+# ffprobe is no longer needed
 
 
 class CameraManager:
@@ -76,13 +75,11 @@ class CameraManager:
         self.current_files: dict[str, str] = {}
         self._initialized = True
         
-        # Start background check & download of binaries
-        threading.Thread(target=self._ensure_binaries_bg, daemon=True, name="ffmpeg-downloader").start()
+        # Removed background auto-download of FFmpeg to make it manual only
 
-    def _ensure_binaries_bg(self):
+    def _ensure_binaries_bg(self, callback=None):
         try:
             ffmpeg_path = get_ffmpeg_path()
-            ffprobe_path = get_ffprobe_path()
             
             # Check if working
             ffmpeg_ok = False
@@ -92,14 +89,9 @@ class CameraManager:
             except Exception:
                 pass
                 
-            ffprobe_ok = False
-            try:
-                subprocess.run([ffprobe_path, "-version"], capture_output=True, timeout=2)
-                ffprobe_ok = True
-            except Exception:
-                pass
-                
-            if ffmpeg_ok and ffprobe_ok:
+            if ffmpeg_ok:
+                if callback:
+                    callback(True, "FFmpeg đã được cài đặt và hoạt động tốt.")
                 return  # Binaries exist and are working!
 
             # If not found or not working, download them!
@@ -107,7 +99,6 @@ class CameraManager:
             dest_dir.mkdir(parents=True, exist_ok=True)
             
             local_ffmpeg = dest_dir / "ffmpeg.exe"
-            local_ffprobe = dest_dir / "ffprobe.exe"
             
             # Try loading AppConfig for base_url
             from agent.config import AppConfig
@@ -126,17 +117,13 @@ class CameraManager:
                     local_ffmpeg.write_bytes(response.read())
                 LOGGER.info("ffmpeg.exe downloaded.")
                 
-            if not local_ffprobe.exists():
-                LOGGER.info("Downloading ffprobe.exe from server...")
-                url = f"{base_url}/static/releases/ffprobe.exe"
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=120) as response:
-                    local_ffprobe.write_bytes(response.read())
-                LOGGER.info("ffprobe.exe downloaded.")
-                
             LOGGER.info("Binaries verification completed.")
+            if callback:
+                callback(True, "Cài đặt FFmpeg thành công.")
         except Exception as exc:
-            LOGGER.error("Failed downloading FFmpeg/FFprobe binaries: %s", exc)
+            LOGGER.error("Failed downloading FFmpeg binary: %s", exc)
+            if callback:
+                callback(False, f"Lỗi cài đặt FFmpeg: {exc}")
 
     def add_log(self, camera_name: str, level: str, msg: str):
         with self.lock:
@@ -175,35 +162,21 @@ class CameraManager:
             return False, "URL trống"
         try:
             result = subprocess.run(
-                [get_ffprobe_path(), "-v", "error", "-rtsp_transport", "tcp",
-                 "-show_entries", "stream=codec_name,width,height,r_frame_rate",
-                 "-of", "json", "-i", rtsp_url],
+                [get_ffmpeg_path(), "-v", "error", "-rtsp_transport", "tcp",
+                 "-i", rtsp_url, "-t", "1", "-f", "null", "-"],
                 capture_output=True, text=True, timeout=15,
             )
             if result.returncode == 0:
-                import json
-                try:
-                    info = json.loads(result.stdout)
-                    streams = info.get("streams", [])
-                    details = []
-                    for s in streams:
-                        codec = s.get("codec_name", "?")
-                        w = s.get("width")
-                        h = s.get("height")
-                        if w and h:
-                            details.append(f"{codec} {w}x{h}")
-                        else:
-                            details.append(codec)
-                    return True, f"Kết nối thành công! Stream: {', '.join(details) or 'OK'}"
-                except Exception:
-                    return True, "Kết nối thành công!"
+                return True, "Kết nối thành công!"
             else:
                 err = result.stderr.strip()[:300]
+                if "401" in err or "Unauthorized" in err:
+                    return False, "Thiếu hoặc sai Username/Password đăng nhập camera (401 Unauthorized)"
                 return False, f"Không kết nối được: {err}"
         except subprocess.TimeoutExpired:
             return False, "Timeout — camera không phản hồi sau 15 giây"
         except FileNotFoundError:
-            return False, f"FFprobe không tìm thấy ({get_ffprobe_path()})"
+            return False, f"FFmpeg không tìm thấy ({get_ffmpeg_path()})"
         except Exception as e:
             return False, f"Lỗi: {e}"
 
@@ -247,9 +220,13 @@ class CameraManager:
             proc = self.recording_processes.get(camera_name)
             if proc and proc.poll() is None:
                 try:
-                    proc.terminate()
+                    proc.stdin.write("q\n")
+                    proc.stdin.flush()
                 except Exception:
-                    pass
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
         self.add_log(camera_name, "info", "⏹️ Nhận lệnh dừng...")
 
     def _recording_thread(
@@ -314,14 +291,14 @@ class CameraManager:
                 with self.lock:
                     proc = subprocess.Popen(
                         cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                         text=True,
                     )
                     self.recording_processes[camera_name] = proc
 
-                stdout, stderr = proc.communicate()
-                returncode = proc.returncode
+                returncode = proc.wait()
 
                 with self.lock:
                     self.recording_processes.pop(camera_name, None)
@@ -334,8 +311,8 @@ class CameraManager:
                     self.add_log(camera_name, "success", f"✅ Đã lưu: {filename} ({size_mb:.1f} MB)")
                     consecutive_failures = 0
                 else:
-                    err_msg = stderr.strip()[:200] if stderr else "Unknown error"
-                    self.add_log(camera_name, "error", f"❌ FFmpeg lỗi (code {returncode}): {err_msg}")
+                    friendly_err = f"FFmpeg lỗi (code {returncode}). Vui lòng kiểm tra lại luồng RTSP hoặc kết nối mạng."
+                    self.add_log(camera_name, "error", f"❌ {friendly_err}")
                     consecutive_failures += 1
             except Exception as e:
                 self.add_log(camera_name, "error", f"❌ Exception: {e}")
