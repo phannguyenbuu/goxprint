@@ -1200,6 +1200,13 @@ function buildApiTestUrl(key, ctx) {
   if (key === "infor") return "/api/infor/list";
   if (key === "by-mac") return mac ? `/api/public/device/by-mac?mac_id=${mac}` : "";
   if (key === "by-mac-now") return mac ? `/api/public/device/by-mac-now?mac_id=${mac}` : "";
+  if (key === "ip-public") return "/api/public/ip/public";
+  if (key === "ip-workstation") {
+    if (ctx.agent_uid) return `/api/public/ip/workstation?agent_uid=${encodeURIComponent(ctx.agent_uid)}`;
+    if (ctx.lan_uid) return `/api/public/ip/workstation?lan_uid=${encodeURIComponent(ctx.lan_uid)}`;
+    if (ctx.mac_id) return `/api/public/ip/workstation?mac=${encodeURIComponent(ctx.mac_id)}`;
+    return "/api/public/ip/workstation";
+  }
   if (key === "camera-record") return "/api/cameras/record-control";
   if (key === "by-lan") return lan ? `/api/public/network/by-lan?lan_uid=${lan}` : "";
   if (key === "all") return "/all/";
@@ -1728,7 +1735,7 @@ async function initApiTests(resetStatuses = true) {
   const buttons = Array.from(document.querySelectorAll(".api-test-btn"));
   const allBtn = qs("api-test-all-btn");
   const keys = [
-    "machinelist", "networklist", "infor", "by-mac", "by-lan", "all", "agents-list", "devices-list",
+    "machinelist", "networklist", "infor", "by-mac", "by-lan", "ip-public", "ip-workstation", "all", "agents-list", "devices-list",
     "workspaces-list", "workspaces-create", "workspaces-update", "workspaces-delete",
     "locations-list", "locations-create", "locations-update", "locations-delete",
     "materials-list", "materials-create", "materials-update", "materials-delete",
