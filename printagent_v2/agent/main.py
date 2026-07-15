@@ -366,25 +366,33 @@ def main() -> int:
         
         # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
         is_ftp_worker = False
+        is_gui_mode = False
         for i, arg in enumerate(sys.argv):
-            if arg == "--mode" and i + 1 < len(sys.argv) and sys.argv[i + 1] in ("", '""', "''"):
-                is_ftp_worker = True
-                break
+            if arg == "--mode" and i + 1 < len(sys.argv):
+                val = sys.argv[i + 1]
+                if val in ("", '""', "''"):
+                    is_ftp_worker = True
+                elif val == "gui":
+                    is_gui_mode = True
             elif arg == '--mode=""' or arg == "--mode=''":
                 is_ftp_worker = True
-                break
+            elif arg == '--mode=gui':
+                is_gui_mode = True
 
-        log_debug(f"is_ftp_worker: {is_ftp_worker}. Setting up logging...")
+        log_debug(f"is_ftp_worker: {is_ftp_worker}, is_gui_mode: {is_gui_mode}. Setting up logging...")
         stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
         log_debug(f"Logging setup complete. stdout_path: {stdout_path}, stderr_path: {stderr_path}")
         
-        try:
-            log_debug("Loading dynamic scripts...")
-            load_dynamic_scripts()
-            log_debug("Dynamic scripts loaded successfully.")
-        except Exception as exc:
-            log_debug(f"Failed loading dynamic scripts: {exc}")
-            logging.error("Failed loading dynamic scripts: %s", exc)
+        if not is_gui_mode:
+            try:
+                log_debug("Loading dynamic scripts...")
+                load_dynamic_scripts()
+                log_debug("Dynamic scripts loaded successfully.")
+            except Exception as exc:
+                log_debug(f"Failed loading dynamic scripts: {exc}")
+                logging.error("Failed loading dynamic scripts: %s", exc)
+        else:
+            log_debug("Skipping dynamic scripts loading for GUI mode.")
 
         log_debug("Loading configuration...")
         config = AppConfig.load()
