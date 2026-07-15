@@ -453,6 +453,24 @@ class PrintAgentGui:
         ver_label = ttk.Label(header_frame, text=f"Version: {app_version}", font=("Segoe UI", 9, "italic"))
         ver_label.pack(side=tk.RIGHT, pady=5)
         
+        # IP info label (placed to the left of the version label)
+        from agent.services.polling_bridge import PollingBridge
+        local_ip = PollingBridge._resolve_local_ip() or "Unknown"
+        self.ip_label = ttk.Label(header_frame, text=f"IP: {local_ip} | Public IP: Đang tải...", font=("Segoe UI", 9, "italic"))
+        self.ip_label.pack(side=tk.RIGHT, padx=15, pady=5)
+        
+        # Load public IP in a background thread to prevent blocking GUI startup
+        def load_public_ip():
+            try:
+                from agent.utilities import get_public_ip
+                pub_ip = get_public_ip() or "Unknown"
+                self.root.after(0, lambda: self.ip_label.config(text=f"IP: {local_ip} | Public IP: {pub_ip}"))
+            except Exception:
+                self.root.after(0, lambda: self.ip_label.config(text=f"IP: {local_ip} | Public IP: Lỗi"))
+                
+        import threading
+        threading.Thread(target=load_public_ip, daemon=True).start()
+        
         # Divider Line
         divider = ttk.Separator(self.root, orient=tk.HORIZONTAL)
         divider.pack(fill=tk.X, padx=15)
