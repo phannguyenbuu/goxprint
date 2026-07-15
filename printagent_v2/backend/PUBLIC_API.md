@@ -895,3 +895,36 @@ All task activity materializes in `Task`, while user assignment metadata lives i
     }
     ```
 
+## 15) Public IP check
+- Method: `GET`
+- Path: `/api/public/ip/public`
+- Description: Get the public IP address of the caller.
+- Response:
+  ```json
+  {
+    "ok": true,
+    "public_ip": "115.79.88.99"
+  }
+  ```
+
+## 16) Workstation (Local) IP check
+- Method: `GET`
+- Path: `/api/public/ip/workstation`
+- Query params (provide at least one):
+  - `agent_uid` – Agent unique ID
+  - `lan_uid` – LAN unique ID
+  - `mac` (or `mac_id`) – MAC address of a printer or device registered under the agent
+- Response:
+  ```json
+  {
+    "ok": true,
+    "local_ip": "192.168.1.50",
+    "hostname": "DESKTOP-TOEFTR1",
+    "agent_uid": "agent_01",
+    "lan_uid": "lan_01",
+    "app_version": "2.0.79",
+    "is_online": true,
+    "last_seen_at": "2026-07-15T03:00:00Z"
+  }
+  ```
+

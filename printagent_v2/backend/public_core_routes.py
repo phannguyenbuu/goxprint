@@ -832,3 +832,85 @@ context["result_payload"] = payload
             
         return jsonify({"ok": True})
 
+    @app.get("/api/public/ip/public")
+    def public_ip_check() -> Any:
+        ip = request.headers.get("X-Forwarded-For")
+        if ip:
+            ip = ip.split(",")[0].strip()
+        else:
+            ip = request.remote_addr
+        return jsonify({"ok": True, "public_ip": ip or "unknown"})
+
+    @app.get("/api/public/ip/workstation")
+    def public_workstation_ip_check() -> Any:
+        agent_uid = _to_text(request.args.get("agent_uid"))
+        lan_uid = _to_text(request.args.get("lan_uid"))
+        mac = _to_text(request.args.get("mac") or request.args.get("mac_id"))
+        
+        with session_factory() as session:
+            agent_node = None
+            
+            if agent_uid:
+                agent_node = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == agent_uid)
+                    .order_by(AgentNode.updated_at.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                
+            elif lan_uid:
+                agent_node = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.lan_uid == lan_uid)
+                    .order_by(AgentNode.updated_at.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                
+            elif mac:
+                normalized_mac = _normalize_mac(mac)
+                if normalized_mac:
+                    printer = session.execute(
+                        select(Printer)
+                        .where(func.upper(Printer.mac_address) == normalized_mac)
+                        .order_by(Printer.updated_at.desc())
+                        .limit(1)
+                    ).scalar_one_or_none()
+                    
+                    if printer and printer.agent_uid:
+                        agent_node = session.execute(
+                            select(AgentNode)
+                            .where(AgentNode.agent_uid == printer.agent_uid)
+                            .order_by(AgentNode.updated_at.desc())
+                            .limit(1)
+                        ).scalar_one_or_none()
+                        
+                    if not agent_node:
+                        device = session.execute(
+                            select(DeviceInfor)
+                            .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
+                            .order_by(DeviceInfor.updated_at.desc())
+                            .limit(1)
+                        ).scalar_one_or_none()
+                        
+                        if device and device.agent_uid:
+                            agent_node = session.execute(
+                                select(AgentNode)
+                                .where(AgentNode.agent_uid == device.agent_uid)
+                                .order_by(AgentNode.updated_at.desc())
+                                .limit(1)
+                            ).scalar_one_or_none()
+            
+            if not agent_node:
+                return jsonify({"ok": False, "error": "Agent workstation not found with the specified parameters"}), 404
+                
+            return jsonify({
+                "ok": True,
+                "local_ip": _to_text(agent_node.local_ip),
+                "hostname": _to_text(agent_node.hostname),
+                "agent_uid": _to_text(agent_node.agent_uid),
+                "lan_uid": _to_text(agent_node.lan_uid),
+                "app_version": _to_text(agent_node.app_version),
+                "is_online": bool(agent_node.is_online),
+                "last_seen_at": agent_node.last_seen_at.isoformat() if agent_node.last_seen_at else None
+            })
+
