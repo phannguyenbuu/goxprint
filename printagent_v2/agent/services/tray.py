@@ -198,9 +198,9 @@ class TrayController:
         user32.SetForegroundWindow(hwnd)
         user32.MessageBoxW(hwnd, message, title, MB_OK | MB_ICONINFORMATION)
 
-    def _force_update(self) -> None:
-        LOGGER.info("Tray: Force update requested")
-        self._show_balloon("GoPrinxAgent", "Checking for updates...")
+    def _run_updater(self) -> None:
+        if self._closed:
+            return
         if self.force_update_callback is not None:
             try:
                 self.force_update_callback()
@@ -269,7 +269,6 @@ class TrayController:
         version = str(self._pending_update_version or "").strip()
         if not version:
             return
-        self._show_balloon(DEFAULT_TRAY_TIP, f"Updated version {version}")
         self._clear_update_notice()
         self._pending_update_version = ""
 

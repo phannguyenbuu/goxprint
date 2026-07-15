@@ -1677,6 +1677,7 @@ if ($node) {{ $node }}
                     self._scan_last_detected_size = size
                     self._scan_last_detected_status = "new"
                     LOGGER.info("Scan file detected: file=%s size=%s reason=%s stage=new", path, size, reason)
+                    self._send_gui_status("Quét tài liệu", f"Phát hiện file scan mới: {path.name}")
                 elif not same:
                     self._scan_last_detected_at = self._now_iso()
                     self._scan_last_detected_file = key
@@ -1707,6 +1708,7 @@ if ($node) {{ $node }}
                     self._scan_last_upload_status = "ok"
                     self._scan_last_upload_drive_path = drive_path
                     LOGGER.info("Scan upload ok: file=%s size=%s reason=%s drive=%s", path, size, reason, drive_path or "-")
+                    self._send_gui_status("Tải tài liệu", f"Tải lên thành công: {path.name}")
                     
                     try:
                         import sys
@@ -2458,6 +2460,7 @@ if ($node) {{ $node }}
                 driver_name = str(command.get("driver_name", "") or "").strip()
                 driver_url = str(command.get("driver_url", "") or "").strip()
                 
+                self._send_gui_status("Cài đặt", f"Bắt đầu cài đặt driver {driver_name} cho {printer.ip}...")
                 self._handle_install_driver(
                     command_id=command_id,
                     printer_ip=printer.ip,
@@ -2468,6 +2471,7 @@ if ($node) {{ $node }}
                 )
                 self._post_control_result(command_id=command_id, ok=True, error="")
                 self._update_recent_command_status(command_id, "success")
+                self._send_gui_status("Cài đặt", f"Cài đặt thành công driver {driver_name} cho {printer.ip}!")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("Failed to install driver for printer %s: %s", printer.ip, exc)
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
@@ -2477,6 +2481,7 @@ if ($node) {{ $node }}
         if command_type == "fetch_address_book":
             import socket
             LOGGER.info("[PollingBridge] === START fetch_address_book command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
+            self._send_gui_status("Lệnh", f"Đồng bộ danh bạ máy in {printer.name} ({printer.ip})...")
             try:
                 # Fetch the entire address book of the Ricoh machine (without auto-reconciliation)
                 LOGGER.info("[PollingBridge] Calling process_address_list for %s...", printer.ip)
@@ -2486,6 +2491,7 @@ if ($node) {{ $node }}
                 self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=result)
                 self._update_recent_command_status(command_id, "success")
                 LOGGER.info("[PollingBridge] === FINISH fetch_address_book command: ID=%s Success ===", command_id)
+                self._send_gui_status("Lệnh", f"Đồng bộ thành công danh bạ máy in {printer.name}!")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("[PollingBridge] Failed to fetch address book for printer %s: %s", printer.ip, exc, exc_info=True)
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
@@ -2727,6 +2733,54 @@ if ($node) {{ $node }}
                 time.sleep(1.5)
                 user32.SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.c_void_p(orig_timeout.value), 2)
             threading.Thread(target=restore, daemon=True).start()
+
+    def _send_gui_status(self, title: str, message: str) -> None:
+        try:
+            from pathlib import Path
+            status_file = Path("storage/data/status_message.txt")
+            status_file.parent.mkdir(parents=True, exist_ok=True)
+            clean_msg = message.replace("\n", " | ")
+            status_file.write_text(f"{title}: {clean_msg}", encoding="utf-8")
+        except Exception as e:
+            LOGGER.warning("Failed to write GUI status message: %s", e)
+
+    def _show_agent_command_popup(self, command_type: str, params: dict) -> None:
+        title = "Thông báo Lệnh từ Server"
+        msg_lines = []
+        
+        if command_type == "general_settings":
+            msg_lines.append("Cập nhật cấu hình chung")
+            scan_auto_open_file = params.get("scan_auto_open_file")
+            scan_auto_open_dir = params.get("scan_auto_open_dir")
+            if scan_auto_open_file is not None:
+                msg_lines.append(f"Tự động mở file scan: {'Bật' if scan_auto_open_file else 'Tắt'}")
+            if scan_auto_open_dir is not None:
+                msg_lines.append(f"Tự động mở thư mục: {'Bật' if scan_auto_open_dir else 'Tắt'}")
+        elif command_type == "trigger_utility":
+            action = str(params.get("action", "")).strip()
+            utility_translations = {
+                "devices_and_printers": "Mở danh sách Máy in & Thiết bị",
+                "open_scan_folder": "Mở thư mục Scan gốc trên PC",
+                "dxdiag": "Xem thông số cấu hình máy (dxdiag)",
+                "change_ip": "Thay đổi địa chỉ IP máy PC",
+            }
+            action_vn = utility_translations.get(action, action)
+            msg_lines.append(f"{action_vn}")
+            
+            if action == "change_ip":
+                mode = str(params.get("mode", "dhcp")).strip().lower()
+                adapter = str(params.get("adapter_name", "Ethernet")).strip()
+                msg_lines.append(f"Card: {adapter}")
+                if mode == "dhcp":
+                    msg_lines.append("Chế độ: DHCP")
+                else:
+                    ip = str(params.get("ip_address", "")).strip()
+                    msg_lines.append(f"Chế độ: IP Tĩnh ({ip})")
+        else:
+            msg_lines.append(f"Lệnh: {command_type}")
+
+        message = " | ".join(msg_lines)
+        self._send_gui_status(title, message)
 
     def _apply_agent_command(self, command: dict[str, object]) -> None:
         command_id = int(command.get("id", 0) or 0)

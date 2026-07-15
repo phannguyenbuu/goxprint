@@ -460,6 +460,10 @@ class PrintAgentGui:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
         
+        # Status Bar at the bottom
+        self.status_bar = ttk.Label(self.root, text="Hệ thống sẵn sàng (Ready)", relief=tk.SUNKEN, anchor=tk.W, padding=(10, 5))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
         # Create tabs
         self.create_printers_tab()
         self.create_ftp_tab()
@@ -2594,6 +2598,10 @@ class PrintAgentGui:
         finally:
             self.refresh_cameras()
 
+    def update_status_bar(self, message: str) -> None:
+        if hasattr(self, "status_bar"):
+            self.status_bar.config(text=message)
+
 
 def show_gui_window(app_version: str) -> None:
     try:
@@ -2673,7 +2681,7 @@ def run_gui_standalone(app_version: str) -> None:
             except Exception:
                 pass
         
-        PrintAgentGui(root, app_version)
+        gui = PrintAgentGui(root, app_version)
         
         # Override WM_DELETE_WINDOW to hide instead of exit
         def on_close():
@@ -2695,6 +2703,14 @@ def run_gui_standalone(app_version: str) -> None:
                         signal_file.unlink()
                         root.destroy()
                         return
+                        
+                # Check for status message signal
+                status_file = Path("storage/data/status_message.txt")
+                if status_file.exists():
+                    msg = status_file.read_text(encoding="utf-8").strip()
+                    if msg:
+                        status_file.unlink()
+                        gui.update_status_bar(msg)
             except Exception:
                 pass
             original_after(200, check_signal)
