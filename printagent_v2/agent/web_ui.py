@@ -162,11 +162,158 @@ def register_ui_routes(app):
                 config.set_value("polling.scan_auto_open_file", bool(body["scan_auto_open_file"]))
             if "scan_auto_open_dir" in body:
                 config.set_value("polling.scan_auto_open_dir", bool(body["scan_auto_open_dir"]))
-            return jsonify({
-                "ok": True,
-                "message": "Cài đặt tự động mở file/thư mục đã được cập nhật.",
-                "scan_auto_open_file": config.get_bool("polling.scan_auto_open_file", True),
-                "scan_auto_open_dir": config.get_bool("polling.scan_auto_open_dir", True),
-            })
+            return jsonify({"ok": True, "message": "Cài đặt tự động mở file/thư mục đã được cập nhật.", "scan_auto_open_file": config.get_bool("polling.scan_auto_open_file", True), "scan_auto_open_dir": config.get_bool("polling.scan_auto_open_dir", True)})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/local/install-driver")
+    def local_install_driver() -> Any:
+        try:
+            body = request.get_json(silent=True) or {}
+            ip = body.get("ip", "")
+            brand = body.get("printer_type", "ricoh") or "ricoh"
+            model = body.get("name", "")
+            
+            bridge = app.config.get("POLLING_BRIDGE")
+            if not bridge:
+                return jsonify({"ok": False, "error": "Không kết nối được với dịch vụ PollingBridge"}), 500
+                
+            import threading
+            def run_task():
+                import requests, re
+                driver_name = model
+                driver_url = ""
+                
+                try:
+                    catalog_resp = requests.get(f"{config.api_url}/drivers/{brand}", timeout=10)
+                    catalog_data = catalog_resp.json()
+                    drivers_list = catalog_data.get("data") or []
+                    
+                    if drivers_list and model:
+                        model_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', model) if len(t) >= 2]
+                        best_match = None
+                        best_score = 0
+                        for drv_item in drivers_list:
+                            drv_model = drv_item.get("model") or drv_item.get("name") or ""
+                            drv_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', drv_model)]
+                            score = len(set(model_tokens) & set(drv_tokens))
+                            if score > best_score:
+                                best_score = score
+                                best_match = drv_item
+                                
+                        if best_match and best_score > 0:
+                            sub_drivers = best_match.get("drivers") or []
+                            if sub_drivers:
+                                selected_drv = sub_drivers[0]
+                                for sd in sub_drivers:
+                                    if "pcl" in sd.get("name", "").lower():
+                                        selected_drv = sd
+                                        break
+                                driver_name = selected_drv.get("name")
+                                driver_url = selected_drv.get("url")
+                except Exception as e:
+                    import logging
+                    logging.warning("Failed to resolve driver from catalog: %s", e)
+                
+                try:
+                    bridge._handle_install_driver(
+                        command_id=0,
+                        printer_ip=ip,
+                        brand=brand,
+                        model=model,
+                        driver_name=driver_name,
+                        driver_url=driver_url
+                    )
+                except Exception as e:
+                    import logging
+                    logging.error("Failed executing local install driver: %s", e)
+                    
+            threading.Thread(target=run_task, daemon=True).start()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/local/install-scan")
+    def local_install_scan() -> Any:
+        try:
+            body = request.get_json(silent=True) or {}
+            printer_data = body.get("printer", {})
+            name = body.get("name", "")
+            email = body.get("email", "")
+            
+            bridge = app.config.get("POLLING_BRIDGE")
+            if not bridge:
+                return jsonify({"ok": False, "error": "Không kết nối được với dịch vụ PollingBridge"}), 500
+                
+            import threading
+            def run_task():
+                from agent.modules.printer import Printer
+                from agent.modules.ricoh.service import RicohService
+                from agent.modules.base_api import APIClient
+                
+                try:
+                    printer = Printer(
+                        id=printer_data.get("id", 0),
+                        name=printer_data.get("name", ""),
+                        ip=printer_data.get("ip", ""),
+                        user=printer_data.get("user", ""),
+                        password=printer_data.get("password", ""),
+                        printer_type=printer_data.get("printer_type", ""),
+                        status="online",
+                        mac_address=printer_data.get("mac_address", "")
+                    )
+                    
+                    api_client = APIClient(config)
+                    ricoh_service = RicohService(api_client, config=config)
+                    
+                    session = ricoh_service.create_http_client(printer, authenticated=True)
+                    setup_res = ricoh_service.setup_scan_destination(
+                        printer=None,
+                        username=name,
+                        session=session,
+                        email=email,
+                    )
+                    
+                    ftp_upload_url = ""
+                    ftp_user = ""
+                    ftp_password = ""
+                    if setup_res and setup_res.get("ok"):
+                        ftp_upload_url = setup_res.get("ftp_upload_url", "")
+                        ftp_info = setup_res.get("ftp", {})
+                        ftp_user = ftp_info.get("ftp_user", "")
+                        ftp_password = ftp_info.get("ftp_password", "")
+                    else:
+                        return
+                        
+                    fields = {}
+                    if ftp_user:
+                        fields["folderAuthUserNameIn"] = ftp_user
+                        fields["folderAuthUserName"] = ftp_user
+                    if ftp_password:
+                        fields["folderPasswordIn"] = ftp_password
+                        fields["wk_folderPasswordIn"] = ftp_password
+                        fields["folderPasswordConfirmIn"] = ftp_password
+                        fields["wk_folderPasswordConfirmIn"] = ftp_password
+                        
+                    ricoh_service.create_address_user_wizard(
+                        printer=printer,
+                        name=name,
+                        email="",
+                        folder=ftp_upload_url,
+                        fields=fields,
+                        session=session
+                    )
+                    
+                    try:
+                        ricoh_service._reset_web_session(session, printer)
+                        session.close()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    import logging
+                    logging.error("Failed executing local install scan: %s", e)
+                    
+            threading.Thread(target=run_task, daemon=True).start()
+            return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500

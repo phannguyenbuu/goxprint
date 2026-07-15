@@ -765,130 +765,31 @@ class PrintAgentGui:
         messagebox.showinfo("Đang cài đặt", f"Đang cấu hình driver và scan ngầm cho {len(printers)} máy in...")
 
     def _legacy_install_driver(self, matched_printer: dict) -> None:
-        from flask import current_app
-        import requests, re
-        
-        bridge = None
+        local_port = self.config.get_int("web.port", 9173)
         try:
-            if current_app:
-                bridge = current_app.config.get("POLLING_BRIDGE")
-        except Exception:
-            pass
-            
-        if not bridge:
-            messagebox.showerror("Error", "Không kết nối được với dịch vụ PollingBridge.")
-            return
-            
-        ip = matched_printer["ip"]
-        brand = matched_printer["printer_type"] or "ricoh"
-        model = matched_printer["name"]
-        driver_name = model
-        driver_url = ""
-        
-        try:
-            catalog_resp = requests.get(f"{self.config.api_url}/drivers/{brand}", timeout=10)
-            catalog_data = catalog_resp.json()
-            drivers_list = catalog_data.get("data") or []
-            
-            if drivers_list and model:
-                model_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', model) if len(t) >= 2]
-                best_match = None
-                best_score = 0
-                for drv_item in drivers_list:
-                    drv_model = drv_item.get("model") or drv_item.get("name") or ""
-                    drv_tokens = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', drv_model)]
-                    score = len(set(model_tokens) & set(drv_tokens))
-                    if score > best_score:
-                        best_score = score
-                        best_match = drv_item
-                        
-                if best_match and best_score > 0:
-                    sub_drivers = best_match.get("drivers") or []
-                    if sub_drivers:
-                        selected_drv = sub_drivers[0]
-                        for sd in sub_drivers:
-                            if "pcl" in sd.get("name", "").lower():
-                                selected_drv = sd
-                                break
-                        driver_name = selected_drv.get("name")
-                        driver_url = selected_drv.get("url")
-        except Exception:
-            pass
-        
-        try:
-            bridge._handle_install_driver(
-                command_id=0,
-                printer_ip=ip,
-                brand=brand,
-                model=model,
-                driver_name=driver_name,
-                driver_url=driver_url
-            )
+            import requests
+            resp = requests.post(f"http://127.0.0.1:{local_port}/api/local/install-driver", json=matched_printer, timeout=5)
+            if resp.status_code != 200 or not resp.json().get("ok"):
+                error_msg = resp.json().get("error", "Unknown error")
+                messagebox.showerror("Error", f"Không kích hoạt được cài đặt driver: {error_msg}")
         except Exception as e:
-            pass
+            messagebox.showerror("Error", f"Không kết nối được với dịch vụ nền PrintAgent: {e}")
 
     def _legacy_install_scan(self, printer_data: dict, name: str, email: str) -> None:
-        from agent.modules.printer import Printer
-        from agent.modules.ricoh.service import RicohService
-        from agent.modules.base_api import APIClient
-        
-        printer = Printer(
-            id=printer_data["id"],
-            name=printer_data["name"],
-            ip=printer_data["ip"],
-            user=printer_data["user"],
-            password=printer_data["password"],
-            printer_type=printer_data["printer_type"],
-            status="online",
-            mac_address=printer_data["mac_address"]
-        )
-        
-        api_client = APIClient(self.config)
-        ricoh_service = RicohService(api_client, config=self.config)
-        
-        session = ricoh_service.create_http_client(printer, authenticated=True)
-        setup_res = ricoh_service.setup_scan_destination(
-            printer=None,
-            username=name,
-            session=session,
-            email=email,
-        )
-        
-        ftp_upload_url = ""
-        ftp_user = ""
-        ftp_password = ""
-        if setup_res and setup_res.get("ok"):
-            ftp_upload_url = setup_res.get("ftp_upload_url", "")
-            ftp_info = setup_res.get("ftp", {})
-            ftp_user = ftp_info.get("ftp_user", "")
-            ftp_password = ftp_info.get("ftp_password", "")
-        else:
-            return
-            
-        fields = {}
-        if ftp_user:
-            fields["folderAuthUserNameIn"] = ftp_user
-            fields["folderAuthUserName"] = ftp_user
-        if ftp_password:
-            fields["folderPasswordIn"] = ftp_password
-            fields["wk_folderPasswordIn"] = ftp_password
-            fields["folderPasswordConfirmIn"] = ftp_password
-            fields["wk_folderPasswordConfirmIn"] = ftp_password
-            
-        ricoh_service.create_address_user_wizard(
-            printer=printer,
-            name=name,
-            email="",
-            folder=ftp_upload_url,
-            fields=fields,
-            session=session
-        )
-        
+        local_port = self.config.get_int("web.port", 9173)
+        payload = {
+            "printer": printer_data,
+            "name": name,
+            "email": email
+        }
         try:
-            ricoh_service._reset_web_session(session, printer)
-            session.close()
-        except Exception:
-            pass
+            import requests
+            resp = requests.post(f"http://127.0.0.1:{local_port}/api/local/install-scan", json=payload, timeout=5)
+            if resp.status_code != 200 or not resp.json().get("ok"):
+                error_msg = resp.json().get("error", "Unknown error")
+                messagebox.showerror("Error", f"Không kích hoạt được cài đặt scan: {error_msg}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Không kết nối được với dịch vụ nền PrintAgent: {e}")
         
     # --- FTP LOGIC ---
     def refresh_ftp_list(self) -> None:
