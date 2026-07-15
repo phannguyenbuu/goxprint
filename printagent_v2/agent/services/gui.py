@@ -439,8 +439,9 @@ class PrintAgentGui:
         if sys.platform == "win32":
             style.theme_use("vista")
             
-        style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
+        style.configure("Treeview", rowheight=32, font=("Segoe UI", 9))
         style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
+        self._init_checkbox_images()
         
         # Top Header Area
         header_frame = ttk.Frame(self.root, padding="15 10 15 10")
@@ -606,7 +607,7 @@ class PrintAgentGui:
         cols = ("IP", "MAC", "Type", "Status", "DevStatus")
         self.printer_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
-        self.printer_tree.heading("#0", text="Chọn | Tên Thiết Bị / Địa chỉ nhận")
+        self.printer_tree.heading("#0", text="☑ Chọn | Tên Thiết Bị / Địa chỉ nhận", command=self.toggle_check_all_printers)
         self.printer_tree.heading("IP", text="Địa chỉ IP / Email")
         self.printer_tree.heading("MAC", text="Địa chỉ MAC / FTP / SMB")
         self.printer_tree.heading("Type", text="Hãng/Loại")
@@ -678,8 +679,9 @@ class PrintAgentGui:
     def _get_checked_printers(self) -> list[dict]:
         checked = []
         for item in self.printer_tree.get_children():
-            text = self.printer_tree.item(item, "text")
-            if text.startswith("☑ "):
+            current_img = self.printer_tree.item(item, "image")
+            img_name = current_img[0] if isinstance(current_img, tuple) and current_img else str(current_img)
+            if img_name == str(self.img_checked):
                 vals = self.printer_tree.item(item, "values")
                 if vals and len(vals) >= 1:
                      ip_addr = vals[0].strip().lower()
@@ -704,13 +706,12 @@ class PrintAgentGui:
         if column == "#0" and (region == "tree" or region == "cell"):
             item_id = self.printer_tree.identify_row(event.y)
             if item_id and not item_id.startswith("dest_"):
-                current_text = self.printer_tree.item(item_id, "text")
-                if current_text.startswith("☑ "):
-                    new_text = "☐ " + current_text[2:]
-                    self.printer_tree.item(item_id, text=new_text)
-                elif current_text.startswith("☐ "):
-                    new_text = "☑ " + current_text[2:]
-                    self.printer_tree.item(item_id, text=new_text)
+                current_img = self.printer_tree.item(item_id, "image")
+                img_name = current_img[0] if isinstance(current_img, tuple) and current_img else str(current_img)
+                if img_name == str(self.img_checked):
+                    self.printer_tree.item(item_id, image=self.img_unchecked)
+                else:
+                    self.printer_tree.item(item_id, image=self.img_checked)
 
     def gui_install_driver(self) -> None:
         printers = self._get_checked_printers()
@@ -1224,7 +1225,8 @@ class PrintAgentGui:
             node_id = self.printer_tree.insert(
                 "",
                 tk.END,
-                text="☑ " + p.name,
+                text=p.name,
+                image=self.img_checked,
                 values=(p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
             )
             self.printer_node_ids[p.ip.lower()] = node_id
@@ -2503,6 +2505,45 @@ class PrintAgentGui:
     def update_status_bar(self, message: str) -> None:
         if hasattr(self, "status_bar"):
             self.status_bar.config(text=message)
+
+    def _init_checkbox_images(self) -> None:
+        self.img_unchecked = tk.PhotoImage(width=24, height=24)
+        for y in range(24):
+            for x in range(24):
+                if (2 <= x <= 21 and (y == 2 or y == 21)) or (2 <= y <= 21 and (x == 2 or x == 21)):
+                    self.img_unchecked.put("#888888", (x, y))
+                elif 3 <= x <= 20 and 3 <= y <= 20:
+                    self.img_unchecked.put("#ffffff", (x, y))
+                else:
+                    self.img_unchecked.put("", (x, y))
+                    
+        self.img_checked = tk.PhotoImage(width=24, height=24)
+        for y in range(24):
+            for x in range(24):
+                if (2 <= x <= 21 and (y == 2 or y == 21)) or (2 <= y <= 21 and (x == 2 or x == 21)):
+                    self.img_checked.put("#888888", (x, y))
+                elif 3 <= x <= 20 and 3 <= y <= 20:
+                    is_checkmark = False
+                    for thick in [-1, 0, 1]:
+                        if (6 <= x <= 10 and y == x + 6 + thick) or (10 <= x <= 18 and y == 26 - x + thick):
+                            is_checkmark = True
+                    if is_checkmark:
+                        self.img_checked.put("#22c55e", (x, y))
+                    else:
+                        self.img_checked.put("#ffffff", (x, y))
+                else:
+                    self.img_checked.put("", (x, y))
+
+    def toggle_check_all_printers(self) -> None:
+        current_heading = self.printer_tree.heading("#0", "text")
+        if current_heading.startswith("☑"):
+            for item in self.printer_tree.get_children():
+                self.printer_tree.item(item, image=self.img_unchecked)
+            self.printer_tree.heading("#0", text="☐ Chọn | Tên Thiết Bị / Địa chỉ nhận")
+        else:
+            for item in self.printer_tree.get_children():
+                self.printer_tree.item(item, image=self.img_checked)
+            self.printer_tree.heading("#0", text="☑ Chọn | Tên Thiết Bị / Địa chỉ nhận")
 
 
 def show_gui_window(app_version: str) -> None:
