@@ -603,19 +603,17 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("Sel", "IP", "MAC", "Type", "Status", "DevStatus")
+        cols = ("IP", "MAC", "Type", "Status", "DevStatus")
         self.printer_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
-        self.printer_tree.heading("#0", text="Tên Thiết Bị / Địa chỉ nhận")
-        self.printer_tree.heading("Sel", text="Chọn")
+        self.printer_tree.heading("#0", text="Chọn | Tên Thiết Bị / Địa chỉ nhận")
         self.printer_tree.heading("IP", text="Địa chỉ IP / Email")
         self.printer_tree.heading("MAC", text="Địa chỉ MAC / FTP / SMB")
         self.printer_tree.heading("Type", text="Hãng/Loại")
         self.printer_tree.heading("Status", text="Kết nối")
         self.printer_tree.heading("DevStatus", text="Trạng thái")
         
-        self.printer_tree.column("#0", width=230, anchor=tk.W)
-        self.printer_tree.column("Sel", width=45, anchor=tk.CENTER)
+        self.printer_tree.column("#0", width=250, anchor=tk.W)
         self.printer_tree.column("IP", width=140, anchor=tk.W)
         self.printer_tree.column("MAC", width=220, anchor=tk.W)
         self.printer_tree.column("Type", width=70, anchor=tk.CENTER)
@@ -654,10 +652,14 @@ class PrintAgentGui:
         selected = self.printer_tree.focus()
         if not selected:
             return None
+        if selected.startswith("dest_"):
+            selected = self.printer_tree.parent(selected)
+            if not selected:
+                return None
         vals = self.printer_tree.item(selected, "values")
-        if not vals or len(vals) < 2:
+        if not vals or len(vals) < 1:
             return None
-        ip_addr = vals[1].strip().lower()
+        ip_addr = vals[0].strip().lower()
         p = self.printers_by_ip.get(ip_addr)
         if p:
             return {
@@ -676,41 +678,39 @@ class PrintAgentGui:
     def _get_checked_printers(self) -> list[dict]:
         checked = []
         for item in self.printer_tree.get_children():
-            vals = self.printer_tree.item(item, "values")
-            if vals and len(vals) >= 2:
-                sel = vals[0]
-                if sel == "☑":
-                    ip_addr = vals[1].strip().lower()
-                    p = self.printers_by_ip.get(ip_addr)
-                    if p:
-                        checked.append({
-                            "id": p.id,
-                            "ip": p.ip,
-                            "printer_type": p.printer_type,
-                            "name": p.name,
-                            "mac_address": p.mac_address,
-                            "status": p.status,
-                            "physical_status": p.physical_status,
-                            "user": p.user,
-                            "password": p.password
-                        })
+            text = self.printer_tree.item(item, "text")
+            if text.startswith("☑ "):
+                vals = self.printer_tree.item(item, "values")
+                if vals and len(vals) >= 1:
+                     ip_addr = vals[0].strip().lower()
+                     p = self.printers_by_ip.get(ip_addr)
+                     if p:
+                         checked.append({
+                             "id": p.id,
+                             "ip": p.ip,
+                             "printer_type": p.printer_type,
+                             "name": p.name,
+                             "mac_address": p.mac_address,
+                             "status": p.status,
+                             "physical_status": p.physical_status,
+                             "user": p.user,
+                             "password": p.password
+                         })
         return checked
 
     def on_printer_tree_click(self, event) -> None:
         region = self.printer_tree.identify_region(event.x, event.y)
-        if region == "cell":
-            column = self.printer_tree.identify_column(event.x)
-            if column == "#1":
-                item_id = self.printer_tree.identify_row(event.y)
-                if item_id:
-                    vals = list(self.printer_tree.item(item_id, "values"))
-                    if vals:
-                        current_sel = vals[0]
-                        if current_sel == "☑":
-                            vals[0] = "☐"
-                        else:
-                            vals[0] = "☑"
-                        self.printer_tree.item(item_id, values=vals)
+        column = self.printer_tree.identify_column(event.x)
+        if column == "#0" and (region == "tree" or region == "cell"):
+            item_id = self.printer_tree.identify_row(event.y)
+            if item_id and not item_id.startswith("dest_"):
+                current_text = self.printer_tree.item(item_id, "text")
+                if current_text.startswith("☑ "):
+                    new_text = "☐ " + current_text[2:]
+                    self.printer_tree.item(item_id, text=new_text)
+                elif current_text.startswith("☐ "):
+                    new_text = "☑ " + current_text[2:]
+                    self.printer_tree.item(item_id, text=new_text)
 
     def gui_install_driver(self) -> None:
         printers = self._get_checked_printers()
@@ -1224,18 +1224,18 @@ class PrintAgentGui:
             node_id = self.printer_tree.insert(
                 "",
                 tk.END,
-                text=p.name,
-                values=("☑", p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
+                text="☑ " + p.name,
+                values=(p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
             )
             self.printer_node_ids[p.ip.lower()] = node_id
             # Insert a "Connecting/Loading..." child row
             if p.printer_type.lower() == "ricoh":
-                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", "", ""))
             else:
-                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", "", ""))
                 
         if not unique_printers:
-            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", "", "", ""))
+            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", "", ""))
             
     def start_address_book_fetching(self, unique_printers: list[Printer], ricoh_service: Any) -> None:
         def run_executor():
@@ -1292,7 +1292,7 @@ class PrintAgentGui:
                 
             has_valid_dest = True
             parent_values = self.printer_tree.item(node_id, "values")
-            printer_ip = parent_values[1] if parent_values else ""
+            printer_ip = parent_values[0] if parent_values else ""
             entry_id = addr.get("entry_id", "")
             item_iid = f"dest_{printer_ip.lower()}_{reg_no}_{entry_id}"
             
@@ -1302,7 +1302,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=("", dest_val, "", "", "", "")
+                    values=(dest_val, "", "", "", "")
                 )
             elif dest_type in ("FTP", "SMB", "Folder"):
                 self.printer_tree.insert(
@@ -1310,7 +1310,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=("", "", dest_val, "", "", "")
+                    values=("", dest_val, "", "", "")
                 )
             else:
                 self.printer_tree.insert(
@@ -1318,7 +1318,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=("", "—", "—", "", "", "")
+                    values=("—", "—", "", "", "")
                 )
                     
         if not has_valid_dest:
@@ -1326,7 +1326,7 @@ class PrintAgentGui:
                 node_id,
                 tk.END,
                 text="(No scan/ftp/folder destinations)",
-                values=("", "", "", "", "", "")
+                values=("", "", "", "", "")
             )
             
     def update_printer_destinations_error(self, node_id: str, error_msg: str) -> None:
@@ -1338,7 +1338,7 @@ class PrintAgentGui:
             node_id,
             tk.END,
             text=f"(Error: {error_msg})",
-            values=("", "", "", "", "", "")
+            values=("", "", "", "", "")
         )
         
     def add_printer_destination(self, selected: str = None) -> None:
@@ -1356,7 +1356,7 @@ class PrintAgentGui:
             messagebox.showwarning("Warning", "Could not find selected printer details.")
             return
             
-        printer_ip = values[1]
+        printer_ip = values[0]
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
             messagebox.showerror("Error", f"Printer with IP {printer_ip} is not loaded.")
@@ -1444,8 +1444,8 @@ class PrintAgentGui:
             name = item_text
             
         dest_values = self.printer_tree.item(selected, "values")
-        email = dest_values[1] if dtype == "Email" else ""
-        folder = dest_values[2] if dtype != "Email" else ""
+        email = dest_values[0] if dtype == "Email" else ""
+        folder = dest_values[1] if dtype != "Email" else ""
         
         progress = ProgressDialog(self.root, "Connecting to Copier", "Fetching destination details from Ricoh printer...")
         
@@ -1742,6 +1742,7 @@ class PrintAgentGui:
         printer_ip = parts[1]
         reg_no = parts[2]
         entry_id = parts[3] if len(parts) > 3 else ""
+        parent_id = self.printer_tree.parent(selected)
         
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
@@ -1819,7 +1820,7 @@ class PrintAgentGui:
             # Parent printer node
             values = self.printer_tree.item(iid, "values")
             if values:
-                printer_ip = values[1]
+                printer_ip = values[0]
                 printer = self.printers_by_ip.get(printer_ip.lower())
                 if printer and printer.printer_type.lower() == "ricoh":
                     menu.add_command(label="Add Email Dest (Thêm nhận Email)", command=lambda: self.add_email_destination_shortcut(iid))
@@ -1839,7 +1840,7 @@ class PrintAgentGui:
         if not values:
             return
             
-        printer_ip = values[1]
+        printer_ip = values[0]
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
             return

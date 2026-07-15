@@ -19,7 +19,7 @@ def main():
     
     # We will read version from a file, or prompt / default
     # Let's see if there is an existing version we should use, e.g. "1.3.56"
-    version = "2.0.76"
+    version = "2.0.77"
     
     exclude_names = set()
     
