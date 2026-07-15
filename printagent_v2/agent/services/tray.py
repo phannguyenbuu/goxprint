@@ -174,6 +174,15 @@ class TrayController:
             return
         self._closed = True
         LOGGER.info("Tray close requested")
+        
+        # Write exit signal to GUI process
+        try:
+            signal_file = Path("storage/data/show_gui.signal")
+            signal_file.parent.mkdir(parents=True, exist_ok=True)
+            signal_file.write_text("exit", encoding="utf-8")
+        except Exception:
+            pass
+            
         if self.stop_event is not None:
             self.stop_event.set()
         if self._hwnd and user32:

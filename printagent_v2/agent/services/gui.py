@@ -461,9 +461,9 @@ class PrintAgentGui:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
         
         # Create tabs
+        self.create_printers_tab()
         self.create_ftp_tab()
         self.create_scan_tab()
-        self.create_printers_tab()
         self.create_camera_tab()
         
         # Load initial data
@@ -591,13 +591,6 @@ class PrintAgentGui:
         main_frame = ttk.Frame(self.printers_tab)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Add Toolbar Frame ABOVE the Treeview
-        toolbar_frame = ttk.Frame(main_frame)
-        toolbar_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
-        ttk.Button(toolbar_frame, text="Cài Driver", command=self.gui_install_driver, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(toolbar_frame, text="Cài Scan", command=self.gui_install_scan, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(toolbar_frame, text="Cài Driver + Scan", command=lambda: self.gui_install_both(), width=20).pack(side=tk.LEFT, padx=5)
-        
         # Action Buttons frame packed first on the right so it gets sizing priority
         btn_frame = ttk.Frame(main_frame, padding="10 0 0 0")
         btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
@@ -606,10 +599,11 @@ class PrintAgentGui:
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        cols = ("IP", "MAC", "Type", "Status", "DevStatus")
+        cols = ("Sel", "IP", "MAC", "Type", "Status", "DevStatus")
         self.printer_tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings")
         
         self.printer_tree.heading("#0", text="Tên Thiết Bị / Địa chỉ nhận")
+        self.printer_tree.heading("Sel", text="Chọn")
         self.printer_tree.heading("IP", text="Địa chỉ IP / Email")
         self.printer_tree.heading("MAC", text="Địa chỉ MAC / FTP / SMB")
         self.printer_tree.heading("Type", text="Hãng/Loại")
@@ -617,6 +611,7 @@ class PrintAgentGui:
         self.printer_tree.heading("DevStatus", text="Trạng thái")
         
         self.printer_tree.column("#0", width=230, anchor=tk.W)
+        self.printer_tree.column("Sel", width=45, anchor=tk.CENTER)
         self.printer_tree.column("IP", width=140, anchor=tk.W)
         self.printer_tree.column("MAC", width=220, anchor=tk.W)
         self.printer_tree.column("Type", width=70, anchor=tk.CENTER)
@@ -630,6 +625,7 @@ class PrintAgentGui:
         self.printer_tree.grid(row=0, column=0, sticky="nsew")
         self.printer_tree.bind("<Button-3>", self.show_printer_context_menu)
         self.printer_tree.bind("<Double-1>", self.on_printer_tree_double_click)
+        self.printer_tree.bind("<Button-1>", self.on_printer_tree_click)
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
         
@@ -637,6 +633,11 @@ class PrintAgentGui:
         tree_frame.columnconfigure(0, weight=1)
         
         # Buttons are packed into the pre-created btn_frame
+        ttk.Button(btn_frame, text="Cài Driver", command=self.gui_install_driver, width=18).pack(pady=5)
+        ttk.Button(btn_frame, text="Cài Scan", command=self.gui_install_scan, width=18).pack(pady=5)
+        ttk.Button(btn_frame, text="Cài Driver + Scan", command=self.gui_install_both, width=18).pack(pady=5)
+        
+        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
         ttk.Button(btn_frame, text="Add Dest (Thêm nhận)", command=self.add_printer_destination, width=18).pack(pady=5)
         ttk.Button(btn_frame, text="Edit Dest (Sửa nhận)", command=self.edit_printer_destination, width=18).pack(pady=5)
@@ -649,28 +650,81 @@ class PrintAgentGui:
         selected = self.printer_tree.focus()
         if not selected:
             return None
-        ip_addr = self.printer_tree.item(selected, "values")[0]
-        for p in self.printers_list:
-            if p["ip"] == ip_addr:
-                return p
+        vals = self.printer_tree.item(selected, "values")
+        if not vals or len(vals) < 2:
+            return None
+        ip_addr = vals[1].strip().lower()
+        p = self.printers_by_ip.get(ip_addr)
+        if p:
+            return {
+                "id": p.id,
+                "ip": p.ip,
+                "printer_type": p.printer_type,
+                "name": p.name,
+                "mac_address": p.mac_address,
+                "status": p.status,
+                "physical_status": p.physical_status,
+                "user": p.user,
+                "password": p.password
+            }
         return None
 
+    def _get_checked_printers(self) -> list[dict]:
+        checked = []
+        for item in self.printer_tree.get_children():
+            vals = self.printer_tree.item(item, "values")
+            if vals and len(vals) >= 2:
+                sel = vals[0]
+                if sel == "☑":
+                    ip_addr = vals[1].strip().lower()
+                    p = self.printers_by_ip.get(ip_addr)
+                    if p:
+                        checked.append({
+                            "id": p.id,
+                            "ip": p.ip,
+                            "printer_type": p.printer_type,
+                            "name": p.name,
+                            "mac_address": p.mac_address,
+                            "status": p.status,
+                            "physical_status": p.physical_status,
+                            "user": p.user,
+                            "password": p.password
+                        })
+        return checked
+
+    def on_printer_tree_click(self, event) -> None:
+        region = self.printer_tree.identify_region(event.x, event.y)
+        if region == "cell":
+            column = self.printer_tree.identify_column(event.x)
+            if column == "#1":
+                item_id = self.printer_tree.identify_row(event.y)
+                if item_id:
+                    vals = list(self.printer_tree.item(item_id, "values"))
+                    if vals:
+                        current_sel = vals[0]
+                        if current_sel == "☑":
+                            vals[0] = "☐"
+                        else:
+                            vals[0] = "☑"
+                        self.printer_tree.item(item_id, values=vals)
+
     def gui_install_driver(self) -> None:
-        printer = self._get_selected_printer()
-        if not printer:
-            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài driver.")
+        printers = self._get_checked_printers()
+        if not printers:
+            messagebox.showwarning("Warning", "Vui lòng check chọn ít nhất một máy in để cài driver.")
             return
         
         import threading
-        def run_driver():
-            self._legacy_install_driver(printer)
-        threading.Thread(target=run_driver, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang tiến hành cài đặt ngầm driver cho máy {printer['ip']}...")
+        def run_drivers():
+            for printer in printers:
+                self._legacy_install_driver(printer)
+        threading.Thread(target=run_drivers, daemon=True).start()
+        messagebox.showinfo("Đang cài đặt", f"Đang tiến hành cài đặt ngầm driver cho {len(printers)} máy in...")
 
     def gui_install_scan(self) -> None:
-        printer = self._get_selected_printer()
-        if not printer:
-            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài scan.")
+        printers = self._get_checked_printers()
+        if not printers:
+            messagebox.showwarning("Warning", "Vui lòng check chọn ít nhất một máy in để cài scan.")
             return
             
         import tkinter.simpledialog as simpledialog
@@ -680,15 +734,16 @@ class PrintAgentGui:
         email = simpledialog.askstring("Input", "Nhập Email (nếu cần):") or ""
         
         import threading
-        def run_scan():
-            self._legacy_install_scan(printer, name, email)
-        threading.Thread(target=run_scan, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình scan ngầm cho máy {printer['ip']}...")
+        def run_scans():
+            for printer in printers:
+                self._legacy_install_scan(printer, name, email)
+        threading.Thread(target=run_scans, daemon=True).start()
+        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình scan ngầm cho {len(printers)} máy in...")
 
     def gui_install_both(self) -> None:
-        printer = self._get_selected_printer()
-        if not printer:
-            messagebox.showwarning("Warning", "Vui lòng chọn máy in để cài đặt.")
+        printers = self._get_checked_printers()
+        if not printers:
+            messagebox.showwarning("Warning", "Vui lòng check chọn ít nhất một máy in để cài đặt.")
             return
             
         import tkinter.simpledialog as simpledialog
@@ -699,10 +754,11 @@ class PrintAgentGui:
         
         import threading
         def run_both():
-            self._legacy_install_driver(printer)
-            self._legacy_install_scan(printer, name, email)
+            for printer in printers:
+                self._legacy_install_driver(printer)
+                self._legacy_install_scan(printer, name, email)
         threading.Thread(target=run_both, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình driver và scan ngầm cho máy {printer['ip']}...")
+        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình driver và scan ngầm cho {len(printers)} máy in...")
 
     def _legacy_install_driver(self, matched_printer: dict) -> None:
         from flask import current_app
@@ -1166,7 +1222,7 @@ class PrintAgentGui:
         for item in self.printer_tree.get_children():
             self.printer_tree.delete(item)
             
-        self.printer_tree.insert("", tk.END, text="Loading printers...", values=("", "", "", "", ""))
+        self.printer_tree.insert("", tk.END, text="Loading printers...", values=("", "", "", "", "", ""))
         
         def run() -> None:
             try:
@@ -1264,17 +1320,17 @@ class PrintAgentGui:
                 "",
                 tk.END,
                 text=p.name,
-                values=(p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
+                values=("☑", p.ip, p.mac_address, p.printer_type.upper(), p.status.capitalize(), p.physical_status)
             )
             self.printer_node_ids[p.ip.lower()] = node_id
             # Insert a "Connecting/Loading..." child row
             if p.printer_type.lower() == "ricoh":
-                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="Loading address list...", values=("", "", "", "", "", ""))
             else:
-                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", "", ""))
+                self.printer_tree.insert(node_id, tk.END, text="(Scan destinations unsupported for this brand)", values=("", "", "", "", "", ""))
                 
         if not unique_printers:
-            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", "", ""))
+            self.printer_tree.insert("", tk.END, text="No printers with IP found", values=("", "", "", "", "", ""))
             
     def start_address_book_fetching(self, unique_printers: list[Printer], ricoh_service: Any) -> None:
         def run_executor():
@@ -1331,7 +1387,7 @@ class PrintAgentGui:
                 
             has_valid_dest = True
             parent_values = self.printer_tree.item(node_id, "values")
-            printer_ip = parent_values[0] if parent_values else ""
+            printer_ip = parent_values[1] if parent_values else ""
             entry_id = addr.get("entry_id", "")
             item_iid = f"dest_{printer_ip.lower()}_{reg_no}_{entry_id}"
             
@@ -1341,7 +1397,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=(dest_val, "", "", "", "")
+                    values=("", dest_val, "", "", "", "")
                 )
             elif dest_type in ("FTP", "SMB", "Folder"):
                 self.printer_tree.insert(
@@ -1349,7 +1405,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=("", dest_val, "", "", "")
+                    values=("", "", dest_val, "", "", "")
                 )
             else:
                 self.printer_tree.insert(
@@ -1357,7 +1413,7 @@ class PrintAgentGui:
                     tk.END,
                     iid=item_iid,
                     text=f"[{dest_type}] {name}",
-                    values=("—", "—", "", "", "")
+                    values=("", "—", "—", "", "", "")
                 )
                     
         if not has_valid_dest:
@@ -1365,7 +1421,7 @@ class PrintAgentGui:
                 node_id,
                 tk.END,
                 text="(No scan/ftp/folder destinations)",
-                values=("", "", "", "", "")
+                values=("", "", "", "", "", "")
             )
             
     def update_printer_destinations_error(self, node_id: str, error_msg: str) -> None:
@@ -1377,7 +1433,7 @@ class PrintAgentGui:
             node_id,
             tk.END,
             text=f"(Error: {error_msg})",
-            values=("", "", "", "", "")
+            values=("", "", "", "", "", "")
         )
         
     def add_printer_destination(self, selected: str = None) -> None:
@@ -1395,7 +1451,7 @@ class PrintAgentGui:
             messagebox.showwarning("Warning", "Could not find selected printer details.")
             return
             
-        printer_ip = values[0]
+        printer_ip = values[1]
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
             messagebox.showerror("Error", f"Printer with IP {printer_ip} is not loaded.")
@@ -1483,8 +1539,8 @@ class PrintAgentGui:
             name = item_text
             
         dest_values = self.printer_tree.item(selected, "values")
-        email = dest_values[0] if dtype == "Email" else ""
-        folder = dest_values[1] if dtype != "Email" else ""
+        email = dest_values[1] if dtype == "Email" else ""
+        folder = dest_values[2] if dtype != "Email" else ""
         
         progress = ProgressDialog(self.root, "Connecting to Copier", "Fetching destination details from Ricoh printer...")
         
@@ -1858,7 +1914,7 @@ class PrintAgentGui:
             # Parent printer node
             values = self.printer_tree.item(iid, "values")
             if values:
-                printer_ip = values[0]
+                printer_ip = values[1]
                 printer = self.printers_by_ip.get(printer_ip.lower())
                 if printer and printer.printer_type.lower() == "ricoh":
                     menu.add_command(label="Add Email Dest (Thêm nhận Email)", command=lambda: self.add_email_destination_shortcut(iid))
@@ -1878,7 +1934,7 @@ class PrintAgentGui:
         if not values:
             return
             
-        printer_ip = values[0]
+        printer_ip = values[1]
         printer = self.printers_by_ip.get(printer_ip.lower())
         if not printer:
             return
@@ -2546,6 +2602,14 @@ def show_gui_window(app_version: str) -> None:
         from pathlib import Path
         from agent.services.runtime import fresh_pyinstaller_env
         
+        # Write show signal to GUI
+        try:
+            signal_file = Path("storage/data/show_gui.signal")
+            signal_file.parent.mkdir(parents=True, exist_ok=True)
+            signal_file.write_text("show", encoding="utf-8")
+        except Exception:
+            pass
+            
         if getattr(sys, "frozen", False):
             exe_path = sys.executable
             cmd = [exe_path, "--mode", "gui"]
@@ -2610,6 +2674,32 @@ def run_gui_standalone(app_version: str) -> None:
                 pass
         
         PrintAgentGui(root, app_version)
+        
+        # Override WM_DELETE_WINDOW to hide instead of exit
+        def on_close():
+            root.withdraw()
+        root.protocol("WM_DELETE_WINDOW", on_close)
+
+        # Check for signal file to show/exit GUI
+        def check_signal():
+            try:
+                signal_file = Path("storage/data/show_gui.signal")
+                if signal_file.exists():
+                    cmd = signal_file.read_text(encoding="utf-8").strip()
+                    if cmd == "show":
+                        signal_file.unlink()
+                        root.deiconify()
+                        root.lift()
+                        root.focus_force()
+                    elif cmd == "exit":
+                        signal_file.unlink()
+                        root.destroy()
+                        return
+            except Exception:
+                pass
+            original_after(200, check_signal)
+
+        original_after(200, check_signal)
         
         # Center window on load with width at 90vw (90% of screen width)
         try:
