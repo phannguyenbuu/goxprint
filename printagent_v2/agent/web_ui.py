@@ -202,20 +202,69 @@ def register_ui_routes(app):
                                 best_match = drv_item
                                 
                         if best_match and best_score > 0:
-                            sub_drivers = best_match.get("drivers") or []
-                            if sub_drivers:
-                                selected_drv = sub_drivers[0]
-                                for sd in sub_drivers:
-                                    if "pcl" in sd.get("name", "").lower():
-                                        selected_drv = sd
-                                        break
-                                driver_name = selected_drv.get("name")
-                                driver_url = selected_drv.get("url")
+                            # Read driver_preference list from settings.json
+                            pref_str = config.get_string("polling.driver_preference", "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps")
+                            pref_list = [p.strip().lower() for p in pref_str.split(";") if p.strip()]
+
+                            if brand == "ricoh":
+                                # Ricoh: drivers is a dict {"Driver Name": "URL"}
+                                sub_drivers = best_match.get("drivers") or {}
+                                if sub_drivers:
+                                    selected_key = None
+                                    for pref in pref_list:
+                                        for key in sub_drivers.keys():
+                                            if pref in key.lower():
+                                                selected_key = key
+                                                break
+                                        if selected_key:
+                                            break
+                                    if not selected_key:
+                                        selected_key = list(sub_drivers.keys())[0]
+                                    driver_name = selected_key
+                                    driver_url = sub_drivers[selected_key]
+                            elif brand == "toshiba":
+                                # Toshiba: drivers is a list of dicts with download_url
+                                sub_drivers = best_match.get("drivers") or []
+                                if sub_drivers:
+                                    selected_drv = None
+                                    for pref in pref_list:
+                                        for sd in sub_drivers:
+                                            sd_name = sd.get("name") or sd.get("description") or ""
+                                            if pref in sd_name.lower():
+                                                selected_drv = sd
+                                                break
+                                        if selected_drv:
+                                            break
+                                    if not selected_drv:
+                                        selected_drv = sub_drivers[0]
+                                    driver_name = selected_drv.get("name") or model
+                                    driver_url = selected_drv.get("download_url") or selected_drv.get("url")
+                            elif brand == "fujifilm":
+                                # Fujifilm: uses all_links list
+                                all_links = best_match.get("all_links") or []
+                                if all_links:
+                                    selected_url = None
+                                    for pref in pref_list:
+                                        for link in all_links:
+                                            if pref in link.lower():
+                                                selected_url = link
+                                                break
+                                        if selected_url:
+                                            break
+                                    if not selected_url:
+                                        selected_url = all_links[0]
+                                    driver_name = model
+                                    driver_url = selected_url
                 except Exception as e:
                     import logging
                     logging.warning("Failed to resolve driver from catalog: %s", e)
                 
                 try:
+                    if not driver_url:
+                        pref_str = config.get_string("polling.driver_preference", "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps")
+                        matched_model = best_match.get("model") if (best_match and isinstance(best_match, dict)) else "None"
+                        raise Exception(f"Thiếu link driver. Khớp model: {matched_model}. Ưu tiên: {pref_str}")
+
                     bridge._handle_install_driver(
                         command_id=0,
                         printer_ip=ip,
@@ -227,6 +276,13 @@ def register_ui_routes(app):
                 except Exception as e:
                     import logging
                     logging.error("Failed executing local install driver: %s", e)
+                    try:
+                        from pathlib import Path
+                        status_file = Path("storage/data/status_message.txt")
+                        status_file.parent.mkdir(parents=True, exist_ok=True)
+                        status_file.write_text(f"❌ LỖI: {str(e)}", encoding="utf-8")
+                    except Exception:
+                        pass
                     
             threading.Thread(target=run_task, daemon=True).start()
             return jsonify({"ok": True})

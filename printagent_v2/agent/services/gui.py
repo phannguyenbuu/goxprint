@@ -742,7 +742,7 @@ class PrintAgentGui:
             for printer in printers:
                 self._legacy_install_driver(printer)
         threading.Thread(target=run_drivers, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang tiến hành cài đặt ngầm driver cho {len(printers)} máy in...")
+        self.update_status_bar(f"Đang tiến hành cài đặt driver cho {len(printers)} máy in...")
 
     def gui_install_scan(self) -> None:
         printers = self._get_checked_printers()
@@ -761,7 +761,7 @@ class PrintAgentGui:
             for printer in printers:
                 self._legacy_install_scan(printer, name, email)
         threading.Thread(target=run_scans, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình scan ngầm cho {len(printers)} máy in...")
+        self.update_status_bar(f"Đang cấu hình scan cho {len(printers)} máy in...")
 
     def gui_install_both(self) -> None:
         printers = self._get_checked_printers()
@@ -781,7 +781,7 @@ class PrintAgentGui:
                 self._legacy_install_driver(printer)
                 self._legacy_install_scan(printer, name, email)
         threading.Thread(target=run_both, daemon=True).start()
-        messagebox.showinfo("Đang cài đặt", f"Đang cấu hình driver và scan ngầm cho {len(printers)} máy in...")
+        self.update_status_bar(f"Đang cấu hình driver và scan cho {len(printers)} máy in...")
 
     def _legacy_install_driver(self, matched_printer: dict) -> None:
         local_port = self.config.get_int("web.port", 9173)
@@ -1150,33 +1150,10 @@ class PrintAgentGui:
         
         def run() -> None:
             try:
-                # 1. Fetch printers from cache, API, and local
-                status_file = Path("storage/data/printers_status.json")
+                # 1. Fetch printers directly from API and local (no JSON cache)
                 printer_objs = []
                 
-                # Cache first
-                if status_file.exists():
-                    try:
-                        import json
-                        with status_file.open("r", encoding="utf-8") as f:
-                            data = json.load(f)
-                        if isinstance(data, list):
-                            for item in data:
-                                ip = str(item.get("ip", "")).strip()
-                                if ip:
-                                    p = Printer(
-                                        name=item.get("name", ""),
-                                        ip=ip,
-                                        mac_address=item.get("mac_address", ""),
-                                        printer_type=item.get("printer_type", ""),
-                                        status=item.get("status", "offline"),
-                                        physical_status=item.get("physical_status", "Unknown"),
-                                    )
-                                    printer_objs.append(p)
-                    except Exception as err:
-                        LOGGER.warning("Failed to load printers_status.json: %s", err)
-                        
-                # API and local next (deduplicated by IP)
+                # API first
                 api_client = APIClient(self.config)
                 try:
                     api_printers = api_client.get_printers()
@@ -1186,6 +1163,7 @@ class PrintAgentGui:
                 except Exception:
                     pass
                     
+                # Local next
                 if sys.platform == "win32":
                     try:
                         from agent.web_discovery import _load_local_windows_printers
@@ -1204,14 +1182,44 @@ class PrintAgentGui:
                     except Exception:
                         pass
                         
-                # Filter printers: only those with IP, and deduplicate
+                # Filter printers: only those with IP, and deduplicate by IP
                 seen_ips = set()
-                unique_printers = []
+                dedup_printers = []
                 for p in printer_objs:
                     normalized_ip = p.ip.strip()
                     if normalized_ip and normalized_ip.lower() not in seen_ips:
                         seen_ips.add(normalized_ip.lower())
-                        unique_printers.append(p)
+                        dedup_printers.append(p)
+
+                # Check online status in parallel to filter only "real" (online/reachable) printers
+                def check_printer_online(ip: str) -> bool:
+                    import socket
+                    # Try connecting to standard printer/web ports with short timeout
+                    for port in [80, 443, 9100]:
+                        try:
+                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            s.settimeout(0.5)
+                            s.connect((ip, port))
+                            s.close()
+                            return True
+                        except Exception:
+                            pass
+                    return False
+
+                def filter_online_printer(p: Printer) -> Printer | None:
+                    if check_printer_online(p.ip):
+                        p.status = "online"
+                        p.physical_status = "Online"
+                        return p
+                    return None
+
+                unique_printers = []
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(16, len(dedup_printers) + 1)) as executor:
+                    results = executor.map(filter_online_printer, dedup_printers)
+                    for r in results:
+                        if r is not None:
+                            unique_printers.append(r)
                         
                 # Update UI on main thread to clear loading row and show printer parents
                 self.root.after(0, lambda: self.populate_printer_parents(unique_printers))

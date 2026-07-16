@@ -3354,6 +3354,13 @@ Write-Output 'INSTALLED'
                 self._post_command_progress(command_id, text)
             except Exception:
                 pass
+            try:
+                # Write to status_message.txt for GUI status bar updates
+                status_file = Path("storage/data/status_message.txt")
+                status_file.parent.mkdir(parents=True, exist_ok=True)
+                status_file.write_text(text, encoding="utf-8")
+            except Exception:
+                pass
 
         def find_best_driver_match(all_drivers: list[str], brand: str, model: str) -> str | None:
             brand_lower = brand.lower() if brand else ""
@@ -3692,18 +3699,8 @@ Write-Output 'INSTALLED'
                                 step_results.append("Printer: LỖI")
 
                         if add_ok:
-                            _progress(f"[5/5] 🚀 Đang mở giao diện hàng đợi và thuộc tính cho: {printer_queue_name}")
-                            try:
-                                subprocess.Popen(
-                                    f'rundll32.exe printui.dll,PrintUIEntry /o /n "{printer_queue_name}"',
-                                    shell=True
-                                )
-                                subprocess.Popen(
-                                    f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_queue_name}"',
-                                    shell=True
-                                )
-                            except Exception as ui_exc:
-                                LOGGER.warning("Failed to open printer interface panels: %s", ui_exc)
+                            # Disabled opening Print Queue and Printer Properties GUI to keep installation silent
+                            pass
 
                     except Exception as add_exc:
                         _progress(f"[5/5] ❌ Lỗi: {add_exc}")
@@ -4350,31 +4347,8 @@ Write-Output 'INSTALLED'
                 with ThreadPoolExecutor(max_workers=min(16, len(printers))) as executor:
                     executor.map(_process_single_printer, printers)
             
-            # Save printer online states to local file for GUI
-            try:
-                status_list = []
-                for printer in printers:
-                    ip = str(printer.ip or "").strip()
-                    if not ip:
-                        continue
-                    is_online = self._printer_online_states.get(ip, False)
-                    phys_status = self._printer_physical_statuses.get(ip, "Unknown") if is_online else "Offline"
-                    status_list.append({
-                        "name": printer.name,
-                        "ip": printer.ip,
-                        "mac_address": printer.mac_address,
-                        "printer_type": printer.printer_type,
-                        "status": "online" if is_online else "offline",
-                        "physical_status": phys_status,
-                        "is_online": is_online
-                    })
-                
-                status_file = Path("storage/data/printers_status.json")
-                status_file.parent.mkdir(parents=True, exist_ok=True)
-                with status_file.open("w", encoding="utf-8") as f:
-                    json.dump(status_list, f, indent=2, ensure_ascii=False)
-            except Exception as write_err:
-                LOGGER.warning("Failed to write printers_status.json: %s", write_err)
+            # Disabled saving printer states to local JSON cache to ensure live queries only
+            pass
 
             LOGGER.info(
                 "Polling cycle done: total=%s ricoh=%s sent=%s failed=%s",

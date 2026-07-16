@@ -655,6 +655,85 @@ New-CimInstance -ClassName Win32_PageFileSetting -Property @{{Name="{drive}pagef
             if ps_file.exists():
                 try: os.remove(ps_file)
                 except: pass
+    def convert_cad_to_pdf(self, cad_path: Path, pdf_path: Path):
+        import subprocess
+        import os
+        import glob
+        
+        accore_exe = None
+        paths = [
+            r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe",
+            r"C:\Program Files\Autodesk\AutoCAD 2023\accoreconsole.exe",
+            r"C:\Program Files\Autodesk\AutoCAD 2024\accoreconsole.exe",
+            r"C:\Program Files\Autodesk\AutoCAD 2025\accoreconsole.exe",
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                accore_exe = p
+                break
+        if not accore_exe:
+            found = glob.glob(r"C:\Program Files\Autodesk\AutoCAD *\accoreconsole.exe")
+            if found:
+                accore_exe = found[0]
+                
+        if not accore_exe:
+            raise FileNotFoundError("Không tìm thấy accoreconsole.exe của AutoCAD trên hệ thống! Vui lòng cài đặt AutoCAD.")
+            
+        logger.info(f"Sử dụng AutoCAD Core Console tại: {accore_exe}")
+        
+        # Command sequence matching AutoCAD's prompts
+        commands = [
+            "FILEDIA",
+            "0",
+            "-PLOT",
+            "y",
+            "Model",
+            "DWG To PDF.pc3",
+            "ISO full bleed A3 (420.00 x 297.00 MM)",
+            "Millimeters",
+            "Landscape",
+            "No",
+            "Extents",
+            "Fit",
+            "Center",
+            "Yes",
+            ".",  # Use '.' for no plot style (color)
+            "Yes",
+            "As",  # Shade plot: As displayed
+            str(pdf_path),  # Output PDF path
+            "No",  # Save changes to page setup?
+            "Yes",  # Proceed with plot?
+            "quit",
+            "y"
+        ]
+        
+        full_input = "\n".join(commands) + "\n"
+        
+        creationflags = 0
+        if sys.platform == 'win32':
+            creationflags = subprocess.CREATE_NO_WINDOW
+            
+        try:
+            logger.info(f"Đang chạy lệnh AutoCAD -PLOT cho tệp: {cad_path.name} -> {pdf_path.name}")
+            proc = subprocess.Popen(
+                [accore_exe, "/i", str(cad_path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=creationflags
+            )
+            stdout, stderr = proc.communicate(input=full_input, timeout=45)
+            
+            if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+                logger.info(f"Chuyển đổi CAD sang PDF thành công: {pdf_path.name} ({os.path.getsize(pdf_path)} bytes)")
+                return True
+            else:
+                logger.error(f"Lỗi AutoCAD output:\n{stdout}\n{stderr}")
+                raise RuntimeError("AutoCAD không tạo ra tệp PDF kết quả. Có thể bản vẽ trống hoặc bị lỗi.")
+        except subprocess.TimeoutExpired:
+            logger.error("AutoCAD Core Console bị treo (Timeout).")
+            raise RuntimeError("AutoCAD Core Console bị treo (Timeout) khi chuyển đổi tệp CAD.")
             
     def process_job(self, job):
         job_id = job.get("id")
@@ -682,26 +761,69 @@ New-CimInstance -ClassName Win32_PageFileSetting -Property @{{Name="{drive}pagef
         preview_path = temp_dir / f"{job_id}.jpg"
         
         try:
-            # Step 1: Download the PDF file
+            # Step 1: Download the original file
             logger.info("Đang tải tệp tin gốc...")
             res = requests.get(download_full_url, timeout=60)
             res.raise_for_status()
-            pdf_path.write_bytes(res.content)
             
-            # Step 2: Render
-            logger.info("Bắt đầu xử lý Vector Render...")
-            success = self.render_pdf_to_tiff(
-                pdf_path=pdf_path,
-                tiff_path=tiff_path,
-                rendered_pdf_path=rendered_pdf_path,
-                preview_path=preview_path,
-                dpi=dpi,
-                colorspace=colorspace,
-                compression=compression,
-                profile=profile,
-                max_pixels=max_pixels,
-                convert_to_pdf=convert_to_pdf
-            )
+            ext = Path(filename).suffix.lower()
+            if ext in [".dxf", ".dwg"]:
+                cad_input_path = temp_dir / f"{job_id}{ext}"
+                cad_input_path.write_bytes(res.content)
+                logger.info(f"Phát hiện định dạng CAD ({ext}). Đang chuyển đổi sang PDF bằng AutoCAD...")
+                self.convert_cad_to_pdf(cad_input_path, pdf_path)
+                
+                # If they want PDF output, skip rasterization and preserve vector PDF
+                if convert_to_pdf:
+                    logger.info("Chế độ xuất PDF: Bỏ qua bước chuyển ảnh (rasterize), giữ nguyên vector PDF...")
+                    rendered_pdf_path.write_bytes(pdf_path.read_bytes())
+                    
+                    # Generate a quick preview image for the UI
+                    try:
+                        logger.info("Tạo ảnh xem trước (JPEG preview) từ vector PDF...")
+                        doc = fitz.open(str(pdf_path))
+                        page = doc[0]
+                        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), colorspace=fitz.csRGB)
+                        img = Image.frombuffer("RGB", [pix.width, pix.height], pix.samples_mv, "raw", "RGB", 0, 1)
+                        img.thumbnail((800, 600))
+                        img.save(str(preview_path), "JPEG", quality=80)
+                        doc.close()
+                    except Exception as pe:
+                        logger.warning(f"Không thể tạo ảnh preview: {pe}")
+                        
+                    success = True
+                else:
+                    # They want TIFF output, proceed with standard rasterization
+                    logger.info("Chế độ xuất TIFF: Bắt đầu xử lý Vector Render sang TIFF...")
+                    success = self.render_pdf_to_tiff(
+                        pdf_path=pdf_path,
+                        tiff_path=tiff_path,
+                        rendered_pdf_path=rendered_pdf_path,
+                        preview_path=preview_path,
+                        dpi=dpi,
+                        colorspace=colorspace,
+                        compression=compression,
+                        profile=profile,
+                        max_pixels=max_pixels,
+                        convert_to_pdf=convert_to_pdf
+                    )
+            else:
+                pdf_path.write_bytes(res.content)
+                
+                # Step 2: Standard PDF Render
+                logger.info("Bắt đầu xử lý Vector Render...")
+                success = self.render_pdf_to_tiff(
+                    pdf_path=pdf_path,
+                    tiff_path=tiff_path,
+                    rendered_pdf_path=rendered_pdf_path,
+                    preview_path=preview_path,
+                    dpi=dpi,
+                    colorspace=colorspace,
+                    compression=compression,
+                    profile=profile,
+                    max_pixels=max_pixels,
+                    convert_to_pdf=convert_to_pdf
+                )
             
             if success:
                 logger.info("Render hoàn thành. Đang tải kết quả lên server...")
@@ -742,6 +864,14 @@ New-CimInstance -ClassName Win32_PageFileSetting -Property @{{Name="{drive}pagef
         finally:
             # Clean up local temporary files
             for p in [pdf_path, tiff_path, rendered_pdf_path, preview_path]:
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+            # Also clean up any CAD files
+            for ext in [".dxf", ".dwg"]:
+                p = temp_dir / f"{job_id}{ext}"
                 if p.exists():
                     try:
                         p.unlink()

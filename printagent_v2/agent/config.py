@@ -56,6 +56,7 @@ class AppConfig:
                         "scan_recursive": True,
                         "scan_auto_open_file": True,
                         "scan_auto_open_dir": True,
+                        "driver_preference": "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps",
                     },
                     "modules": {
                         "ricoh": {
@@ -111,6 +112,9 @@ class AppConfig:
                             changed = True
                         if "scan_auto_open_dir" not in polling_data:
                             polling_data["scan_auto_open_dir"] = True
+                            changed = True
+                        if "driver_preference" not in polling_data:
+                            polling_data["driver_preference"] = "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps"
                             changed = True
                     
                     if changed:
@@ -216,6 +220,7 @@ class AppConfig:
                 "scan_recursive": True,
                 "scan_auto_open_file": True,
                 "scan_auto_open_dir": True,
+                "driver_preference": "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps",
             },
             "modules": {
                 "ricoh": {
