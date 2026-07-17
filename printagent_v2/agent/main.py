@@ -372,12 +372,8 @@ def main() -> int:
                 val = sys.argv[i + 1]
                 if val in ("", '""', "''"):
                     is_ftp_worker = True
-                elif val == "gui":
-                    is_gui_mode = True
             elif arg == '--mode=""' or arg == "--mode=''":
                 is_ftp_worker = True
-            elif arg == '--mode=gui':
-                is_gui_mode = True
 
         log_debug(f"is_ftp_worker: {is_ftp_worker}, is_gui_mode: {is_gui_mode}. Setting up logging...")
         stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
@@ -608,10 +604,7 @@ def main() -> int:
                 return 0
 
             if args.mode == "gui":
-                log_debug("Running standalone GUI mode...")
-                from agent.services.gui import run_gui_standalone
-                run_gui_standalone(updater.current_version)
-                log_debug("Standalone GUI mode finished.")
+                log_debug("GUI mode has been removed.")
                 return 0
      
             log_debug("Running in API client / Services mode...")

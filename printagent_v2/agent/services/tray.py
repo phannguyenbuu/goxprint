@@ -157,32 +157,19 @@ class TrayController:
             LOGGER.warning("Failed to clear update notice: %s", exc)
 
     def _show(self) -> None:
-        LOGGER.info("Tray show requested (opening GUI window)")
-        try:
-            from agent.services.gui import show_gui_window
-            show_gui_window(self.app_version)
-        except Exception as exc:
-            LOGGER.exception("Failed to launch GUI: %s", exc)
-            target = self.url.strip()
-            if target:
+        LOGGER.info("Tray show requested (opening Web UI in browser)")
+        target = self.url.strip()
+        if target:
+            try:
                 webbrowser.open_new_tab(target)
-
-
+            except Exception as exc:
+                LOGGER.exception("Failed to open Web UI in browser: %s", exc)
 
     def _close(self) -> None:
         if self._closed:
             return
         self._closed = True
         LOGGER.info("Tray close requested")
-        
-        # Write exit signal to GUI process
-        try:
-            signal_file = Path("storage/data/show_gui.signal")
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            signal_file.write_text("exit", encoding="utf-8")
-        except Exception:
-            pass
-            
         if self.stop_event is not None:
             self.stop_event.set()
         if self._hwnd and user32:
