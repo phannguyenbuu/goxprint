@@ -275,8 +275,6 @@ class TrayController:
         if not menu:
             return
         try:
-            user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show")
-            user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
             user32.AppendMenuW(menu, MF_STRING, ID_CLOSE, "Quit (Thoát)")
             
             user32.SetForegroundWindow(self._hwnd)
