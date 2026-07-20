@@ -1606,6 +1606,28 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         
         return success, error_msg
 
+    def _update_live_camera_recording_state(agent_uid: str, ip: str, is_recording: bool):
+        import json
+        from pathlib import Path
+        live_file = Path(f"storage/live_cameras_{agent_uid}.json")
+        if live_file.exists():
+            try:
+                cams = []
+                with open(live_file, "r", encoding="utf-8") as f:
+                    cams = json.load(f)
+                if isinstance(cams, list):
+                    updated = False
+                    for item in cams:
+                        if item.get("ip") == ip:
+                            item["is_recording"] = is_recording
+                            updated = True
+                            break
+                    if updated:
+                        with open(live_file, "w", encoding="utf-8") as f:
+                            json.dump(cams, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                LOGGER.error("Failed to update live cameras JSON state: %s", e)
+
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/start")
     def start_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
         from models import CameraConfig
@@ -1623,6 +1645,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 "prefix": cfg.prefix
             }
             camera_name = cfg.camera_name
+            camera_ip = cfg.ip
             
         success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
         if success:
@@ -1631,6 +1654,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if cfg:
                     cfg.is_recording = True
                     session.commit()
+            _update_live_camera_recording_state(agent_uid, camera_ip, True)
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": err}), 504
 
@@ -1642,6 +1666,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             if not cfg:
                 return jsonify({"ok": False, "error": "Camera config not found"}), 404
             camera_name = cfg.camera_name
+            camera_ip = cfg.ip
             
         success, err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
         if success:
@@ -1650,6 +1675,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if cfg:
                     cfg.is_recording = False
                     session.commit()
+            _update_live_camera_recording_state(agent_uid, camera_ip, False)
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": err}), 504
 

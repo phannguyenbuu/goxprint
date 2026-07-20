@@ -2103,6 +2103,16 @@ if ($node) {{ $node }}
                     camera_name = f"Camera {ip_addr}"
                     rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
                     
+                    is_rec = False
+                    for cfg_item in configs:
+                        cfg_rtsp = cfg_item.get("rtsp_url", "")
+                        cfg_ip_match = re.search(r'rtsp://([^:/]+)', cfg_rtsp)
+                        if (cfg_ip_match and cfg_ip_match.group(1) == ip_addr) or cfg_item.get("camera_name") == camera_name:
+                            is_rec = cm.get_status(cfg_item.get("camera_name")).get("running", False)
+                            camera_name = cfg_item.get("camera_name")
+                            rtsp_url = cfg_rtsp
+                            break
+                    
                     cameras_payload.append({
                         "ip": ip_addr,
                         "mac_address": mac_addr,
@@ -2110,7 +2120,8 @@ if ($node) {{ $node }}
                         "manufacturer": info.get("manufacturer", "Generic"),
                         "model": info.get("model", "Camera IP"),
                         "rtsp_url": rtsp_url,
-                        "is_online": True
+                        "is_online": True,
+                        "is_recording": is_rec
                     })
                 
                 # Check status of configured cameras not found in discovery
@@ -2123,6 +2134,7 @@ if ($node) {{ $node }}
                             is_online, _ = cm.test_rtsp_connection(rtsp)
                             mac_addr = get_mac_address(ip_addr)
                             info = get_onvif_info(ip_addr)
+                            is_rec = cm.get_status(c.get("camera_name")).get("running", False)
                             cameras_payload.append({
                                 "ip": ip_addr,
                                 "mac_address": mac_addr,
@@ -2130,7 +2142,8 @@ if ($node) {{ $node }}
                                 "manufacturer": info.get("manufacturer", "Generic"),
                                 "model": info.get("model", "Camera IP"),
                                 "rtsp_url": rtsp,
-                                "is_online": is_online
+                                "is_online": is_online,
+                                "is_recording": is_rec
                             })
                             
                 self._last_discovered_cameras = cameras_payload
