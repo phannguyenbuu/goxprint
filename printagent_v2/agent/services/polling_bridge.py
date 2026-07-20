@@ -434,6 +434,13 @@ class PollingBridge:
 
     @staticmethod
     def _resolve_local_ip() -> str:
+        import time
+        now = time.time()
+        cached_ip = getattr(PollingBridge._resolve_local_ip, "_cached_ip", "")
+        cached_time = getattr(PollingBridge._resolve_local_ip, "_cached_time", 0.0)
+        if cached_ip and (now - cached_time < 15.0):
+            return cached_ip
+
         candidates: list[str] = []
 
         def _push(value: str) -> None:
@@ -463,34 +470,37 @@ class PollingBridge:
             except Exception:  # noqa: BLE001
                 continue
 
-        try:
-            script = r"""
+        # If we already have a valid unicast IP, skip running the slow powershell command!
+        has_unicast = any(PollingBridge._ipv4_scope_score(c) >= 200 for c in candidates)
+        if not has_unicast:
+            try:
+                script = r"""
 $ErrorActionPreference='SilentlyContinue'
 Get-NetIPAddress -AddressFamily IPv4 |
   Where-Object { $_.IPAddress -and $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -ne '0.0.0.0' } |
   Select-Object IPAddress,InterfaceAlias,PrefixOrigin,AddressState |
   ConvertTo-Json -Depth 4
 """
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                check=True,
-                **no_window_subprocess_kwargs(),
-            )
-            payload = json.loads(result.stdout or "[]")
-            if isinstance(payload, dict):
-                payload = [payload]
-            if isinstance(payload, list):
-                for item in payload:
-                    if not isinstance(item, dict):
-                        continue
-                    ip = str(item.get("IPAddress", "") or "").strip()
-                    if ip:
-                        _push(ip)
-        except Exception:  # noqa: BLE001
-            pass
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    check=True,
+                    **no_window_subprocess_kwargs(),
+                )
+                payload = json.loads(result.stdout or "[]")
+                if isinstance(payload, dict):
+                    payload = [payload]
+                if isinstance(payload, list):
+                    for item in payload:
+                        if not isinstance(item, dict):
+                            continue
+                        ip = str(item.get("IPAddress", "") or "").strip()
+                        if ip:
+                            _push(ip)
+            except Exception:  # noqa: BLE001
+                pass
 
         best_ip = ""
         best_score = -1
@@ -499,7 +509,11 @@ Get-NetIPAddress -AddressFamily IPv4 |
             if score > best_score:
                 best_ip = candidate
                 best_score = score
-        return best_ip or ""
+
+        ret_ip = best_ip or ""
+        PollingBridge._resolve_local_ip._cached_ip = ret_ip
+        PollingBridge._resolve_local_ip._cached_time = now
+        return ret_ip
 
     def polling_when_ip_change(self) -> None:
         if not self._ip_change_lock.acquire(blocking=False):
@@ -763,6 +777,35 @@ Get-NetNeighbor -AddressFamily IPv4 |
             self._ip_change_thread = threading.Thread(target=self._ip_change_polling_loop, daemon=True, name="polling-ip-change")
             self._ip_change_thread.start()
             LOGGER.info("IP change polling thread initialized")
+
+        # Auto-resume camera recordings on startup
+        try:
+            from agent.services.camera_manager import CameraManager
+            cm = CameraManager()
+            local_cfg_path = Path("storage/camera_configs.json")
+            if local_cfg_path.exists():
+                with local_cfg_path.open("r", encoding="utf-8") as f:
+                    configs = json.load(f)
+                import tempfile
+                default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
+                output_dir = self._config.get_string("camera.output_dir", default_out)
+                for cfg in configs:
+                    camera_name = cfg.get("camera_name")
+                    rtsp_url = cfg.get("rtsp_url")
+                    if camera_name and rtsp_url:
+                        LOGGER.info("[PollingBridge] Auto-resuming camera recording for: %s", camera_name)
+                        cm.start_recording(
+                            camera_name=camera_name,
+                            rtsp_url=rtsp_url,
+                            output_dir=output_dir,
+                            segment_duration=cfg.get("segment_duration", 60),
+                            video_codec=cfg.get("video_codec", "copy"),
+                            audio_codec=cfg.get("audio_codec", "copy"),
+                            no_audio=cfg.get("no_audio", True),
+                            prefix=cfg.get("prefix", "rec")
+                        )
+        except Exception as e:
+            LOGGER.error("Failed to auto-resume camera recordings on startup: %s", e)
 
         self._last_started_at = self._now_iso()
         return True, "Polling started"
@@ -1232,6 +1275,12 @@ if ($node) {{ $node }}
 
         The agent no longer generates legacy temporary LAN identifiers.
         """
+        import time
+        now = time.time()
+        if hasattr(self, "_last_lan_info_time") and (now - self._last_lan_info_time < 60.0):
+            if getattr(self, "_cached_lan_uid", ""):
+                return self._cached_lan_uid, getattr(self, "_cached_signature", "")
+
         gateway_ip = self._resolve_default_gateway()
         gateway_mac = self._resolve_gateway_mac(gateway_ip) if gateway_ip else ""
         subnet = self._subnet_hint(local_ip)
@@ -1251,14 +1300,21 @@ if ($node) {{ $node }}
         signature = "|".join(lan_core_parts)
 
         composed_uid = self._compose_lan_uid(lead, gateway_mac, gateway_ip)
+        ret_uid = ""
         if composed_uid:
             self._resolved_lan_uid = composed_uid
-            return composed_uid, signature
+            ret_uid = composed_uid
+        elif self._resolved_lan_uid:
+            ret_uid = self._resolved_lan_uid
 
-        if self._resolved_lan_uid:
-            return self._resolved_lan_uid, signature
+        if not ret_uid:
+            ret_uid = ""
 
-        return "", signature
+        self._last_lan_info_time = now
+        self._cached_lan_uid = ret_uid
+        self._cached_signature = signature
+
+        return ret_uid, signature
 
     def _polling_base_url(self) -> str:
         raw = self._config.get_string("polling.url").strip()
@@ -2616,13 +2672,23 @@ if ($node) {{ $node }}
                 short_name = custom_name
                 LOGGER.info("[PollingBridge] Adding scan destination for name=%s email=%s ftp_site_name=%s on printer=%s", custom_name, email, short_name, printer.ip)
 
-                # Create FTP site + register address book entry on copier
-                result = self._ricoh_service.setup_scan_destination(
-                    printer=printer,
-                    username=custom_name,
-                    ftp_site_name=short_name,
-                    email=email,
-                )
+                is_toshiba = self._printer_type(printer.printer_type) == "toshiba"
+                if is_toshiba:
+                    if self._toshiba_service is None:
+                        raise RuntimeError("Toshiba Service is not initialized on the agent")
+                    result = self._toshiba_service.setup_scan_destination(
+                        printer=printer,
+                        username=custom_name,
+                        email=email,
+                    )
+                else:
+                    # Create FTP site + register address book entry on copier
+                    result = self._ricoh_service.setup_scan_destination(
+                        printer=printer,
+                        username=custom_name,
+                        ftp_site_name=short_name,
+                        email=email,
+                    )
                 if not result.get("ok"):
                     raise RuntimeError(result.get("error") or "setup_scan_destination failed")
                 if not result.get("printer_setup_ok"):
@@ -2645,10 +2711,11 @@ if ($node) {{ $node }}
 
                 # Fetch address book after add so UI can refresh
                 addr_result = None
-                try:
-                    addr_result = self._ricoh_service.process_address_list(printer)
-                except Exception as addr_exc:
-                    LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email add: %s", addr_exc)
+                if not is_toshiba:
+                    try:
+                        addr_result = self._ricoh_service.process_address_list(printer)
+                    except Exception as addr_exc:
+                        LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email add: %s", addr_exc)
 
                 # Enrich the newly created entry in addr_result with accurate wizard data
                 # (Ricoh AJAX often returns empty folder fields for newly created entries)
@@ -3348,6 +3415,17 @@ Write-Output 'INSTALLED'
         _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
         step_results: list[str] = []
 
+        def get_system32_file(filename: str) -> str:
+            sysnative = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Sysnative")
+            if os.path.isdir(sysnative):
+                target = os.path.join(sysnative, filename)
+                if os.path.exists(target):
+                    return target
+            return os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", filename)
+
+        pnputil_path = get_system32_file("pnputil.exe")
+        powershell_path = get_system32_file("WindowsPowerShell\\v1.0\\powershell.exe")
+
         def _progress(text: str) -> None:
             LOGGER.info("[DriverInstall] %s", text)
             try:
@@ -3428,7 +3506,7 @@ Write-Output 'INSTALLED'
             try:
                 _progress(f"[0/5] 🔍 Kiểm tra driver cho '{brand} {model}' trong hệ thống...")
                 check = subprocess.run(
-                    ["powershell", "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
+                    [powershell_path, "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
                     capture_output=True, text=True, timeout=15,
                     creationflags=_NO_WINDOW,
                 )
@@ -3548,7 +3626,7 @@ Write-Output 'INSTALLED'
                         _progress(f"[3/5] pnputil ({i}/{len(inf_files)}): {inf.name}")
                         try:
                             result = subprocess.run(
-                                ["pnputil", "/add-driver", str(inf), "/install"],
+                                [pnputil_path, "/add-driver", str(inf), "/install"],
                                 capture_output=True, text=True, timeout=120,
                                 creationflags=_NO_WINDOW,
                             )
@@ -3583,7 +3661,7 @@ Write-Output 'INSTALLED'
                 try:
                     # Query currently registered drivers in Spooler
                     check = subprocess.run(
-                        ["powershell", "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
+                        [powershell_path, "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
                         capture_output=True, text=True, timeout=30,
                         creationflags=_NO_WINDOW,
                     )
@@ -3608,7 +3686,7 @@ Write-Output 'INSTALLED'
                             _progress(f"[4/5] 📌 Đăng ký driver '{matched_name}' từ Driver Store vào Spooler...")
                             try:
                                 reg_res = subprocess.run(
-                                    ["powershell", "-Command", f"Add-PrinterDriver -Name '{matched_name}'"],
+                                    [powershell_path, "-Command", f"Add-PrinterDriver -Name '{matched_name}'"],
                                     capture_output=True, text=True, timeout=30,
                                     creationflags=_NO_WINDOW,
                                 )
@@ -3641,21 +3719,27 @@ Write-Output 'INSTALLED'
                 printer_queue_name = f"{brand.upper()} {model} ({printer_ip})"
                 _progress(f"[5/5] 🖨️ Thêm máy in: {printer_queue_name}")
 
+                def _registry_key_exists(reg_path: str) -> bool:
+                    try:
+                        import winreg
+                        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_READ)
+                        winreg.CloseKey(key)
+                        return True
+                    except Exception:
+                        return False
+
                 # 5a: Port
                 _progress(f"[5/5] 📌 Tạo TCP/IP port: {port_name} → {printer_ip}")
                 port_ok = False
                 try:
-                    port_check = subprocess.run(
-                        ["powershell", "-Command",
-                         f"Get-PrinterPort -Name '{port_name}' -ErrorAction SilentlyContinue"],
-                        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
-                    )
-                    if port_name in port_check.stdout:
+                    # Direct registry check in Python takes < 1ms and never hangs/timeouts
+                    reg_ports_path = f"SYSTEM\\CurrentControlSet\\Control\\Print\\Monitors\\Standard TCP/IP Port\\Ports\\{port_name}"
+                    if _registry_key_exists(reg_ports_path):
                         _progress(f"[5/5] ✅ Port {port_name} đã tồn tại")
                         port_ok = True
                     else:
                         port_result = subprocess.run(
-                            ["powershell", "-Command",
+                            [powershell_path, "-Command",
                              f"Add-PrinterPort -Name '{port_name}' -PrinterHostAddress '{printer_ip}'"],
                             capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
                         )
@@ -3671,12 +3755,9 @@ Write-Output 'INSTALLED'
                 if port_ok:
                     _progress(f"[5/5] 🖨️ Add-Printer: {printer_queue_name}")
                     try:
-                        printer_check = subprocess.run(
-                            ["powershell", "-Command",
-                             f"Get-Printer -Name '{printer_queue_name}' -ErrorAction SilentlyContinue"],
-                            capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
-                        )
-                        printer_existed = printer_queue_name in printer_check.stdout
+                        # Direct registry check in Python for printer existence
+                        reg_printers_path = f"SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\{printer_queue_name}"
+                        printer_existed = _registry_key_exists(reg_printers_path)
                         add_ok = False
 
                         if printer_existed:
@@ -3685,7 +3766,7 @@ Write-Output 'INSTALLED'
                             add_ok = True
                         else:
                             add_result = subprocess.run(
-                                ["powershell", "-Command",
+                                [powershell_path, "-Command",
                                  f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
                                 capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
                             )
@@ -3716,6 +3797,8 @@ Write-Output 'INSTALLED'
             summary = " | ".join(step_results)
             _progress(f"🏁 HOÀN TẤT: {brand} {model} @ {printer_ip} — {summary}")
             LOGGER.info("Driver installation completed for %s: %s", printer_ip, summary)
+            if any(k in summary for k in ["Printer: LỖI", "BỎ QUA", "KHÔNG TÌM THẤY"]):
+                raise RuntimeError(summary)
 
         except Exception:
             try:

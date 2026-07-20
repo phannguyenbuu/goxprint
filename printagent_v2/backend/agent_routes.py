@@ -67,7 +67,16 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if request.query_string:
                     path += "?" + request.query_string.decode("utf-8", errors="ignore")
                 
-                url = f"http://127.0.0.1:{port}{path}"
+                # Determine target_port and scheme
+                target_port = 80
+                for k, val in TUNNEL_REGISTRY.items():
+                    if val == port:
+                        target_port = k[2]
+                        break
+                
+                is_https = target_port in (443, 10443)
+                scheme = "https" if is_https else "http"
+                url = f"{scheme}://127.0.0.1:{port}{path}"
                 headers = {key: value for key, value in request.headers.items() if key.lower() not in ("host", "content-length", "connection", "transfer-encoding")}
                 headers["Connection"] = "close"
                 
@@ -84,7 +93,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                             cookies=request.cookies,
                             allow_redirects=False,
                             stream=True,
-                            timeout=10
+                            timeout=10,
+                            verify=False if is_https else True
                         )
                         break
                     except Exception as exc:
@@ -1085,21 +1095,25 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
             printer = None
             if active_agent:
-                # Prioritize matching agent_uid, ip, and the active lan_uid
+                # 1. Prioritize matching ip on the active agent's lan_uid (ignoring agent_uid, since multiple agents share same LAN Site)
                 printer = session.execute(
                     select(Printer).where(
-                        Printer.agent_uid == agent_uid,
                         Printer.ip == printer_ip,
                         Printer.lan_uid == active_agent.lan_uid
                     )
                 ).scalars().first()
 
             if not printer:
+                # 2. Fallback to matching agent_uid and ip
                 printer = session.execute(
-                    select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+                    select(Printer).where(
+                        Printer.agent_uid == agent_uid,
+                        Printer.ip == printer_ip
+                    )
                 ).scalars().first()
 
             if not printer:
+                # 3. Last fallback to ip only
                 printer = session.execute(
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
@@ -1109,7 +1123,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
+                lan_uid=active_agent.lan_uid if active_agent else printer.lan_uid,
                 agent_uid=agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer_ip,
@@ -1173,10 +1187,33 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "target_ip": printer_ip
         }
         with session_factory() as session:
-            printer = session.execute(
-                select(Printer).where(Printer.agent_uid == agent_uid, Printer.ip == printer_ip)
+            active_agent = session.execute(
+                select(AgentNode)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.last_seen_at.desc())
             ).scalars().first()
+
+            printer = None
+            if active_agent:
+                # 1. Prioritize matching ip on the active agent's lan_uid (ignoring agent_uid, since multiple agents share same LAN Site)
+                printer = session.execute(
+                    select(Printer).where(
+                        Printer.ip == printer_ip,
+                        Printer.lan_uid == active_agent.lan_uid
+                    )
+                ).scalars().first()
+
             if not printer:
+                # 2. Fallback to matching agent_uid and ip
+                printer = session.execute(
+                    select(Printer).where(
+                        Printer.agent_uid == agent_uid,
+                        Printer.ip == printer_ip
+                    )
+                ).scalars().first()
+
+            if not printer:
+                # 3. Last fallback to ip only
                 printer = session.execute(
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
@@ -1186,7 +1223,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
+                lan_uid=active_agent.lan_uid if active_agent else printer.lan_uid,
                 agent_uid=agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer_ip,

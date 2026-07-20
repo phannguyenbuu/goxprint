@@ -271,10 +271,10 @@ export async function getScansFiles(lanUid: string, email: string): Promise<any>
   return fetchApi(`/api/scans/files?lan_uid=${encodeURIComponent(lanUid)}&email=${encodeURIComponent(email)}`);
 }
 
-export async function installDriverOnAgent(printerId: string, brand: string, model: string, driverName: string, driverUrl: string): Promise<any> {
+export async function installDriverOnAgent(printerId: string, brand: string, model: string, driverName: string, driverUrl: string, agentUid?: string): Promise<any> {
   return fetchApi(`/api/devices/${printerId}/install-driver`, {
     method: 'POST',
-    body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl })
+    body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl, agent_uid: agentUid })
   });
 }
 

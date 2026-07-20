@@ -233,6 +233,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "auth_password": p.auth_password or "",
                     "address_book_sync": sync_data,
                     "suggested_drivers": _match_printer_drivers(p.printer_name),
+                    "agent_uid": p.agent_uid or "",
                 })
 
             agent_stmt = select(AgentNode)

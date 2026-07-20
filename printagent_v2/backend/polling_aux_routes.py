@@ -433,6 +433,10 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                         ).scalars().first()
                                         
                                     if existed_cam:
+                                        if existed_cam.rtsp_url and existed_cam.ip and existed_cam.ip != ip:
+                                            existed_cam.rtsp_url = existed_cam.rtsp_url.replace(existed_cam.ip, ip)
+                                        elif not existed_cam.rtsp_url:
+                                            existed_cam.rtsp_url = rtsp_url
                                         existed_cam.ip = ip
                                         if mac:
                                             existed_cam.mac_address = mac

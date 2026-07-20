@@ -152,10 +152,20 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 cmd.error_message = "Superseded by newer command"
                 cmd.responded_at = requested_at
 
+            from models import AgentNode
+            active_agent = None
+            if printer.agent_uid:
+                active_agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == printer.agent_uid)
+                    .order_by(AgentNode.last_seen_at.desc())
+                ).scalars().first()
+            active_lan_uid = active_agent.lan_uid if active_agent else printer.lan_uid
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
+                lan_uid=active_lan_uid,
                 agent_uid=printer.agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer.ip,
@@ -251,10 +261,20 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 req_agent_uid = body.get("agent_uid", "").strip()
             target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
+            from models import AgentNode
+            active_agent = None
+            if target_agent_uid:
+                active_agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == target_agent_uid)
+                    .order_by(AgentNode.last_seen_at.desc())
+                ).scalars().first()
+            active_lan_uid = active_agent.lan_uid if active_agent else printer.lan_uid
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
+                lan_uid=active_lan_uid,
                 agent_uid=target_agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer.ip,
@@ -367,10 +387,20 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
             target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
+            from models import AgentNode
+            active_agent = None
+            if target_agent_uid:
+                active_agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == target_agent_uid)
+                    .order_by(AgentNode.last_seen_at.desc())
+                ).scalars().first()
+            active_lan_uid = active_agent.lan_uid if active_agent else printer.lan_uid
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
+                lan_uid=active_lan_uid,
                 agent_uid=target_agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer.ip,

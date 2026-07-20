@@ -34,6 +34,10 @@ def register_ui_routes(app):
     def ftp_page() -> Any:
         return render_template("ftp.html", active_tab="ftp", page_title="FTP")
 
+
+
+
+
     @app.get("/settings")
     def settings() -> Any:
         return redirect(url_for("devices"))
@@ -47,7 +51,10 @@ def register_ui_routes(app):
         return jsonify(
             {
                 "lan_uid": lan_uid,
+                "agent_uid": bridge._agent_uid,
                 "fingerprint": fingerprint,
+                "pc_ip": local_ip,
+                "pc_name": hostname,
                 "env": _env_snapshot(config, updater),
                 "device_filters": {"filter_mode": "valid_only"},
             }

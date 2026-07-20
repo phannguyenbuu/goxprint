@@ -97,6 +97,7 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
         model = str(body.get("model", "")).strip()
         driver_name = str(body.get("driver_name", "")).strip()
         driver_url = str(body.get("driver_url", "")).strip()
+        target_agent_uid = str(body.get("agent_uid", "")).strip()
 
         if not brand or not model or not driver_name or not driver_url:
             return jsonify({"ok": False, "error": "brand, model, driver_name, and driver_url are required"}), 400
@@ -173,11 +174,22 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
                 cmd.error_message = "Superseded by newer command"
                 cmd.responded_at = requested_at
 
+            from models import AgentNode
+            resolved_agent_uid = target_agent_uid or printer.agent_uid
+            active_agent = None
+            if resolved_agent_uid:
+                active_agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == resolved_agent_uid)
+                    .order_by(AgentNode.last_seen_at.desc())
+                ).scalars().first()
+            active_lan_uid = active_agent.lan_uid if active_agent else printer.lan_uid
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
-                lan_uid=printer.lan_uid,
-                agent_uid=printer.agent_uid,
+                lan_uid=active_lan_uid,
+                agent_uid=resolved_agent_uid,
                 printer_name=printer.printer_name,
                 ip=printer.ip,
                 desired_enabled=printer.enabled,

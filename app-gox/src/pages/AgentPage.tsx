@@ -253,6 +253,24 @@ export function AgentPage() {
     onConfirm: () => {},
   });
 
+  const [installDriverModal, setInstallDriverModal] = useState<{
+    isOpen: boolean;
+    printerId: string;
+    brand: string;
+    model: string;
+    driverName: string;
+    driverUrl: string;
+    selectedAgentUid: string;
+  }>({
+    isOpen: false,
+    printerId: '',
+    brand: '',
+    model: '',
+    driverName: '',
+    driverUrl: '',
+    selectedAgentUid: '',
+  });
+
   // IP Input Modal state
   const [ipInputModal, setIpInputModal] = useState<{
     isOpen: boolean;
@@ -2426,69 +2444,74 @@ except Exception as e:
 
   // ── INSTALL DRIVER ON CLIENT PC ──
   const handleRemoteInstallDriver = (printerId: string, brand: string, model: string, drName: string, drUrl: string) => {
-    setConfirmModal({
+    const defaultAgent = getTargetAgentUid(printerId);
+    setInstallDriverModal({
       isOpen: true,
-      title: 'Cài đặt Driver từ xa',
-      message: `Bạn có chắc muốn gửi lệnh cài đặt driver "${drName}" từ xa lên PC đại diện?`,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-        const TOAST_ID = 'driver-install-progress';
-        replaceToast(TOAST_ID, '⏳ Đang gửi lệnh cài đặt driver tới Agent...', 'info');
-        try {
-          const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl);
-          if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
+      printerId,
+      brand,
+      model,
+      driverName: drName,
+      driverUrl: drUrl,
+      selectedAgentUid: defaultAgent,
+    });
+  };
 
-          const commandId = res.command_id;
-          if (!commandId) {
-            replaceToast(TOAST_ID, '✅ Đã gửi lệnh cài đặt driver.', 'success');
+  const executeRemoteInstallDriver = async (printerId: string, brand: string, model: string, drName: string, drUrl: string, agentUid: string) => {
+    const TOAST_ID = 'driver-install-progress';
+    replaceToast(TOAST_ID, '⏳ Đang gửi lệnh cài đặt driver tới Agent...', 'info');
+    try {
+      const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl, agentUid);
+      if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
+
+      const commandId = res.command_id;
+      if (!commandId) {
+        replaceToast(TOAST_ID, '✅ Đã gửi lệnh cài đặt driver.', 'success');
+        return;
+      }
+
+      // Poll for progress — driver install can take up to 5 minutes
+      const maxPollMs = 300000;
+      const pollInterval = 2000;
+      const startTime = Date.now();
+      let lastProgressText = '';
+
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            replaceToast(TOAST_ID, '⏰ Quá thời gian chờ (5 phút). Kiểm tra trên PC đại diện.', 'info');
             return;
           }
 
-          // Poll for progress — driver install can take up to 5 minutes
-          const maxPollMs = 300000;
-          const pollInterval = 2000;
-          const startTime = Date.now();
-          let lastProgressText = '';
-
-          const timer = setInterval(async () => {
-            try {
-              const elapsed = Date.now() - startTime;
-              if (elapsed > maxPollMs) {
-                clearInterval(timer);
-                replaceToast(TOAST_ID, '⏰ Quá thời gian chờ (5 phút). Kiểm tra trên PC đại diện.', 'info');
-                return;
-              }
-
-              const statusRes = await getCommandStatus(commandId);
-              if (statusRes.status === 'success') {
-                clearInterval(timer);
-                replaceToast(TOAST_ID, '✅ Cài đặt driver thành công!', 'success');
-              } else if (statusRes.status === 'failed' || !statusRes.ok) {
-                clearInterval(timer);
-                replaceToast(TOAST_ID, `❌ Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            replaceToast(TOAST_ID, '✅ Cài đặt driver thành công!', 'success');
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            replaceToast(TOAST_ID, `❌ Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
+          } else {
+            const progressText = statusRes.progress_text || '';
+            if (progressText && progressText !== lastProgressText) {
+              lastProgressText = progressText;
+              replaceToast(TOAST_ID, progressText, 'info');
+            } else if (!progressText) {
+              const elapsedSec = Math.round(elapsed / 1000);
+              if (statusRes.received_at) {
+                replaceToast(TOAST_ID, `⚡ Agent đã nhận lệnh - đang cài đặt driver... (${elapsedSec}s)`, 'info');
               } else {
-                const progressText = statusRes.progress_text || '';
-                if (progressText && progressText !== lastProgressText) {
-                  lastProgressText = progressText;
-                  replaceToast(TOAST_ID, progressText, 'info');
-                } else if (!progressText) {
-                  const elapsedSec = Math.round(elapsed / 1000);
-                  if (statusRes.received_at) {
-                    replaceToast(TOAST_ID, `⚡ Agent đã nhận lệnh - đang cài đặt driver... (${elapsedSec}s)`, 'info');
-                  } else {
-                    replaceToast(TOAST_ID, `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info');
-                  }
-                }
+                replaceToast(TOAST_ID, `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info');
               }
-            } catch (pollErr) {
-              // Silently continue polling on network errors
             }
-          }, pollInterval);
-        } catch (err: any) {
-          replaceToast(TOAST_ID, `❌ Không thể cài driver: ${err.message}`, 'error');
+          }
+        } catch (pollErr) {
+          // Silently continue polling on network errors
         }
-      }
-    });
+      }, pollInterval);
+    } catch (err: any) {
+      replaceToast(TOAST_ID, `❌ Không thể cài driver: ${err.message}`, 'error');
+    }
   };
 
   // Helpers
@@ -5398,6 +5421,109 @@ raise RuntimeError('\\n'.join(lines))`;
                     color: 'var(--color-secondary)',
                   }}
                   onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy bỏ
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5b. INSTALL DRIVER MODAL WITH TARGET AGENT SELECTION */}
+      <AnimatePresence>
+        {installDriverModal.isOpen && (
+          <div style={styles.confirmOverlay} onClick={() => setInstallDriverModal((prev) => ({ ...prev, isOpen: false }))}>
+            <motion.div
+              style={styles.confirmModalCard}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+            >
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>📦 Cài đặt Driver từ xa</h3>
+                <button
+                  style={styles.modalCloseBtn}
+                  onClick={() => setInstallDriverModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={styles.modalBody}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--color-text)', lineHeight: 1.4, margin: '0 0 12px 0' }}>
+                  Bạn chuẩn bị cài đặt driver <strong>"{installDriverModal.driverName}"</strong> từ xa.
+                </p>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                    Chọn Máy đại diện (Agent) để thực hiện cài đặt:
+                  </label>
+                  <select
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: '6px',
+                      background: 'var(--color-input-bg)',
+                      border: '1px solid var(--color-border)',
+                      color: 'var(--color-text)',
+                      fontSize: '0.82rem',
+                    }}
+                    value={installDriverModal.selectedAgentUid}
+                    onChange={(e) =>
+                      setInstallDriverModal((prev) => ({ ...prev, selectedAgentUid: e.target.value }))
+                    }
+                  >
+                    {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_online).length === 0) ? (
+                      <option value="">(Không có Agent online trong LAN này)</option>
+                    ) : (
+                      selectedLan.agents
+                        .filter((a: any) => a.is_online)
+                        .map((a: any) => (
+                          <option key={a.agent_uid} value={a.agent_uid}>
+                            {a.hostname} ({a.local_ip})
+                          </option>
+                        ))
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    background: 'var(--color-primary)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'white',
+                  }}
+                  disabled={!installDriverModal.selectedAgentUid}
+                  onClick={() => {
+                    setInstallDriverModal((prev) => ({ ...prev, isOpen: false }));
+                    executeRemoteInstallDriver(
+                      installDriverModal.printerId,
+                      installDriverModal.brand,
+                      installDriverModal.model,
+                      installDriverModal.driverName,
+                      installDriverModal.driverUrl,
+                      installDriverModal.selectedAgentUid
+                    );
+                  }}
+                >
+                  Bắt đầu cài đặt
+                </button>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    borderColor: 'var(--color-secondary)',
+                    color: 'var(--color-secondary)',
+                  }}
+                  onClick={() => setInstallDriverModal((prev) => ({ ...prev, isOpen: false }))}
                 >
                   Hủy bỏ
                 </button>

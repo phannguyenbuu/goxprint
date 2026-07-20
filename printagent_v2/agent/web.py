@@ -78,7 +78,18 @@ def create_app(
         static_folder=str(static_dir),
         instance_path=os.path.abspath(os.getcwd())
     )
-    # flask_cors not needed for local agent web UI (localhost only)
+    # Enable CORS for APIs to allow local detection from auto.goxprint.com
+    from flask_cors import CORS
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    
+    @app.after_request
+    def add_pna_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PATCH, PUT, DELETE"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, X-Lead-Token"
+        return response
+    
     config = AppConfig.load()
     api_client = APIClient(config)
     ricoh_service = RicohService(api_client, config=config)
