@@ -73,6 +73,7 @@ class CameraManager:
         self.start_times: dict[str, datetime] = {}
         self.segment_counts: dict[str, int] = {}
         self.current_files: dict[str, str] = {}
+        self.duration_limits: dict[str, int] = {}
         self._initialized = True
         
         # Removed background auto-download of FFmpeg to make it manual only
@@ -189,7 +190,8 @@ class CameraManager:
         video_codec: str = "copy",
         audio_codec: str = "copy",
         no_audio: bool = True,
-        prefix: str = "rec"
+        prefix: str = "rec",
+        duration_limit: int | None = None
     ) -> bool:
         with self.lock:
             if camera_name in self.recording_processes:
@@ -200,6 +202,7 @@ class CameraManager:
             self.start_times[camera_name] = datetime.now()
             self.segment_counts[camera_name] = 0
             self.logs[camera_name] = []
+            self.duration_limits[camera_name] = duration_limit
             
         t = threading.Thread(
             target=self._recording_thread,
@@ -254,6 +257,15 @@ class CameraManager:
         stop_event = self.stop_events[camera_name]
 
         while not stop_event.is_set():
+            # Check duration limit
+            duration_limit = getattr(self, "duration_limits", {}).get(camera_name)
+            if duration_limit:
+                elapsed = (datetime.now() - self.start_times[camera_name]).total_seconds()
+                if elapsed >= duration_limit:
+                    self.add_log(camera_name, "info", f"⏰ Đã đạt giới hạn thời gian ghi hình ({duration_limit} giây). Tự động dừng ghi.")
+                    self.stop_recording(camera_name)
+                    break
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             # Format: {prefix}_{camera_name}_{ts}.mp4
             filename = f"{prefix}_{camera_name}_{ts}.mp4"

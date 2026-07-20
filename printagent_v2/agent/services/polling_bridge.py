@@ -3125,6 +3125,13 @@ if ($node) {{ $node }}
                     except Exception as e:
                         LOGGER.error("Failed to save local camera config: %s", e)
 
+                    duration_limit = params.get("duration_limit")
+                    if duration_limit is not None:
+                        try:
+                            duration_limit = int(duration_limit)
+                        except (ValueError, TypeError):
+                            duration_limit = None
+
                     success = cm.start_recording(
                         camera_name=camera_name,
                         rtsp_url=rtsp_url,
@@ -3133,7 +3140,8 @@ if ($node) {{ $node }}
                         video_codec=video_codec,
                         audio_codec=audio_codec,
                         no_audio=no_audio,
-                        prefix=prefix
+                        prefix=prefix,
+                        duration_limit=duration_limit
                     )
                     if not success:
                         raise RuntimeError("Failed to start camera recorder")

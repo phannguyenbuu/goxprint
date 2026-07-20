@@ -1631,6 +1631,9 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/start")
     def start_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
         from models import CameraConfig
+        body = request.get_json(silent=True) or {}
+        duration = body.get("duration")
+        
         with session_factory() as session:
             cfg = _get_or_create_camera_config(session, agent_uid, camera_id)
             if not cfg:
@@ -1644,6 +1647,11 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 "no_audio": cfg.no_audio,
                 "prefix": cfg.prefix
             }
+            if duration is not None:
+                try:
+                    params["duration_limit"] = int(duration) * 60
+                except (ValueError, TypeError):
+                    pass
             camera_name = cfg.camera_name
             camera_ip = cfg.ip
             
@@ -1907,14 +1915,17 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             }
 
         if action == "start":
+            params["duration_limit"] = duration * 60
             success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
             if success:
-                return jsonify({"ok": True, "message": "Đã bắt đầu ghi hình thành công"})
+                _update_live_camera_recording_state(agent_uid, cfg.ip, True)
+                return jsonify({"ok": True, "message": f"Đã bắt đầu ghi hình thành công với giới hạn {duration} phút"})
             return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
 
         elif action == "stop":
             success, err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
             if success:
+                _update_live_camera_recording_state(agent_uid, cfg.ip, False)
                 return jsonify({"ok": True, "message": "Đã dừng ghi hình thành công"})
             return jsonify({"ok": False, "error": f"Không thể dừng ghi hình: {err}"}), 504
 
@@ -1922,17 +1933,12 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             # Ensure the segment duration is long enough so FFmpeg does not split the recording
             record_params = dict(params)
             record_params["segment_duration"] = max(cfg.segment_duration, duration + 15)
+            record_params["duration_limit"] = duration
 
             success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, record_params)
             if not success:
                 return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
 
-            import time
-            # Sleep longer than requested duration to compensate for polling and RTSP connection latency
-            time.sleep(duration + 8)
-
-            stop_success, stop_err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
-            if stop_success:
-                return jsonify({"ok": True, "message": f"Đã hoàn thành ghi hình {duration}s thành công"})
-            return jsonify({"ok": False, "error": f"Đã bắt đầu ghi nhưng lỗi khi dừng: {stop_err}"}), 504
+            _update_live_camera_recording_state(agent_uid, cfg.ip, True)
+            return jsonify({"ok": True, "message": f"Đã bắt đầu tiến trình ghi hình giới hạn {duration} giây"})
 
