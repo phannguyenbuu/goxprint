@@ -1238,6 +1238,43 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         return jsonify({"ok": True})
 
 
+    def _get_clean_manufacturer(mac: str, mac_vendors: dict) -> str:
+        if not mac or not mac_vendors:
+            return "Generic"
+        clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+        if len(clean_mac) >= 6:
+            oui = f"{clean_mac[0:2]}:{clean_mac[2:4]}:{clean_mac[4:6]}"
+            vendor_info = mac_vendors.get(oui)
+            if vendor_info:
+                vendor_name = vendor_info.get("manufacturer") or ""
+                vendor_lower = vendor_name.lower()
+                if "dahua" in vendor_lower:
+                    return "Dahua"
+                elif "hikvision" in vendor_lower:
+                    return "Hikvision"
+                elif "ezviz" in vendor_lower:
+                    return "Ezviz"
+                elif "imou" in vendor_lower:
+                    return "Imou"
+                elif "sony" in vendor_lower:
+                    return "Sony"
+                elif "panasonic" in vendor_lower:
+                    return "Panasonic"
+                elif "tp-link" in vendor_lower:
+                    return "TP-Link"
+                elif "brother" in vendor_lower:
+                    return "Brother"
+                elif "canon" in vendor_lower:
+                    return "Canon"
+                elif "epson" in vendor_lower:
+                    return "Epson"
+                elif "toshiba" in vendor_lower:
+                    return "Toshiba"
+                elif "ricoh" in vendor_lower:
+                    return "Ricoh"
+                return vendor_name
+        return "Generic"
+
     def _get_or_create_camera_config(session, agent_uid, camera_id):
         from models import CameraConfig, AgentNode
         import ipaddress
@@ -1278,14 +1315,23 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                 if isinstance(cams_list, list):
                                     for item in cams_list:
                                         if item.get("ip") == ip_str:
-                                            manufacturer = item.get("manufacturer") or "Generic"
-                                            model = item.get("model") or "Camera IP"
                                             rtsp_url = item.get("rtsp_url") or rtsp_url
                                             camera_name = item.get("camera_name") or camera_name
                                             mac_address = item.get("mac_address") or item.get("mac") or ""
                                             break
                         except Exception:
                             pass
+                            
+                    # Load mac_vendors to resolve manufacturer
+                    mac_vendors = {}
+                    mac_file = Path("storage/mac_vendors.json")
+                    if mac_file.exists():
+                        try:
+                            with open(mac_file, "r", encoding="utf-8") as f:
+                                mac_vendors = json.load(f)
+                        except Exception:
+                            pass
+                    manufacturer = _get_clean_manufacturer(mac_address, mac_vendors)
                             
                     cfg = CameraConfig(
                         lead=lead,
@@ -1401,6 +1447,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 except Exception:
                     virtual_id = 9999
                     
+                resolved_manufacturer = _get_clean_manufacturer(mac, mac_vendors)
+                
                 if config:
                     results.append({
                         "id": config.id,
@@ -1415,7 +1463,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_recording": config.is_recording,
                         "ip": ip,
                         "mac_address": mac or config.mac_address or "",
-                        "manufacturer": item.get("manufacturer") or config.manufacturer or "Generic",
+                        "manufacturer": resolved_manufacturer if resolved_manufacturer != "Generic" else (config.manufacturer or "Generic"),
                         "model": item.get("model") or config.model or "Camera IP",
                         "is_online": True,
                     })
@@ -1433,7 +1481,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_recording": False,
                         "ip": ip,
                         "mac_address": mac or "",
-                        "manufacturer": item.get("manufacturer") or "Generic",
+                        "manufacturer": resolved_manufacturer,
                         "model": item.get("model") or "Camera IP",
                         "is_online": True,
                     })
