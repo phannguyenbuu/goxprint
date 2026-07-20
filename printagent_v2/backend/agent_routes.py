@@ -1341,6 +1341,16 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if mac:
                     configs_by_mac[mac] = c
 
+            # Load offline MAC vendors database
+            mac_vendors = {}
+            mac_file = Path("storage/mac_vendors.json")
+            if mac_file.exists():
+                try:
+                    with open(mac_file, "r", encoding="utf-8") as f:
+                        mac_vendors = json.load(f)
+                except Exception as e:
+                    LOGGER.error("Failed to load mac_vendors.json: %s", e)
+
             live_cameras = []
             seen_ips = set()
             
@@ -1357,6 +1367,24 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                         continue
                                     if ip in seen_ips:
                                         continue
+                                        
+                                    # Filter out Toshiba/Tokyo Electric devices by MAC OUI
+                                    mac = (item.get("mac_address") or item.get("mac") or "").strip()
+                                    is_toshiba = False
+                                    if mac and mac_vendors:
+                                        clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+                                        if len(clean_mac) >= 6:
+                                            oui_hex = f"{clean_mac[0:2]}:{clean_mac[2:4]}:{clean_mac[4:6]}"
+                                            vendor_info = mac_vendors.get(oui_hex)
+                                            if vendor_info:
+                                                vendor_name = vendor_info.get("manufacturer", "")
+                                                vendor_lower = vendor_name.lower()
+                                                if "toshiba" in vendor_lower or "tokyo electric" in vendor_lower:
+                                                    is_toshiba = True
+                                                    
+                                    if is_toshiba:
+                                        continue
+                                        
                                     seen_ips.add(ip)
                                     live_cameras.append(item)
                     except Exception as e:
