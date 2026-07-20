@@ -639,16 +639,26 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     updated += 1
             # Ingest cameras inventory
             cameras = body.get("cameras") if isinstance(body.get("cameras"), list) else []
+            
+            # Save raw live payload to json file (so we get live results directly without database records)
+            import json
+            from pathlib import Path
+            storage_dir = Path("storage")
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            live_file = storage_dir / f"live_cameras_{agent_uid}.json"
+            try:
+                with open(live_file, "w", encoding="utf-8") as f:
+                    json.dump(cameras, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                LOGGER.error("Failed to save live cameras JSON: %s", e)
+                
+            # Update online status of configured cameras if they match by IP or MAC
             from models import CameraConfig
             for item in cameras:
                 if not isinstance(item, dict):
                     continue
                 ip = _to_text(item.get("ip"))
                 mac = _to_text(item.get("mac_address")) or _to_text(item.get("mac"))
-                camera_name = _to_text(item.get("camera_name")) or f"Camera {ip}"
-                manufacturer = _to_text(item.get("manufacturer")) or "Generic"
-                model = _to_text(item.get("model")) or "Camera IP"
-                rtsp_url = _to_text(item.get("rtsp_url")) or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
                 is_online = bool(item.get("is_online", True))
                 
                 existed_cam = None
@@ -662,27 +672,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     ).scalars().first()
                     
                 if existed_cam:
-                    existed_cam.ip = ip
-                    if mac:
-                        existed_cam.mac_address = mac
-                    existed_cam.manufacturer = manufacturer
-                    existed_cam.model = model
                     existed_cam.is_online = is_online
-                else:
-                    new_cam = CameraConfig(
-                        lead=lead,
-                        lan_uid=lan_uid,
-                        agent_uid=agent_uid,
-                        camera_name=camera_name,
-                        ip=ip,
-                        mac_address=mac,
-                        manufacturer=manufacturer,
-                        model=model,
-                        rtsp_url=rtsp_url,
-                        is_online=is_online,
-                        is_recording=False
-                    )
-                    session.add(new_cam)
                     
             session.commit()
 
