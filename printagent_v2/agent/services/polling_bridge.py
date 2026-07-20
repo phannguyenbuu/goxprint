@@ -2013,11 +2013,11 @@ if ($node) {{ $node }}
                     return {"manufacturer": "Generic", "model": last_error}
 
                 # Port scan helper
-                def scan_ip_port(ip_addr: str, port: int = 554) -> bool:
+                def scan_ip_port(ip_addr: str) -> bool:
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         s.settimeout(0.6)
-                        res = s.connect_ex((ip_addr, port))
+                        res = s.connect_ex((ip_addr, 554))
                         s.close()
                         return res == 0
                     except Exception:
@@ -2085,65 +2085,25 @@ if ($node) {{ $node }}
                 for subnet_prefix in subnets:
                     ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255) if f"{subnet_prefix}.{i}" not in discovered_ips]
                     with ThreadPoolExecutor(max_workers=50) as executor:
-                        futures_554 = {executor.submit(scan_ip_port, ip_addr, 554): ip_addr for ip_addr in ips_to_scan}
-                        futures_9100 = {executor.submit(scan_ip_port, ip_addr, 9100): ip_addr for ip_addr in ips_to_scan}
-                        
-                        for future in futures_554:
-                            ip_addr = futures_554[future]
+                        futures = {executor.submit(scan_ip_port, ip_addr): ip_addr for ip_addr in ips_to_scan}
+                        for future in futures:
+                            ip_addr = futures[future]
                             try:
-                                if future.result() and ip_addr not in discovered_ips:
-                                    discovered_ips.append(ip_addr)
-                            except Exception:
-                                pass
-                                     
-                        for future in futures_9100:
-                            ip_addr = futures_9100[future]
-                            try:
-                                if future.result() and ip_addr not in discovered_ips:
+                                if future.result():
                                     discovered_ips.append(ip_addr)
                             except Exception:
                                 pass
 
                 # Compile results
                 cameras_payload = []
-
-                def check_and_compile(ip_addr: str) -> dict | None:
-                    # 1. Quick TCP check on RTSP port 554
-                    if not scan_ip_port(ip_addr):
-                        return None
-                        
-                    # 2. Check credentials from config if available
-                    username, password = find_credentials(ip_addr)
-                    if username and password:
-                        rtsp_url = f"rtsp://{username}:{password}@{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
-                    else:
-                        rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
-                        
-                    # 3. Test actual RTSP connection stream
-                    is_online, _ = cm.test_rtsp_connection(rtsp_url)
-                    if not is_online:
-                        # Try fallback generic stream paths if first one failed
-                        if not username or not password:
-                            fallback_urls = [
-                                f"rtsp://{ip_addr}:554/live/ch0",
-                                f"rtsp://{ip_addr}:554/h264/ch1/main/av_stream"
-                            ]
-                            for fb_url in fallback_urls:
-                                fb_online, _ = cm.test_rtsp_connection(fb_url)
-                                if fb_online:
-                                    rtsp_url = fb_url
-                                    is_online = True
-                                    break
-                                    
-                    if not is_online:
-                        return None
-                        
-                    # 4. Fetch ONVIF details and MAC address
+                for ip_addr in discovered_ips:
                     info = get_onvif_info(ip_addr)
                     mac_addr = get_mac_address(ip_addr)
-                    camera_name = f"Camera {ip_addr}"
                     
-                    return {
+                    camera_name = f"Camera {ip_addr}"
+                    rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                    
+                    cameras_payload.append({
                         "ip": ip_addr,
                         "mac_address": mac_addr,
                         "camera_name": camera_name,
@@ -2151,18 +2111,7 @@ if ($node) {{ $node }}
                         "model": info.get("model", "Camera IP"),
                         "rtsp_url": rtsp_url,
                         "is_online": True
-                    }
-
-                # Run compilation check in parallel
-                with ThreadPoolExecutor(max_workers=20) as executor:
-                    futures = [executor.submit(check_and_compile, ip) for ip in discovered_ips]
-                    for future in futures:
-                        try:
-                            res = future.result()
-                            if res:
-                                cameras_payload.append(res)
-                        except Exception:
-                            pass
+                    })
                 
                 # Check status of configured cameras not found in discovery
                 for c in configs:
@@ -3281,11 +3230,6 @@ if ($node) {{ $node }}
                         resp.raise_for_status()
                         
                     self._post_control_result(command_id=command_id, ok=True, error="")
-                    self._update_recent_command_status(command_id, "success")
-                    return
-                elif action == "scan_cameras":
-                    self._trigger_background_camera_scan()
-                    self._post_control_result(command_id=command_id, ok=True, error="Started background camera scan")
                     self._update_recent_command_status(command_id, "success")
                     return
                 else:

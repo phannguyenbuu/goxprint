@@ -640,7 +640,6 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             # Ingest cameras inventory
             cameras = body.get("cameras") if isinstance(body.get("cameras"), list) else []
             from models import CameraConfig
-            reported_ids = set()
             for item in cameras:
                 if not isinstance(item, dict):
                     continue
@@ -669,7 +668,6 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     existed_cam.manufacturer = manufacturer
                     existed_cam.model = model
                     existed_cam.is_online = is_online
-                    reported_ids.add(existed_cam.id)
                 else:
                     new_cam = CameraConfig(
                         lead=lead,
@@ -685,17 +683,6 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         is_recording=False
                     )
                     session.add(new_cam)
-                    session.flush()
-                    reported_ids.add(new_cam.id)
-            
-            # Delete all other cameras of this agent that are not reported in the current scan
-            if cameras:
-                all_agent_cams = session.execute(
-                    select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid)
-                ).scalars().all()
-                for cam in all_agent_cams:
-                    if cam.id not in reported_ids:
-                        session.delete(cam)
                     
             session.commit()
 

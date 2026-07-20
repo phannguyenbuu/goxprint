@@ -1249,29 +1249,13 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             ).scalars().first()
             
             if agent and agent.lan_uid and agent.lan_uid != "default":
-                all_configs = session.execute(
-                    select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid, CameraConfig.is_online == True)
+                configs = session.execute(
+                    select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid)
                 ).scalars().all()
             else:
-                all_configs = session.execute(
-                    select(CameraConfig).where(CameraConfig.agent_uid == agent_uid, CameraConfig.is_online == True)
+                configs = session.execute(
+                    select(CameraConfig).where(CameraConfig.agent_uid == agent_uid)
                 ).scalars().all()
-                
-            # Verify if the owner agent of each online camera is actually online, otherwise mark it offline
-            configs = []
-            changed = False
-            for c in all_configs:
-                owner = session.execute(
-                    select(AgentNode).where(AgentNode.agent_uid == c.agent_uid, AgentNode.is_online == True)
-                ).scalars().first()
-                if owner:
-                    configs.append(c)
-                else:
-                    c.is_online = False
-                    c.is_recording = False
-                    changed = True
-            if changed:
-                session.commit()
             
             seen_ips = set()
             results = []
