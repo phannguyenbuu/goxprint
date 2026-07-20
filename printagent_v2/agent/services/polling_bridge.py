@@ -3497,6 +3497,99 @@ Write-Output 'INSTALLED'
                     continue
             return list(set(names))
 
+        # Try to delegate driver installation to elevated GoxDriverService (SYSTEM) to bypass UAC and standard user permission limits
+        try:
+            use_service = self._ensure_gox_driver_service()
+            if use_service:
+                _progress("[GDS] GoxDriverService is running. Delegating driver installation to service (SYSTEM)...")
+                
+                def _call_gds(request: dict, timeout_s: float = 300.0) -> dict:
+                    import win32file
+                    import win32pipe
+                    import pywintypes
+                    import json
+                    import time
+
+                    PIPE_NAME = r"\\.\pipe\GoxDriverService"
+                    deadline = time.time() + timeout_s
+                    pipe_handle = None
+
+                    while time.time() < deadline:
+                        try:
+                            pipe_handle = win32file.CreateFile(
+                                PIPE_NAME,
+                                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                                0, None,
+                                win32file.OPEN_EXISTING,
+                                0, None,
+                            )
+                            break
+                        except pywintypes.error as e:
+                            if e.winerror == 2:
+                                raise RuntimeError("GoxDriverService not running") from e
+                            if e.winerror == 231:
+                                win32pipe.WaitNamedPipe(PIPE_NAME, 2000)
+                                continue
+                            raise
+
+                    if pipe_handle is None:
+                        raise TimeoutError("Could not connect to GoxDriverService pipe")
+
+                    try:
+                        payload = json.dumps(request).encode("utf-8")
+                        win32file.WriteFile(pipe_handle, payload)
+
+                        chunks = []
+                        while True:
+                            try:
+                                hr, data = win32file.ReadFile(pipe_handle, 65536)
+                                if not data:
+                                    break
+                                chunks.append(data)
+                                if len(data) < 65536:
+                                    break
+                            except pywintypes.error as e:
+                                if e.winerror == 109:
+                                    break
+                                raise
+                        
+                        raw = b"".join(chunks)
+                        if not raw:
+                            return {"success": False, "error": "Empty response from GoxDriverService"}
+                        return json.loads(raw.decode("utf-8"))
+                    finally:
+                        try:
+                            win32file.FlushFileBuffers(pipe_handle)
+                            win32file.CloseHandle(pipe_handle)
+                        except Exception:
+                            pass
+
+                req = {
+                    "action": "download_and_install",
+                    "driver_url": driver_url,
+                    "printer_ip": printer_ip,
+                    "model": model,
+                    "driver_name": driver_name,
+                }
+                res = _call_gds(req, timeout_s=360.0)
+                
+                service_out = res.get("output", "")
+                for line in service_out.splitlines():
+                    if line.strip():
+                        LOGGER.info("[GDS-Service] %s", line)
+                
+                if res.get("success"):
+                    installed_driver_name = res.get("driver_name")
+                    summary = f"🏁 HOÀN TẤT: {brand} {model} @ {printer_ip} — Cài qua dịch vụ (SYSTEM) thành công | Driver: {installed_driver_name}"
+                    _progress(summary)
+                    LOGGER.info("Driver installation completed via SYSTEM service: %s", summary)
+                    return  # Early success return, skipping standard non-admin path
+                else:
+                    raise RuntimeError(f"Service error: {res.get('error')}")
+        except Exception as gds_err:
+            LOGGER.warning("Failed to install driver via GoxDriverService: %s. Falling back to direct mode.", gds_err)
+            _progress(f"[GDS] ⚠️ Lỗi cài qua dịch vụ: {gds_err}. Chuyển sang cài trực tiếp...")
+
         temp_dir = Path(tempfile.mkdtemp(prefix="printagent_driver_"))
         try:
             # ── BƯỚC 0: Kiểm tra driver có sẵn trong hệ thống ──
