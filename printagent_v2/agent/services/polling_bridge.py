@@ -2172,6 +2172,15 @@ if ($node) {{ $node }}
                     "user": str(printer.user or "").strip(),
                 }
             )
+        local_configs = []
+        cfg_path = Path("storage/camera_configs.json")
+        if cfg_path.exists():
+            try:
+                with cfg_path.open("r", encoding="utf-8") as f:
+                    local_configs = json.load(f)
+            except Exception:
+                pass
+
         payload = {
             "lead": lead,
             "lan_uid": lan_uid,
@@ -2181,6 +2190,7 @@ if ($node) {{ $node }}
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "devices": devices,
             "cameras": getattr(self, "_last_discovered_cameras", []),
+            "configs": local_configs,
             "fingerprint_signature": fingerprint,
         }
         payload.update(self._agent_runtime_metadata())
@@ -3145,6 +3155,79 @@ if ($node) {{ $node }}
                     )
                     if not success:
                         raise RuntimeError("Failed to start camera recorder")
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "save_camera_config":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    rtsp_url = str(params.get("rtsp_url", "")).strip()
+                    segment_duration = int(params.get("segment_duration", 60))
+                    video_codec = str(params.get("video_codec", "copy")).strip()
+                    audio_codec = str(params.get("audio_codec", "copy")).strip()
+                    no_audio = bool(params.get("no_audio", True))
+                    prefix = str(params.get("prefix", "rec")).strip()
+                    
+                    if not camera_name or not rtsp_url:
+                        raise ValueError("save_camera_config: Missing camera_name or rtsp_url")
+                        
+                    try:
+                        local_cfg_path = Path("storage/camera_configs.json")
+                        local_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                        configs = []
+                        if local_cfg_path.exists():
+                            try:
+                                with local_cfg_path.open("r", encoding="utf-8") as f:
+                                    configs = json.load(f)
+                            except Exception:
+                                configs = []
+                        
+                        found = False
+                        for c in configs:
+                            if c.get("camera_name") == camera_name:
+                                c.update({
+                                    "rtsp_url": rtsp_url,
+                                    "segment_duration": segment_duration,
+                                    "prefix": prefix,
+                                    "video_codec": video_codec,
+                                    "audio_codec": audio_codec,
+                                    "no_audio": no_audio
+                                })
+                                found = True
+                                break
+                        if not found:
+                            configs.append({
+                                "camera_name": camera_name,
+                                "rtsp_url": rtsp_url,
+                                "segment_duration": segment_duration,
+                                "prefix": prefix,
+                                "video_codec": video_codec,
+                                "audio_codec": audio_codec,
+                                "no_audio": no_audio
+                            })
+                        with local_cfg_path.open("w", encoding="utf-8") as f:
+                            json.dump(configs, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        LOGGER.error("Failed to save local camera config: %s", e)
+                        
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    return
+                elif action == "delete_camera_config":
+                    camera_name = str(params.get("camera_name", "")).strip()
+                    if not camera_name:
+                        raise ValueError("delete_camera_config: Missing camera_name")
+                        
+                    try:
+                        local_cfg_path = Path("storage/camera_configs.json")
+                        if local_cfg_path.exists():
+                            with local_cfg_path.open("r", encoding="utf-8") as f:
+                                configs = json.load(f)
+                            configs = [c for c in configs if c.get("camera_name") != camera_name]
+                            with local_cfg_path.open("w", encoding="utf-8") as f:
+                                json.dump(configs, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        LOGGER.error("Failed to delete local camera config: %s", e)
                         
                     self._post_control_result(command_id=command_id, ok=True, error="")
                     self._update_recent_command_status(command_id, "success")

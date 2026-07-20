@@ -647,34 +647,14 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             storage_dir.mkdir(parents=True, exist_ok=True)
             live_file = storage_dir / f"live_cameras_{agent_uid}.json"
             try:
+                payload_data = {
+                    "cameras": cameras,
+                    "configs": body.get("configs") if isinstance(body.get("configs"), list) else []
+                }
                 with open(live_file, "w", encoding="utf-8") as f:
-                    json.dump(cameras, f, indent=2, ensure_ascii=False)
+                    json.dump(payload_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 LOGGER.error("Failed to save live cameras JSON: %s", e)
-                
-            # Update online status of configured cameras if they match by IP or MAC
-            from models import CameraConfig
-            for item in cameras:
-                if not isinstance(item, dict):
-                    continue
-                ip = _to_text(item.get("ip"))
-                mac = _to_text(item.get("mac_address")) or _to_text(item.get("mac"))
-                is_online = bool(item.get("is_online", True))
-                
-                existed_cam = None
-                if mac:
-                    existed_cam = session.execute(
-                        select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid, CameraConfig.mac_address == mac)
-                    ).scalars().first()
-                if not existed_cam and ip:
-                    existed_cam = session.execute(
-                        select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid, CameraConfig.ip == ip)
-                    ).scalars().first()
-                    
-                if existed_cam:
-                    existed_cam.is_online = is_online
-                    
-            session.commit()
 
         LOGGER.info(
             "inventory: lead=%s lan=%s agent=%s devices=%s inserted=%s updated=%s",

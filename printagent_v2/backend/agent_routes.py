@@ -1275,85 +1275,153 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 return vendor_name
         return "Generic"
 
+    def _update_live_camera_config_state(agent_uid: str, ip: str, config_dict: dict):
+        import json
+        from pathlib import Path
+        live_file = Path(f"storage/live_cameras_{agent_uid}.json")
+        try:
+            payload_data = {"cameras": [], "configs": []}
+            if live_file.exists():
+                with open(live_file, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+                    if not isinstance(payload_data, dict):
+                        payload_data = {"cameras": [], "configs": []}
+            
+            configs = payload_data.get("configs")
+            if not isinstance(configs, list):
+                configs = []
+            
+            updated = False
+            for c in configs:
+                c_rtsp = c.get("rtsp_url", "")
+                import re
+                c_ip_match = re.search(r'rtsp://([^:/]+)', c_rtsp)
+                c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
+                if c_ip == ip:
+                    c.update(config_dict)
+                    updated = True
+                    break
+            if not updated:
+                configs.append(config_dict)
+                
+            payload_data["configs"] = configs
+            with open(live_file, "w", encoding="utf-8") as f:
+                json.dump(payload_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            LOGGER.error("Failed to update live camera config state: %s", e)
+
+    def _delete_live_camera_config_state(agent_uid: str, ip: str):
+        import json
+        from pathlib import Path
+        live_file = Path(f"storage/live_cameras_{agent_uid}.json")
+        if live_file.exists():
+            try:
+                with open(live_file, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+                    if not isinstance(payload_data, dict):
+                        payload_data = {"cameras": [], "configs": []}
+                
+                configs = payload_data.get("configs")
+                if isinstance(configs, list):
+                    import re
+                    new_configs = []
+                    for c in configs:
+                        c_rtsp = c.get("rtsp_url", "")
+                        c_ip_match = re.search(r'rtsp://([^:/]+)', c_rtsp)
+                        c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
+                        if c_ip != ip:
+                            new_configs.append(c)
+                    payload_data["configs"] = new_configs
+                    with open(live_file, "w", encoding="utf-8") as f:
+                        json.dump(payload_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                LOGGER.error("Failed to delete live camera config state: %s", e)
+
+    class MockCameraConfig:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
     def _get_or_create_camera_config(session, agent_uid, camera_id):
-        from models import CameraConfig, AgentNode
         import ipaddress
         import json
         from pathlib import Path
         
-        cfg = session.execute(
-            select(CameraConfig).where(CameraConfig.id == camera_id)
-        ).scalars().first()
-        
-        if not cfg:
+        try:
+            ip_str = str(ipaddress.IPv4Address(camera_id))
+        except Exception:
+            return None
+            
+        # Read from live JSON file
+        live_file = Path(f"storage/live_cameras_{agent_uid}.json")
+        config_data = {}
+        if live_file.exists():
             try:
-                ip_str = str(ipaddress.IPv4Address(camera_id))
-                cfg = session.execute(
-                    select(CameraConfig).where(CameraConfig.ip == ip_str, CameraConfig.agent_uid == agent_uid)
-                ).scalars().first()
-                
-                if not cfg:
-                    agent = session.execute(
-                        select(AgentNode)
-                        .where(AgentNode.agent_uid == agent_uid)
-                        .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-                    ).scalars().first()
-                    lan_uid = agent.lan_uid if agent else "default"
-                    lead = agent.lead if agent else "default"
-                    
-                    manufacturer = "Generic"
-                    model = "Camera IP"
-                    rtsp_url = f"rtsp://{ip_str}:554/cam/realmonitor?channel=1&subtype=0"
-                    camera_name = f"Camera {ip_str}"
-                    mac_address = ""
-                    
-                    live_file = Path(f"storage/live_cameras_{agent_uid}.json")
-                    if live_file.exists():
-                        try:
-                            with open(live_file, "r", encoding="utf-8") as f:
-                                cams_list = json.load(f)
-                                if isinstance(cams_list, list):
-                                    for item in cams_list:
-                                        if item.get("ip") == ip_str:
-                                            rtsp_url = item.get("rtsp_url") or rtsp_url
-                                            camera_name = item.get("camera_name") or camera_name
-                                            mac_address = item.get("mac_address") or item.get("mac") or ""
-                                            break
-                        except Exception:
-                            pass
-                            
-                    # Load mac_vendors to resolve manufacturer
-                    mac_vendors = {}
-                    mac_file = Path("storage/mac_vendors.json")
-                    if mac_file.exists():
-                        try:
-                            with open(mac_file, "r", encoding="utf-8") as f:
-                                mac_vendors = json.load(f)
-                        except Exception:
-                            pass
-                    manufacturer = _get_clean_manufacturer(mac_address, mac_vendors)
-                            
-                    cfg = CameraConfig(
-                        lead=lead,
-                        lan_uid=lan_uid,
-                        agent_uid=agent_uid,
-                        camera_name=camera_name,
-                        rtsp_url=rtsp_url,
-                        ip=ip_str,
-                        mac_address=mac_address,
-                        manufacturer=manufacturer,
-                        model=model,
-                        is_online=True
-                    )
-                    session.add(cfg)
-                    session.flush()
+                with open(live_file, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+                    if isinstance(payload_data, dict):
+                        configs = payload_data.get("configs") or []
+                        cameras = payload_data.get("cameras") or []
+                        
+                        # Search in configs first
+                        for c in configs:
+                            rtsp = c.get("rtsp_url", "")
+                            import re
+                            c_ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                            c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
+                            if c_ip == ip_str:
+                                config_data = c
+                                break
+                                
+                        # If not found in configs, search in scanned cameras
+                        if not config_data:
+                            for item in cameras:
+                                if item.get("ip") == ip_str:
+                                    config_data = {
+                                        "camera_name": item.get("camera_name") or f"Camera {ip_str}",
+                                        "rtsp_url": item.get("rtsp_url") or f"rtsp://{ip_str}:554/cam/realmonitor?channel=1&subtype=0",
+                                        "segment_duration": 60,
+                                        "prefix": "rec",
+                                        "video_codec": "copy",
+                                        "audio_codec": "copy",
+                                        "no_audio": True,
+                                        "ip": ip_str,
+                                        "mac_address": item.get("mac_address") or item.get("mac") or ""
+                                    }
+                                    break
             except Exception:
                 pass
-        return cfg
+                
+        if not config_data:
+            config_data = {
+                "camera_name": f"Camera {ip_str}",
+                "rtsp_url": f"rtsp://{ip_str}:554/cam/realmonitor?channel=1&subtype=0",
+                "segment_duration": 60,
+                "prefix": "rec",
+                "video_codec": "copy",
+                "audio_codec": "copy",
+                "no_audio": True,
+                "ip": ip_str,
+                "mac_address": ""
+            }
+            
+        return MockCameraConfig(
+            id=camera_id,
+            camera_name=config_data.get("camera_name"),
+            rtsp_url=config_data.get("rtsp_url"),
+            segment_duration=config_data.get("segment_duration", 60),
+            prefix=config_data.get("prefix", "rec"),
+            video_codec=config_data.get("video_codec", "copy"),
+            audio_codec=config_data.get("audio_codec", "copy"),
+            no_audio=config_data.get("no_audio", True),
+            ip=config_data.get("ip", ip_str),
+            mac_address=config_data.get("mac_address", ""),
+            is_recording=config_data.get("is_recording", False)
+        )
 
     @app.get("/api/agents/<agent_uid>/cameras")
     def get_agent_cameras(agent_uid: str) -> Any:
-        from models import CameraConfig, AgentNode
+        from models import AgentNode
         import ipaddress
         import json
         from pathlib import Path
@@ -1373,20 +1441,6 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             ).scalars().all()
             online_uids = [a.agent_uid for a in online_agents]
             
-            db_configs = session.execute(
-                select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid)
-            ).scalars().all()
-            
-            configs_by_ip = {}
-            configs_by_mac = {}
-            for c in db_configs:
-                ip = (c.ip or "").strip()
-                mac = (c.mac_address or "").strip()
-                if ip:
-                    configs_by_ip[ip] = c
-                if mac:
-                    configs_by_mac[mac] = c
-
             # Load offline MAC vendors database
             mac_vendors = {}
             mac_file = Path("storage/mac_vendors.json")
@@ -1398,6 +1452,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     LOGGER.error("Failed to load mac_vendors.json: %s", e)
 
             live_cameras = []
+            local_configs = []
             seen_ips = set()
             
             for uid in online_uids:
@@ -1405,7 +1460,15 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if live_file.exists():
                     try:
                         with open(live_file, "r", encoding="utf-8") as f:
-                            cams_list = json.load(f)
+                            payload_data = json.load(f)
+                            cams_list = []
+                            cfg_list = []
+                            if isinstance(payload_data, dict):
+                                cams_list = payload_data.get("cameras") or []
+                                cfg_list = payload_data.get("configs") or []
+                            elif isinstance(payload_data, list):
+                                cams_list = payload_data
+                                
                             if isinstance(cams_list, list):
                                 for item in cams_list:
                                     ip = (item.get("ip") or "").strip()
@@ -1433,14 +1496,28 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                         
                                     seen_ips.add(ip)
                                     live_cameras.append(item)
+                                    
+                            if isinstance(cfg_list, list):
+                                for cfg_item in cfg_list:
+                                    local_configs.append(cfg_item)
                     except Exception as e:
                         LOGGER.error("Failed to read live cameras file for %s: %s", uid, e)
             
+            # Group local configs by IP
+            configs_by_ip = {}
+            for c in local_configs:
+                rtsp = c.get("rtsp_url", "")
+                import re
+                ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                ip = ip_match.group(1) if ip_match else c.get("ip")
+                if ip:
+                    configs_by_ip[ip] = c
+
             results = []
             for item in live_cameras:
                 ip = item.get("ip")
                 mac = item.get("mac_address") or item.get("mac")
-                config = configs_by_ip.get(ip) or configs_by_mac.get(mac)
+                config = configs_by_ip.get(ip)
                 
                 try:
                     virtual_id = int(ipaddress.IPv4Address(ip))
@@ -1451,20 +1528,20 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 
                 if config:
                     results.append({
-                        "id": config.id,
-                        "agent_uid": config.agent_uid,
-                        "camera_name": config.camera_name,
-                        "rtsp_url": config.rtsp_url,
-                        "segment_duration": config.segment_duration,
-                        "prefix": config.prefix,
-                        "video_codec": config.video_codec,
-                        "audio_codec": config.audio_codec,
-                        "no_audio": config.no_audio,
-                        "is_recording": config.is_recording,
+                        "id": virtual_id,
+                        "agent_uid": agent_uid,
+                        "camera_name": config.get("camera_name") or f"Camera {ip}",
+                        "rtsp_url": config.get("rtsp_url") or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0",
+                        "segment_duration": config.get("segment_duration", 60),
+                        "prefix": config.get("prefix", "rec"),
+                        "video_codec": config.get("video_codec", "copy"),
+                        "audio_codec": config.get("audio_codec", "copy"),
+                        "no_audio": config.get("no_audio", True),
+                        "is_recording": item.get("is_recording", False),
                         "ip": ip,
-                        "mac_address": mac or config.mac_address or "",
-                        "manufacturer": resolved_manufacturer if resolved_manufacturer != "Generic" else (config.manufacturer or "Generic"),
-                        "model": item.get("model") or config.model or "Camera IP",
+                        "mac_address": mac or "",
+                        "manufacturer": resolved_manufacturer if resolved_manufacturer != "Generic" else (config.get("manufacturer") or "Generic"),
+                        "model": item.get("model") or "Camera IP",
                         "is_online": True,
                     })
                 else:
@@ -1486,11 +1563,35 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_online": True,
                     })
                     
+            # Add offline configured cameras
+            for ip, config in configs_by_ip.items():
+                if ip not in seen_ips:
+                    try:
+                        virtual_id = int(ipaddress.IPv4Address(ip))
+                    except Exception:
+                        virtual_id = 9999
+                    results.append({
+                        "id": virtual_id,
+                        "agent_uid": agent_uid,
+                        "camera_name": config.get("camera_name") or f"Camera {ip}",
+                        "rtsp_url": config.get("rtsp_url"),
+                        "segment_duration": config.get("segment_duration", 60),
+                        "prefix": config.get("prefix", "rec"),
+                        "video_codec": config.get("video_codec", "copy"),
+                        "audio_codec": config.get("audio_codec", "copy"),
+                        "no_audio": config.get("no_audio", True),
+                        "is_recording": False,
+                        "ip": ip,
+                        "mac_address": config.get("mac_address") or "",
+                        "manufacturer": config.get("manufacturer") or "Generic",
+                        "model": "Camera IP",
+                        "is_online": False,
+                    })
+                    
             return jsonify({"ok": True, "cameras": results})
 
     @app.post("/api/agents/<agent_uid>/cameras")
     def save_agent_camera(agent_uid: str) -> Any:
-        from models import CameraConfig, AgentNode
         body = request.get_json(silent=True) or {}
         camera_id = body.get("id")
         camera_name = str(body.get("camera_name", "Camera")).strip()
@@ -1504,51 +1605,91 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         if not rtsp_url:
             return jsonify({"ok": False, "error": "Missing rtsp_url"}), 400
             
-        with session_factory() as session:
-            agent = session.execute(
-                select(AgentNode)
-                .where(AgentNode.agent_uid == agent_uid)
-                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-            ).scalars().first()
-            lan_uid = agent.lan_uid if agent else "default"
-            lead = agent.lead if agent else "default"
-
-            if camera_id:
-                cfg = _get_or_create_camera_config(session, agent_uid, camera_id)
-                if not cfg:
-                    return jsonify({"ok": False, "error": "Camera config not found"}), 404
-                cfg.agent_uid = agent_uid
-            else:
-                cfg = CameraConfig(agent_uid=agent_uid, lan_uid=lan_uid, lead=lead)
-                session.add(cfg)
+        params = {
+            "camera_name": camera_name,
+            "rtsp_url": rtsp_url,
+            "segment_duration": segment_duration,
+            "prefix": prefix,
+            "video_codec": video_codec,
+            "audio_codec": audio_codec,
+            "no_audio": no_audio
+        }
+        
+        import ipaddress
+        import re
+        camera_ip = ""
+        if camera_id:
+            try:
+                camera_ip = str(ipaddress.IPv4Address(camera_id))
+            except Exception:
+                pass
+        
+        if not camera_ip:
+            ip_match = re.search(r'rtsp://([^:/]+)', rtsp_url)
+            if ip_match:
+                camera_ip = ip_match.group(1)
                 
-            cfg.camera_name = camera_name
-            cfg.rtsp_url = rtsp_url
-            cfg.segment_duration = segment_duration
-            cfg.prefix = prefix
-            cfg.video_codec = video_codec
-            cfg.audio_codec = audio_codec
-            cfg.no_audio = no_audio
-            if lan_uid:
-                cfg.lan_uid = lan_uid
-            if lead:
-                cfg.lead = lead
-            
-            session.commit()
-            return jsonify({"ok": True, "camera_id": cfg.id})
+        # Send save command to Agent (saves to agent's local JSON)
+        success, err = _queue_camera_utility_command(agent_uid, "save_camera_config", camera_name, params)
+        if success:
+            try:
+                virtual_id = int(ipaddress.IPv4Address(camera_ip))
+            except Exception:
+                virtual_id = 9999
+                
+            # Update Server's local JSON cache instantly
+            _update_live_camera_config_state(agent_uid, camera_ip, {
+                "camera_name": camera_name,
+                "rtsp_url": rtsp_url,
+                "segment_duration": segment_duration,
+                "prefix": prefix,
+                "video_codec": video_codec,
+                "audio_codec": audio_codec,
+                "no_audio": no_audio,
+                "ip": camera_ip
+            })
+            return jsonify({"ok": True, "camera_id": virtual_id})
+        return jsonify({"ok": False, "error": err}), 504
 
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/delete")
     def delete_agent_camera(agent_uid: str, camera_id: int) -> Any:
-        from models import CameraConfig
-        with session_factory() as session:
-            cfg = session.execute(
-                select(CameraConfig).where(CameraConfig.id == camera_id)
-            ).scalars().first()
-            if not cfg:
-                return jsonify({"ok": False, "error": "Camera config not found"}), 404
-            session.delete(cfg)
-            session.commit()
+        import ipaddress
+        try:
+            camera_ip = str(ipaddress.IPv4Address(camera_id))
+        except Exception:
+            return jsonify({"ok": False, "error": "Invalid camera ID"}), 400
+            
+        # Get camera name from live file config
+        from pathlib import Path
+        import json
+        live_file = Path(f"storage/live_cameras_{agent_uid}.json")
+        camera_name = f"Camera {camera_ip}"
+        if live_file.exists():
+            try:
+                with open(live_file, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+                    if isinstance(payload_data, dict):
+                        for c in (payload_data.get("configs") or []):
+                            rtsp = c.get("rtsp_url", "")
+                            import re
+                            c_ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                            c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
+                            if c_ip == camera_ip:
+                                camera_name = c.get("camera_name")
+                                break
+            except Exception:
+                pass
+
+        # Stop recording first (just in case)
+        _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
+        
+        # Send delete config command to Agent
+        success, err = _queue_camera_utility_command(agent_uid, "delete_camera_config", camera_name, {})
+        if success:
+            # Delete config from server JSON cache instantly
+            _delete_live_camera_config_state(agent_uid, camera_ip)
             return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": err}), 504
 
     def _queue_camera_utility_command(agent_uid: str, action: str, camera_name: str, params: dict, wait_seconds: float = 15.0) -> tuple[bool, str]:
         requested_at = datetime.now(timezone.utc)
@@ -1612,25 +1753,41 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         live_file = Path(f"storage/live_cameras_{agent_uid}.json")
         if live_file.exists():
             try:
-                cams = []
+                payload_data = {"cameras": [], "configs": []}
                 with open(live_file, "r", encoding="utf-8") as f:
-                    cams = json.load(f)
-                if isinstance(cams, list):
-                    updated = False
-                    for item in cams:
-                        if item.get("ip") == ip:
-                            item["is_recording"] = is_recording
-                            updated = True
-                            break
-                    if updated:
-                        with open(live_file, "w", encoding="utf-8") as f:
-                            json.dump(cams, f, indent=2, ensure_ascii=False)
+                    payload_data = json.load(f)
+                    if not isinstance(payload_data, dict):
+                        payload_data = {"cameras": [], "configs": []}
+                
+                cams = payload_data.get("cameras") or []
+                updated = False
+                for item in cams:
+                    if item.get("ip") == ip:
+                        item["is_recording"] = is_recording
+                        updated = True
+                        break
+                        
+                configs = payload_data.get("configs") or []
+                for item in configs:
+                    c_rtsp = item.get("rtsp_url", "")
+                    import re
+                    c_ip_match = re.search(r'rtsp://([^:/]+)', c_rtsp)
+                    c_ip = c_ip_match.group(1) if c_ip_match else item.get("ip")
+                    if c_ip == ip:
+                        item["is_recording"] = is_recording
+                        updated = True
+                        break
+                        
+                if updated:
+                    payload_data["cameras"] = cams
+                    payload_data["configs"] = configs
+                    with open(live_file, "w", encoding="utf-8") as f:
+                        json.dump(payload_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 LOGGER.error("Failed to update live cameras JSON state: %s", e)
 
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/start")
     def start_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
-        from models import CameraConfig
         body = request.get_json(silent=True) or {}
         duration = body.get("duration")
         
@@ -1657,18 +1814,12 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             
         success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
         if success:
-            with session_factory() as session:
-                cfg = _get_or_create_camera_config(session, agent_uid, camera_id)
-                if cfg:
-                    cfg.is_recording = True
-                    session.commit()
             _update_live_camera_recording_state(agent_uid, camera_ip, True)
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": err}), 504
 
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/stop")
     def stop_agent_camera_recording(agent_uid: str, camera_id: int) -> Any:
-        from models import CameraConfig
         with session_factory() as session:
             cfg = _get_or_create_camera_config(session, agent_uid, camera_id)
             if not cfg:
@@ -1678,11 +1829,6 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             
         success, err = _queue_camera_utility_command(agent_uid, "stop_camera_recorder", camera_name, {})
         if success:
-            with session_factory() as session:
-                cfg = _get_or_create_camera_config(session, agent_uid, camera_id)
-                if cfg:
-                    cfg.is_recording = False
-                    session.commit()
             _update_live_camera_recording_state(agent_uid, camera_ip, False)
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": err}), 504
