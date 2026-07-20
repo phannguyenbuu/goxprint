@@ -3283,6 +3283,11 @@ if ($node) {{ $node }}
                     self._post_control_result(command_id=command_id, ok=True, error="")
                     self._update_recent_command_status(command_id, "success")
                     return
+                elif action == "scan_cameras":
+                    self._trigger_background_camera_scan()
+                    self._post_control_result(command_id=command_id, ok=True, error="Started background camera scan")
+                    self._update_recent_command_status(command_id, "success")
+                    return
                 else:
                     raise ValueError(f"Unknown utility action: {action}")
 
