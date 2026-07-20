@@ -25,7 +25,10 @@ hiddenimports = [
     'tkinter.messagebox',
     'tkinter.filedialog',
     'tkinter.simpledialog',
-    'flask_cors'
+    'flask_cors',
+    'win32file',
+    'win32pipe',
+    'pywintypes'
 ]
 
 a = Analysis(
