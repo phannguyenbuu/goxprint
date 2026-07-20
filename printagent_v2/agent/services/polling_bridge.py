@@ -2013,11 +2013,11 @@ if ($node) {{ $node }}
                     return {"manufacturer": "Generic", "model": last_error}
 
                 # Port scan helper
-                def scan_ip_port(ip_addr: str) -> bool:
+                def scan_ip_port(ip_addr: str, port: int = 554) -> bool:
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         s.settimeout(0.6)
-                        res = s.connect_ex((ip_addr, 554))
+                        res = s.connect_ex((ip_addr, port))
                         s.close()
                         return res == 0
                     except Exception:
@@ -2085,11 +2085,21 @@ if ($node) {{ $node }}
                 for subnet_prefix in subnets:
                     ips_to_scan = [f"{subnet_prefix}.{i}" for i in range(1, 255) if f"{subnet_prefix}.{i}" not in discovered_ips]
                     with ThreadPoolExecutor(max_workers=50) as executor:
-                        futures = {executor.submit(scan_ip_port, ip_addr): ip_addr for ip_addr in ips_to_scan}
-                        for future in futures:
-                            ip_addr = futures[future]
+                        futures_554 = {executor.submit(scan_ip_port, ip_addr, 554): ip_addr for ip_addr in ips_to_scan}
+                        futures_9100 = {executor.submit(scan_ip_port, ip_addr, 9100): ip_addr for ip_addr in ips_to_scan}
+                        
+                        for future in futures_554:
+                            ip_addr = futures_554[future]
                             try:
-                                if future.result():
+                                if future.result() and ip_addr not in discovered_ips:
+                                    discovered_ips.append(ip_addr)
+                            except Exception:
+                                pass
+                                     
+                        for future in futures_9100:
+                            ip_addr = futures_9100[future]
+                            try:
+                                if future.result() and ip_addr not in discovered_ips:
                                     discovered_ips.append(ip_addr)
                             except Exception:
                                 pass
