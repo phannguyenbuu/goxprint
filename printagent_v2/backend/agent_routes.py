@@ -1238,7 +1238,16 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         return jsonify({"ok": True})
 
 
-    def _get_clean_manufacturer(mac: str, mac_vendors: dict) -> str:
+    def _get_clean_manufacturer(mac: str, mac_vendors: dict, rtsp_url: str = None) -> str:
+        if rtsp_url:
+            url_lower = rtsp_url.lower()
+            if "/cam/realmonitor" in url_lower:
+                return "Imou"
+            if "/streaming/channels" in url_lower or "/h264/ch" in url_lower or "/h265/ch" in url_lower:
+                return "Hikvision"
+            if "/onvif1" in url_lower or "/onvif2" in url_lower:
+                return "Yoosee"
+
         if not mac or not mac_vendors:
             return "Generic"
         clean_mac = "".join(c for c in mac if c.isalnum()).upper()
@@ -1254,8 +1263,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     return "Hikvision"
                 elif "ezviz" in vendor_lower:
                     return "Ezviz"
-                elif "imou" in vendor_lower:
+                elif "imou" in vendor_lower or "huacheng" in vendor_lower:
                     return "Imou"
+                elif "sigmastar" in vendor_lower:
+                    return "Sigmastar"
                 elif "sony" in vendor_lower:
                     return "Sony"
                 elif "panasonic" in vendor_lower:
@@ -1454,6 +1465,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             live_cameras = []
             local_configs = []
             seen_ips = set()
+            toshiba_ips = set()
             
             for uid in online_uids:
                 live_file = Path(f"storage/live_cameras_{uid}.json")
@@ -1493,9 +1505,13 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                                 vendor_name = vendor_info.get("manufacturer", "")
                                                 vendor_lower = vendor_name.lower()
                                                 if "toshiba" in vendor_lower or "tokyo electric" in vendor_lower:
-                                                    is_toshiba = True
+                                                    # Do not treat as Toshiba if it has a camera RTSP path
+                                                    rtsp_url = item.get("rtsp_url") or ""
+                                                    if "/cam/realmonitor" not in rtsp_url.lower() and "/streaming/channels" not in rtsp_url.lower():
+                                                        is_toshiba = True
                                                     
                                     if is_toshiba:
+                                        toshiba_ips.add(ip)
                                         continue
                                         
                                     seen_ips.add(ip)
@@ -1528,7 +1544,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 except Exception:
                     virtual_id = 9999
                     
-                resolved_manufacturer = _get_clean_manufacturer(mac, mac_vendors)
+                rtsp_url = config.get("rtsp_url") if config else item.get("rtsp_url")
+                resolved_manufacturer = _get_clean_manufacturer(mac, mac_vendors, rtsp_url=rtsp_url)
                 
                 final_manufacturer = resolved_manufacturer
                 if final_manufacturer == "Generic":
@@ -1583,16 +1600,20 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     
             # Add offline configured cameras
             for ip, config in configs_by_ip.items():
-                if ip not in seen_ips:
+                if ip not in seen_ips and ip not in toshiba_ips:
                     try:
                         virtual_id = int(ipaddress.IPv4Address(ip))
                     except Exception:
                         virtual_id = 9999
+                    
+                    rtsp = config.get("rtsp_url") or ""
+                    resolved_manufacturer = _get_clean_manufacturer(config.get("mac_address"), mac_vendors, rtsp_url=rtsp)
+                    
                     results.append({
                         "id": virtual_id,
                         "agent_uid": agent_uid,
                         "camera_name": config.get("camera_name") or f"Camera {ip}",
-                        "rtsp_url": config.get("rtsp_url"),
+                        "rtsp_url": rtsp,
                         "segment_duration": config.get("segment_duration", 60),
                         "prefix": config.get("prefix", "rec"),
                         "video_codec": config.get("video_codec", "copy"),
@@ -1601,7 +1622,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_recording": False,
                         "ip": ip,
                         "mac_address": config.get("mac_address") or "",
-                        "manufacturer": config.get("manufacturer") or "Generic",
+                        "manufacturer": resolved_manufacturer if resolved_manufacturer != "Generic" else (config.get("manufacturer") or "Generic"),
                         "model": "Camera IP",
                         "is_online": False,
                     })
