@@ -1362,26 +1362,17 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     if isinstance(payload_data, dict):
                         configs = payload_data.get("configs") or []
                         cameras = payload_data.get("cameras") or []
-                        if c_ip == ip_str:
-                            config_data = c
-                            break
-                            
-                    # If not found in configs, search in scanned cameras
-                    if not config_data:
-                        for item in cameras:
-                            if item.get("ip") == ip_str:
-                                config_data = {
-                                    "camera_name": item.get("camera_name") or f"Camera {ip_str}",
-                                    "rtsp_url": item.get("rtsp_url") or f"rtsp://{ip_str}:554/cam/realmonitor?channel=1&subtype=0",
-                                    "segment_duration": 60,
-                                    "prefix": "rec",
-                                    "video_codec": "copy",
-                                    "audio_codec": "copy",
-                                    "no_audio": True,
-                                    "ip": ip_str,
-                                    "mac_address": item.get("mac_address") or item.get("mac") or ""
-                                }
+                        
+                        # Search in configs first
+                        for c in configs:
+                            rtsp = c.get("rtsp_url", "")
+                            import re
+                            c_ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp)
+                            c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
+                            if c_ip == ip_str:
+                                config_data = c
                                 break
+                                
                         # If not found in configs, search in scanned cameras
                         if not config_data:
                             for item in cameras:
