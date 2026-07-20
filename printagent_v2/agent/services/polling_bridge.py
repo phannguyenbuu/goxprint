@@ -2096,14 +2096,44 @@ if ($node) {{ $node }}
 
                 # Compile results
                 cameras_payload = []
-                for ip_addr in discovered_ips:
+
+                def check_and_compile(ip_addr: str) -> dict | None:
+                    # 1. Quick TCP check on RTSP port 554
+                    if not scan_ip_port(ip_addr):
+                        return None
+                        
+                    # 2. Check credentials from config if available
+                    username, password = find_credentials(ip_addr)
+                    if username and password:
+                        rtsp_url = f"rtsp://{username}:{password}@{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                    else:
+                        rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                        
+                    # 3. Test actual RTSP connection stream
+                    is_online, _ = cm.test_rtsp_connection(rtsp_url)
+                    if not is_online:
+                        # Try fallback generic stream paths if first one failed
+                        if not username or not password:
+                            fallback_urls = [
+                                f"rtsp://{ip_addr}:554/live/ch0",
+                                f"rtsp://{ip_addr}:554/h264/ch1/main/av_stream"
+                            ]
+                            for fb_url in fallback_urls:
+                                fb_online, _ = cm.test_rtsp_connection(fb_url)
+                                if fb_online:
+                                    rtsp_url = fb_url
+                                    is_online = True
+                                    break
+                                    
+                    if not is_online:
+                        return None
+                        
+                    # 4. Fetch ONVIF details and MAC address
                     info = get_onvif_info(ip_addr)
                     mac_addr = get_mac_address(ip_addr)
-                    
                     camera_name = f"Camera {ip_addr}"
-                    rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
                     
-                    cameras_payload.append({
+                    return {
                         "ip": ip_addr,
                         "mac_address": mac_addr,
                         "camera_name": camera_name,
@@ -2111,7 +2141,18 @@ if ($node) {{ $node }}
                         "model": info.get("model", "Camera IP"),
                         "rtsp_url": rtsp_url,
                         "is_online": True
-                    })
+                    }
+
+                # Run compilation check in parallel
+                with ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = [executor.submit(check_and_compile, ip) for ip in discovered_ips]
+                    for future in futures:
+                        try:
+                            res = future.result()
+                            if res:
+                                cameras_payload.append(res)
+                        except Exception:
+                            pass
                 
                 # Check status of configured cameras not found in discovery
                 for c in configs:
