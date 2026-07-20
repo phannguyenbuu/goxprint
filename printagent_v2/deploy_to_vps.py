@@ -92,6 +92,7 @@ files_to_copy = [
     (str(local_backend / 'storage' / 'drivers' / 'toshiba.json'), '/opt/printagent/storage/drivers/toshiba.json'),
     (str(local_backend / 'storage' / 'drivers' / 'ricoh.json'), '/opt/printagent/storage/drivers/ricoh.json'),
     (str(local_backend / 'storage' / 'drivers' / 'fujifilm.json'), '/opt/printagent/storage/drivers/fujifilm.json'),
+    (str(local_backend / 'storage' / 'mac_vendors.json'), '/opt/printagent/storage/mac_vendors.json'),
     (str(local_backend / 'static' / 'logo.png'), '/opt/printagent/static/logo.png')
 ]
 
