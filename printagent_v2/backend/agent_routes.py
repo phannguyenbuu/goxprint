@@ -1250,11 +1250,11 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             
             if agent and agent.lan_uid and agent.lan_uid != "default":
                 configs = session.execute(
-                    select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid)
+                    select(CameraConfig).where(CameraConfig.lan_uid == agent.lan_uid, CameraConfig.is_online == True)
                 ).scalars().all()
             else:
                 configs = session.execute(
-                    select(CameraConfig).where(CameraConfig.agent_uid == agent_uid)
+                    select(CameraConfig).where(CameraConfig.agent_uid == agent_uid, CameraConfig.is_online == True)
                 ).scalars().all()
             
             seen_ips = set()

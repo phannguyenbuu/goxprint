@@ -688,15 +688,14 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     session.flush()
                     reported_ids.add(new_cam.id)
             
-            # Mark all other cameras of this agent as offline
+            # Delete all other cameras of this agent that are not reported in the current scan
             if cameras:
                 all_agent_cams = session.execute(
                     select(CameraConfig).where(CameraConfig.lead == lead, CameraConfig.agent_uid == agent_uid)
                 ).scalars().all()
                 for cam in all_agent_cams:
                     if cam.id not in reported_ids:
-                        cam.is_online = False
-                        cam.is_recording = False
+                        session.delete(cam)
                     
             session.commit()
 
