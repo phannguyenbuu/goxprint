@@ -1295,7 +1295,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             for c in configs:
                 c_rtsp = c.get("rtsp_url", "")
                 import re
-                c_ip_match = re.search(r'rtsp://([^:/]+)', c_rtsp)
+                c_ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', c_rtsp)
                 c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
                 if c_ip == ip:
                     c.update(config_dict)
@@ -1362,17 +1362,26 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     if isinstance(payload_data, dict):
                         configs = payload_data.get("configs") or []
                         cameras = payload_data.get("cameras") or []
-                        
-                        # Search in configs first
-                        for c in configs:
-                            rtsp = c.get("rtsp_url", "")
-                            import re
-                            c_ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
-                            c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
-                            if c_ip == ip_str:
-                                config_data = c
+                        if c_ip == ip_str:
+                            config_data = c
+                            break
+                            
+                    # If not found in configs, search in scanned cameras
+                    if not config_data:
+                        for item in cameras:
+                            if item.get("ip") == ip_str:
+                                config_data = {
+                                    "camera_name": item.get("camera_name") or f"Camera {ip_str}",
+                                    "rtsp_url": item.get("rtsp_url") or f"rtsp://{ip_str}:554/cam/realmonitor?channel=1&subtype=0",
+                                    "segment_duration": 60,
+                                    "prefix": "rec",
+                                    "video_codec": "copy",
+                                    "audio_codec": "copy",
+                                    "no_audio": True,
+                                    "ip": ip_str,
+                                    "mac_address": item.get("mac_address") or item.get("mac") or ""
+                                }
                                 break
-                                
                         # If not found in configs, search in scanned cameras
                         if not config_data:
                             for item in cameras:
@@ -1511,7 +1520,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             for c in local_configs:
                 rtsp = c.get("rtsp_url", "")
                 import re
-                ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp)
                 ip = ip_match.group(1) if ip_match else c.get("ip")
                 if ip:
                     configs_by_ip[ip] = c
@@ -1642,7 +1651,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 pass
         
         if not camera_ip:
-            ip_match = re.search(r'rtsp://([^:/]+)', rtsp_url)
+            ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp_url)
             if ip_match:
                 camera_ip = ip_match.group(1)
                 
@@ -1689,7 +1698,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         for c in (payload_data.get("configs") or []):
                             rtsp = c.get("rtsp_url", "")
                             import re
-                            c_ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                            c_ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp)
                             c_ip = c_ip_match.group(1) if c_ip_match else c.get("ip")
                             if c_ip == camera_ip:
                                 camera_name = c.get("camera_name")
@@ -1788,7 +1797,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 for item in configs:
                     c_rtsp = item.get("rtsp_url", "")
                     import re
-                    c_ip_match = re.search(r'rtsp://([^:/]+)', c_rtsp)
+                    c_ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', c_rtsp)
                     c_ip = c_ip_match.group(1) if c_ip_match else item.get("ip")
                     if c_ip == ip:
                         item["is_recording"] = is_recording

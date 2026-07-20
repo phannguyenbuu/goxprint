@@ -1868,7 +1868,7 @@ if ($node) {{ $node }}
                 def find_credentials(ip_addr: str) -> tuple[str | None, str | None]:
                     for c in configs:
                         rtsp = c.get("rtsp_url", "")
-                        ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                        ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp)
                         if ip_match and ip_match.group(1) == ip_addr:
                             cred_match = re.search(r'rtsp://([^:@]+):([^:@]+)@', rtsp)
                             if cred_match:
@@ -2135,7 +2135,7 @@ if ($node) {{ $node }}
                     is_rec = False
                     for cfg_item in configs:
                         cfg_rtsp = cfg_item.get("rtsp_url", "")
-                        cfg_ip_match = re.search(r'rtsp://([^:/]+)', cfg_rtsp)
+                        cfg_ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', cfg_rtsp)
                         if (cfg_ip_match and cfg_ip_match.group(1) == ip_addr) or cfg_item.get("camera_name") == camera_name:
                             is_rec = cm.get_status(cfg_item.get("camera_name")).get("running", False)
                             camera_name = cfg_item.get("camera_name")
@@ -2156,7 +2156,7 @@ if ($node) {{ $node }}
                 # Check status of configured cameras not found in discovery
                 for c in configs:
                     rtsp = c.get("rtsp_url", "")
-                    ip_match = re.search(r'rtsp://([^:/]+)', rtsp)
+                    ip_match = re.search(r'rtsp://(?:[^@\n]+@)?([^:/#\n?]+)', rtsp)
                     if ip_match:
                         ip_addr = ip_match.group(1)
                         if not any(item["ip"] == ip_addr for item in cameras_payload):
