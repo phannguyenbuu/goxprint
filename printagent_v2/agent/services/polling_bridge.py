@@ -2126,8 +2126,12 @@ if ($node) {{ $node }}
                 # Compile results
                 cameras_payload = []
                 for ip_addr in discovered_ips:
-                    info = get_onvif_info(ip_addr)
                     mac_addr = get_mac_address(ip_addr)
+                    clean_mac = "".join(c for c in mac_addr if c.isalnum()).upper()
+                    if len(clean_mac) != 12 or not all(c in "0123456789ABCDEF" for c in clean_mac):
+                        continue
+                        
+                    info = get_onvif_info(ip_addr)
                     
                     camera_name = f"Camera {ip_addr}"
                     rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"

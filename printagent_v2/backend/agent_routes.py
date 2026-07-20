@@ -1478,7 +1478,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                         continue
                                         
                                     mac = (item.get("mac_address") or item.get("mac") or "").strip()
-                                    if not mac or mac.lower() == "unknown":
+                                    clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+                                    if len(clean_mac) != 12 or not all(c in "0123456789ABCDEF" for c in clean_mac):
                                         continue
                                         
                                     # Filter out Toshiba/Tokyo Electric devices by MAC OUI
