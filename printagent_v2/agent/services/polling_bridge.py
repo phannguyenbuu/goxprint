@@ -2025,14 +2025,43 @@ if ($node) {{ $node }}
 
                 # Dynamic MAC lookup
                 def get_mac_address(ip_addr: str) -> str:
+                    # 1. Try /proc/net/arp on Linux (fastest, direct)
+                    try:
+                        from pathlib import Path
+                        arp_path = Path("/proc/net/arp")
+                        if arp_path.exists():
+                            with arp_path.open("r", encoding="utf-8") as f:
+                                for line in f:
+                                    parts = line.split()
+                                    if len(parts) >= 4 and parts[0] == ip_addr:
+                                        mac = parts[3].strip()
+                                        if mac and mac != "00:00:00:00:00:00":
+                                            return mac.upper()
+                    except Exception:
+                        pass
+
+                    # 2. Try ip neigh on Linux
                     try:
                         import subprocess
-                        output = subprocess.check_output(f"arp -a {ip_addr}", shell=True, timeout=0.8).decode('utf-8', errors='ignore')
+                        output = subprocess.check_output(f"ip neigh show {ip_addr}", shell=True, timeout=0.8).decode('utf-8', errors='ignore')
                         mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', output)
                         if mac_match:
                             return mac_match.group(0).upper().replace("-", ":")
                     except Exception:
                         pass
+
+                    # 3. Try arp -a (full table or specific IP)
+                    for cmd in [f"arp -a {ip_addr}", "arp -a"]:
+                        try:
+                            import subprocess
+                            output = subprocess.check_output(cmd, shell=True, timeout=0.8).decode('utf-8', errors='ignore')
+                            for line in output.splitlines():
+                                if ip_addr in line:
+                                    mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', line)
+                                    if mac_match:
+                                        return mac_match.group(0).upper().replace("-", ":")
+                        except Exception:
+                            pass
                     return "Unknown"
 
                 # 2. Multicast WS-Discovery

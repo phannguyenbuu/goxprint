@@ -1526,6 +1526,20 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     
                 resolved_manufacturer = _get_clean_manufacturer(mac, mac_vendors)
                 
+                final_manufacturer = resolved_manufacturer
+                if final_manufacturer == "Generic":
+                    reported_mfr = item.get("manufacturer") or "Generic"
+                    if reported_mfr != "Generic":
+                        final_manufacturer = reported_mfr
+                
+                model_str = item.get("model") or "Camera IP"
+                model_lower = model_str.lower()
+                if any(err_kw in model_lower for err_kw in ("timeout", "lỗi", "error", "404", "504", "conn")):
+                    if final_manufacturer != "Generic":
+                        model_str = "Camera IP"
+                    else:
+                        model_str = "Camera IP (Chưa rõ dòng)"
+                
                 if config:
                     results.append({
                         "id": virtual_id,
@@ -1540,8 +1554,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_recording": item.get("is_recording", False),
                         "ip": ip,
                         "mac_address": mac or "",
-                        "manufacturer": resolved_manufacturer if resolved_manufacturer != "Generic" else (config.get("manufacturer") or "Generic"),
-                        "model": item.get("model") or "Camera IP",
+                        "manufacturer": final_manufacturer,
+                        "model": model_str,
                         "is_online": True,
                     })
                 else:
@@ -1558,8 +1572,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         "is_recording": False,
                         "ip": ip,
                         "mac_address": mac or "",
-                        "manufacturer": resolved_manufacturer,
-                        "model": item.get("model") or "Camera IP",
+                        "manufacturer": final_manufacturer,
+                        "model": model_str,
                         "is_online": True,
                     })
                     
