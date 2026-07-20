@@ -4078,28 +4078,6 @@ except Exception as e:
                               <GlowCard>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                                   <h4 style={{ ...styles.cardTitle, fontSize: '0.85rem', marginBottom: 0 }}>🎥 Các phân đoạn video đã ghi (Click để xem)</h4>
-                                  <button
-                                    style={{
-                                      background: 'var(--color-success)',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      padding: '2px 8px',
-                                      fontSize: '0.68rem',
-                                      fontWeight: 600,
-                                      cursor: 'pointer'
-                                    }}
-                                    onClick={() => {
-                                      const liveTs = getLiveQueryTimestamp();
-                                      setQueryTimestamp(liveTs);
-                                      setQueryDuration(30);
-                                      setActiveLoadingFile('__LIVE__');
-                                      handleQueryVideo(activeAgentUid, selectedCamera.id, liveTs, 30);
-                                    }}
-                                    disabled={queryVideoLoading}
-                                  >
-                                    {queryVideoLoading && activeLoadingFile === '__LIVE__' ? '⏳...' : '📺 Xem Live (30s)'}
-                                  </button>
                                 </div>
                                 
                                 <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
