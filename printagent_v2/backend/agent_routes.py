@@ -1599,6 +1599,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
                 is_any_recording = any(it.get("is_recording", False) for it in items)
 
+                combined_ip_str = ", ".join(all_ips) if len(all_ips) > 1 else primary_ip
+
                 results.append({
                     "id": virtual_id,
                     "agent_uid": agent_uid,
@@ -1610,7 +1612,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "audio_codec": config.get("audio_codec", "copy") if config else "copy",
                     "no_audio": config.get("no_audio", True) if config else True,
                     "is_recording": is_any_recording,
-                    "ip": primary_ip,
+                    "ip": combined_ip_str,
                     "mac_address": mac_formatted,
                     "manufacturer": final_manufacturer,
                     "model": model_str,
@@ -2005,8 +2007,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         )
         if success:
             return jsonify({"ok": True})
-        status_code = 504 if err == "Timeout waiting for Agent response" else 400
-        return jsonify({"ok": False, "error": err}), status_code
+        return jsonify({"ok": False, "error": err}), 200
 
     @app.post("/api/agents/<agent_uid>/cameras/upload-video")
     def upload_agent_camera_video(agent_uid: str) -> Any:
