@@ -811,57 +811,57 @@ All task activity materializes in `Task`, while user assignment metadata lives i
     ```
 
 ## 20) Camera Recording Control
-- **Camera Recording Control by MAC ID:** `POST /api/cameras/record-control`
+- **Camera Recording Control:** `POST /api/cameras/record-control` (Aliases: `POST /api/public/camera/control`, `POST /api/public/camera/record`, `POST /api/cameras/record`)
   - Headers: `Content-Type: application/json`
-  - Body params (required):
-    - `mac_id`: MAC address of the target camera (case-insensitive, separators like `:` and `-` are optional)
-    - `agent_uid`: (optional) ID of the managing agent to narrow down camera config resolution
-    - `action`: `'start'`, `'stop'`, or `'record'`
-    - `duration`: (optional, default: 30) recording length in seconds when action is `'record'`
+  - Body params:
+    - `mac_id` / `mac` / `camera_mac`: MAC address of target camera. Optional if `ip` or `camera_id` is supplied.
+    - `ip`: (optional fallback) IP address of camera if `mac_id` is not passed.
+    - `camera_id` / `id`: (optional fallback) Camera ID if `mac_id` is not passed.
+    - `agent_uid` / `agent`: (optional) ID of managing agent. If omitted, automatically selects an online agent in the same LAN.
+    - `action`: `'start'`, `'record'`, or `'stop'` (default: `'start'`).
+    - `duration`: (optional, default: 30) Recording duration limit in seconds (for `'record'`) or minutes (for `'start'`).
   - Responses:
-    - **Success (Start/Stop):**
+    - **Success (Start/Record/Stop):**
       ```json
       {
         "ok": true,
-        "message": "Đã bắt đầu ghi hình thành công"
+        "message": "Đã bắt đầu ghi hình thành công với giới hạn 30 phút"
       }
       ```
-    - **Success (Record 15s):**
-      ```json
-      {
-        "ok": true,
-        "message": "Đã hoàn thành ghi hình 15s thành công"
-      }
-      ```
-    - **Error (Gateway/Agent offline/Failed):**
+    - **Error:**
       ```json
       {
         "ok": false,
-        "error": "Agent quản lý camera này (kythuat02) đang ngoại tuyến (offline)"
+        "error": "Không có Agent trực tuyến nào để thực hiện thao tác"
       }
       ```
 
 ## 21) Camera Configurations (CRUD)
-- **List LAN Cameras:** `GET /api/agents/<agent_uid>/cameras`
-  - Returns all camera configurations registered under the same LAN (`lan_uid`) as the requesting agent.
+- **List LAN Cameras:** `GET /api/public/camera/list` (Aliases: `GET /api/cameras/list`, `GET /api/agents/<agent_uid>/cameras`)
+  - Query Parameters (optional):
+    - `lan_uid`: Unique ID of the LAN site.
+    - `agent_uid`: Unique ID of the Agent node.
+  - Returns all active and configured cameras within the requested LAN site (`lan_uid`) or Agent (`agent_uid`), deduplicated by MAC address.
   - Response:
     ```json
     {
       "ok": true,
       "cameras": [
         {
-          "id": 1,
-          "agent_uid": "agent_01",
-          "camera_name": "Camera 01",
-          "rtsp_url": "rtsp://...",
+          "id": 3232235778,
+          "agent_uid": "kythuat02",
+          "camera_name": "Camera 192.168.1.67 (Camera 192.168.1.108)",
+          "rtsp_url": "rtsp://admin:Donga2011@192.168.1.67:554/cam/realmonitor?channel=1&subtype=0",
           "segment_duration": 60,
           "prefix": "rec",
           "video_codec": "copy",
           "audio_codec": "copy",
           "no_audio": true,
           "is_recording": false,
-          "ip": "192.168.1.67",
-          "mac_address": "AA-BB-CC-DD-EE-FF",
+          "ip": "192.168.1.67, 192.168.1.108",
+          "mac_address": "24:14:07:43:31:4D",
+          "manufacturer": "Sigmastar",
+          "model": "Camera IP",
           "is_online": true
         }
       ]
