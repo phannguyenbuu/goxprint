@@ -1603,6 +1603,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             # Add offline configured cameras
             for ip, config in configs_by_ip.items():
                 if ip not in seen_ips and ip not in toshiba_ips:
+                    mac = config.get("mac_address") or ""
+                    clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+                    if len(clean_mac) != 12 or not all(c in "0123456789ABCDEF" for c in clean_mac):
+                        continue
                     try:
                         virtual_id = int(ipaddress.IPv4Address(ip))
                     except Exception:
