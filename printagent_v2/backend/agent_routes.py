@@ -1239,6 +1239,44 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
 
     def _get_clean_manufacturer(mac: str, mac_vendors: dict, rtsp_url: str = None) -> str:
+        # 1. Try MAC OUI lookup first (highest confidence)
+        if mac and mac_vendors:
+            clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+            if len(clean_mac) >= 6:
+                oui = f"{clean_mac[0:2]}:{clean_mac[2:4]}:{clean_mac[4:6]}"
+                vendor_info = mac_vendors.get(oui)
+                if vendor_info:
+                    vendor_name = vendor_info.get("manufacturer") or ""
+                    vendor_lower = vendor_name.lower()
+                    if "dahua" in vendor_lower:
+                        return "Dahua"
+                    elif "hikvision" in vendor_lower:
+                        return "Hikvision"
+                    elif "ezviz" in vendor_lower:
+                        return "Ezviz"
+                    elif "imou" in vendor_lower or "huacheng" in vendor_lower:
+                        return "Imou"
+                    elif "sigmastar" in vendor_lower:
+                        return "Sigmastar"
+                    elif "sony" in vendor_lower:
+                        return "Sony"
+                    elif "panasonic" in vendor_lower:
+                        return "Panasonic"
+                    elif "tp-link" in vendor_lower:
+                        return "TP-Link"
+                    elif "brother" in vendor_lower:
+                        return "Brother"
+                    elif "canon" in vendor_lower:
+                        return "Canon"
+                    elif "epson" in vendor_lower:
+                        return "Epson"
+                    elif "toshiba" in vendor_lower or "tokyo electric" in vendor_lower:
+                        return "Toshiba"
+                    elif "ricoh" in vendor_lower:
+                        return "Ricoh"
+                    return vendor_name
+
+        # 2. Fallback to RTSP URL pattern mapping if MAC OUI was not found or resolved
         if rtsp_url:
             url_lower = rtsp_url.lower()
             if "/cam/realmonitor" in url_lower:
@@ -1248,42 +1286,6 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             if "/onvif1" in url_lower or "/onvif2" in url_lower:
                 return "Yoosee"
 
-        if not mac or not mac_vendors:
-            return "Generic"
-        clean_mac = "".join(c for c in mac if c.isalnum()).upper()
-        if len(clean_mac) >= 6:
-            oui = f"{clean_mac[0:2]}:{clean_mac[2:4]}:{clean_mac[4:6]}"
-            vendor_info = mac_vendors.get(oui)
-            if vendor_info:
-                vendor_name = vendor_info.get("manufacturer") or ""
-                vendor_lower = vendor_name.lower()
-                if "dahua" in vendor_lower:
-                    return "Dahua"
-                elif "hikvision" in vendor_lower:
-                    return "Hikvision"
-                elif "ezviz" in vendor_lower:
-                    return "Ezviz"
-                elif "imou" in vendor_lower or "huacheng" in vendor_lower:
-                    return "Imou"
-                elif "sigmastar" in vendor_lower:
-                    return "Sigmastar"
-                elif "sony" in vendor_lower:
-                    return "Sony"
-                elif "panasonic" in vendor_lower:
-                    return "Panasonic"
-                elif "tp-link" in vendor_lower:
-                    return "TP-Link"
-                elif "brother" in vendor_lower:
-                    return "Brother"
-                elif "canon" in vendor_lower:
-                    return "Canon"
-                elif "epson" in vendor_lower:
-                    return "Epson"
-                elif "toshiba" in vendor_lower:
-                    return "Toshiba"
-                elif "ricoh" in vendor_lower:
-                    return "Ricoh"
-                return vendor_name
         return "Generic"
 
     def _update_live_camera_config_state(agent_uid: str, ip: str, config_dict: dict):

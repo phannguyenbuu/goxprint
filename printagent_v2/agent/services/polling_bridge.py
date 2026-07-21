@@ -2134,7 +2134,7 @@ if ($node) {{ $node }}
                     info = get_onvif_info(ip_addr)
                     
                     camera_name = f"Camera {ip_addr}"
-                    rtsp_url = f"rtsp://{ip_addr}:554/cam/realmonitor?channel=1&subtype=0"
+                    rtsp_url = f"rtsp://{ip_addr}:554/"
                     
                     is_rec = False
                     for cfg_item in configs:
