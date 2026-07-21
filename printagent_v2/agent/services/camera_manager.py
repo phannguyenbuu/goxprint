@@ -431,7 +431,19 @@ class CameraManager:
                     break
 
             if not matched_file or not file_start_time:
-                LOGGER.warning("No recorded file found covering timestamp %s for camera %s", timestamp_str, camera_name)
+                LOGGER.warning("No exact recorded file found covering timestamp %s for camera %s. Falling back to most recent file.", timestamp_str, camera_name)
+                # Fallback: Pick the most recent video file for this camera
+                if files_list:
+                    matched_file = files_list[-1]
+                    match = re.search(r'_(\d{8}_\d{6})\.mp4$', matched_file.name)
+                    if match:
+                        try:
+                            file_start_time = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S")
+                        except ValueError:
+                            file_start_time = None
+                            
+            if not matched_file:
+                LOGGER.error("No recorded files found for camera %s in %s", camera_name, output_dir)
                 return None
 
             # Calculate offset in seconds
