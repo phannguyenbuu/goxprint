@@ -2060,6 +2060,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
             if not candidates:
                 # Fallback to checking live_cameras JSON files in storage_dir on server
+                storage_dir = Path(app.config.get("STORAGE_DIR", "storage"))
                 live_cam_item = None
                 live_agent_uid = agent_uid_req
                 
