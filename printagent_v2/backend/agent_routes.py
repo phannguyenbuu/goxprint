@@ -1507,10 +1507,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                                                 vendor_name = vendor_info.get("manufacturer", "")
                                                 vendor_lower = vendor_name.lower()
                                                 if "toshiba" in vendor_lower or "tokyo electric" in vendor_lower:
-                                                    # Do not treat as Toshiba if it has a camera RTSP path
-                                                    rtsp_url = item.get("rtsp_url") or ""
-                                                    if "/cam/realmonitor" not in rtsp_url.lower() and "/streaming/channels" not in rtsp_url.lower():
-                                                        is_toshiba = True
+                                                    is_toshiba = True
                                                     
                                     if is_toshiba:
                                         toshiba_ips.add(ip)
@@ -1572,6 +1569,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     
                 rtsp_url = (config.get("rtsp_url") if config else None) or primary_item.get("rtsp_url")
                 resolved_manufacturer = _get_clean_manufacturer(mac_formatted, mac_vendors, rtsp_url=rtsp_url)
+                if resolved_manufacturer == "Toshiba":
+                    continue
                 
                 final_manufacturer = resolved_manufacturer
                 if final_manufacturer == "Generic":
