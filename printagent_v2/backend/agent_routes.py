@@ -1433,26 +1433,52 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         )
 
     @app.get("/api/agents/<agent_uid>/cameras")
-    def get_agent_cameras(agent_uid: str) -> Any:
+    @app.get("/api/public/camera/list")
+    @app.get("/api/cameras/list")
+    def get_agent_cameras(agent_uid: str = "") -> Any:
         from models import AgentNode
         import ipaddress
         import json
         from pathlib import Path
         
+        lan_uid_param = (request.args.get("lan_uid") or request.args.get("lan") or "").strip()
+        agent_uid_param = (agent_uid or request.args.get("agent_uid") or request.args.get("agent") or "").strip()
+
         with session_factory() as session:
-            agent = session.execute(
-                select(AgentNode)
-                .where(AgentNode.agent_uid == agent_uid)
-                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-            ).scalars().first()
+            online_uids = []
             
-            if not agent:
-                return jsonify({"ok": True, "cameras": []})
+            if lan_uid_param:
+                online_agents = session.execute(
+                    select(AgentNode).where(AgentNode.lan_uid == lan_uid_param, AgentNode.is_online == True)
+                ).scalars().all()
+                online_uids = [a.agent_uid for a in online_agents]
+            elif agent_uid_param:
+                agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == agent_uid_param)
+                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                ).scalars().first()
                 
-            online_agents = session.execute(
-                select(AgentNode).where(AgentNode.lan_uid == agent.lan_uid, AgentNode.is_online == True)
-            ).scalars().all()
-            online_uids = [a.agent_uid for a in online_agents]
+                if agent:
+                    online_agents = session.execute(
+                        select(AgentNode).where(AgentNode.lan_uid == agent.lan_uid, AgentNode.is_online == True)
+                    ).scalars().all()
+                    online_uids = [a.agent_uid for a in online_agents]
+                else:
+                    # Fallback: check if agent_uid_param is actually a lan_uid
+                    online_agents = session.execute(
+                        select(AgentNode).where(AgentNode.lan_uid == agent_uid_param, AgentNode.is_online == True)
+                    ).scalars().all()
+                    online_uids = [a.agent_uid for a in online_agents]
+            else:
+                # Retrieve all online agents if no filter passed
+                online_agents = session.execute(
+                    select(AgentNode).where(AgentNode.is_online == True)
+                ).scalars().all()
+                online_uids = [a.agent_uid for a in online_agents]
+
+            if not online_uids and (agent_uid_param or lan_uid_param):
+                return jsonify({"ok": True, "cameras": []})
             
             # Load offline MAC vendors database
             mac_vendors = {}
@@ -2030,16 +2056,65 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         return send_from_directory(str(dest_dir), filename)
 
     @app.post("/api/cameras/record-control")
+    @app.post("/api/public/camera/control")
+    @app.post("/api/public/camera/record")
+    @app.post("/api/cameras/record")
     def control_camera_recording_by_mac() -> Any:
         from models import CameraConfig, AgentNode
         body = request.get_json(silent=True) or {}
-        mac_id = str(body.get("mac_id", "")).strip()
-        agent_uid_req = str(body.get("agent_uid", "")).strip()
-        action = str(body.get("action", "")).strip().lower()
-        duration = int(body.get("duration", 30))
+        mac_id = str(body.get("mac_id") or body.get("mac") or body.get("camera_mac") or "").strip()
+        agent_uid_req = str(body.get("agent_uid") or body.get("agent") or "").strip()
+        action = str(body.get("action") or "start").strip().lower()
+        if action in ("start_record", "recording"):
+            action = "start"
+
+        duration_raw = body.get("duration") if body.get("duration") is not None else (body.get("duration_limit") or body.get("duration_seconds"))
+        try:
+            duration = int(duration_raw) if duration_raw is not None else 30
+        except (ValueError, TypeError):
+            duration = 30
 
         if not mac_id:
-            return jsonify({"ok": False, "error": "Thiếu MAC ID của camera (mac_id)"}), 400
+            req_ip = str(body.get("ip") or "").strip()
+            req_cam_id = body.get("camera_id") or body.get("id")
+            if req_ip or req_cam_id:
+                storage_dir = Path(app.config.get("STORAGE_DIR", "storage"))
+                with session_factory() as session:
+                    if req_cam_id:
+                        try:
+                            cid = int(req_cam_id)
+                            cfg_db = session.execute(select(CameraConfig).where(CameraConfig.id == cid)).scalars().first()
+                            if cfg_db and cfg_db.mac_address:
+                                mac_id = cfg_db.mac_address
+                        except Exception:
+                            pass
+                    if not mac_id and req_ip:
+                        cfg_db = session.execute(select(CameraConfig).where(CameraConfig.ip == req_ip)).scalars().first()
+                        if cfg_db and cfg_db.mac_address:
+                            mac_id = cfg_db.mac_address
+
+                    if not mac_id:
+                        online_agents_list = session.execute(select(AgentNode).where(AgentNode.is_online == True)).scalars().all()
+                        for ag in online_agents_list:
+                            ag_file = storage_dir / f"live_cameras_{ag.agent_uid}.json"
+                            if ag_file.exists():
+                                try:
+                                    with open(ag_file, "r", encoding="utf-8") as f:
+                                        payload_data = json.load(f)
+                                        cams_list = payload_data.get("cameras") if isinstance(payload_data, dict) else (payload_data if isinstance(payload_data, list) else [])
+                                        for item in cams_list:
+                                            item_ip = str(item.get("ip", "")).strip()
+                                            item_mac = str(item.get("mac_address") or item.get("mac") or "").strip()
+                                            if req_ip and item_ip == req_ip and item_mac:
+                                                mac_id = item_mac
+                                                break
+                                except Exception:
+                                    pass
+                                if mac_id:
+                                    break
+
+        if not mac_id:
+            return jsonify({"ok": False, "error": "Thiếu thông tin nhận diện camera (truyền mac_id, ip hoặc camera_id)"}), 400
         if action not in ("start", "stop", "record"):
             return jsonify({"ok": False, "error": "Hành động không hợp lệ (action phải là start, stop hoặc record)"}), 400
 
@@ -2170,11 +2245,13 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             }
 
         if action == "start":
-            params["duration_limit"] = duration * 60
+            duration_sec = duration * 60 if duration < 60 else duration
+            params["duration_limit"] = duration_sec
             success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, params)
             if success:
                 _update_live_camera_recording_state(agent_uid, cfg.ip, True)
-                return jsonify({"ok": True, "message": f"Đã bắt đầu ghi hình thành công với giới hạn {duration} phút"})
+                msg_time = f"{duration_sec // 60} phút" if duration_sec >= 60 else f"{duration_sec} giây"
+                return jsonify({"ok": True, "message": f"Đã bắt đầu ghi hình thành công với giới hạn {msg_time}"})
             return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
 
         elif action == "stop":
