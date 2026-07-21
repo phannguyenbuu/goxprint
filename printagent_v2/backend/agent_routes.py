@@ -1758,7 +1758,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": err}), 504
 
-    def _queue_camera_utility_command(agent_uid: str, action: str, camera_name: str, params: dict, wait_seconds: float = 15.0) -> tuple[bool, str]:
+    def _queue_camera_utility_command(agent_uid: str, action: str, camera_name: str, params: dict, wait_seconds: float = 12.0) -> tuple[bool, str]:
         requested_at = datetime.now(timezone.utc)
         cmd_params = {
             "action": action,
@@ -2189,10 +2189,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             record_params["segment_duration"] = max(cfg.segment_duration, duration + 15)
             record_params["duration_limit"] = duration
 
-            success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, record_params)
-            if not success:
+            success, err = _queue_camera_utility_command(agent_uid, "start_camera_recorder", camera_name, record_params, wait_seconds=3.0)
+            if not success and err != "Timeout waiting for Agent response":
                 return jsonify({"ok": False, "error": f"Không thể bắt đầu ghi hình: {err}"}), 504
 
             _update_live_camera_recording_state(agent_uid, cfg.ip, True)
-            return jsonify({"ok": True, "message": f"Đã bắt đầu tiến trình ghi hình giới hạn {duration} giây"})
+            return jsonify({"ok": True, "message": f"Đã gửi lệnh bắt đầu ghi hình {duration}s tới Agent!"})
 
