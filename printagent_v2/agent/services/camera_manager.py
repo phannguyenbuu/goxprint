@@ -144,11 +144,14 @@ class CameraManager:
 
     def get_status(self, camera_name: str) -> dict:
         with self.lock:
-            running = camera_name in self.recording_processes
+            proc = self.recording_processes.get(camera_name)
+            running = proc is not None and proc.poll() is None
             start_time = self.start_times.get(camera_name)
             elapsed = None
-            if start_time:
+            if start_time and running:
                 elapsed = int((datetime.now() - start_time).total_seconds())
+            else:
+                elapsed = None
             return {
                 "running": running,
                 "segment_count": self.segment_counts.get(camera_name, 0),
