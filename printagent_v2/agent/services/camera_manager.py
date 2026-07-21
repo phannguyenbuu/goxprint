@@ -426,12 +426,33 @@ class CameraManager:
                 except ValueError:
                     continue
 
-                # Check if target timestamp fits in this segment
+            # Check with a 5-second tolerance window or exact filename start match
+            from datetime import timedelta
+            for f in files_list:
+                match = re.search(r'_(\d{8}_\d{6})\.mp4$', f.name)
+                if not match:
+                    continue
+                start_str = match.group(1)
+                try:
+                    start_dt = datetime.strptime(start_str, "%Y%m%d_%H%M%S")
+                except ValueError:
+                    continue
+
                 file_mtime = datetime.fromtimestamp(f.stat().st_mtime)
-                if start_dt <= target_ts <= file_mtime:
+                # Exact or within file duration range with 5-second grace period
+                if (start_dt - timedelta(seconds=5)) <= target_ts <= (file_mtime + timedelta(seconds=5)):
                     matched_file = f
                     file_start_time = start_dt
                     break
+
+            # Fallback: Match file by exact start timestamp in filename if mtime wasn't updated yet
+            if not matched_file:
+                target_str = target_ts.strftime("%Y%m%d_%H%M%S")
+                for f in files_list:
+                    if target_str in f.name:
+                        matched_file = f
+                        file_start_time = target_ts
+                        break
 
             if not matched_file or not file_start_time:
                 LOGGER.warning("No recorded file found covering timestamp %s for camera %s", timestamp_str, camera_name)
