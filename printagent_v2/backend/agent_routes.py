@@ -1535,71 +1535,88 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 if ip:
                     configs_by_ip[ip] = c
 
-            results = []
+            # Group live cameras by MAC address for deduplication
+            grouped_by_mac = {}
             for item in live_cameras:
-                ip = item.get("ip")
-                mac = item.get("mac_address") or item.get("mac")
-                config = configs_by_ip.get(ip)
+                mac = (item.get("mac_address") or item.get("mac") or "").strip()
+                clean_mac = "".join(c for c in mac if c.isalnum()).upper()
+                if len(clean_mac) == 12 and all(c in "0123456789ABCDEF" for c in clean_mac):
+                    if clean_mac not in grouped_by_mac:
+                        grouped_by_mac[clean_mac] = []
+                    grouped_by_mac[clean_mac].append(item)
+
+            results = []
+            seen_macs = set()
+
+            for clean_mac, items in grouped_by_mac.items():
+                seen_macs.add(clean_mac)
+                # Primary item is the one recording or first in list
+                primary_item = next((it for it in items if it.get("is_recording")), items[0])
+                primary_ip = primary_item.get("ip")
+                
+                all_ips = [it.get("ip") for it in items if it.get("ip")]
+                
+                # Check if custom name/config exists for any of the IPs
+                config = None
+                for it_ip in all_ips:
+                    if it_ip in configs_by_ip:
+                        config = configs_by_ip[it_ip]
+                        break
+                        
+                mac_formatted = f"{clean_mac[0:2]}:{clean_mac[2:4]}:{clean_mac[4:6]}:{clean_mac[6:8]}:{clean_mac[8:10]}:{clean_mac[10:12]}"
                 
                 try:
-                    virtual_id = int(ipaddress.IPv4Address(ip))
+                    virtual_id = int(ipaddress.IPv4Address(primary_ip))
                 except Exception:
                     virtual_id = 9999
                     
-                rtsp_url = config.get("rtsp_url") if config else item.get("rtsp_url")
-                resolved_manufacturer = _get_clean_manufacturer(mac, mac_vendors, rtsp_url=rtsp_url)
+                rtsp_url = (config.get("rtsp_url") if config else None) or primary_item.get("rtsp_url")
+                resolved_manufacturer = _get_clean_manufacturer(mac_formatted, mac_vendors, rtsp_url=rtsp_url)
                 
                 final_manufacturer = resolved_manufacturer
                 if final_manufacturer == "Generic":
-                    reported_mfr = item.get("manufacturer") or "Generic"
+                    reported_mfr = primary_item.get("manufacturer") or "Generic"
                     if reported_mfr != "Generic":
                         final_manufacturer = reported_mfr
                 
-                model_str = item.get("model") or "Camera IP"
+                model_str = primary_item.get("model") or "Camera IP"
                 model_lower = model_str.lower()
                 if any(err_kw in model_lower for err_kw in ("timeout", "lỗi", "error", "404", "504", "conn")):
                     if final_manufacturer != "Generic":
                         model_str = "Camera IP"
                     else:
                         model_str = "Camera IP (Chưa rõ dòng)"
-                
-                if config:
-                    results.append({
-                        "id": virtual_id,
-                        "agent_uid": agent_uid,
-                        "camera_name": config.get("camera_name") or f"Camera {ip}",
-                        "rtsp_url": config.get("rtsp_url") or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0",
-                        "segment_duration": config.get("segment_duration", 60),
-                        "prefix": config.get("prefix", "rec"),
-                        "video_codec": config.get("video_codec", "copy"),
-                        "audio_codec": config.get("audio_codec", "copy"),
-                        "no_audio": config.get("no_audio", True),
-                        "is_recording": item.get("is_recording", False),
-                        "ip": ip,
-                        "mac_address": mac or "",
-                        "manufacturer": final_manufacturer,
-                        "model": model_str,
-                        "is_online": True,
-                    })
+
+                # Build combined camera name if multiple IPs share the same MAC
+                if config and config.get("camera_name"):
+                    camera_name = config.get("camera_name")
                 else:
-                    results.append({
-                        "id": virtual_id,
-                        "agent_uid": agent_uid,
-                        "camera_name": item.get("camera_name") or f"Camera {ip}",
-                        "rtsp_url": item.get("rtsp_url") or f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0",
-                        "segment_duration": 60,
-                        "prefix": "rec",
-                        "video_codec": "copy",
-                        "audio_codec": "copy",
-                        "no_audio": True,
-                        "is_recording": False,
-                        "ip": ip,
-                        "mac_address": mac or "",
-                        "manufacturer": final_manufacturer,
-                        "model": model_str,
-                        "is_online": True,
-                    })
-                    
+                    if len(all_ips) > 1:
+                        other_ips_str = ", ".join(f"Camera {ip}" for ip in all_ips[1:])
+                        camera_name = f"Camera {all_ips[0]} ({other_ips_str})"
+                    else:
+                        camera_name = f"Camera {all_ips[0]}"
+
+                is_any_recording = any(it.get("is_recording", False) for it in items)
+
+                results.append({
+                    "id": virtual_id,
+                    "agent_uid": agent_uid,
+                    "camera_name": camera_name,
+                    "rtsp_url": rtsp_url or f"rtsp://{primary_ip}:554/cam/realmonitor?channel=1&subtype=0",
+                    "segment_duration": config.get("segment_duration", 60) if config else 60,
+                    "prefix": config.get("prefix", "rec") if config else "rec",
+                    "video_codec": config.get("video_codec", "copy") if config else "copy",
+                    "audio_codec": config.get("audio_codec", "copy") if config else "copy",
+                    "no_audio": config.get("no_audio", True) if config else True,
+                    "is_recording": is_any_recording,
+                    "ip": primary_ip,
+                    "mac_address": mac_formatted,
+                    "manufacturer": final_manufacturer,
+                    "model": model_str,
+                    "is_online": True,
+                })
+
             # Add offline configured cameras
             for ip, config in configs_by_ip.items():
                 if ip not in seen_ips and ip not in toshiba_ips:
@@ -1607,6 +1624,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     clean_mac = "".join(c for c in mac if c.isalnum()).upper()
                     if len(clean_mac) != 12 or not all(c in "0123456789ABCDEF" for c in clean_mac):
                         continue
+                    if clean_mac in seen_macs:
+                        continue
+                    seen_macs.add(clean_mac)
+
                     try:
                         virtual_id = int(ipaddress.IPv4Address(ip))
                     except Exception:
