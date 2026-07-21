@@ -389,23 +389,28 @@ class AppConfig:
     def user_token(self) -> str:
         return self.get_string("user_token", "")
 
-    def get_or_create_short_name(self, email: str) -> str:
+    def get_or_create_short_name(self, identifier: str) -> str:
         import re as _re
-        prefix = str(email or "").split("@")[0].strip()
+        raw_id = str(identifier or "").strip()
+        # If identifier contains '@', extract the prefix before '@'; otherwise use raw_id
+        if "@" in raw_id:
+            prefix = raw_id.split("@")[0].strip()
+        else:
+            prefix = raw_id
         # Sanitize: keep only alphanumeric + underscore
         prefix = _re.sub(r"[^A-Za-z0-9_]", "", prefix) or "scan"
 
         if len(prefix) <= 10:
-            self.record_ftp_name_mapping(prefix, email)
+            self.record_ftp_name_mapping(prefix, raw_id)
             return prefix
 
         existing_map = self._get("ftp_name_map") or {}
         if not isinstance(existing_map, dict):
             existing_map = {}
 
-        # Check if there is already a mapping for this exact email
-        for sname, mapped_email in existing_map.items():
-            if str(mapped_email or "").lower() == email.lower():
+        # Check if there is already a mapping for this exact identifier
+        for sname, mapped_id in existing_map.items():
+            if str(mapped_id or "").lower() == raw_id.lower():
                 return sname
 
         # Find next available suffix (candidate will always be exactly 10 characters)
@@ -415,18 +420,19 @@ class AppConfig:
             base_part = prefix[:base_len]
             candidate = f"{base_part}{suffix}"
             if candidate not in existing_map:
-                self.record_ftp_name_mapping(candidate, email)
+                self.record_ftp_name_mapping(candidate, raw_id)
                 return candidate
 
         return prefix[:10]
 
-    def record_ftp_name_mapping(self, short_name: str, email: str) -> None:
+    def record_ftp_name_mapping(self, short_name: str, identifier: str) -> None:
         try:
             existing = self._get("ftp_name_map") or {}
             if not isinstance(existing, dict):
                 existing = {}
-            if existing.get(short_name, "").lower() != email.lower():
-                existing[short_name] = email
+            raw_id = str(identifier or "").strip()
+            if existing.get(short_name, "").lower() != raw_id.lower():
+                existing[short_name] = raw_id
                 self.set_value("ftp_name_map", existing)
         except Exception:
             pass

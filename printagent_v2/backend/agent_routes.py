@@ -2059,7 +2059,49 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         candidates.append(c)
 
             if not candidates:
-                return jsonify({"ok": False, "error": f"Không tìm thấy cấu hình camera với MAC ID: {mac_id}"}), 404
+                # Fallback to checking live_cameras JSON files on server
+                live_file = Path("storage/live_cameras_kythuat02.json")
+                live_cam_item = None
+                live_agent_uid = agent_uid_req
+                
+                # Search across all online agents' live_cameras files
+                online_agents_list = session.execute(select(AgentNode).where(AgentNode.is_online == True)).scalars().all()
+                for ag in online_agents_list:
+                    ag_file = Path(f"storage/live_cameras_{ag.agent_uid}.json")
+                    if ag_file.exists():
+                        try:
+                            with open(ag_file, "r", encoding="utf-8") as f:
+                                payload_data = json.load(f)
+                                cams_list = payload_data.get("cameras") if isinstance(payload_data, dict) else (payload_data if isinstance(payload_data, list) else [])
+                                for item in cams_list:
+                                    item_mac = (item.get("mac_address") or item.get("mac") or "").strip()
+                                    if item_mac and item_mac.replace(":", "").replace("-", "").lower() == norm_mac_id:
+                                        live_cam_item = item
+                                        live_agent_uid = ag.agent_uid
+                                        break
+                        except Exception:
+                            pass
+                    if live_cam_item:
+                        break
+
+                if live_cam_item:
+                    # Construct a transient config object
+                    cam_ip = live_cam_item.get("ip", "")
+                    cfg = CameraConfig(
+                        agent_uid=live_agent_uid,
+                        camera_name=live_cam_item.get("camera_name") or f"Camera {cam_ip}",
+                        rtsp_url=live_cam_item.get("rtsp_url") or f"rtsp://{cam_ip}:554/cam/realmonitor?channel=1&subtype=0",
+                        segment_duration=60,
+                        prefix="rec",
+                        video_codec="copy",
+                        audio_codec="copy",
+                        no_audio=True,
+                        ip=cam_ip,
+                        mac_address=mac_id
+                    )
+                    candidates = [cfg]
+                else:
+                    return jsonify({"ok": False, "error": f"Không tìm thấy cấu hình camera với MAC ID: {mac_id}"}), 404
 
             # Candidate config to read parameters from
             cfg = candidates[0]

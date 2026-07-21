@@ -86,21 +86,20 @@ Trên một số dòng Ricoh, ID tuần tự nội bộ của cơ sở dữ li�
 
 ### Quy tắc
 - Bỏ hoàn toàn tiền tố `"Scan to "` khi đặt tên hiển thị trên copier address book (ví dụ: `Scan to r1` đổi thành `r1`).
-- Đặt tên hiển thị dựa theo phần prefix của địa chỉ email (phần trước chữ `@`).
-- Nếu prefix email có độ dài **không quá 10 ký tự**: sử dụng nguyên trạng prefix làm tên hiển thị.
-- Nếu prefix email có độ dài **vượt quá 10 ký tự**: Cắt ngắn phần tên và thêm hậu tố `~1`, `~2`... (ví dụ: `cuongnhat24` có 11 ký tự -> `cuongnha~1`). Bảo đảm tổng độ dài của tên hiển thị luôn **đúng 10 ký tự**.
-- Toàn bộ bảng mapping `{short_name: email}` này phải được lưu trong tệp `settings.json` dưới khóa `"ftp_name_map"` để thực hiện reverse-lookup.
+- Đặt tên hiển thị dựa theo `username` hoặc phần định danh người dùng. Nếu đầu vào là email (chứa `@`), tự động tách phần prefix trước chữ `@`.
+- Nếu tên có độ dài **không quá 10 ký tự**: sử dụng nguyên trạng làm tên hiển thị.
+- Nếu tên có độ dài **vượt quá 10 ký tự**: Cắt ngắn phần tên và thêm hậu tố `~1`, `~2`... (ví dụ: `cuongnhat24` có 11 ký tự -> `cuongnha~1`). Bảo đảm tổng độ dài của tên hiển thị luôn **đúng 10 ký tự**.
+- Bảng mapping `{short_name: username_or_email}` được lưu trong tệp `settings.json` dưới khóa `"ftp_name_map"` để thực hiện reverse-lookup khi cần.
 
 ---
 
-## ✅ RULE 9: Tham số email luôn là rỗng (luôn đi theo luồng FOLDER), username chứa ký tự @ đại diện cho email
+## ✅ RULE 9: Tham số email trong Wizard luôn là rỗng (luôn đi theo luồng FOLDER FTP), username đóng vai trò định danh chính
 
 ### Quy tắc
-- Khi đăng ký đích quét (Ricoh Address Book Wizard), tham số `email` truyền vào wizard luôn luôn là rỗng (`""`), tức là luôn đi theo luồng cấu hình FOLDER (FTP/SMB), không thực hiện bước cấu hình MAIL trên copier.
-- Tham số `username` (hoặc tên đăng ký/key user) đóng vai trò là địa chỉ email đầy đủ của người dùng (ví dụ: `phannguyenbuu@gmail.com`), vì vậy tên đăng ký này luôn chứa ký tự `@`.
-- Đường dẫn đích quét trên copier (`Path (Required)`) luôn luôn được cấu hình đầy đủ bằng email của người dùng dưới dạng `/{email}/` (ví dụ: `/phannguyenbuu@gmail.com/`).
-- File quét sẽ được lưu cục bộ tại thư mục `%TEMP%/GoPrinxAgent/ftp/{email}/`.
+- Khi đăng ký đích quét (Ricoh Address Book Wizard), tham số `email` truyền vào wizard luôn luôn là rỗng (`""`), tức là luôn đi theo luồng cấu hình FOLDER (FTP/SMB), không dùng luồng Mail của máy copier. Email trong giao diện client là **không bắt buộc** (chỉ dùng để tích hợp dịch vụ lưu trữ trực tuyến Scan-to-Cloud khi bật tính năng).
+- Tham số `username` (hoặc tên đăng ký/key user) đóng vai trò là chuỗi định danh người dùng (ví dụ: `phannguyenbuu`, `user123`), KHÔNG bắt buộc chứa ký tự `@`.
+- Đường dẫn đích quét trên copier (`Path (Required)`) được cấu hình bằng `username` dạng `/{username}/` hoặc thư mục FTP chung `%TEMP%/GoPrinxAgent/ftp/`.
 
 ---
 
-_Cập nhật lần cuối: 2026-06-06 | Lý do: Cấu hình FTP port cố định theo từng agent và đặt Path (Required) thành /{email}/_
+_Cập nhật lần cuối: 2026-07-21 | Lý do: Loại bỏ bắt buộc email khi tạo điểm scan, hỗ trợ username linh hoạt và bổ sung thông báo hint Scan-to-Cloud_

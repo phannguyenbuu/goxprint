@@ -3275,7 +3275,13 @@ if ($node) {{ $node }}
                     cm.stop_recording(camera_name)
                     
                     self._post_control_result(command_id=command_id, ok=True, error="")
-                    self._update_recent_command_status(command_id, "success")
+                elif action == "scan_cameras":
+                    LOGGER.info("[PollingBridge] Received scan_cameras command, starting background scan...")
+                    self._trigger_background_camera_scan()
+                    cameras = getattr(self, "_last_discovered_cameras", [])
+                    payload_str = json.dumps({"cameras": cameras})
+                    self._post_control_result(command_id=command_id, ok=True, error=payload_str)
+                    self._update_recent_command_status(command_id, "success", payload_str)
                     return
                 elif action == "get_camera_status":
                     camera_name = str(params.get("camera_name", "")).strip()
@@ -3587,8 +3593,19 @@ Write-Output 'INSTALLED'
                 if brand_matched:
                     candidates = brand_matched
                     
-            # 1. Match by full model tokens containing digits
             model_tokens = [t.lower() for t in model.split() if any(c.isdigit() for c in t)]
+
+            # 0. Highest priority: Exact word boundary match for full token (e.g. \b6503\b or \bc6503\b or \bw8140\b)
+            for token in model_tokens:
+                pattern = r'\b' + re.escape(token) + r'\b'
+                exact_matches = [d for d in candidates if re.search(pattern, d.lower())]
+                if exact_matches:
+                    pcl6 = [d for d in exact_matches if "pcl" in d.lower() and "6" in d]
+                    matched = pcl6[0] if pcl6 else exact_matches[0]
+                    LOGGER.info("[DriverInstall] Exact boundary match by token '%s' -> '%s'", token, matched)
+                    return matched
+
+            # 1. Match by full model tokens containing digits (substring)
             for token in model_tokens:
                 matches = [d for d in candidates if token in d.lower()]
                 if matches:
@@ -3597,9 +3614,17 @@ Write-Output 'INSTALLED'
                     LOGGER.info("[DriverInstall] Matched by token '%s' -> '%s'", token, matched)
                     return matched
                     
-            # 2. Match by digits (>= 3 chars)
+            # 2. Match by digits (>= 3 chars with word boundary first)
             for digit_seq in model_digits:
                 if len(digit_seq) >= 3:
+                    pattern = r'\b' + re.escape(digit_seq) + r'\b'
+                    boundary_matches = [d for d in candidates if re.search(pattern, d.lower())]
+                    if boundary_matches:
+                        pcl6 = [d for d in boundary_matches if "pcl" in d.lower() and "6" in d]
+                        matched = pcl6[0] if pcl6 else boundary_matches[0]
+                        LOGGER.info("[DriverInstall] Matched by digits boundary '%s' -> '%s'", digit_seq, matched)
+                        return matched
+
                     matches = [d for d in candidates if digit_seq in d.lower()]
                     if matches:
                         pcl6 = [d for d in matches if "pcl" in d.lower() and "6" in d]
@@ -3608,7 +3633,7 @@ Write-Output 'INSTALLED'
                         return matched
                         
             # 3. Match by other model words
-            ignore_words = {"mp", "im", "sp", "spf", "c", "pro"}
+            ignore_words = {"mp", "im", "sp", "spf", "c", "pro", "w"}
             model_words = [w.lower() for w in model.split() if w.lower() not in ignore_words]
             for word in model_words:
                 matches = [d for d in candidates if word in d.lower()]
@@ -3733,21 +3758,23 @@ Write-Output 'INSTALLED'
             installed_driver_name = None
             skip_download_and_install = False
             
-            try:
-                _progress(f"[0/5] 🔍 Kiểm tra driver cho '{brand} {model}' trong hệ thống...")
-                check = subprocess.run(
-                    [powershell_path, "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
-                    capture_output=True, text=True, timeout=15,
-                    creationflags=_NO_WINDOW,
-                )
-                all_drivers = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
-                installed_driver_name = find_best_driver_match(all_drivers, brand, model)
-                if installed_driver_name:
-                    _progress(f"[0/5] ✅ Driver đã tồn tại sẵn: {installed_driver_name}")
-                    step_results.append(f"Driver check: {installed_driver_name} đã có")
-                    skip_download_and_install = True
-            except Exception as e:
-                LOGGER.warning("Error checking existing driver: %s", e)
+            # If driver_url is provided, we always download/extract to guarantee exact INF files exist
+            if not driver_url or not driver_url.strip():
+                try:
+                    _progress(f"[0/5] 🔍 Kiểm tra driver cho '{brand} {model}' trong hệ thống...")
+                    check = subprocess.run(
+                        [powershell_path, "-Command", "Get-PrinterDriver | Select-Object -ExpandProperty Name"],
+                        capture_output=True, text=True, timeout=15,
+                        creationflags=_NO_WINDOW,
+                    )
+                    all_drivers = [d.strip() for d in check.stdout.strip().splitlines() if d.strip()]
+                    installed_driver_name = find_best_driver_match(all_drivers, brand, model)
+                    if installed_driver_name:
+                        _progress(f"[0/5] ✅ Driver đã tồn tại sẵn: {installed_driver_name}")
+                        step_results.append(f"Driver check: {installed_driver_name} đã có")
+                        skip_download_and_install = True
+                except Exception as e:
+                    LOGGER.warning("Error checking existing driver: %s", e)
 
             if not skip_download_and_install:
                 urls = [u.strip() for u in driver_url.split(";") if u.strip()]
@@ -4010,8 +4037,13 @@ Write-Output 'INSTALLED'
                                 step_results.append("Printer: LỖI")
 
                         if add_ok:
-                            # Disabled opening Print Queue and Printer Properties GUI to keep installation silent
-                            pass
+                            try:
+                                # 2 lệnh hiển thị cửa sổ Hàng đợi in (/o) và Thuộc tính máy in (/p)
+                                subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /o /n "{printer_queue_name}"', shell=True)
+                                subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_queue_name}"', shell=True)
+                                _progress(f"[5/5] 🖥️ Đã mở cửa sổ Hàng đợi in & Thuộc tính máy in cho '{printer_queue_name}'")
+                            except Exception as ui_exc:
+                                LOGGER.warning("[DriverInstall] Could not open printer GUI: %s", ui_exc)
 
                     except Exception as add_exc:
                         _progress(f"[5/5] ❌ Lỗi: {add_exc}")
