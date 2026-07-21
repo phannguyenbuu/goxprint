@@ -1913,10 +1913,10 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         if success:
             try:
                 status_dict = json.loads(payload)
-                return jsonify({"ok": True, "result": status_dict})
+                return jsonify({"ok": True, "status": status_dict, "result": status_dict})
             except Exception as e:
                 return jsonify({"ok": False, "error": f"Failed parsing payload: {e}"}), 500
-        return jsonify({"ok": False, "error": payload}), 504
+        return jsonify({"ok": False, "error": payload}), 200
 
     @app.post("/api/agents/<agent_uid>/cameras/<int:camera_id>/test")
     def test_agent_camera_rtsp(agent_uid: str, camera_id: int) -> Any:
