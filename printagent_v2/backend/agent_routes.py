@@ -2165,7 +2165,8 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 "video_codec": cfg.video_codec,
                 "audio_codec": cfg.audio_codec,
                 "no_audio": cfg.no_audio,
-                "prefix": cfg.prefix
+                "prefix": cfg.prefix,
+                "mac_address": cfg.mac_address or mac_id
             }
 
         if action == "start":

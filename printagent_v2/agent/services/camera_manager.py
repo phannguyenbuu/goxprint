@@ -194,7 +194,8 @@ class CameraManager:
         audio_codec: str = "copy",
         no_audio: bool = True,
         prefix: str = "rec",
-        duration_limit: int | None = None
+        duration_limit: int | None = None,
+        mac_address: str = ""
     ) -> bool:
         with self.lock:
             if camera_name in self.recording_processes:
@@ -209,7 +210,7 @@ class CameraManager:
             
         t = threading.Thread(
             target=self._recording_thread,
-            args=(camera_name, rtsp_url, output_dir, segment_duration, video_codec, audio_codec, no_audio, prefix),
+            args=(camera_name, rtsp_url, output_dir, segment_duration, video_codec, audio_codec, no_audio, prefix, mac_address),
             daemon=True,
             name=f"cam-rec-{camera_name}"
         )
@@ -244,7 +245,8 @@ class CameraManager:
         video_codec: str,
         audio_codec: str,
         no_audio: bool,
-        prefix: str
+        prefix: str,
+        mac_address: str = ""
     ):
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -259,6 +261,10 @@ class CameraManager:
         MAX_FAILURES = 10
         stop_event = self.stop_events[camera_name]
 
+        # Normalize MAC for filename if present
+        clean_mac = "".join(c for c in mac_address if c.isalnum()).upper() if mac_address else ""
+        file_identifier = clean_mac if (len(clean_mac) == 12) else camera_name
+
         while not stop_event.is_set():
             # Check duration limit
             duration_limit = getattr(self, "duration_limits", {}).get(camera_name)
@@ -270,8 +276,8 @@ class CameraManager:
                     break
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # Format: {prefix}_{camera_name}_{ts}.mp4
-            filename = f"{prefix}_{camera_name}_{ts}.mp4"
+            # Format: {prefix}_{file_identifier}_{ts}.mp4 (Identifier is clean MAC ID if available, else camera_name)
+            filename = f"{prefix}_{file_identifier}_{ts}.mp4"
             output_file = out_path / filename
 
             with self.lock:
@@ -354,10 +360,9 @@ class CameraManager:
         out_path = Path(output_dir)
         files = []
         if out_path.exists():
-            # Match: prefix_camera_name_YYYYMMDD_HHMMSS.mp4
-            # Escape camera name in glob pattern
-            glob_pattern = f"*_{camera_name}_*.mp4"
-            for f in sorted(out_path.glob(glob_pattern), reverse=True)[:100]:
+            # Return all mp4 files in output_dir sorted by last modified time
+            found_files = list(out_path.glob("*.mp4"))
+            for f in sorted(found_files, key=lambda x: x.stat().st_mtime, reverse=True)[:100]:
                 stat = f.stat()
                 files.append({
                     "name": f.name,
@@ -408,13 +413,14 @@ class CameraManager:
             if not out_path.exists():
                 return None
 
-            # Scan files matching the camera
-            glob_pattern = f"*_{camera_name}_*.mp4"
+            # Scan all mp4 files in output directory
+            found_files = list(out_path.glob("*.mp4"))
+
             matched_file = None
             file_start_time = None
 
             # Sort files chronologically to find the correct window
-            files_list = sorted(out_path.glob(glob_pattern))
+            files_list = sorted(found_files, key=lambda x: x.name)
             for f in files_list:
                 # Name format: prefix_cameraName_YYYYMMDD_HHMMSS.mp4
                 match = re.search(r'_(\d{8}_\d{6})\.mp4$', f.name)

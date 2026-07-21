@@ -3175,6 +3175,8 @@ if ($node) {{ $node }}
                         except (ValueError, TypeError):
                             duration_limit = None
 
+                    mac_address = str(params.get("mac_address", params.get("mac", ""))).strip()
+
                     success = cm.start_recording(
                         camera_name=camera_name,
                         rtsp_url=rtsp_url,
@@ -3184,7 +3186,8 @@ if ($node) {{ $node }}
                         audio_codec=audio_codec,
                         no_audio=no_audio,
                         prefix=prefix,
-                        duration_limit=duration_limit
+                        duration_limit=duration_limit,
+                        mac_address=mac_address
                     )
                     if not success:
                         raise RuntimeError("Failed to start camera recorder")
