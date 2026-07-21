@@ -2059,15 +2059,14 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                         candidates.append(c)
 
             if not candidates:
-                # Fallback to checking live_cameras JSON files on server
-                live_file = Path("storage/live_cameras_kythuat02.json")
+                # Fallback to checking live_cameras JSON files in storage_dir on server
                 live_cam_item = None
                 live_agent_uid = agent_uid_req
                 
                 # Search across all online agents' live_cameras files
                 online_agents_list = session.execute(select(AgentNode).where(AgentNode.is_online == True)).scalars().all()
                 for ag in online_agents_list:
-                    ag_file = Path(f"storage/live_cameras_{ag.agent_uid}.json")
+                    ag_file = storage_dir / f"live_cameras_{ag.agent_uid}.json"
                     if ag_file.exists():
                         try:
                             with open(ag_file, "r", encoding="utf-8") as f:
