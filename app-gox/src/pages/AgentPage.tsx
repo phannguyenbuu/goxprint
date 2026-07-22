@@ -1471,8 +1471,9 @@ except Exception as e:
         hint: isChangeIp
           ? 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.'
           : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
-        value: '192.168.1.12',
+        value: selectedUtilityAgent?.local_ip || '192.168.1.12',
         error: '',
+
         onConfirm: (targetIp: string) => {
           const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
           setUtilityActionPending(command);

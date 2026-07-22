@@ -1506,7 +1506,9 @@ async function runApiTest(key, ctx) {
     let reqBody = { lead: ctx.lead || "default" };
 
     if (actionName === "change_ip") {
-      const newIp = window.prompt("Enter new IP address for agent PC (leave empty to cancel):", "192.168.1.12");
+      const defaultIp = ctx.local_ip || "192.168.1.12";
+      const newIp = window.prompt("Enter new IP address for agent PC (leave empty to cancel):", defaultIp);
+
       if (!newIp) {
         setApiTestStatus(key, "idle", "Cancelled");
         if (output) output.textContent = `[${key}] Cancelled.`;
