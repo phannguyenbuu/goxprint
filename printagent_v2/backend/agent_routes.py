@@ -889,30 +889,35 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             return auth_error
             
         requested_at = datetime.now(timezone.utc)
+        from active_agents_registry import ACTIVE_AGENTS
+        agent_mem = ACTIVE_AGENTS.get(agent_uid)
+        lan_uid_val = agent_mem.get("lan_uid", "default") if agent_mem else "default"
+
+        import json as _json
+        params = {
+            "action": action,
+        }
+        if body and isinstance(body, dict):
+            for k, v in body.items():
+                if k != "action":
+                    params[k] = v
+
+        if action == "change_ip":
+            params["adapter_name"] = str(params.get("adapter_name") or "Ethernet").strip()
+            params["mode"] = str(params.get("mode") or "dhcp").strip().lower()
+            if params["mode"] == "static":
+                params["ip_address"] = str(params.get("ip_address") or "").strip()
+                params["subnet_mask"] = str(params.get("subnet_mask") or "255.255.255.0").strip()
+                params["gateway"] = str(params.get("gateway") or "").strip()
+                params["dns"] = str(params.get("dns") or "").strip()
+
+        params_str = _json.dumps(params)
+        
         with session_factory() as session:
-            agent = session.execute(
-                select(AgentNode).where(
-                    AgentNode.lead == lead_valid,
-                    AgentNode.agent_uid == agent_uid
-                ).order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-            ).scalars().first()
-            if agent is None:
-                return jsonify({"ok": False, "error": "Agent not found"}), 404
-            
-            import json as _json
-            params = {
-                "action": action,
-            }
-            if body and isinstance(body, dict):
-                for k, v in body.items():
-                    if k != "action":
-                        params[k] = v
-            params_str = _json.dumps(params)
-            
             command = PrinterControlCommand(
                 printer_id=0,
                 lead=lead_valid,
-                lan_uid=agent.lan_uid,
+                lan_uid=lan_uid_val,
                 agent_uid=agent_uid,
                 printer_name="AgentNode",
                 ip="0.0.0.0",
@@ -930,7 +935,9 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "ok": True,
             "message": f"Utility action '{action}' queued",
             "command_id": command_id,
+            "params": params,
         })
+
 
     @app.post("/api/agents/<agent_uid>/emergency-restart")
     def trigger_emergency_restart(agent_uid: str) -> Any:
