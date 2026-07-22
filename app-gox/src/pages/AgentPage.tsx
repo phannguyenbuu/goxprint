@@ -277,6 +277,7 @@ export function AgentPage() {
     title: string;
     hint: string;
     value: string;
+    scanStatus?: string;
     error: string;
     onConfirm: (ip: string) => void;
   }>({
@@ -284,9 +285,11 @@ export function AgentPage() {
     title: '🌐 Đổi địa chỉ IP tĩnh',
     hint: 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.',
     value: '',
+    scanStatus: '',
     error: '',
     onConfirm: () => {},
   });
+
 
   // Storage Modal states
   const [storageModalData, setStorageModalData] = useState<{ lanUid: string; email: string }>({ lanUid: '', email: '' });
@@ -1464,19 +1467,18 @@ except Exception as e:
     let content = commandContent;
     if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
       const isChangeIp = command === 'change_agent_ip';
-      // Open IP input modal instead of window.prompt
+      const currentIp = selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '';
+      
+      // Open IP input modal immediately without blocking
       setIpInputModal({
         isOpen: true,
         title: isChangeIp ? '🌐 Đổi địa chỉ IP tĩnh' : '🔍 Kiểm tra IP khớp Copier',
         hint: isChangeIp
           ? 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.'
           : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
-        value: selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '',
+        value: currentIp,
+        scanStatus: isChangeIp ? '⏳ Loading... Đang quét điểm scan FTP trên máy photo...' : '',
         error: '',
-
-
-
-
         onConfirm: (targetIp: string) => {
           const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
           setUtilityActionPending(command);
@@ -1538,7 +1540,37 @@ except Exception as e:
             });
         },
       });
-      return; // Early return — execution continues in modal's onConfirm
+
+      // Lazy load matching scan destinations in background (non-blocking)
+      if (isChangeIp && currentIp) {
+        const checkCmdObj = utilityCommands.find((c: any) => c.command === 'check_scan_ip_match');
+        if (checkCmdObj && checkCmdObj.command_content) {
+          const checkContent = checkCmdObj.command_content.replace('__TARGET_IP__', currentIp);
+          triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_scan_ip_match', checkContent)
+            .then((res: any) => {
+              if (res.ok && res.command_id) {
+                const startTime = Date.now();
+                const timer = setInterval(async () => {
+                  const elapsed = Date.now() - startTime;
+                  if (elapsed > 40000) { clearInterval(timer); return; }
+                  try {
+                    const statusRes = await getCommandStatus(res.command_id);
+                    if (statusRes.status === 'success' || statusRes.status === 'failed') {
+                      clearInterval(timer);
+                      const resultText = statusRes.result_payload || statusRes.result || statusRes.error || '';
+                      setIpInputModal(prev => ({
+                        ...prev,
+                        scanStatus: resultText ? `🔍 ${resultText}` : ''
+                      }));
+                    }
+                  } catch (e) {}
+                }, 1500);
+              }
+            })
+            .catch(() => {});
+        }
+      }
+      return;
     }
 
     setUtilityActionPending(command);
@@ -5591,7 +5623,23 @@ raise RuntimeError('\\n'.join(lines))`;
                     ⚠️ {ipInputModal.error}
                   </p>
                 )}
+                {ipInputModal.scanStatus && (
+                  <div style={{
+                    marginTop: '10px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: 'var(--color-surface-light)',
+                    fontSize: '0.74rem',
+                    color: 'var(--color-text-secondary)',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    border: '1px solid var(--color-surface-border)'
+                  }}>
+                    {ipInputModal.scanStatus}
+                  </div>
+                )}
               </div>
+
 
               <div style={styles.modalFooter}>
                 <button
