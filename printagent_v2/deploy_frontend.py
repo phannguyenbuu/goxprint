@@ -35,12 +35,16 @@ print("SFTP session opened successfully.")
 
 remote_dist = "/var/www/app-gox"
 
+print("Cleaning old remote files in /var/www/app-gox...")
+ssh.exec_command("rm -rf /var/www/app-gox/*")
+
 # Clean remote directory or ensure it exists
 try:
     sftp.mkdir(remote_dist)
     print(f"Created remote directory: {remote_dist}")
 except IOError:
     pass  # Already exists
+
 
 def sftp_put_dir(local_path, remote_path):
     """Recursively uploads a directory via SFTP"""
