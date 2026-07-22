@@ -53,62 +53,10 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not ok_auth:
             return auth_error
 
-        with session_factory() as session:
-            stmt = (
-                select(Printer, AgentNode.hostname, LanSite.lan_name)
-                .join(AgentNode, (Printer.lead == AgentNode.lead) & (Printer.lan_uid == AgentNode.lan_uid) & (Printer.agent_uid == AgentNode.agent_uid), isouter=True)
-                .join(LanSite, (Printer.lead == LanSite.lead) & (Printer.lan_uid == LanSite.lan_uid), isouter=True)
-                .where(Printer.lead == lead)
-            )
-            results = session.execute(stmt).all()
+        from active_agents_registry import get_all_devices_in_memory
+        devices = get_all_devices_in_memory()
+        return jsonify({"ok": True, "printers": devices})
 
-            output = []
-            for row in results:
-                p: Printer = row[0]
-                hostname = row[1] or "Unknown"
-                lan_name = row[2] or "Unknown"
-
-                latest_counter = session.execute(
-                    select(CounterInfor)
-                    .where(CounterInfor.lead == lead, CounterInfor.lan_uid == p.lan_uid, CounterInfor.ip == p.ip)
-                    .order_by(CounterInfor.timestamp.desc(), CounterInfor.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-
-                latest_status = session.execute(
-                    select(StatusInfor)
-                    .where(StatusInfor.lead == lead, StatusInfor.lan_uid == p.lan_uid, StatusInfor.ip == p.ip)
-                    .order_by(StatusInfor.timestamp.desc(), StatusInfor.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-
-                baseline_row = session.execute(
-                    select(CounterBaseline)
-                    .where(CounterBaseline.lead == lead, CounterBaseline.lan_uid == p.lan_uid, CounterBaseline.ip == p.ip)
-                ).scalar_one_or_none()
-                base = baseline_row.raw_payload if baseline_row and isinstance(baseline_row.raw_payload, dict) else {}
-
-                total_bw = 0
-                if latest_counter:
-                    total_bw = _apply_baseline(latest_counter.total, base, "total") or 0
-
-                output.append({
-                    "lan_uid": p.lan_uid,
-                    "agent_uid": p.agent_uid,
-                    "lan_name": lan_name,
-                    "hostname": hostname,
-                    "printer_name": p.printer_name,
-                    "ip": p.ip,
-                    "mac": p.mac_address,
-                    "counter": total_bw,
-                    "status": latest_status.system_status if latest_status else "Unknown",
-                    "alerts": latest_status.printer_alerts if latest_status else "",
-                    "toner": latest_status.toner_black if latest_status else "Unknown",
-                    "last_seen_at": p.updated_at.isoformat() if p.updated_at else "",
-                    **_serialize_audit_payload_iso(p.created_at, p.updated_at),
-                })
-
-        return jsonify({"ok": True, "printers": output})
 
     @app.get("/api/public/device/by-mac")
     def public_device_by_mac() -> Any:
@@ -120,66 +68,13 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not normalized_mac:
             return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
 
-        with session_factory() as session:
-            row = session.execute(
-                select(DeviceInfor)
-                .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
-                .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                .limit(1)
-            ).scalar_one_or_none()
+        from active_agents_registry import get_device_by_mac_in_memory
+        mem_device = get_device_by_mac_in_memory(normalized_mac)
+        if mem_device:
+            return jsonify(mem_device)
 
-            if row is None:
-                printer = session.execute(
-                    select(Printer)
-                    .where(func.upper(Printer.mac_address) == normalized_mac)
-                    .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-                if printer is not None:
-                    row = session.execute(
-                        select(DeviceInfor)
-                        .where(
-                            DeviceInfor.lead == printer.lead,
-                            DeviceInfor.lan_uid == printer.lan_uid,
-                            DeviceInfor.ip == printer.ip,
-                        )
-                        .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                        .limit(1)
-                    ).scalar_one_or_none()
-                    if row is None and _to_text(printer.ip):
-                        row = session.execute(
-                            select(DeviceInfor)
-                            .where(
-                                DeviceInfor.lead == printer.lead,
-                                DeviceInfor.ip == printer.ip,
-                            )
-                            .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                            .limit(1)
-                        ).scalar_one_or_none()
+        return jsonify({"ok": False, "error": "Device not found for mac_id in active agents"}), 404
 
-            if row is None:
-                return jsonify({"ok": False, "error": "Device not found for mac_id"}), 404
-
-            counter_data = row.counter_data if isinstance(row.counter_data, dict) else {}
-            status_data = row.status_data if isinstance(row.status_data, dict) else {}
-            return jsonify(
-                {
-                    "ok": True,
-                    "mac_id": normalized_mac,
-                    "lead": row.lead,
-                    "lan_uid": row.lan_uid,
-                    "agent_uid": row.agent_uid,
-                    "printer_name": row.printer_name,
-                    "ip": row.ip,
-                    "counter": counter_data,
-                    "status": status_data,
-                    "counter_data": counter_data,
-                    "status_data": status_data,
-                    "last_counter_at": row.last_counter_at.isoformat() if row.last_counter_at else "",
-                    "last_status_at": row.last_status_at.isoformat() if row.last_status_at else "",
-                    **_serialize_audit_payload_iso(row.created_at, row.updated_at),
-                }
-            )
 
     @app.get("/api/public/device/by-mac-now")
     def public_device_by_mac_now() -> Any:

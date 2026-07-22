@@ -1027,14 +1027,10 @@ def create_app() -> Flask:
             _safe_alter_table(session, "PrinterControlCommand", "driver_name", "VARCHAR(255) NOT NULL DEFAULT ''")
             _safe_alter_table(session, "PrinterControlCommand", "driver_url", "TEXT NOT NULL DEFAULT ''")
             session.execute(text('UPDATE "PrinterControlCommand" SET created_at = COALESCE(requested_at, created_at, NOW()), updated_at = COALESCE(responded_at, requested_at, updated_at, NOW());'))
-            # Self-heal CounterInfor / StatusInfor for dedupe + touch-updated flow
-            _safe_alter_table(session, "CounterInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
-            _safe_alter_table(session, "CounterInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            _safe_alter_table(session, "StatusInfor", "mac_id", "VARCHAR(64) NOT NULL DEFAULT ''")
-            _safe_alter_table(session, "StatusInfor", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            session.execute(text('CREATE INDEX IF NOT EXISTS idx_counterinfor_lead_lan_agent_ip_mac ON "CounterInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
-            session.execute(text('CREATE INDEX IF NOT EXISTS idx_statusinfor_lead_lan_agent_ip_mac ON "StatusInfor" (lead, lan_uid, agent_uid, ip, mac_id);'))
-            session.execute(text('CREATE INDEX IF NOT EXISTS idx_deviceinfor_lead_lan_mac ON "DeviceInfor" (lead, lan_uid, mac_id);'))
+            # Drop all confusing real device storage & telemetry snapshot tables in PostgreSQL
+            session.execute(text('DROP TABLE IF EXISTS "Printer", "DeviceInfor", "DeviceInforHistory", "CounterInfor", "StatusInfor", "CounterBaseline", "PrinterEnableLog", "PrinterOnlineLog", "AgentNode", "AgentPresenceLog", "DeviceFeatureFlag", "DeviceLockHistory", "MachineAlert", "NetworkInfo" CASCADE;'))
+
+
     
             # Seed demo user-workspace links for existing sample accounts so the
             # login workspace picker has data on fresh deployments.
