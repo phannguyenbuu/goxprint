@@ -237,44 +237,31 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 })
 
             agent_stmt = select(AgentNode)
-            if lead:
-                agent_stmt = agent_stmt.where(AgentNode.lead == lead)
-            agent_rows = session.execute(agent_stmt).scalars().all()
-            
-            master_by_lan = {}
-            agents_by_lan_all: dict[tuple[str, str], list[AgentNode]] = defaultdict(list)
-            for a in agent_rows:
-                agents_by_lan_all[(a.lead, a.lan_uid)].append(a)
-            for (l_lead, l_lan), l_agents in agents_by_lan_all.items():
-                l_agents_sorted = sorted(l_agents, key=lambda x: x.id)
-                master_agent = next((x for x in l_agents_sorted if x.is_online), None)
-                if not master_agent and l_agents_sorted:
-                    master_agent = l_agents_sorted[0]
-                if master_agent:
-                    master_by_lan[(l_lead, l_lan)] = master_agent.agent_uid
+            from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+            prune_offline_agents(timeout_seconds=30)
 
             agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for agent in agent_rows:
+            for agent_uid, agent_info in ACTIVE_AGENTS.items():
+                a_lead = agent_info.get("lead", "default")
+                a_lan_uid = agent_info.get("lan_uid", "default")
+                if lead and a_lead != lead:
+                    continue
                 agent_dict = {
-                    "id": int(agent.id),
-                    "agent_uid": agent.agent_uid,
-                    "hostname": agent.hostname,
-                    "local_ip": agent.local_ip,
-                    "local_mac": agent.local_mac,
-                    "app_version": agent.app_version,
-                    "run_mode": agent.run_mode,
-                    "web_port": agent.web_port,
-                    "ftp_ports": agent.ftp_ports,
-                    "ftp_sites": list(agent.ftp_sites or []),
-                    "is_master": master_by_lan.get((agent.lead, agent.lan_uid)) == agent.agent_uid,
-                    "is_online": bool(agent.is_online),
-                    "updated_at": _format_datetime_ui(agent.updated_at),
-                    "created_at": _format_datetime_ui(agent.created_at)
+                    "agent_uid": agent_uid,
+                    "hostname": agent_info.get("hostname", ""),
+                    "local_ip": agent_info.get("local_ip", ""),
+                    "local_mac": agent_info.get("local_mac", ""),
+                    "app_version": agent_info.get("app_version", ""),
+                    "run_mode": agent_info.get("run_mode", "web"),
+                    "web_port": agent_info.get("web_port", 9173),
+                    "is_master": True,
+                    "is_online": True,
+                    "updated_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
                 }
-                agents_by_lan[agent.lan_uid].append(agent_dict)
-                if agent.is_online:
-                    active_agents_by_lan[agent.lan_uid].append(agent_dict)
+                agents_by_lan[a_lan_uid].append(agent_dict)
+                active_agents_by_lan[a_lan_uid].append(agent_dict)
+
 
             if standalone:
                 rows = [r for r in rows if len(printers_by_lan.get(r.lan_uid, [])) > 0]

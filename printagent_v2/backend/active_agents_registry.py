@@ -71,7 +71,21 @@ def update_agent_in_memory(
         dev["updated_at"] = now.isoformat()
 
 
+def prune_offline_agents(timeout_seconds: int = 30) -> None:
+    """Purge agents from in-memory registry that haven't sent a heartbeat/poll within timeout_seconds."""
+    now = datetime.now(timezone.utc)
+    expired_keys = []
+    for agent_uid, agent_info in ACTIVE_AGENTS.items():
+        last_seen = agent_info.get("last_seen_at")
+        if not last_seen or (now - last_seen).total_seconds() > timeout_seconds:
+            expired_keys.append(agent_uid)
+    for key in expired_keys:
+        LOGGER.info("[ACTIVE_AGENTS] Pruning offline agent '%s' (last_seen > %ds)", key, timeout_seconds)
+        ACTIVE_AGENTS.pop(key, None)
+
+
 def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
+    prune_offline_agents(timeout_seconds=30)
     norm_mac = mac_id.upper().replace("-", ":")
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
         devices = agent_info.get("devices", {})
@@ -93,6 +107,7 @@ def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
 
 
 def get_all_devices_in_memory() -> list[dict[str, Any]]:
+    prune_offline_agents(timeout_seconds=30)
     output = []
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
         devices = agent_info.get("devices", {})
@@ -109,3 +124,24 @@ def get_all_devices_in_memory() -> list[dict[str, Any]]:
                 "last_seen_at": dev.get("updated_at", ""),
             })
     return output
+
+
+def get_all_active_agents_in_memory(timeout_seconds: int = 30) -> list[dict[str, Any]]:
+    prune_offline_agents(timeout_seconds=timeout_seconds)
+    output = []
+    for agent_uid, agent_info in ACTIVE_AGENTS.items():
+        output.append({
+            "lead": agent_info.get("lead", "default"),
+            "lan_uid": agent_info.get("lan_uid", "default"),
+            "agent_uid": agent_uid,
+            "hostname": agent_info.get("hostname", ""),
+            "local_ip": agent_info.get("local_ip", ""),
+            "local_mac": agent_info.get("local_mac", ""),
+            "app_version": agent_info.get("app_version", ""),
+            "run_mode": agent_info.get("run_mode", "web"),
+            "web_port": agent_info.get("web_port", 9173),
+            "last_seen_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
+            "device_count": len(agent_info.get("devices", {})),
+        })
+    return output
+
