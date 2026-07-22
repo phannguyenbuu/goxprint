@@ -283,7 +283,7 @@ export function AgentPage() {
     isOpen: false,
     title: '🌐 Đổi địa chỉ IP tĩnh',
     hint: 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.',
-    value: '192.168.1.12',
+    value: '',
     error: '',
     onConfirm: () => {},
   });
@@ -1467,11 +1467,13 @@ except Exception as e:
       // Open IP input modal instead of window.prompt
       setIpInputModal({
         isOpen: true,
+        title: isChangeIp ? '🌐 Đổi địa chỉ IP tĩnh' : '🔍 Kiểm tra IP khớp Copier',
         hint: isChangeIp
           ? 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.'
           : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
         value: selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '',
         error: '',
+
 
 
 
