@@ -1501,13 +1501,16 @@ async function runApiTest(key, ctx) {
     else if (key === "agent-utility-open-folder") { actionLabel = "Open Scan Folder"; actionName = "open_scan_folder"; }
     else if (key === "agent-utility-dxdiag") { actionLabel = "dxdiag Hardware Info"; actionName = "dxdiag"; }
     else if (key === "agent-utility-change-ip") { actionLabel = "Change IP Address"; actionName = "change_ip"; }
+    else if (key === "agent-utility-create-shortcut") { actionLabel = "Create Desktop Shortcut"; actionName = "create_scan_shortcut"; }
+
 
     let promptMsg = `Queue utility action '${actionLabel}' for agent ${ctx.agent_uid}?`;
     let reqBody = { lead: ctx.lead || "default" };
 
     if (actionName === "change_ip") {
-      const defaultIp = ctx.local_ip || "192.168.1.12";
+      const defaultIp = ctx.local_ip || "";
       const newIp = window.prompt("Enter new IP address for agent PC (leave empty to cancel):", defaultIp);
+
 
       if (!newIp) {
         setApiTestStatus(key, "idle", "Cancelled");

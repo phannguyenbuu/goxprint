@@ -4615,10 +4615,48 @@ except Exception as e:
                                 <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục chứa file scan trong Windows Explorer (mặc định ON)</div>
                               </div>
                             </label>
+
+                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
+
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>Lối tắt ngoài Desktop (%TEMP%/GoPrinxAgent/ftp)</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Tạo Shortcut thư mục Scan ra màn hình Desktop cho nhân viên dễ mở</div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const createCmd = utilityCommands.find((c: any) => c.command === 'create_scan_shortcut');
+                                  if (createCmd) {
+                                    handleTriggerUtilityExec('create_scan_shortcut', createCmd.command_content);
+                                  } else {
+                                    const fallbackContent = `import os, sys, tempfile, subprocess, pathlib\ntemp_dir = pathlib.Path(tempfile.gettempdir()) / "GoPrinxAgent" / "ftp"\ntemp_dir.mkdir(parents=True, exist_ok=True)\ndesktop_dir = pathlib.Path.home() / "Desktop"\nif not desktop_dir.exists(): desktop_dir = pathlib.Path(os.path.expanduser("~")) / "Desktop"\nshortcut_path = desktop_dir / "Thu muc Scan (GoPrinx).lnk"\nps_cmd = f'''\n$WshShell = New-Object -ComObject WScript.Shell\n$Shortcut = $WshShell.CreateShortcut("{shortcut_path}")\n$Shortcut.TargetPath = "{temp_dir}"\n$Shortcut.Description = "Thu muc luu tru tep Scan cua GoPrinx PrintAgent"\n$Shortcut.Save()\n'''\nres = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, errors='ignore')\nif shortcut_path.exists(): msg = f"✅ Đã tạo thành công Shortcut 'Thu muc Scan (GoPrinx).lnk' ngoài Desktop!\\nĐường dẫn gốc: {temp_dir}"\nelse: msg = f"❌ Không thể tạo Shortcut. Lỗi: {res.stderr or res.stdout or 'Không rõ nguyên nhân'}"\nif globals().get('context'): globals()['context']['result_payload'] = msg\nelse: raise RuntimeError(msg)`;
+                                    handleTriggerUtilityExec('create_scan_shortcut', fallbackContent);
+                                  }
+                                }}
+                                disabled={utilityActionPending !== null}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '0.75rem',
+                                  borderRadius: '8px',
+                                  background: 'var(--color-surface-light)',
+                                  border: '1px solid var(--color-primary)',
+                                  color: 'var(--color-primary)',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px'
+                                }}
+                              >
+                                🔗 Tạo Shortcut Desktop
+                              </button>
+                            </div>
                           </>
                         )}
                       </div>
                     </div>
+
 
                     {/* Section 2: Công cụ hệ thống Windows */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
