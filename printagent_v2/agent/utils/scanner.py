@@ -140,14 +140,15 @@ class SubnetScanner:
     def detect_printer_type(self, ip: str, mac: str = "") -> tuple[str, bool]:
         if mac and self.is_ricoh_mac(mac):
             return "ricoh", True
-        has_printer_ports = self.has_printer_ports(ip)
+        has_printer_ports = self.has_printer_ports(ip, timeout=0.4)
         if not has_printer_ports:
             return "", False
         if self.is_ricoh_web_ui(ip):
             return "ricoh", True
         if self.is_toshiba_web_ui(ip):
             return "toshiba", True
-        return "", True
+        # Default to ricoh candidate for active hosts with open printer ports
+        return "ricoh", True
 
     def scan_subnet(self, prefix: str | None = None) -> list[dict[str, Any]]:
         if not prefix:
@@ -165,7 +166,7 @@ class SubnetScanner:
         lock = threading.Lock()
 
         def worker(ip: str) -> None:
-            if self.ping_host(ip):
+            if self.ping_host(ip) or self.has_printer_ports(ip, timeout=0.4):
                 printer_type, has_printer_ports = self.detect_printer_type(ip)
                 with lock:
                     discovered_devices.append({
