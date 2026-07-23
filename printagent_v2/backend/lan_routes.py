@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from flask import Flask, jsonify, request
@@ -292,23 +293,27 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
             # 3. Dynamic LanSite creation & mapping for all active LANs
             rows_list = list(rows)
-            existing_lan_map = {r.lan_uid: r for r in rows_list}
-            all_active_lan_uids = set(existing_lan_map.keys()) | set(active_agents_by_lan.keys()) | set(printers_by_lan.keys())
+            existing_lan_map = {r.lan_uid: r for r in rows_list if r and r.lan_uid}
+            all_active_lan_uids = {uid for uid in (set(existing_lan_map.keys()) | set(active_agents_by_lan.keys()) | set(printers_by_lan.keys())) if uid}
             
             for uid in all_active_lan_uids:
                 if uid not in existing_lan_map:
-                    new_lan = LanSite(
-                        lead=lead or "default",
-                        lan_uid=uid,
-                        lan_name=f"LAN {uid}",
-                        subnet_cidr="",
-                        gateway_ip="",
-                        gateway_mac="",
-                    )
-                    session.add(new_lan)
-                    session.commit()
-                    rows_list.append(new_lan)
-                    existing_lan_map[uid] = new_lan
+                    try:
+                        new_lan = LanSite(
+                            lead=lead or "default",
+                            lan_uid=uid,
+                            lan_name=f"LAN {uid}",
+                            subnet_cidr="",
+                            gateway_ip="",
+                            gateway_mac="",
+                        )
+                        session.add(new_lan)
+                        session.commit()
+                        rows_list.append(new_lan)
+                        existing_lan_map[uid] = new_lan
+                    except Exception as exc:
+                        session.rollback()
+                        LOGGER.warning("[list_lan_sites] Failed to auto-create LanSite for uid %s: %s", uid, exc)
 
             if standalone:
                 rows = [r for r in rows_list if len(printers_by_lan.get(r.lan_uid, [])) > 0]
