@@ -71,7 +71,7 @@ def update_agent_in_memory(
         dev["updated_at"] = now.isoformat()
 
 
-def prune_offline_agents(timeout_seconds: int = 30) -> None:
+def prune_offline_agents(timeout_seconds: int = 120) -> None:
     """Purge agents from in-memory registry that haven't sent a heartbeat/poll within timeout_seconds."""
     now = datetime.now(timezone.utc)
     expired_keys = []
@@ -85,7 +85,7 @@ def prune_offline_agents(timeout_seconds: int = 30) -> None:
 
 
 def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
-    prune_offline_agents(timeout_seconds=30)
+    prune_offline_agents(timeout_seconds=120)
     norm_mac = mac_id.upper().replace("-", ":")
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
         devices = agent_info.get("devices", {})
@@ -107,7 +107,7 @@ def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
 
 
 def get_all_devices_in_memory() -> list[dict[str, Any]]:
-    prune_offline_agents(timeout_seconds=30)
+    prune_offline_agents(timeout_seconds=120)
     output = []
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
         devices = agent_info.get("devices", {})

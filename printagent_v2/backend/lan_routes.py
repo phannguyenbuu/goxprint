@@ -238,10 +238,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
             agent_stmt = select(AgentNode)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
-            prune_offline_agents(timeout_seconds=30)
+            prune_offline_agents(timeout_seconds=120)
 
             agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            
+            # 1. Add active agents from RAM
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
                 a_lead = agent_info.get("lead", "default")
                 a_lan_uid = agent_info.get("lan_uid", "default")
@@ -262,11 +264,56 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 agents_by_lan[a_lan_uid].append(agent_dict)
                 active_agents_by_lan[a_lan_uid].append(agent_dict)
 
+            # 2. Add fallback active agents from DB (AgentNode) seen within last 5 minutes
+            five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+            db_agent_stmt = select(AgentNode).where(AgentNode.last_seen_at >= five_mins_ago)
+            if lead:
+                db_agent_stmt = db_agent_stmt.where(AgentNode.lead == lead)
+            db_agents = session.execute(db_agent_stmt).scalars().all()
+            for db_a in db_agents:
+                a_lan_uid = db_a.lan_uid or "default"
+                existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
+                if db_a.agent_uid not in existing_uids:
+                    agent_dict = {
+                        "agent_uid": db_a.agent_uid,
+                        "hostname": db_a.hostname or "",
+                        "local_ip": db_a.local_ip or "",
+                        "local_mac": db_a.local_mac or "",
+                        "app_version": db_a.app_version or "",
+                        "run_mode": db_a.run_mode or "web",
+                        "web_port": db_a.web_port or 9173,
+                        "is_master": True,
+                        "is_online": db_a.is_online,
+                        "updated_at": db_a.last_seen_at.isoformat() if db_a.last_seen_at else "",
+                    }
+                    agents_by_lan[a_lan_uid].append(agent_dict)
+                    if db_a.is_online:
+                        active_agents_by_lan[a_lan_uid].append(agent_dict)
+
+            # 3. Dynamic LanSite creation & mapping for all active LANs
+            rows_list = list(rows)
+            existing_lan_map = {r.lan_uid: r for r in rows_list}
+            all_active_lan_uids = set(existing_lan_map.keys()) | set(active_agents_by_lan.keys()) | set(printers_by_lan.keys())
+            
+            for uid in all_active_lan_uids:
+                if uid not in existing_lan_map:
+                    new_lan = LanSite(
+                        lead=lead or "default",
+                        lan_uid=uid,
+                        lan_name=f"LAN {uid}",
+                        subnet_cidr="",
+                        gateway_ip="",
+                        gateway_mac="",
+                    )
+                    session.add(new_lan)
+                    session.commit()
+                    rows_list.append(new_lan)
+                    existing_lan_map[uid] = new_lan
 
             if standalone:
-                rows = [r for r in rows if len(printers_by_lan.get(r.lan_uid, [])) > 0]
+                rows = [r for r in rows_list if len(printers_by_lan.get(r.lan_uid, [])) > 0]
             else:
-                rows = [r for r in rows if len(active_agents_by_lan.get(r.lan_uid, [])) > 0]
+                rows = [r for r in rows_list if len(active_agents_by_lan.get(r.lan_uid, [])) > 0 or len(printers_by_lan.get(r.lan_uid, [])) > 0]
 
             email_stmt = select(LanEmail).order_by(LanEmail.email_number.asc())
             if lead:
