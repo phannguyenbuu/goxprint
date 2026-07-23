@@ -92,29 +92,42 @@ class SubnetScanner:
 
     def is_ricoh_web_ui(self, ip: str) -> bool:
         """Probes the Web UI of the IP to check for Ricoh-specific markers."""
-        try:
-            url = f"http://{ip}/"
-            response = requests.get(url, timeout=self.WEB_TIMEOUT_SECONDS, verify=False)
-            content = response.text.lower()
-            return "ricoh" in content or "web image monitor" in content
-        except Exception:
-            return False
+        for schema in ["http", "https"]:
+            try:
+                url = f"{schema}://{ip}/"
+                response = requests.get(url, timeout=self.WEB_TIMEOUT_SECONDS, verify=False)
+                content = response.text.lower()
+                if any(k in content for k in ["ricoh", "web image monitor", "aficio", "gestetner", "lanier", "savin"]):
+                    return True
+            except Exception:
+                pass
+        return False
 
     def is_toshiba_web_ui(self, ip: str) -> bool:
         """Probes Toshiba TopAccess markers."""
-        try:
-            response = requests.get(
-                f"http://{ip}/?MAIN=TOPACCESS",
-                timeout=self.WEB_TIMEOUT_SECONDS,
-                verify=False,
-                allow_redirects=True,
-            )
-            content = response.text.lower()
-            if "topaccess" in content or "toshiba" in content or "contentwebserver" in content:
-                return True
-            return bool(response.cookies.get("Session"))
-        except Exception:
-            return False
+        targets = [
+            f"http://{ip}/?MAIN=TOPACCESS",
+            f"https://{ip}/?MAIN=TOPACCESS",
+            f"https://{ip}:10443/",
+            f"http://{ip}/",
+            f"https://{ip}/",
+        ]
+        for url in targets:
+            try:
+                response = requests.get(
+                    url,
+                    timeout=self.WEB_TIMEOUT_SECONDS,
+                    verify=False,
+                    allow_redirects=True,
+                )
+                content = response.text.lower()
+                if any(k in content for k in ["topaccess", "toshiba", "contentwebserver", "e-studio", "estudio"]):
+                    return True
+                if response.cookies.get("Session"):
+                    return True
+            except Exception:
+                pass
+        return False
 
     def is_ricoh_probe(self, ip: str, mac: str = "") -> bool:
         """Determines if the host is likely a Ricoh printer."""

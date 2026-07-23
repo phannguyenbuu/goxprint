@@ -1044,7 +1044,24 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 seen.add(ip)
                 active_rows.append((ip, row))
                 printer_type = self._printer_type(str(row.get("printer_type", "") or ""))
+                has_ports = bool(row.get("has_printer_ports"))
                 if printer_type not in {"ricoh", "toshiba"}:
+                    if not has_ports:
+                        continue
+                    mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type="")
+                    discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type="")
+                    if discovered is None:
+                        discovered = Printer(
+                            id=0,
+                            name=f"Copier ({ip})",
+                            ip=ip,
+                            user="",
+                            password="",
+                            printer_type="toshiba" if self._toshiba_service else "ricoh",
+                            status="online",
+                            mac_address=mac,
+                        )
+                    printers.append(discovered)
                     continue
                 mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=printer_type)
                 discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=printer_type)
