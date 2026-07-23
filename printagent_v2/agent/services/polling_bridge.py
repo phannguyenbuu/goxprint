@@ -115,6 +115,7 @@ class PollingBridge:
         self._recent_commands_lock = threading.Lock()
         self._update_staged = False
         self._ip_change_thread = None
+        self._scan_point_sync_thread = None
         self._ip_change_lock = threading.Lock()
 
     @staticmethod
@@ -630,6 +631,118 @@ Get-NetIPAddress -AddressFamily IPv4 |
             except Exception as exc:
                 LOGGER.warning("Periodic polling_when_ip_change call failed: %s", exc)
 
+    def _scan_point_sync_loop(self) -> None:
+        """Periodically fetches scan points for online copiers 15 mins after startup, and every 3 hours thereafter."""
+        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Waiting 15 minutes before initial sync cycle...")
+        # 1. Initial 15-minute wait (900 seconds) post-startup
+        for _ in range(900):
+            if self._stop_event.is_set():
+                return
+            time.sleep(1.0)
+
+        while not self._stop_event.is_set():
+            try:
+                LOGGER.info("[ScanPointSync] Starting 3-hour / 15-min scheduled scan points sync cycle...")
+                self.run_scan_point_sync_cycle()
+                LOGGER.info("[ScanPointSync] Completed scheduled scan points fetch for all online copiers.")
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("[ScanPointSync] Scheduled scan points sync cycle failed: %s", exc, exc_info=True)
+
+            # 2. Wait 3 hours (10,800 seconds) for next cycle
+            for _ in range(10800):
+                if self._stop_event.is_set():
+                    break
+                time.sleep(1.0)
+
+    def _post_address_book_sync_data(self, printer: Any, address_book_data: dict[str, Any]) -> None:
+        base_url = self._polling_base_url()
+        if not base_url:
+            return
+        token = self._config.get_string("polling.token").strip()
+        lead = self._config.get_string("polling.lead").strip()
+        url = f"{base_url}/api/polling/address-book-sync"
+        payload = {
+            "lead": lead,
+            "printer_ip": str(getattr(printer, "ip", "") or "").strip(),
+            "mac_address": str(getattr(printer, "mac_address", "") or "").strip(),
+            "address_book_data": address_book_data,
+        }
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-API-Token"] = token
+        try:
+            import requests
+            resp = requests.post(url, json=payload, headers=headers, timeout=15)
+            LOGGER.debug("[_post_address_book_sync_data] Response status: %s", resp.status_code)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("[_post_address_book_sync_data] Failed to post address book sync data to VPS: %s", exc)
+
+    def run_scan_point_sync_cycle(self) -> None:
+        printers = self._load_printers()
+        if not printers:
+            LOGGER.info("[ScanPointSync] No printers configured for scan point sync.")
+            return
+
+        local_ip = self._get_local_ip()
+
+        for printer in printers:
+            if self._stop_event.is_set():
+                break
+            if not getattr(printer, "is_online", True) or self._printer_type(getattr(printer, "printer_type", "")) != "ricoh":
+                continue
+
+            try:
+                LOGGER.info("[ScanPointSync] Fetching scan points (address_list) for copier %s (IP: %s)...", printer.name, printer.ip)
+                payload = self._ricoh_service.process_address_list(printer)
+                entries = payload.get("address_list", []) if isinstance(payload, dict) else []
+
+                # --- Requirement (2): Scan Point FTP IP Repair Logic ---
+                has_repaired = False
+                for entry in entries:
+                    folder = str(entry.get("folder", "") or entry.get("folder_path", "") or "").strip()
+                    if not folder or ("ftp://" not in folder.lower() and not folder.lower().startswith("ftp:")):
+                        continue
+
+                    # Extract FTP server IP
+                    ftp_ip = ""
+                    if folder.lower().startswith("ftp://"):
+                        match = re.match(r"ftp://([^:/]+)", folder, re.I)
+                        if match:
+                            ftp_ip = match.group(1)
+
+                    if ftp_ip and local_ip and ftp_ip != local_ip:
+                        import subprocess
+                        ping_res = subprocess.run(["ping", "-n", "1", "-w", "400", ftp_ip], capture_output=True)
+                        if ping_res.returncode != 0:
+                            # Stale/non-existent FTP IP detected! Repair scan_point FTP IP on copier to current local_ip
+                            LOGGER.info(
+                                "[ScanPointRepair] Dead FTP IP %s detected for entry '%s' (reg_no=%s) on copier %s (%s). Repairing to current Agent IP %s...",
+                                ftp_ip, entry.get("name"), entry.get("registration_no"), printer.name, printer.ip, local_ip
+                            )
+                            try:
+                                entry_name = entry.get("name") or "Scan"
+                                self._ricoh_service.setup_scan_destination(
+                                    printer=printer,
+                                    username=entry_name,
+                                    email="",
+                                    session=None
+                                )
+                                has_repaired = True
+                                LOGGER.info("[ScanPointRepair] Successfully updated scan point FTP IP on copier %s to %s!", printer.ip, local_ip)
+                            except Exception as rep_exc:
+                                LOGGER.warning("[ScanPointRepair] Failed to repair scan point FTP IP on copier %s: %s", printer.ip, rep_exc)
+
+                if has_repaired:
+                    payload = self._ricoh_service.process_address_list(printer)
+
+                self._post_address_book_sync_data(printer, payload)
+                LOGGER.info("[ScanPointSync] Completed scan points fetch for copier %s (%s) and saved to PostgreSQL.", printer.name, printer.ip)
+
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("[ScanPointSync] Failed scan point sync for printer %s (%s): %s", printer.name, printer.ip, exc)
+
+        LOGGER.info("[ScanPointSync] Finished scan points sync cycle for all online copiers.")
+
     @staticmethod
     def _normalize_mac(value: str) -> str:
         text = str(value or "").strip().replace("-", ":").upper()
@@ -778,6 +891,11 @@ Get-NetNeighbor -AddressFamily IPv4 |
             self._ip_change_thread.start()
             LOGGER.info("IP change polling thread initialized")
 
+        if not self._scan_point_sync_thread or not self._scan_point_sync_thread.is_alive():
+            self._scan_point_sync_thread = threading.Thread(target=self._scan_point_sync_loop, daemon=True, name="polling-scan-point-sync")
+            self._scan_point_sync_thread.start()
+            LOGGER.info("Scan point periodic sync thread initialized (15-min initial delay, 3h interval)")
+
         # Auto-resume camera recordings on startup
         try:
             from agent.services.camera_manager import CameraManager
@@ -826,6 +944,11 @@ Get-NetNeighbor -AddressFamily IPv4 |
         try:
             if self._ip_change_thread and self._ip_change_thread.is_alive():
                 self._ip_change_thread.join(timeout=3)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._scan_point_sync_thread and self._scan_point_sync_thread.is_alive():
+                self._scan_point_sync_thread.join(timeout=3)
         except Exception:  # noqa: BLE001
             pass
         LOGGER.info("Polling bridge stop requested")

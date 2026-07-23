@@ -230,6 +230,57 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             }
         )
 
+    @app.post("/api/polling/address-book-sync")
+    def polling_address_book_sync() -> Any:
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
+        sent_token = _request_api_token()
+        ok_auth, lead, auth_error = _validate_polling_auth(body, lead_key_map, sent_token)
+        if not ok_auth:
+            return auth_error
+
+        printer_ip = _to_text(body.get("printer_ip") or body.get("ip"))
+        mac_address = _normalize_mac(_to_text(body.get("mac_address") or body.get("mac_id")))
+        address_book_data = body.get("address_book_data")
+        if not isinstance(address_book_data, dict):
+            return jsonify({"ok": False, "error": "Missing address_book_data"}), 400
+
+        with session_factory() as session:
+            printer = None
+            if printer_ip:
+                printer = session.execute(
+                    select(Printer).where(Printer.lead == lead, Printer.ip == printer_ip)
+                ).scalars().first()
+            if printer is None and mac_address:
+                printer = session.execute(
+                    select(Printer).where(Printer.lead == lead, Printer.mac_address == mac_address)
+                ).scalars().first()
+
+            if printer:
+                raw_list = address_book_data.get("address_list") or []
+                enriched_list = []
+                for entry in raw_list:
+                    if isinstance(entry, dict):
+                        folder_str = entry.get("folder_path") or entry.get("folder") or ""
+                        parsed = parse_folder_str(folder_str)
+                        entry["protocol"] = parsed["protocol"]
+                        entry["server_host"] = parsed["server"]
+                        entry["folder_port_no"] = parsed["port"]
+                        entry["path_on_folder"] = parsed["path"]
+                    enriched_list.append(entry)
+
+                sync_data = {
+                    "status": "success",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "address_list": enriched_list,
+                }
+                printer.address_book_sync = sync_data
+                session.commit()
+                LOGGER.info("[polling_address_book_sync] Persisted address_book_sync to PostgreSQL for printer %s (%s)", printer.printer_name, printer.ip)
+                return jsonify({"ok": True, "printer_id": int(printer.id)})
+            return jsonify({"ok": False, "error": "Printer not found"}), 404
+
     @app.post("/api/polling/control-result")
     def polling_control_result() -> Any:
         body = request.get_json(silent=True) or {}
@@ -323,6 +374,9 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             "address_list": enriched_list,
                         }
                         command.error_message = json.dumps(sync_data, ensure_ascii=False)
+                        if printer is not None:
+                            printer.address_book_sync = sync_data
+                            LOGGER.info("[polling_control_result] Updated Printer.address_book_sync for printer_id=%d in PostgreSQL", printer.id)
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
                     if command.command_type == "add_scan_email_dest" and wizard_short_name:
