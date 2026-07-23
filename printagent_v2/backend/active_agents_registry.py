@@ -99,8 +99,8 @@ def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
                 "agent_uid": agent_uid,
                 "printer_name": dev.get("printer_name", ""),
                 "ip": dev.get("ip", ""),
-                "counter": dev.get("counter", {}),
-                "status": dev.get("status", {}),
+                "counter": dev.get("counter") or {},
+                "status": dev.get("status") or {},
                 "last_seen_at": dev.get("updated_at", ""),
             }
     return None
@@ -119,11 +119,12 @@ def get_all_devices_in_memory() -> list[dict[str, Any]]:
                 "agent_uid": agent_uid,
                 "printer_name": dev.get("printer_name", ""),
                 "ip": dev.get("ip", ""),
-                "counter": dev.get("counter", {}),
-                "status": dev.get("status", {}),
+                "counter": dev.get("counter") or {},
+                "status": dev.get("status") or {},
                 "last_seen_at": dev.get("updated_at", ""),
             })
     return output
+
 
 
 def get_all_active_agents_in_memory(timeout_seconds: int = 30) -> list[dict[str, Any]]:
