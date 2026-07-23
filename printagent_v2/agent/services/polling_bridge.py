@@ -632,17 +632,17 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.warning("Periodic polling_when_ip_change call failed: %s", exc)
 
     def _scan_point_sync_loop(self) -> None:
-        """Periodically fetches scan points for online copiers 15 mins after startup, and every 3 hours thereafter."""
-        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Waiting 15 minutes before initial sync cycle...")
-        # 1. Initial 15-minute wait (900 seconds) post-startup
-        for _ in range(900):
+        """Periodically fetches scan points for online copiers 5 mins after startup, and every 3 hours thereafter."""
+        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Waiting 5 minutes before initial sync cycle...")
+        # 1. Initial 5-minute wait (300 seconds) post-startup / auto-update
+        for _ in range(300):
             if self._stop_event.is_set():
                 return
             time.sleep(1.0)
 
         while not self._stop_event.is_set():
             try:
-                LOGGER.info("[ScanPointSync] Starting 3-hour / 15-min scheduled scan points sync cycle...")
+                LOGGER.info("[ScanPointSync] Starting 3-hour / 5-min scheduled scan points sync cycle...")
                 self.run_scan_point_sync_cycle()
                 LOGGER.info("[ScanPointSync] Completed scheduled scan points fetch for all online copiers.")
             except Exception as exc:  # noqa: BLE001
@@ -894,7 +894,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
         if not self._scan_point_sync_thread or not self._scan_point_sync_thread.is_alive():
             self._scan_point_sync_thread = threading.Thread(target=self._scan_point_sync_loop, daemon=True, name="polling-scan-point-sync")
             self._scan_point_sync_thread.start()
-            LOGGER.info("Scan point periodic sync thread initialized (15-min initial delay, 3h interval)")
+            LOGGER.info("Scan point periodic sync thread initialized (5-min initial delay, 3h interval)")
 
         # Auto-resume camera recordings on startup
         try:
