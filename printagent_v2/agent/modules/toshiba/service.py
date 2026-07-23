@@ -577,3 +577,46 @@ class ToshibaService:
                 "ftp_upload_path": share_name,
             }
 
+    def process_address_list(self, printer: Printer) -> dict[str, Any]:
+        """Fetches address book / template scan destinations from Toshiba copier."""
+        try:
+            session = requests.Session()
+            session.mount("https://", ToshibaSSLAdapter())
+            base_url = f"https://{printer.ip}:10443"
+            headers = {'Content-Type': 'text/plain; charset=UTF-8', 'Accept': '*/*'}
+
+            get_templates_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<DeviceInformationModel>
+<GetValue>
+    <JobTemplates>
+        <GroupList>
+            <Group>
+                <TemplateList/>
+            </Group>
+        </GroupList>
+    </JobTemplates>
+</GetValue>
+<Command>
+    <GetTemplateList>
+        <commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>
+        <Params><appName>TOPACCESS</appName></Params>
+    </GetTemplateList>
+</Command>
+</DeviceInformationModel>"""
+            r = session.post(f"{base_url}/contentwebserver", data=get_templates_xml, headers=headers, verify=False, timeout=8)
+            entries = []
+            if r.status_code == 200:
+                for match in re.finditer(r'<Template\s+id="([^"]+)">.*?<Name>([^<]*)</Name>', r.text, re.DOTALL):
+                    t_id = match.group(1)
+                    t_name = match.group(2)
+                    entries.append({
+                        "registration_no": t_id,
+                        "name": t_name or f"Template {t_id}",
+                        "email": "",
+                        "folder": f"smb://{printer.ip}/Scan_{t_name}",
+                    })
+            return {"ok": True, "address_list": entries}
+        except Exception as exc:
+            LOGGER.warning("[ToshibaService] Failed to fetch template address list for %s: %s", printer.ip, exc)
+            return {"ok": True, "address_list": []}
+
