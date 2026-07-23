@@ -51,6 +51,31 @@ class SubnetScanner:
         except Exception:
             return "127.0.0.1"
 
+    @classmethod
+    def get_all_local_subnets(cls) -> list[str]:
+        subnets: set[str] = set()
+        local_ip = cls.get_local_ip()
+        if local_ip and not local_ip.startswith("127."):
+            subnets.add(".".join(local_ip.split(".")[:3]))
+
+        try:
+            hostname = socket.gethostname()
+            _, _, ips = socket.gethostbyname_ex(hostname)
+            for ip in ips:
+                if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        subnets.add(".".join(parts[:3]))
+        except Exception:
+            pass
+
+        # Ensure standard local subnets are probed if present
+        if any(s.startswith("192.168.") for s in subnets) or not subnets:
+            subnets.add("192.168.1")
+            subnets.add("192.168.0")
+
+        return list(subnets)
+
     @staticmethod
     def get_subnet_prefix(ip: str) -> str:
         if not ip or ip == "127.0.0.1":
@@ -151,39 +176,44 @@ class SubnetScanner:
         return "ricoh", True
 
     def scan_subnet(self, prefix: str | None = None) -> list[dict[str, Any]]:
-        if not prefix:
-            local_ip = self.get_local_ip()
-            prefix = self.get_subnet_prefix(local_ip)
+        prefixes: list[str] = []
+        if prefix:
+            prefixes.append(prefix)
+        else:
+            prefixes = self.get_all_local_subnets()
         
-        if not prefix:
+        if not prefixes:
             LOGGER.warning("Could not determine subnet prefix for scanning")
             return []
 
-        LOGGER.info("Starting printer subnet scan for %s.0/24", prefix)
-        ips = [f"{prefix}.{i}" for i in range(1, 255)]
         discovered_devices: list[dict[str, Any]] = []
-        
         lock = threading.Lock()
 
-        def worker(ip: str) -> None:
-            if self.ping_host(ip) or self.has_printer_ports(ip, timeout=0.4):
-                printer_type, has_printer_ports = self.detect_printer_type(ip)
-                with lock:
-                    discovered_devices.append({
-                        "ip": ip,
-                        "printer_type": printer_type,
-                        "has_printer_ports": has_printer_ports,
-                        "is_ricoh": printer_type == "ricoh",
-                        "is_toshiba": printer_type == "toshiba",
-                    })
+        for sub_prefix in prefixes:
+            LOGGER.info("Starting printer subnet scan for %s.0/24", sub_prefix)
+            ips = [f"{sub_prefix}.{i}" for i in range(1, 255)]
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            executor.map(worker, ips)
+            def worker(ip: str) -> None:
+                if self.ping_host(ip) or self.has_printer_ports(ip, timeout=0.4):
+                    printer_type, has_printer_ports = self.detect_printer_type(ip)
+                    with lock:
+                        discovered_devices.append({
+                            "ip": ip,
+                            "printer_type": printer_type,
+                            "has_printer_ports": has_printer_ports,
+                            "is_ricoh": printer_type == "ricoh",
+                            "is_toshiba": printer_type == "toshiba",
+                        })
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                executor.map(worker, ips)
 
         ricoh_count = sum(1 for d in discovered_devices if d.get("printer_type") == "ricoh")
         toshiba_count = sum(1 for d in discovered_devices if d.get("printer_type") == "toshiba")
         LOGGER.info(
-            "Subnet scan finished. Active hosts: %d, Ricoh machines: %d, Toshiba machines: %d",
+            "Subnet scan finished across %d subnets (%s). Active hosts: %d, Ricoh: %d, Toshiba: %d",
+            len(prefixes),
+            ", ".join(prefixes),
             len(discovered_devices),
             ricoh_count,
             toshiba_count,
