@@ -563,7 +563,12 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.info("[polling_when_ip_change] Checking address book on copier %s (IP=%s)...", printer.name, printer.ip)
                 session = None
                 try:
-                    session = self._ricoh_service.create_http_client(printer, authenticated=True)
+                    try:
+                        session = self._ricoh_service.create_http_client(printer, authenticated=True)
+                    except Exception as auth_exc:
+                        LOGGER.debug("[polling_when_ip_change] Admin login failed for %s (%s), trying unauthenticated session: %s", printer.name, printer.ip, auth_exc)
+                        session = self._ricoh_service.create_http_client(printer, authenticated=False)
+
                     payload = self._ricoh_service.process_address_list(printer, session=session)
                     entries = payload.get("address_list", [])
 
@@ -594,8 +599,8 @@ Get-NetIPAddress -AddressFamily IPv4 |
                                 LOGGER.warning("[polling_when_ip_change] Failed updating copier %s entry %s: %s",
                                                printer.ip, reg_no, res)
                 except Exception as e:
-                    LOGGER.error("[polling_when_ip_change] Error checking/updating copier %s (IP=%s): %s",
-                                 printer.name, printer.ip, e, exc_info=True)
+                    LOGGER.warning("[polling_when_ip_change] Skipping copier %s (IP=%s): %s",
+                                   printer.name, printer.ip, e)
                 finally:
                     if session:
                         try:
