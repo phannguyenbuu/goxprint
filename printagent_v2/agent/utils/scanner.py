@@ -78,47 +78,6 @@ class SubnetScanner:
         except Exception:
             return False
 
-    @staticmethod
-    def get_local_ip() -> str:
-        try:
-            # Create a dummy socket to find local interface IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(0)
-            # Doesn't need to be reachable
-            s.connect(("8.8.8.8", 1))
-            local_ip = s.getsockname()[0]
-            s.close()
-            return str(local_ip)
-        except Exception:
-            return "127.0.0.1"
-
-    @staticmethod
-    def get_subnet_prefix(ip: str) -> str:
-        if not ip or ip == "127.0.0.1":
-            return ""
-        parts = ip.split(".")
-        if len(parts) != 4:
-            return ""
-        return ".".join(parts[:3])
-
-    def ping_host(self, ip: str) -> bool:
-        """
-        Performs a single ping to a host.
-        On Windows: -n 1 (one packet), -w 500 (500ms timeout)
-        """
-        try:
-            # -n 1: 1 packet
-            # -w 500: 500ms wait
-            result = subprocess.run(
-                ["ping", "-n", "1", "-w", "500", ip],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-
     RICOH_MAC_PREFIXES = [
         "00:00:74", "00:26:73", "00:E0:21", "00:1B:ED",
         "00:00:18", "00:06:78", "00:15:C5", "00:0B:A9"
@@ -133,42 +92,29 @@ class SubnetScanner:
 
     def is_ricoh_web_ui(self, ip: str) -> bool:
         """Probes the Web UI of the IP to check for Ricoh-specific markers."""
-        for schema in ["http", "https"]:
-            try:
-                url = f"{schema}://{ip}/"
-                response = requests.get(url, timeout=self.WEB_TIMEOUT_SECONDS, verify=False)
-                content = response.text.lower()
-                if any(k in content for k in ["ricoh", "web image monitor", "aficio", "gestetner", "lanier", "savin"]):
-                    return True
-            except Exception:
-                pass
-        return False
+        try:
+            url = f"http://{ip}/"
+            response = requests.get(url, timeout=self.WEB_TIMEOUT_SECONDS, verify=False)
+            content = response.text.lower()
+            return "ricoh" in content or "web image monitor" in content
+        except Exception:
+            return False
 
     def is_toshiba_web_ui(self, ip: str) -> bool:
         """Probes Toshiba TopAccess markers."""
-        targets = [
-            f"http://{ip}/",
-            f"https://{ip}/",
-            f"https://{ip}:10443/",
-            f"http://{ip}/?MAIN=TOPACCESS",
-            f"https://{ip}/?MAIN=TOPACCESS",
-        ]
-        for url in targets:
-            try:
-                response = requests.get(
-                    url,
-                    timeout=self.WEB_TIMEOUT_SECONDS,
-                    verify=False,
-                    allow_redirects=True,
-                )
-                content = response.text.lower()
-                if any(k in content for k in ["topaccess", "toshiba", "contentwebserver", "e-studio", "estudio"]):
-                    return True
-                if response.cookies.get("Session"):
-                    return True
-            except Exception:
-                pass
-        return False
+        try:
+            response = requests.get(
+                f"http://{ip}/?MAIN=TOPACCESS",
+                timeout=self.WEB_TIMEOUT_SECONDS,
+                verify=False,
+                allow_redirects=True,
+            )
+            content = response.text.lower()
+            if "topaccess" in content or "toshiba" in content or "contentwebserver" in content:
+                return True
+            return bool(response.cookies.get("Session"))
+        except Exception:
+            return False
 
     def is_ricoh_probe(self, ip: str, mac: str = "") -> bool:
         """Determines if the host is likely a Ricoh printer."""
@@ -181,15 +127,14 @@ class SubnetScanner:
     def detect_printer_type(self, ip: str, mac: str = "") -> tuple[str, bool]:
         if mac and self.is_ricoh_mac(mac):
             return "ricoh", True
-        has_ports = self.has_printer_ports(ip, timeout=0.4)
-        if not has_ports:
+        has_printer_ports = self.has_printer_ports(ip)
+        if not has_printer_ports:
             return "", False
         if self.is_ricoh_web_ui(ip):
             return "ricoh", True
         if self.is_toshiba_web_ui(ip):
             return "toshiba", True
-        # Default to ricoh for unclassified hosts with open printer ports
-        return "ricoh", True
+        return "", True
 
     def scan_subnet(self, prefix: str | None = None) -> list[dict[str, Any]]:
         if not prefix:
@@ -207,7 +152,7 @@ class SubnetScanner:
         lock = threading.Lock()
 
         def worker(ip: str) -> None:
-            if self.ping_host(ip) or self.has_printer_ports(ip, timeout=0.4):
+            if self.ping_host(ip):
                 printer_type, has_printer_ports = self.detect_printer_type(ip)
                 with lock:
                     discovered_devices.append({

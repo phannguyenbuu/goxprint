@@ -58,6 +58,7 @@ class ToshibaService:
 
     def _build_session(self, printer: Printer) -> tuple[requests.Session, str, str, str]:
         landing_url, origin = normalize_urls(self._landing_url(printer))
+        content_url = f"{origin}/contentwebserver"
         session = requests.Session()
         session.headers.update(
             {
@@ -69,15 +70,16 @@ class ToshibaService:
             }
         )
         session.cookies.set("pageTrack", "MAIN=TOPACCESS")
-        real_landing, real_origin = bootstrap_session(
+        bootstrap_session(
             session=session,
             landing_url=landing_url,
             origin=origin,
             timeout=self.timeout,
         )
-        content_url = f"{real_origin}/contentwebserver"
         csrf_token = str(session.cookies.get("Session") or "").strip()
-        return session, real_landing, content_url, csrf_token
+        if not csrf_token:
+            raise RuntimeError("No Toshiba TopAccess Session cookie found after bootstrap")
+        return session, landing_url, content_url, csrf_token
 
     def _fetch_status_root(self, printer: Printer) -> tuple[Any, str, str]:
         session: requests.Session | None = None
@@ -574,47 +576,4 @@ class ToshibaService:
                 "ftp_upload_url": f"smb://{local_ip}/{share_name}",
                 "ftp_upload_path": share_name,
             }
-
-    def process_address_list(self, printer: Printer) -> dict[str, Any]:
-        """Fetches address book / template scan destinations from Toshiba copier."""
-        try:
-            session = requests.Session()
-            session.mount("https://", ToshibaSSLAdapter())
-            base_url = f"https://{printer.ip}:10443"
-            headers = {'Content-Type': 'text/plain; charset=UTF-8', 'Accept': '*/*'}
-
-            get_templates_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<DeviceInformationModel>
-<GetValue>
-    <JobTemplates>
-        <GroupList>
-            <Group>
-                <TemplateList/>
-            </Group>
-        </GroupList>
-    </JobTemplates>
-</GetValue>
-<Command>
-    <GetTemplateList>
-        <commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>
-        <Params><appName>TOPACCESS</appName></Params>
-    </GetTemplateList>
-</Command>
-</DeviceInformationModel>"""
-            r = session.post(f"{base_url}/contentwebserver", data=get_templates_xml, headers=headers, verify=False, timeout=8)
-            entries = []
-            if r.status_code == 200:
-                for match in re.finditer(r'<Template\s+id="([^"]+)">.*?<Name>([^<]*)</Name>', r.text, re.DOTALL):
-                    t_id = match.group(1)
-                    t_name = match.group(2)
-                    entries.append({
-                        "registration_no": t_id,
-                        "name": t_name or f"Template {t_id}",
-                        "email": "",
-                        "folder": f"smb://{printer.ip}/Scan_{t_name}",
-                    })
-            return {"ok": True, "address_list": entries}
-        except Exception as exc:
-            LOGGER.warning("[ToshibaService] Failed to fetch template address list for %s: %s", printer.ip, exc)
-            return {"ok": True, "address_list": []}
 

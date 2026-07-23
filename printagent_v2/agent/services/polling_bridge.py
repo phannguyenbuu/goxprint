@@ -693,18 +693,12 @@ Get-NetIPAddress -AddressFamily IPv4 |
         for printer in printers:
             if self._stop_event.is_set():
                 break
-            p_type = self._printer_type(getattr(printer, "printer_type", ""))
-            if not getattr(printer, "is_online", True) or p_type not in {"ricoh", "toshiba"}:
+            if not getattr(printer, "is_online", True) or self._printer_type(getattr(printer, "printer_type", "")) != "ricoh":
                 continue
 
             try:
-                LOGGER.info("[ScanPointSync] Fetching scan points (address_list) for copier %s (IP: %s, Type: %s)...", printer.name, printer.ip, p_type)
-                payload = {}
-                if p_type == "ricoh" and self._ricoh_service:
-                    payload = self._ricoh_service.process_address_list(printer)
-                elif p_type == "toshiba" and self._toshiba_service:
-                    payload = self._toshiba_service.process_address_list(printer)
-
+                LOGGER.info("[ScanPointSync] Fetching scan points (address_list) for copier %s (IP: %s)...", printer.name, printer.ip)
+                payload = self._ricoh_service.process_address_list(printer)
                 entries = payload.get("address_list", []) if isinstance(payload, dict) else []
 
                 # --- Requirement (2): Scan Point FTP IP Repair Logic ---
@@ -732,29 +726,19 @@ Get-NetIPAddress -AddressFamily IPv4 |
                             )
                             try:
                                 entry_name = entry.get("name") or "Scan"
-                                if p_type == "ricoh" and self._ricoh_service:
-                                    self._ricoh_service.setup_scan_destination(
-                                        printer=printer,
-                                        username=entry_name,
-                                        email="",
-                                        session=None
-                                    )
-                                elif p_type == "toshiba" and self._toshiba_service:
-                                    self._toshiba_service.setup_scan_destination(
-                                        printer=printer,
-                                        username=entry_name,
-                                        email=""
-                                    )
+                                self._ricoh_service.setup_scan_destination(
+                                    printer=printer,
+                                    username=entry_name,
+                                    email="",
+                                    session=None
+                                )
                                 has_repaired = True
                                 LOGGER.info("[ScanPointRepair] Successfully updated scan point FTP IP on copier %s to %s!", printer.ip, local_ip)
                             except Exception as rep_exc:
                                 LOGGER.warning("[ScanPointRepair] Failed to repair scan point FTP IP on copier %s: %s", printer.ip, rep_exc)
 
                 if has_repaired:
-                    if p_type == "ricoh" and self._ricoh_service:
-                        payload = self._ricoh_service.process_address_list(printer)
-                    elif p_type == "toshiba" and self._toshiba_service:
-                        payload = self._toshiba_service.process_address_list(printer)
+                    payload = self._ricoh_service.process_address_list(printer)
 
                 self._post_address_book_sync_data(printer, payload)
                 LOGGER.info("[ScanPointSync] Completed scan points fetch for copier %s (%s) and saved to PostgreSQL.", printer.name, printer.ip)
@@ -1092,16 +1076,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=preferred_type)
                     discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=preferred_type)
                     if discovered is None:
-                        discovered = Printer(
-                            id=0,
-                            name=f"Copier ({ip})",
-                            ip=ip,
-                            user="",
-                            password="",
-                            printer_type=preferred_type or "ricoh",
-                            status="online",
-                            mac_address=mac,
-                        )
+                        continue
                     printers.append(discovered)
                     if not mac:
                         LOGGER.warning(
