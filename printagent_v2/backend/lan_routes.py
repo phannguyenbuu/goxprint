@@ -294,7 +294,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             # 3. Dynamic LanSite creation & mapping for all active LANs
             rows_list = list(rows)
             existing_lan_map = {r.lan_uid: r for r in rows_list if r and r.lan_uid}
-            all_active_lan_uids = {uid for uid in (set(existing_lan_map.keys()) | set(active_agents_by_lan.keys()) | set(printers_by_lan.keys())) if uid}
+            all_active_lan_uids = {uid for uid in (set(existing_lan_map.keys()) | set(active_agents_by_lan.keys())) if uid}
             
             for uid in all_active_lan_uids:
                 if uid not in existing_lan_map:
@@ -315,10 +315,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         session.rollback()
                         LOGGER.warning("[list_lan_sites] Failed to auto-create LanSite for uid %s: %s", uid, exc)
 
-            if standalone:
-                rows = [r for r in rows_list if len(printers_by_lan.get(r.lan_uid, [])) > 0]
-            else:
-                rows = [r for r in rows_list if len(active_agents_by_lan.get(r.lan_uid, [])) > 0 or len(printers_by_lan.get(r.lan_uid, [])) > 0]
+            rows = [r for r in rows_list if len(active_agents_by_lan.get(r.lan_uid, [])) > 0]
 
             email_stmt = select(LanEmail).order_by(LanEmail.email_number.asc())
             if lead:
