@@ -1092,7 +1092,16 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=preferred_type)
                     discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=preferred_type)
                     if discovered is None:
-                        continue
+                        discovered = Printer(
+                            id=0,
+                            name=f"Copier ({ip})",
+                            ip=ip,
+                            user="",
+                            password="",
+                            printer_type=preferred_type or "ricoh",
+                            status="online",
+                            mac_address=mac,
+                        )
                     printers.append(discovered)
                     if not mac:
                         LOGGER.warning(

@@ -58,7 +58,6 @@ class ToshibaService:
 
     def _build_session(self, printer: Printer) -> tuple[requests.Session, str, str, str]:
         landing_url, origin = normalize_urls(self._landing_url(printer))
-        content_url = f"{origin}/contentwebserver"
         session = requests.Session()
         session.headers.update(
             {
@@ -70,16 +69,15 @@ class ToshibaService:
             }
         )
         session.cookies.set("pageTrack", "MAIN=TOPACCESS")
-        bootstrap_session(
+        real_landing, real_origin = bootstrap_session(
             session=session,
             landing_url=landing_url,
             origin=origin,
             timeout=self.timeout,
         )
+        content_url = f"{real_origin}/contentwebserver"
         csrf_token = str(session.cookies.get("Session") or "").strip()
-        if not csrf_token:
-            raise RuntimeError("No Toshiba TopAccess Session cookie found after bootstrap")
-        return session, landing_url, content_url, csrf_token
+        return session, real_landing, content_url, csrf_token
 
     def _fetch_status_root(self, printer: Printer) -> tuple[Any, str, str]:
         session: requests.Session | None = None

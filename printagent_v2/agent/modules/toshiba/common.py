@@ -49,28 +49,38 @@ def bootstrap_session(
     landing_url: str,
     origin: str,
     timeout: int,
-) -> None:
-    candidates = [landing_url]
-    default_url = f"{origin}/?MAIN=TOPACCESS"
-    if landing_url.rstrip("/") != default_url:
-        candidates.append(default_url)
+) -> tuple[str, str]:
+    """Tries HTTP and HTTPS endpoints for Toshiba TopAccess. Returns (real_landing_url, real_origin)."""
+    parsed = urlparse(landing_url)
+    host = parsed.netloc.split(":")[0] if parsed.netloc else landing_url.replace("http://", "").replace("https://", "").split("/")[0]
+    
+    candidates = [
+        landing_url,
+        f"http://{host}/?MAIN=TOPACCESS",
+        f"https://{host}/?MAIN=TOPACCESS",
+        f"https://{host}:10443/?MAIN=TOPACCESS",
+        f"http://{host}/",
+        f"https://{host}/",
+    ]
     seen: set[str] = set()
     last_error: Exception | None = None
     for candidate in candidates:
-        if candidate in seen:
+        if not candidate or candidate in seen:
             continue
         seen.add(candidate)
         try:
-            response = session.get(candidate, timeout=timeout)
-            response.raise_for_status()
-            if session.cookies.get("Session"):
-                return
-        except Exception as exc:  # noqa: BLE001
+            req_timeout = min(5.0, float(timeout)) if timeout else 5.0
+            response = session.get(candidate, timeout=req_timeout, verify=False, allow_redirects=True)
+            res_url = response.url if response.url else candidate
+            c_landing, c_origin = normalize_urls(res_url)
+            if response.status_code in {200, 301, 302, 303, 307}:
+                return c_landing, c_origin
+        except Exception as exc:
             last_error = exc
             continue
     if last_error is not None:
         raise last_error
-    raise RuntimeError("Unable to bootstrap Toshiba TopAccess session")
+    raise RuntimeError(f"Unable to bootstrap Toshiba TopAccess session for {host}")
 
 
 def compact_snippet(text: str, limit: int = SNIPPET_LIMIT) -> str:
