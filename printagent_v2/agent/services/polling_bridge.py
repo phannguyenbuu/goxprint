@@ -2468,10 +2468,17 @@ if ($node) {{ $node }}
         agent_uid = self._agent_uid or hostname
         devices: list[dict[str, str]] = []
         for printer in printers:
+            p_name = str(printer.name or "").strip()
+            p_ip = str(printer.ip or "").strip()
+            if not p_name or "unknown" in p_name.lower():
+                probed = PollingBridge._probe_real_device_name(p_ip)
+                if probed:
+                    p_name = probed
+                    printer.name = probed
             devices.append(
                 {
-                    "printer_name": str(printer.name or "").strip(),
-                    "ip": str(printer.ip or "").strip(),
+                    "printer_name": p_name,
+                    "ip": p_ip,
                     "mac_address": str(printer.mac_address or "").strip(),
                     "printer_type": str(printer.printer_type or "").strip(),
                     "status": str(printer.status or "").strip(),
@@ -4912,13 +4919,20 @@ Write-Output 'INSTALLED'
                     LOGGER.warning("Polling bridge failed for %s (%s): %s", printer.name, printer.ip, exc)
                     # Always send heartbeat payload even when collector fails.
                     try:
+                        p_name = str(printer.name or "").strip()
+                        if not p_name or "unknown" in p_name.lower():
+                            probed = PollingBridge._probe_real_device_name(str(printer.ip or "").strip())
+                            if probed:
+                                p_name = probed
+                                printer.name = probed
+
                         fallback_payload = {
                             "lead": lead,
                             "lan_uid": lan_uid,
                             "agent_uid": agent_uid,
                             "hostname": hostname,
                             "local_ip": local_ip,
-                            "printer_name": str(printer.name or "").strip() or "Unknown Printer",
+                            "printer_name": p_name or "Unknown Printer",
                             "ip": str(printer.ip or "").strip(),
                             "mac_id": str(printer.mac_address or "").strip(),
                             "mac_address": str(printer.mac_address or "").strip(),
