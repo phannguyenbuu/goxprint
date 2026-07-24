@@ -384,18 +384,27 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if dev_mac:
                         existing_macs.add(dev_mac)
 
-                # Perform strict deduplication by mac_id (or IP if mac_id is missing)
+                # Perform strict deduplication by IP address (or MAC if IP is missing)
+                # Prioritize valid printer names over Unknown Printer
+                sorted_lan_printers = sorted(
+                    lan_printers,
+                    key=lambda x: (
+                        1 if "unknown" in str(x.get("printer_name", "")).lower() else 0,
+                        0 if x.get("address_book_sync") else 1
+                    )
+                )
+
                 deduped_printers = []
                 seen_keys = set()
 
-                for p in lan_printers:
-                    mac_clean = _to_text(p.get("mac_id")).replace("-", ":").upper().strip()
+                for p in sorted_lan_printers:
                     ip_clean = _to_text(p.get("ip")).strip()
+                    mac_clean = _to_text(p.get("mac_id")).replace("-", ":").upper().strip()
                     
-                    if mac_clean and not mac_clean.startswith("IP:"):
-                        key = f"MAC:{mac_clean}"
-                    elif ip_clean:
+                    if ip_clean:
                         key = f"IP:{ip_clean}"
+                    elif mac_clean and not mac_clean.startswith("IP:"):
+                        key = f"MAC:{mac_clean}"
                     else:
                         key = f"ID:{p.get('id')}"
 

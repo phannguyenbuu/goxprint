@@ -14,12 +14,47 @@ from models import DeviceInfor
 LOGGER = logging.getLogger(__name__)
 
 
+import socket
+import subprocess
+import platform
+from concurrent.futures import ThreadPoolExecutor
+
+def _is_ip_reachable(ip: str) -> bool:
+    if not ip or not ip.strip():
+        return False
+    ip_str = ip.strip()
+    for port in (80, 9100, 443, 515, 8080):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.4)
+            res = s.connect_ex((ip_str, port))
+            s.close()
+            if res == 0:
+                return True
+        except Exception:
+            pass
+    try:
+        cmd = ["ping", "-n", "1", "-w", "800", ip_str] if platform.system() == "Windows" else ["ping", "-c", "1", "-W", "1", ip_str]
+        ret = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.2)
+        return ret.returncode == 0
+    except Exception:
+        return False
+
+
+from datetime import datetime, timedelta, timezone
+
 def register_public_device_routes(app: Flask, session_factory: Any) -> None:
 
     @app.get("/machinelist/")
     def public_machine_list() -> Any:
         lead = _to_text(request.args.get("lead"))
         lan_uid = _to_text(request.args.get("lan_uid"))
+        check_ping = _to_text(request.args.get("check_ping")).lower() in ("true", "1")
+        max_age_seconds = _to_int(request.args.get("max_age_seconds")) or 600  # Default 10 mins
+
+        now = datetime.now(timezone.utc)
+        cutoff_time = now - timedelta(seconds=max_age_seconds)
+
         with session_factory() as session:
             stmt = select(DeviceInfor).where(DeviceInfor.lan_uid != "").order_by(
                 DeviceInfor.updated_at.desc(), DeviceInfor.id.desc()
@@ -37,6 +72,13 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                 dedupe_key = (_to_text(row.lead), _to_text(row.lan_uid), dedupe_token)
                 if dedupe_key in seen:
                     continue
+
+                # Filter out machines that haven't been updated/polled within max_age_seconds
+                if row.updated_at:
+                    updated_at_utc = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
+                    if updated_at_utc < cutoff_time:
+                        continue
+
                 seen.add(dedupe_key)
                 counter_data = row.counter_data if isinstance(row.counter_data, dict) else {}
                 status_data = row.status_data if isinstance(row.status_data, dict) else {}
@@ -57,12 +99,20 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
                     }
                 )
-            machines.sort(key=lambda x: (_to_text(x.get("lead")), _to_text(x.get("lan_uid")), _to_text(x.get("mac_id"))))
+
+            if check_ping and machines:
+                with ThreadPoolExecutor(max_workers=min(20, len(machines))) as executor:
+                    reachability = list(executor.map(lambda m: _is_ip_reachable(m.get("ip", "")), machines))
+                online_machines = [m for m, reachable in zip(machines, reachability) if reachable]
+            else:
+                online_machines = machines
+
+            online_machines.sort(key=lambda x: (_to_text(x.get("lead")), _to_text(x.get("lan_uid")), _to_text(x.get("mac_id"))))
             return jsonify(
                 {
                     "ok": True,
-                    "count": len(machines),
-                    "machines": machines,
+                    "count": len(online_machines),
+                    "machines": online_machines,
                 }
             )
 
