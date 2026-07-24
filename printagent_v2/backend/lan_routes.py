@@ -183,6 +183,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for p in printer_rows:
                 sync_data = p.address_book_sync
+                if isinstance(sync_data, str):
+                    try:
+                        sync_data = json.loads(sync_data)
+                    except Exception:
+                        sync_data = {}
                 if isinstance(sync_data, dict) and "address_list" in sync_data:
                     from utils import _safe_path_token
                     safe_lan_uid = _safe_path_token(p.lan_uid)
