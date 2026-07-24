@@ -4888,7 +4888,7 @@ Write-Output 'INSTALLED'
 
             # Poll printers in parallel using ThreadPoolExecutor
             if printers:
-                with ThreadPoolExecutor(max_workers=min(16, len(printers))) as executor:
+                with ThreadPoolExecutor(max_workers=min(6, len(printers))) as executor:
                     executor.map(_process_single_printer, printers)
             
             # Disabled saving printer states to local JSON cache to ensure live queries only

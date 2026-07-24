@@ -307,7 +307,7 @@ class RicohServiceBase:
                     try:
                         url = urljoin(base_url, form_path)
                         LOGGER.info("[RicohLogin] GET %s", form_path)
-                        resp = session.get(url, timeout=8)
+                        resp = session.get(url, timeout=15)
                         if resp.status_code == 200:
                             html_content = resp.text
                             # Handle JS intermediate redirect if present (same as test_login_226.py)
@@ -318,7 +318,7 @@ class RicohServiceBase:
                                 if action_match:
                                     redirect_url = urljoin(resp.url, action_match.group(1))
                                     LOGGER.info("[RicohLogin] POST Redirect %s", action_match.group(1))
-                                    resp = session.post(redirect_url, data=hidden, timeout=8)
+                                    resp = session.post(redirect_url, data=hidden, timeout=15)
                                     html_content = resp.text
 
                             if self._is_session_full(html_content):
@@ -334,6 +334,22 @@ class RicohServiceBase:
                     except Exception as e:
                         LOGGER.debug("[RicohLogin] GET %s failed: %s", form_path, e)
                         continue
+
+                if not referer_url:
+                    LOGGER.info("[RicohLogin] Retrying authForm fetch with 1.5s delay for %s...", printer.ip)
+                    time.sleep(1.5)
+                    for form_path in form_urls:
+                        try:
+                            url = urljoin(base_url, form_path)
+                            resp = session.get(url, timeout=15)
+                            if resp.status_code == 200:
+                                html_content = resp.text
+                                wim_token = self._extract_wim_token(html_content) or self._extract_hidden_inputs(html_content).get("wimToken", "")
+                                referer_url = resp.url
+                                LOGGER.info("[RicohLogin] Retry form OK for %s", printer.ip)
+                                break
+                        except Exception:
+                            continue
 
                 if not referer_url:
                     LOGGER.warning("[RicohLogin] Could not load login form for %s", printer.ip)
@@ -386,7 +402,7 @@ class RicohServiceBase:
 
                     LOGGER.info("[RicohLogin] POST %s using %s Strategy", strategy["path"], strategy["name"])
                     try:
-                        resp = session.post(post_url, data=data, headers={"Referer": referer_url}, timeout=8)
+                        resp = session.post(post_url, data=data, headers={"Referer": referer_url}, timeout=15)
                     except Exception as post_exc:
                         LOGGER.debug("[RicohLogin] POST %s failed: %s", strategy["path"], post_exc)
                         continue
