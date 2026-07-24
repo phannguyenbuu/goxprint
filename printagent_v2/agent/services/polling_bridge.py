@@ -434,6 +434,18 @@ class PollingBridge:
         return 200
 
     @staticmethod
+    def _is_placeholder_printer_name(name: str, ip: str = "") -> bool:
+        if not name or not name.strip():
+            return True
+        text = str(name).strip().lower()
+        ip_str = str(ip).strip().lower()
+        if ip_str and text == ip_str:
+            return True
+        if any(kw in text for kw in ("unknown", "copier (", "thiết bị photocopy", "discovery")):
+            return True
+        return False
+
+    @staticmethod
     def _probe_real_device_name(ip: str) -> str:
         """Tự động thám dò TÊN THẬT SỰ & MODEL CHÍNH XÁC của thiết bị thông qua PJL (9100) và HTTP/HTTPS (80/443)."""
         if not ip or not ip.strip():
@@ -2468,9 +2480,7 @@ if ($node) {{ $node }}
         agent_uid = self._agent_uid or hostname
         devices: list[dict[str, str]] = []
         for printer in printers:
-            p_name = str(printer.name or "").strip()
-            p_ip = str(printer.ip or "").strip()
-            if not p_name or "unknown" in p_name.lower():
+            if PollingBridge._is_placeholder_printer_name(p_name, p_ip):
                 probed = PollingBridge._probe_real_device_name(p_ip)
                 if probed:
                     p_name = probed
@@ -4920,8 +4930,9 @@ Write-Output 'INSTALLED'
                     # Always send heartbeat payload even when collector fails.
                     try:
                         p_name = str(printer.name or "").strip()
-                        if not p_name or "unknown" in p_name.lower():
-                            probed = PollingBridge._probe_real_device_name(str(printer.ip or "").strip())
+                        p_ip = str(printer.ip or "").strip()
+                        if PollingBridge._is_placeholder_printer_name(p_name, p_ip):
+                            probed = PollingBridge._probe_real_device_name(p_ip)
                             if probed:
                                 p_name = probed
                                 printer.name = probed
