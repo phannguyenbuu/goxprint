@@ -359,11 +359,9 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     dev_ip = str(dev.ip or "").strip()
                     dev_mac = str(dev.mac_id or "").strip().replace("-", ":").upper()
                     name = str(dev.printer_name or "").strip()
-                    if not name or "unknown" in name.lower():
+                    if not name:
                         continue
                     if dev_ip and dev_ip in existing_ips:
-                        continue
-                    if dev_mac and dev_mac in existing_macs:
                         continue
                     
                     lan_printers.append({
@@ -381,16 +379,16 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     })
                     if dev_ip:
                         existing_ips.add(dev_ip)
-                    if dev_mac:
-                        existing_macs.add(dev_mac)
 
-                # Perform strict deduplication by IP address (or MAC if IP is missing)
-                # Prioritize valid printer names over Unknown Printer
+                # Perform strict deduplication:
+                # Prioritize valid named printers over Unknown Printer
+                # Prioritize printers with address book sync data
                 sorted_lan_printers = sorted(
                     lan_printers,
                     key=lambda x: (
                         1 if "unknown" in str(x.get("printer_name", "")).lower() else 0,
-                        0 if x.get("address_book_sync") else 1
+                        0 if x.get("address_book_sync") and isinstance(x.get("address_book_sync"), dict) and x.get("address_book_sync").get("address_list") else 1,
+                        0 if str(x.get("ip", "")).strip() else 1,
                     )
                 )
 
@@ -398,13 +396,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 seen_keys = set()
 
                 for p in sorted_lan_printers:
-                    ip_clean = _to_text(p.get("ip")).strip()
                     mac_clean = _to_text(p.get("mac_id")).replace("-", ":").upper().strip()
+                    ip_clean = _to_text(p.get("ip")).strip()
                     
-                    if ip_clean:
-                        key = f"IP:{ip_clean}"
-                    elif mac_clean and not mac_clean.startswith("IP:"):
+                    if mac_clean and not mac_clean.startswith("IP:"):
                         key = f"MAC:{mac_clean}"
+                    elif ip_clean:
+                        key = f"IP:{ip_clean}"
                     else:
                         key = f"ID:{p.get('id')}"
 
