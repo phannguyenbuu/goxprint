@@ -320,7 +320,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     "web_port": port,
                     "ftp_ports": _to_text(agent.ftp_ports),
                     "printer_ips": printer_ips_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
-                    "printers": printers_by_agent.get((_to_text(agent.lead), _to_text(agent.lan_uid), _to_text(agent.agent_uid))) or printers_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
+                    "printers": printers_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
                     "lan_printers": printers_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
                     "last_seen_at": _format_agents_datetime_ui(last_seen),
                     "online_changed_at": _format_agents_datetime_ui(online_changed_at),
