@@ -356,10 +356,6 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 active_count = len(active_agents_by_lan.get(r.lan_uid, []))
                 has_online_agent = (active_count > 0) or (total_active_agents > 0)
                 
-                for p in lan_printers:
-                    if has_online_agent and p.get("enabled") != False:
-                        p["is_online"] = True
-
                 for dev in devices_by_lan.get(r.lan_uid, []):
                     dev_ip = str(dev.ip or "").strip()
                     dev_mac = str(dev.mac_id or "").strip().replace("-", ":").upper()
@@ -374,7 +370,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "printer_name": name,
                         "ip": dev_ip,
                         "mac_id": dev_mac,
-                        "is_online": has_online_agent,
+                        "is_online": False,
                         "enabled": True,
                         "auth_user": "",
                         "auth_password": "",
@@ -399,6 +395,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
                 deduped_printers = []
                 seen_keys = set()
+                cutoff_15m = datetime.now(timezone.utc) - timedelta(seconds=900)
 
                 for p in sorted_lan_printers:
                     mac_clean = _to_text(p.get("mac_id")).replace("-", ":").upper().strip()
@@ -414,6 +411,23 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if key in seen_keys:
                         continue
                     seen_keys.add(key)
+
+                    # Compute real online status based on recent device polling (last 15 mins)
+                    dev_match = None
+                    for dev in devices_by_lan.get(r.lan_uid, []):
+                        dev_mac = _to_text(dev.mac_id).replace("-", ":").upper().strip()
+                        dev_ip = _to_text(dev.ip).strip()
+                        if (mac_clean and dev_mac == mac_clean) or (ip_clean and dev_ip == ip_clean):
+                            dev_match = dev
+                            break
+
+                    is_online = False
+                    if has_online_agent and dev_match and dev_match.updated_at:
+                        dev_updated_utc = dev_match.updated_at if dev_match.updated_at.tzinfo else dev_match.updated_at.replace(tzinfo=timezone.utc)
+                        if dev_updated_utc >= cutoff_15m:
+                            is_online = True
+
+                    p["is_online"] = is_online
                     deduped_printers.append(p)
 
                 out_rows.append({
