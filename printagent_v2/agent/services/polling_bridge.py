@@ -447,12 +447,57 @@ class PollingBridge:
 
     @staticmethod
     def _probe_real_device_name(ip: str) -> str:
-        """Tự động thám dò TÊN THẬT SỰ & MODEL CHÍNH XÁC của thiết bị thông qua PJL (9100) và HTTP/HTTPS (80/443)."""
+        """Tự động thám dò TÊN THẬT SỰ & MODEL CHÍNH XÁC của thiết bị Ricoh, Toshiba, HP, Canon, Brother, Fujifilm..."""
         if not ip or not ip.strip():
             return ""
         ip_str = ip.strip()
 
-        # 1. Probe via PJL @PJL INFO ID (Port 9100) - Rất nhanh và chuẩn xác cho máy in HP, Canon, Ricoh, Brother, Xerox...
+        # 1. Probe via Ricoh / Toshiba / HP / Canon Web Scraping (Port 80/443)
+        for proto in ("http", "https"):
+            try:
+                import urllib.request
+                import ssl
+                import re
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                urls = [
+                    f"{proto}://{ip_str}/",
+                    f"{proto}://{ip_str}/web/guest/en/websys/webArch/topPage.cgi",
+                    f"{proto}://{ip_str}/main.asp",
+                ]
+                for url in urls:
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                        with urllib.request.urlopen(req, timeout=1.5, context=ctx) as resp:
+                            html = resp.read().decode("utf-8", errors="ignore")
+                            
+                            # Extract Ricoh / Toshiba / HP / Canon / Xerox / Fujifilm model from HTML
+                            m = re.search(r"\b(Aficio\s+MP\s*\d+|MP\s*\d+|e-STUDIO\s*\d+\w*|HP\s+[A-Za-z0-9\s\-]+|Canon\s+[A-Za-z0-9\s\-]+|DocuCentre\s+[A-Za-z0-9\s\-]+)\b", html, re.IGNORECASE)
+                            if m:
+                                model_str = re.sub(r"\s+", " ", m.group(1)).strip()
+                                if len(model_str) >= 4 and not model_str.lower().startswith("http"):
+                                    return model_str
+
+                            # Fallback to <title>
+                            match_title = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+                            if match_title:
+                                title = match_title.group(1).strip()
+                                clean_title = re.sub(r"\s+", " ", title)
+                                if clean_title and clean_title.lower() not in ("index", "home", "login", "welcome"):
+                                    if clean_title.lower() == "web image monitor":
+                                        m2 = re.search(r"\b(MP\s*\d+|Aficio\s+MP\s*\d+)\b", html, re.IGNORECASE)
+                                        if m2:
+                                            return m2.group(1).strip()
+                                    else:
+                                        return clean_title
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # 2. Probe via PJL @PJL INFO ID (Port 9100)
         try:
             import socket
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -469,27 +514,6 @@ class PollingBridge:
                             return name
         except Exception:
             pass
-
-        # 2. Probe via HTTP/HTTPS Title (Port 80/443)
-        for proto in ("http", "https"):
-            try:
-                import urllib.request
-                import ssl
-                import re
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                req = urllib.request.Request(f"{proto}://{ip_str}/", headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=1.2, context=ctx) as resp:
-                    html = resp.read().decode("utf-8", errors="ignore")
-                    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-                    if match:
-                        title = match.group(1).strip()
-                        clean_title = re.sub(r"\s+", " ", title)
-                        if clean_title and clean_title.lower() not in ("index", "home", "login", "welcome", "web image monitor"):
-                            return clean_title
-            except Exception:
-                pass
 
         return ""
 
