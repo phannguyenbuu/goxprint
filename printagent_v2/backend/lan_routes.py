@@ -412,7 +412,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         continue
                     seen_keys.add(key)
 
-                    is_online = has_online_agent and (p.get("enabled") != False)
+                    is_online = bool(p.get("enabled") != False)
                     p["is_online"] = is_online
                     deduped_printers.append(p)
 
