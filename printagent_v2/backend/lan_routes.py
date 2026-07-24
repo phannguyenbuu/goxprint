@@ -384,6 +384,26 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if dev_mac:
                         existing_macs.add(dev_mac)
 
+                # Perform strict deduplication by mac_id (or IP if mac_id is missing)
+                deduped_printers = []
+                seen_keys = set()
+
+                for p in lan_printers:
+                    mac_clean = _to_text(p.get("mac_id")).replace("-", ":").upper().strip()
+                    ip_clean = _to_text(p.get("ip")).strip()
+                    
+                    if mac_clean and not mac_clean.startswith("IP:"):
+                        key = f"MAC:{mac_clean}"
+                    elif ip_clean:
+                        key = f"IP:{ip_clean}"
+                    else:
+                        key = f"ID:{p.get('id')}"
+
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    deduped_printers.append(p)
+
                 out_rows.append({
                     "lead": r.lead,
                     "lan_uid": r.lan_uid,
@@ -396,7 +416,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "active_agents": len(active_agents_by_lan.get(r.lan_uid, [])),
                     "agents": agents_by_lan.get(r.lan_uid, []),
                     "emails": emails_by_lan.get(r.lan_uid, []),
-                    "printers": lan_printers,
+                    "printers": deduped_printers,
                     **_serialize_audit_payload_iso(r.created_at, r.updated_at),
                 })
 
