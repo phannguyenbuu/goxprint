@@ -997,7 +997,11 @@ export function AgentPage() {
 
   useEffect(() => {
     fetchLanSitesData(true);
-  }, []);
+    const timer = setInterval(() => {
+      fetchLanSitesData(false);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [fetchLanSitesData]);
 
   const fetchCameras = useCallback(async (agentUid: string) => {
     if (!agentUid) return;
