@@ -1703,7 +1703,7 @@ except Exception as e:
       
       // 2. Không show Unknown Printer
       const name = (p.printer_name || '').toLowerCase().trim();
-      if (!name || name.includes('unknown') || name === 'unknown printer') return false;
+      if (name.includes('unknown') || name === 'unknown printer') return false;
 
       // 3. Lọc generic printer như pdf, fax, brother, etc.
       if (
@@ -1853,7 +1853,13 @@ except Exception as e:
           }
         }
       } catch (err: any) {
-        console.warn('Poll command error:', err.message);
+        clearInterval(timer);
+        setCommandStatus((prev) => {
+          const updated = { ...prev };
+          delete updated[targetKey];
+          return updated;
+        });
+        onFailed(err.message || 'Lệnh thực hiện thất bại từ Agent');
       }
     }, pollInterval);
   };
@@ -1888,6 +1894,28 @@ except Exception as e:
       );
     } catch (err: any) {
       showToast(`Lỗi gửi lệnh đồng bộ: ${err.message}`, 'error');
+    }
+  };
+
+  // ── SYNC ALL ADDRESS BOOKS ──
+  const handleSyncAllAddressBooks = async () => {
+    if (!filteredPrinters || filteredPrinters.length === 0) {
+      showToast('Không có máy photocopy nào để đồng bộ', 'info');
+      return;
+    }
+    if (onlineAgents.length === 0) {
+      showToast('Không có Agent nào đang online', 'error');
+      return;
+    }
+
+    showToast(`Đã gửi lệnh đồng bộ toàn bộ danh bạ cho ${filteredPrinters.length} máy...`, 'info', 4000);
+
+    for (const p of filteredPrinters) {
+      try {
+        handleRefetchAddressBook(String(p.id));
+      } catch (err: any) {
+        console.error('Failed sync for printer:', p.id, err);
+      }
     }
   };
 
@@ -2916,16 +2944,57 @@ except Exception as e:
                 exit={{ opacity: 0, x: -10 }}
                 style={styles.tabContent}
               >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+                    Quản lý danh sách máy photocopy & danh bạ scan
+                  </div>
+                  <button
+                    style={{
+                      ...styles.smallBtn,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      fontSize: '0.825rem',
+                      fontWeight: 600,
+                      borderColor: '#3b82f6',
+                      color: '#60a5fa',
+                      backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={handleSyncAllAddressBooks}
+                    disabled={onlineAgents.length === 0 || filteredPrinters.length === 0}
+                    title="Phát lệnh đồng bộ danh bạ tới tất cả các máy photocopy đang hoạt động"
+                  >
+                    🔄 Đồng bộ toàn bộ danh bạ ({filteredPrinters.length} máy)
+                  </button>
+                </div>
+
                 <AnimatedList>
                   {filteredPrinters.length === 0 ? (
                     <div style={styles.emptyText}>Không tìm thấy máy photocopy nào hoạt động trong dải LAN này.</div>
                   ) : (
                     filteredPrinters.map((p) => {
-                      const isExpanded = expandedPrinters[p.id] || false;
+                      const isExpanded = expandedPrinters[p.id] !== false;
                       const driversExpanded = expandedDrivers[p.id] || false;
                       const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
                       
-                      const sync = liveAddressBooks[p.id] || {};
+                      const parseSyncObj = (raw: any) => {
+                        if (!raw) return null;
+                        if (typeof raw === 'string') {
+                          try { return JSON.parse(raw); } catch { return null; }
+                        }
+                        return typeof raw === 'object' ? raw : null;
+                      };
+
+                      const liveSync = parseSyncObj(liveAddressBooks[p.id]);
+                      const dbSync = parseSyncObj(p.address_book_sync);
+
+                      const liveHasList = liveSync && Array.isArray(liveSync.address_list) && liveSync.address_list.length > 0;
+                      const dbHasList = dbSync && Array.isArray(dbSync.address_list) && dbSync.address_list.length > 0;
+
+                      const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
+                      const hasAddressList = Array.isArray(sync.address_list) && sync.address_list.length > 0;
                       const syncCount = sync.address_list ? sync.address_list.length : 0;
                       const syncTime = sync.timestamp ? new Date(sync.timestamp).toLocaleTimeString('vi-VN') : '';
                       
@@ -2947,7 +3016,7 @@ except Exception as e:
                           {/* Header details */}
                           <div style={styles.cardHeader}>
                             <div>
-                              <span style={styles.copierTitle}>🖨️ {p.printer_name}</span>
+                              <span style={styles.copierTitle}>🖨️ {p.printer_name || "Thiết bị Photocopy (Đang thám dò...)"}</span>
                               <div style={styles.copierSubtitle}>IP: {p.ip} · MAC: {p.mac_id || '—'}</div>
                             </div>
                             <span
@@ -3047,9 +3116,9 @@ except Exception as e:
                               <div style={styles.syncStatusText}>
                                 {isPending ? (
                                   <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>{statusMsg}</span>
-                                ) : sync.status === 'success' ? (
+                                ) : hasAddressList ? (
                                   <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
-                                    ✔ Đồng bộ OK ({syncCount} mục) · {syncTime}
+                                    ✔ Đồng bộ OK ({syncCount} mục) {syncTime ? `· ${syncTime}` : ''}
                                   </span>
                                 ) : sync.status === 'error' ? (
                                   <span style={{ color: 'var(--color-error)' }}>
@@ -3214,19 +3283,6 @@ except Exception as e:
                             </button>
 
                             <button
-                              style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
-                              onClick={() => {
-                                if (!isExpanded) {
-                                  handleRefetchAddressBook(String(p.id));
-                                } else {
-                                  setExpandedPrinters((prev) => ({ ...prev, [p.id]: false }));
-                                }
-                              }}
-                            >
-                              {isExpanded ? '▲ Ẩn danh bạ' : '👁 Xem danh bạ'}
-                            </button>
-
-                            <button
                               style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#ef4444', color: '#ef4444' }}
                               onClick={() => {
                                 setRemoteLockPrinter({ ip: p.ip, name: p.name || p.printer_name || p.ip, id: p.id, agentUid: selectedAgentUid });
@@ -3272,7 +3328,7 @@ except Exception as e:
                                 <div style={styles.destinationsBlock}>
                                   <span style={styles.destBlockTitle}>📂 Danh sách điểm scan:</span>
                                   
-                                  {sync.status === 'success' && sync.address_list && sync.address_list.length > 0 ? (
+                                  {hasAddressList ? (
                                     sync.address_list
                                       .filter((entry: any) => entry.type !== 'Summary' && entry.registration_no !== '-')
                                       .map((entry: any, eIdx: number) => {
