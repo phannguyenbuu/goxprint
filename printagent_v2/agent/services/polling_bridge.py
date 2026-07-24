@@ -434,6 +434,54 @@ class PollingBridge:
         return 200
 
     @staticmethod
+    def _probe_real_device_name(ip: str) -> str:
+        """Tự động thám dò TÊN THẬT SỰ & MODEL CHÍNH XÁC của thiết bị thông qua PJL (9100) và HTTP/HTTPS (80/443)."""
+        if not ip or not ip.strip():
+            return ""
+        ip_str = ip.strip()
+
+        # 1. Probe via PJL @PJL INFO ID (Port 9100) - Rất nhanh và chuẩn xác cho máy in HP, Canon, Ricoh, Brother, Xerox...
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            s.connect((ip_str, 9100))
+            s.sendall(b"\x1b%-12345X@PJL INFO ID\r\n\x1b%-12345X")
+            data = s.recv(1024).decode("utf-8", errors="ignore")
+            s.close()
+            if data and "ID" in data.upper():
+                for line in data.splitlines():
+                    if "ID" in line.upper() and "=" in line:
+                        name = line.split("=", 1)[1].replace('"', '').strip()
+                        if name:
+                            return name
+        except Exception:
+            pass
+
+        # 2. Probe via HTTP/HTTPS Title (Port 80/443)
+        for proto in ("http", "https"):
+            try:
+                import urllib.request
+                import ssl
+                import re
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(f"{proto}://{ip_str}/", headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=1.2, context=ctx) as resp:
+                    html = resp.read().decode("utf-8", errors="ignore")
+                    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+                    if match:
+                        title = match.group(1).strip()
+                        clean_title = re.sub(r"\s+", " ", title)
+                        if clean_title and clean_title.lower() not in ("index", "home", "login", "welcome", "web image monitor"):
+                            return clean_title
+            except Exception:
+                pass
+
+        return ""
+
+    @staticmethod
     def _resolve_local_ip() -> str:
         import time
         now = time.time()
