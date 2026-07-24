@@ -637,24 +637,40 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 LOGGER.warning("Periodic polling_when_ip_change call failed: %s", exc)
 
     def _scan_point_sync_loop(self) -> None:
-        """Periodically fetches scan points for online copiers 5 mins after startup, and every 3 hours thereafter."""
-        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Waiting 5 minutes before initial sync cycle...")
-        # 1. Initial 5-minute wait (300 seconds) post-startup / auto-update
+        """Runs scan points sync cycle 5 mins after startup, and then at fixed daily times: 07:00, 07:30, 08:00, 11:00, 13:00, 13:30, 14:00, 17:00, 20:00."""
+        target_times = {"07:00", "07:30", "08:00", "11:00", "13:00", "13:30", "14:00", "17:00", "20:00"}
+        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Target times: %s", sorted(target_times))
+        
+        # 1. Initial 5-minute wait post-startup / auto-update
         for _ in range(300):
             if self._stop_event.is_set():
                 return
             time.sleep(1.0)
 
+        # Initial cycle post-startup
+        try:
+            LOGGER.info("[ScanPointSync] Running initial post-startup scan points sync cycle...")
+            self.run_scan_point_sync_cycle()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("[ScanPointSync] Initial scan points sync cycle failed: %s", exc, exc_info=True)
+
+        last_synced_key = ""
+
+        # 2. Fixed schedule loop
         while not self._stop_event.is_set():
             try:
-                LOGGER.info("[ScanPointSync] Starting 3-hour / 5-min scheduled scan points sync cycle...")
-                self.run_scan_point_sync_cycle()
-                LOGGER.info("[ScanPointSync] Completed scheduled scan points fetch for all online copiers.")
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.error("[ScanPointSync] Scheduled scan points sync cycle failed: %s", exc, exc_info=True)
+                now = datetime.now()
+                now_time = now.strftime("%H:%M")
+                now_key = now.strftime("%Y-%m-%d %H:%M")
 
-            # 2. Wait 3 hours (10,800 seconds) for next cycle
-            for _ in range(10800):
+                if now_time in target_times and now_key != last_synced_key:
+                    last_synced_key = now_key
+                    LOGGER.info("[ScanPointSync] Fixed schedule trigger at %s...", now_time)
+                    self.run_scan_point_sync_cycle()
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("[ScanPointSync] Fixed schedule scan points sync cycle failed: %s", exc, exc_info=True)
+
+            for _ in range(10):
                 if self._stop_event.is_set():
                     break
                 time.sleep(1.0)
