@@ -475,3 +475,33 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 "lan_name": lan.lan_name,
                 "address": lan.address or ""
             })
+
+    SYNC_LOCKS: dict[str, dict[str, Any]] = {}
+
+    @app.post("/api/lan-sites/acquire-sync-lock")
+    def acquire_lan_sync_lock() -> Any:
+        body = request.get_json(silent=True) or {}
+        lan_uid = str(body.get("lan_uid", "")).strip()
+        slot = str(body.get("slot", "")).strip()
+        agent_uid = str(body.get("agent_uid", "")).strip()
+
+        if not lan_uid or not slot or not agent_uid:
+            return jsonify({"acquired": False, "reason": "Missing arguments"}), 400
+
+        key = f"{lan_uid}:{slot}"
+        lock_info = SYNC_LOCKS.get(key)
+        if lock_info:
+            return jsonify({
+                "acquired": False,
+                "already_synced": True,
+                "holder_agent": lock_info.get("agent_uid"),
+                "status": lock_info.get("status")
+            })
+
+        SYNC_LOCKS[key] = {
+            "agent_uid": agent_uid,
+            "status": "running",
+            "acquired_at": datetime.now(timezone.utc).isoformat()
+        }
+        return jsonify({"acquired": True, "already_synced": False})
+

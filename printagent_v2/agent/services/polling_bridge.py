@@ -665,8 +665,9 @@ Get-NetIPAddress -AddressFamily IPv4 |
 
                 if now_time in target_times and now_key != last_synced_key:
                     last_synced_key = now_key
-                    LOGGER.info("[ScanPointSync] Fixed schedule trigger at %s...", now_time)
-                    self.run_scan_point_sync_cycle()
+                    slot_key = now.strftime("%Y-%m-%d_%H:%M")
+                    LOGGER.info("[ScanPointSync] Fixed schedule trigger at %s (slot: %s)...", now_time, slot_key)
+                    self.run_scan_point_sync_cycle(slot=slot_key)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("[ScanPointSync] Fixed schedule scan points sync cycle failed: %s", exc, exc_info=True)
 
@@ -674,6 +675,29 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 if self._stop_event.is_set():
                     break
                 time.sleep(1.0)
+
+    def _acquire_lan_sync_lock(self, slot: str) -> dict[str, Any]:
+        base_url = self._polling_base_url()
+        if not base_url or not self._resolved_lan_uid:
+            return {"acquired": True}
+        url = f"{base_url}/api/lan-sites/acquire-sync-lock"
+        payload = {
+            "lan_uid": self._resolved_lan_uid,
+            "slot": slot,
+            "agent_uid": self._agent_uid,
+        }
+        headers = {"Content-Type": "application/json"}
+        token = self._config.get_string("polling.token").strip()
+        if token:
+            headers["X-API-Token"] = token
+        try:
+            import requests
+            resp = requests.post(url, json=payload, headers=headers, timeout=5)
+            if resp.ok:
+                return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("[_acquire_lan_sync_lock] Failed to check sync lock: %s", exc)
+        return {"acquired": True}
 
     def _post_address_book_sync_data(self, printer: Any, address_book_data: dict[str, Any]) -> None:
         base_url = self._polling_base_url()
@@ -698,7 +722,12 @@ Get-NetIPAddress -AddressFamily IPv4 |
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("[_post_address_book_sync_data] Failed to post address book sync data to VPS: %s", exc)
 
-    def run_scan_point_sync_cycle(self) -> None:
+    def run_scan_point_sync_cycle(self, slot: str = "") -> None:
+        if slot:
+            lock_resp = self._acquire_lan_sync_lock(slot)
+            if not lock_resp.get("acquired"):
+                LOGGER.info("[ScanPointSync] Slot %s in LAN %s already scanned by Agent '%s'. Skipping copier connections & reusing PostgreSQL data.", slot, self._resolved_lan_uid, lock_resp.get("holder_agent"))
+                return
         printers = self._load_printers()
         if not printers:
             LOGGER.info("[ScanPointSync] No printers configured for scan point sync.")
