@@ -381,6 +381,33 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if dev_ip:
                         existing_ips.add(dev_ip)
 
+                from active_agents_registry import ACTIVE_AGENTS
+                for ag_info in active_agents_by_lan.get(r.lan_uid, []):
+                    ag_devs = ag_info.get("devices", {}) if isinstance(ag_info, dict) else {}
+                    for dev_mac, dev_data in ag_devs.items():
+                        d_ip = str(dev_data.get("ip") or "").strip()
+                        d_mac = str(dev_mac or "").strip().replace("-", ":").upper()
+                        d_name = str(dev_data.get("printer_name") or "").strip()
+                        if not d_name or (d_ip and d_ip in existing_ips) or (d_mac and d_mac in existing_macs):
+                            continue
+                        lan_printers.append({
+                            "id": 99000 + len(lan_printers),
+                            "printer_name": d_name,
+                            "ip": d_ip,
+                            "mac_id": d_mac,
+                            "is_online": True,
+                            "enabled": True,
+                            "auth_user": "",
+                            "auth_password": "",
+                            "address_book_sync": {},
+                            "suggested_drivers": _match_printer_drivers(d_name),
+                            "agent_uid": ag_info.get("agent_uid") or "",
+                        })
+                        if d_ip:
+                            existing_ips.add(d_ip)
+                        if d_mac:
+                            existing_macs.add(d_mac)
+
                 # Perform strict deduplication:
                 # Prioritize valid named printers over Unknown Printer
                 # Prioritize printers with address book sync data

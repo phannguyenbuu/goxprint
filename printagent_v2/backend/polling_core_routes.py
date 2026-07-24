@@ -144,6 +144,43 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
             status_data=status_data,
         )
 
+        if ip and (mac_id or (printer_name and "unknown" not in printer_name.lower())):
+            with session_factory() as session:
+                try:
+                    stmt = select(Printer).where(Printer.lead == lead)
+                    if mac_id:
+                        stmt = stmt.where(func.upper(Printer.mac_address) == mac_id)
+                    else:
+                        stmt = stmt.where(Printer.ip == ip)
+                    p_obj = session.execute(stmt).scalars().first()
+
+                    if p_obj:
+                        p_obj.ip = ip
+                        if mac_id:
+                            p_obj.mac_address = mac_id
+                        if printer_name and "unknown" not in printer_name.lower():
+                            p_obj.printer_name = printer_name
+                        p_obj.agent_uid = agent_uid
+                        p_obj.lan_uid = lan_uid
+                    else:
+                        p_obj = Printer(
+                            lead=lead,
+                            lan_uid=lan_uid,
+                            agent_uid=agent_uid,
+                            printer_name=printer_name or "Unknown Printer",
+                            ip=ip,
+                            mac_address=mac_id or "",
+                            enabled=True,
+                            auth_user="",
+                            auth_password="",
+                            address_book_sync={},
+                        )
+                        session.add(p_obj)
+                    session.commit()
+                except Exception as p_exc:  # noqa: BLE001
+                    session.rollback()
+                    LOGGER.warning("[ingest_polling] Auto-upsert Printer failed: %s", p_exc)
+
         with session_factory() as session:
             is_master, emails = _is_agent_master_and_get_emails(session, lead, lan_uid, agent_uid)
 
