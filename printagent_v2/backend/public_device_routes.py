@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request
 from sqlalchemy import select, func
 
 from utils import _to_text, _to_int
-from models import DeviceInfor
+from models import DeviceInfor, Printer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +56,21 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
         cutoff_time = now - timedelta(seconds=max_age_seconds)
 
         with session_factory() as session:
+            # Build authoritative MAC ID -> printer_name map from Printer table
+            p_stmt = select(Printer).where(Printer.mac_address != "")
+            if lead:
+                p_stmt = p_stmt.where(Printer.lead == lead)
+            if lan_uid:
+                p_stmt = p_stmt.where(Printer.lan_uid == lan_uid)
+            p_rows = session.execute(p_stmt).scalars().all()
+
+            mac_to_name: dict[str, str] = {}
+            for p in p_rows:
+                p_mac = _to_text(p.mac_address).replace("-", ":").upper()
+                p_name = _to_text(p.printer_name)
+                if p_mac and p_name and "unknown" not in p_name.lower():
+                    mac_to_name[p_mac] = p_name
+
             stmt = select(DeviceInfor).where(DeviceInfor.lan_uid != "").order_by(
                 DeviceInfor.updated_at.desc(), DeviceInfor.id.desc()
             )
@@ -82,13 +97,19 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                 seen.add(dedupe_key)
                 counter_data = row.counter_data if isinstance(row.counter_data, dict) else {}
                 status_data = row.status_data if isinstance(row.status_data, dict) else {}
+
+                # Resolve printer_name strictly bound to MAC ID
+                resolved_name = mac_to_name.get(mac_id) or _to_text(row.printer_name)
+                if not resolved_name or "unknown" in resolved_name.lower():
+                    resolved_name = mac_to_name.get(mac_id) or _to_text(row.printer_name) or "Unknown Printer"
+
                 machines.append(
                     {
                         "lead": row.lead,
                         "lan_uid": row.lan_uid,
                         "mac_id": mac_id,
                         "agent_uid": row.agent_uid,
-                        "printer_name": row.printer_name,
+                        "printer_name": resolved_name,
                         "ip": row.ip,
                         "counter_total": _to_int(counter_data.get("total")) or 0,
                         "system_status": _to_text(status_data.get("system_status")),

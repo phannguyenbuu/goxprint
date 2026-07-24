@@ -61,9 +61,10 @@ def update_agent_in_memory(
     if mac_id:
         norm_mac = mac_id.upper().replace("-", ":")
         dev = devices_dict.setdefault(norm_mac, {})
-        dev["mac_id"] = norm_mac
-        dev["printer_name"] = printer_name or dev.get("printer_name", "Unknown Printer")
-        dev["ip"] = ip or dev.get("ip", "")
+        if printer_name and "unknown" not in printer_name.lower():
+            dev["printer_name"] = printer_name
+        elif "printer_name" not in dev or "unknown" in str(dev.get("printer_name", "")).lower():
+            dev["printer_name"] = printer_name or "Unknown Printer"
         if isinstance(counter_data, dict) and counter_data:
             dev["counter"] = counter_data
         if isinstance(status_data, dict) and status_data:
