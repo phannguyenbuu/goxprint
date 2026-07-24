@@ -633,10 +633,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
         manifest = _load_agent_release_manifest()
         version = _to_text(manifest.get("version"))
         sha256 = _to_text(manifest.get("sha256")).lower()
-        if sha256 and current_sha256:
-            update_available = sha256 != current_sha256
-        else:
-            update_available = _is_newer_version(version, current_version)
+        update_available = _is_newer_version(version, current_version) or (bool(sha256) and bool(current_sha256) and sha256 != current_sha256)
         return jsonify(
             {
                 "ok": True,
