@@ -14,7 +14,7 @@ from sqlalchemy import select
 from utils import _to_text, _format_datetime_ui, _apply_date_filters
 from serializers import _refresh_stale_agent_offline, _refresh_stale_offline
 from app_helpers import _serialize_audit_payload_iso
-from models import LanSite, AgentNode, LanEmail, Printer
+from models import LanSite, AgentNode, LanEmail, Printer, DeviceInfor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -331,27 +331,76 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "pc_name": em.pc_name,
                 })
 
+            dev_stmt = select(DeviceInfor)
+            if lead:
+                dev_stmt = dev_stmt.where(DeviceInfor.lead == lead)
+            dev_rows = session.execute(dev_stmt).scalars().all()
+            devices_by_lan: dict[str, list[DeviceInfor]] = defaultdict(list)
+            for dev in dev_rows:
+                if dev.lan_uid:
+                    devices_by_lan[dev.lan_uid].append(dev)
 
-            return jsonify({
-                "rows": [
-                    {
-                        "lead": r.lead,
-                        "lan_uid": r.lan_uid,
-                        "lan_name": r.lan_name,
-                        "address": r.address or "",
-                        "subnet_cidr": r.subnet_cidr,
-                        "gateway_ip": r.gateway_ip,
-                        "gateway_mac": r.gateway_mac,
-                        "fingerprint_signature": r.fingerprint_signature,
-                        "active_agents": len(active_agents_by_lan.get(r.lan_uid, [])),
-                        "agents": agents_by_lan.get(r.lan_uid, []),
-                        "emails": emails_by_lan.get(r.lan_uid, []),
-                        "printers": printers_by_lan.get(r.lan_uid, []),
-                        **_serialize_audit_payload_iso(r.created_at, r.updated_at),
-                    }
-                    for r in rows
-                ]
-            })
+            out_rows = []
+            total_active_agents = sum(len(v) for v in active_agents_by_lan.values())
+
+            for r in rows:
+                lan_printers = list(printers_by_lan.get(r.lan_uid, []))
+                existing_ips = {str(p.get("ip", "")).strip() for p in lan_printers if str(p.get("ip", "")).strip()}
+                existing_macs = {str(p.get("mac_id", "")).strip().upper() for p in lan_printers if str(p.get("mac_id", "")).strip()}
+                
+                active_count = len(active_agents_by_lan.get(r.lan_uid, []))
+                has_online_agent = (active_count > 0) or (total_active_agents > 0)
+                
+                for p in lan_printers:
+                    if has_online_agent and p.get("enabled") != False:
+                        p["is_online"] = True
+
+                for dev in devices_by_lan.get(r.lan_uid, []):
+                    dev_ip = str(dev.ip or "").strip()
+                    dev_mac = str(dev.mac_id or "").strip().replace("-", ":").upper()
+                    name = str(dev.printer_name or "").strip()
+                    if not name or "unknown" in name.lower():
+                        continue
+                    if dev_ip and dev_ip in existing_ips:
+                        continue
+                    if dev_mac and dev_mac in existing_macs:
+                        continue
+                    
+                    lan_printers.append({
+                        "id": dev.id,
+                        "printer_name": name,
+                        "ip": dev_ip,
+                        "mac_id": dev_mac,
+                        "is_online": has_online_agent,
+                        "enabled": True,
+                        "auth_user": "",
+                        "auth_password": "",
+                        "address_book_sync": {},
+                        "suggested_drivers": _match_printer_drivers(name),
+                        "agent_uid": dev.agent_uid or "",
+                    })
+                    if dev_ip:
+                        existing_ips.add(dev_ip)
+                    if dev_mac:
+                        existing_macs.add(dev_mac)
+
+                out_rows.append({
+                    "lead": r.lead,
+                    "lan_uid": r.lan_uid,
+                    "lan_name": r.lan_name,
+                    "address": r.address or "",
+                    "subnet_cidr": r.subnet_cidr,
+                    "gateway_ip": r.gateway_ip,
+                    "gateway_mac": r.gateway_mac,
+                    "fingerprint_signature": r.fingerprint_signature,
+                    "active_agents": len(active_agents_by_lan.get(r.lan_uid, [])),
+                    "agents": agents_by_lan.get(r.lan_uid, []),
+                    "emails": emails_by_lan.get(r.lan_uid, []),
+                    "printers": lan_printers,
+                    **_serialize_audit_payload_iso(r.created_at, r.updated_at),
+                })
+
+            return jsonify({"rows": out_rows})
 
     @app.delete("/api/lan-sites/<string:lan_uid>")
     def delete_lan_site(lan_uid: str) -> Any:
