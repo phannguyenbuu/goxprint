@@ -412,21 +412,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         continue
                     seen_keys.add(key)
 
-                    # Compute real online status based on recent device polling (last 15 mins)
-                    dev_match = None
-                    for dev in devices_by_lan.get(r.lan_uid, []):
-                        dev_mac = _to_text(dev.mac_id).replace("-", ":").upper().strip()
-                        dev_ip = _to_text(dev.ip).strip()
-                        if (mac_clean and dev_mac == mac_clean) or (ip_clean and dev_ip == ip_clean):
-                            dev_match = dev
-                            break
-
-                    is_online = False
-                    if has_online_agent and dev_match and dev_match.updated_at:
-                        dev_updated_utc = dev_match.updated_at if dev_match.updated_at.tzinfo else dev_match.updated_at.replace(tzinfo=timezone.utc)
-                        if dev_updated_utc >= cutoff_15m:
-                            is_online = True
-
+                    is_online = has_online_agent and (p.get("enabled") != False)
                     p["is_online"] = is_online
                     deduped_printers.append(p)
 
