@@ -1145,6 +1145,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
             )
             if printers:
                 self._last_discovered_printers = list(printers)
+                self._save_printers_json(printers)
             return printers
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Polling bridge local scan failed: %s", exc)
@@ -1196,6 +1197,40 @@ Get-NetNeighbor -AddressFamily IPv4 |
     @staticmethod
     def _write_last_payload(payload: dict) -> None:
         LOGGER.debug("Polling payload kept in-memory only; not writing local snapshot")
+
+    @staticmethod
+    def _save_printers_json(printers: list[Any]) -> None:
+        try:
+            import json, os, tempfile
+            data = []
+            for p in printers:
+                data.append({
+                    "id": getattr(p, "id", None),
+                    "name": str(getattr(p, "name", "") or "").strip(),
+                    "ip": str(getattr(p, "ip", "") or "").strip(),
+                    "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
+                    "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
+                    "user": str(getattr(p, "user", "") or "").strip(),
+                })
+            
+            local_app = os.getenv("LOCALAPPDATA", "")
+            save_dirs = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent",
+                Path("storage") / "data",
+            ]
+            if local_app:
+                save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
+
+            for target_dir in save_dirs:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_file = target_dir / "printers.json"
+                    with open(target_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _check_and_update_scripts(self, remote_scripts: dict[str, str]) -> None:
         if remote_scripts is None or not isinstance(remote_scripts, dict):
