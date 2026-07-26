@@ -3084,6 +3084,17 @@ if ($node) {{ $node }}
             detail,
         )
 
+    def _sync_inventory_to_server(self) -> None:
+        try:
+            import socket
+            hostname = socket.gethostname()
+            local_ip = self._resolve_local_ip()
+            lan_uid = self._agent_lan_uid() or "default"
+            printers = self._load_local_printers_json()
+            self._push_inventory(printers, hostname=hostname, local_ip=local_ip, lan_uid=lan_uid)
+        except Exception as exc:
+            LOGGER.warning("[_sync_inventory_to_server] Failed: %s", exc)
+
     def _apply_machine_control(self, printer: Printer, enabled: bool) -> None:
         ip = str(printer.ip or "").strip()
         if not ip:
@@ -3486,7 +3497,7 @@ if ($node) {{ $node }}
 
             self._post_control_result(command_id=command_id, ok=True, error="")
             self._update_recent_command_status(command_id, "success")
-            self._push_inventory()
+            self._sync_inventory_to_server()
             return
 
         if command_type == "trigger_utility":
@@ -5334,7 +5345,7 @@ Write-Output 'INSTALLED'
                 if controls_payload.get("request_inventory_push"):
                     LOGGER.info("[PollingBridge] VPS RAM has empty printers payload for agent %s, auto-triggering inventory push...", self._agent_uid)
                     try:
-                        self._push_inventory()
+                        self._sync_inventory_to_server()
                     except Exception as push_exc:
                         LOGGER.warning("[PollingBridge] Auto inventory push failed: %s", push_exc)
 
