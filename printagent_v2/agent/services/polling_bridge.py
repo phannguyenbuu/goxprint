@@ -2852,18 +2852,21 @@ if ($node) {{ $node }}
         lead = self._config.get_string("polling.lead").strip()
         agent_uid = self._agent_uid or hostname
         devices: list[dict[str, str]] = []
-        for printer in printers:
-            p_name = str(printer.name or "").strip()
-            p_ip = str(printer.ip or "").strip()
+        all_disc = self._load_local_printers_json()
+        p_src = all_disc if all_disc else printers
+        for printer in p_src:
+            p_name = str(getattr(printer, "name", "") or "").strip()
+            p_ip = str(getattr(printer, "ip", "") or "").strip()
             devices.append(
                 {
                     "printer_name": p_name,
                     "name": p_name,
                     "ip": p_ip,
-                    "mac_address": str(printer.mac_address or "").strip(),
-                    "printer_type": str(printer.printer_type or "").strip(),
-                    "status": str(printer.status or "").strip(),
-                    "user": str(printer.user or "").strip(),
+                    "mac_address": str(getattr(printer, "mac_address", "") or "").strip(),
+                    "mac_id": str(getattr(printer, "mac_address", "") or "").strip(),
+                    "printer_type": str(getattr(printer, "printer_type", "") or "").strip(),
+                    "status": str(getattr(printer, "status", "") or "").strip(),
+                    "user": str(getattr(printer, "user", "") or "").strip(),
                 }
             )
         local_configs = []
@@ -5284,7 +5287,9 @@ Write-Output 'INSTALLED'
 
                     devices_payload_list = []
                     try:
-                        for p in printers:
+                        all_disc = self._load_local_printers_json()
+                        p_src = all_disc if all_disc else printers
+                        for p in p_src:
                             devices_payload_list.append({
                                 "printer_name": str(getattr(p, "name", "") or "").strip(),
                                 "ip": str(getattr(p, "ip", "") or "").strip(),
