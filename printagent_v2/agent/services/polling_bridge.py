@@ -1456,8 +1456,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
                                     if is_router:
                                         continue
 
-                                    p_user = str(item.get("user", "") or item.get("auth_user", "") or "").strip()
-                                    p_pass = str(item.get("password", "") or item.get("auth_password", "") or "").strip()
+                                    p_user = str(item.get("auth_user", "") or item.get("user", "") or "").strip()
+                                    p_pass = str(item.get("auth_password", "") or item.get("password", "") or "").strip()
                                     res.append(Printer(
                                         id=item.get("id", 0) or 0,
                                         name=p_name,
@@ -1665,13 +1665,10 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 p_user = str(getattr(p, "user", "") or getattr(p, "auth_user", "") or "").strip()
                 p_pass = str(getattr(p, "password", "") or getattr(p, "auth_password", "") or "").strip()
                 data.append({
-                    "id": getattr(p, "id", None),
                     "name": p_name,
                     "ip": ip,
                     "mac_address": clean_mac or raw_mac,
                     "printer_type": detected_type,
-                    "user": p_user,
-                    "password": p_pass,
                     "auth_user": p_user,
                     "auth_password": p_pass,
                     "updated_at": updated_at_val,
