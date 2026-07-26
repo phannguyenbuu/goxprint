@@ -197,6 +197,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             if lead:
                 printer_stmt = printer_stmt.where(Printer.lead == lead)
             printer_rows = session.execute(printer_stmt).scalars().all()
+            printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             # 1. Populate printers_by_lan directly from ACTIVE_AGENTS in-memory printers_json payload (bypassing PostgreSQL)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
             prune_offline_agents(timeout_seconds=180)
