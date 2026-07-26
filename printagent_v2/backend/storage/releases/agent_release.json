@@ -1,7 +1,7 @@
 {
   "size": 21444408,
-  "version": "2.1.88",
-  "published_at": "2026-07-26T15:03:41.442857+07:00",
+  "version": "2.1.89",
+  "published_at": "2026-07-26T15:14:16.133665+07:00",
   "sha256": "7b84b0dcb4a0c4f5b828c23840df1b1022fa40bebe11f473c501656f8361d741",
   "mandatory": true,
   "download_url": "https://download.goxprint.com/printagent.exe",

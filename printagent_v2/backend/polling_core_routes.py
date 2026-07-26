@@ -156,6 +156,9 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         devices_list = body.get("devices")
         with session_factory() as session:
             try:
+                active_macs = set()
+                active_ips = set()
+
                 if isinstance(devices_list, list) and len(devices_list) > 0:
                     for dev in devices_list:
                         if not isinstance(dev, dict):
@@ -165,6 +168,11 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
                         if not d_ip and not d_mac:
                             continue
+                        if d_mac:
+                            active_macs.add(d_mac)
+                        if d_ip:
+                            active_ips.add(d_ip)
+
                         stmt = select(Printer).where(Printer.lead == lead)
                         if d_mac:
                             stmt = stmt.where(func.upper(Printer.mac_address) == d_mac)
@@ -196,9 +204,15 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             session.add(p_obj)
                 
                 if ip and (mac_id or printer_name):
+                    d_mac = mac_id.upper() if mac_id else ""
+                    if d_mac:
+                        active_macs.add(d_mac)
+                    if ip:
+                        active_ips.add(ip)
+
                     stmt = select(Printer).where(Printer.lead == lead)
-                    if mac_id:
-                        stmt = stmt.where(func.upper(Printer.mac_address) == mac_id.upper())
+                    if d_mac:
+                        stmt = stmt.where(func.upper(Printer.mac_address) == d_mac)
                     else:
                         stmt = stmt.where(Printer.ip == ip)
                     p_obj = session.execute(stmt).scalars().first()
@@ -224,6 +238,18 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             address_book_sync={},
                         )
                         session.add(p_obj)
+
+                # Purge stale DB printers for this lead if agent explicitly reported devices list (printers.json)
+                if isinstance(devices_list, list) and (active_macs or active_ips):
+                    existing_db_printers = session.execute(select(Printer).where(Printer.lead == lead)).scalars().all()
+                    for ep in existing_db_printers:
+                        ep_mac = (ep.mac_address or "").strip().upper()
+                        ep_ip = (ep.ip or "").strip()
+                        is_active = (ep_mac and ep_mac in active_macs) or (ep_ip and ep_ip in active_ips)
+                        if not is_active:
+                            session.delete(ep)
+                            LOGGER.info("[ingest_polling] Deleted stale DB printer ID %s (%s, IP %s, MAC %s) for lead %s - not found in agent printers.json", ep.id, ep.printer_name, ep.ip, ep.mac_address, lead)
+
                 session.commit()
             except Exception as p_exc:  # noqa: BLE001
                 session.rollback()
