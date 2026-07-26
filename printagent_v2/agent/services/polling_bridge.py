@@ -4224,6 +4224,10 @@ Write-Output 'INSTALLED'
         LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
 
+        TOSHIBA_DIRECT_INF_URL = "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
+        if ("toshiba" in (brand or "").lower() or "toshiba" in (model or "").lower() or "e-studio" in (model or "").lower()) and TOSHIBA_DIRECT_INF_URL not in driver_url:
+            driver_url = f"{TOSHIBA_DIRECT_INF_URL};{driver_url}" if driver_url else TOSHIBA_DIRECT_INF_URL
+
         _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
         step_results: list[str] = []
 

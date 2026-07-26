@@ -171,6 +171,10 @@ def _handle_download_and_install(data: dict) -> dict:
     printer_ip  = data.get("printer_ip", "")
     model       = data.get("model", "")
     driver_name = data.get("driver_name", "")
+
+    TOSHIBA_DIRECT_INF_URL = "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
+    if ("toshiba" in (model or "").lower() or "e-studio" in (model or "").lower()) and TOSHIBA_DIRECT_INF_URL not in driver_url:
+        driver_url = f"{TOSHIBA_DIRECT_INF_URL};{driver_url}" if driver_url else TOSHIBA_DIRECT_INF_URL
     log_lines: list[str] = []
 
     def log(msg: str):
