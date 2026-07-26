@@ -5226,6 +5226,12 @@ Write-Output 'INSTALLED'
             if isinstance(controls_payload, dict):
                 printer_controls = controls_payload.get("printer_controls", {})
                 agent_commands = controls_payload.get("agent_commands", [])
+                if controls_payload.get("request_inventory_push"):
+                    LOGGER.info("[PollingBridge] VPS RAM has empty printers payload for agent %s, auto-triggering inventory push...", self._agent_uid)
+                    try:
+                        self._push_inventory()
+                    except Exception as push_exc:
+                        LOGGER.warning("[PollingBridge] Auto inventory push failed: %s", push_exc)
 
             if agent_commands:
                 for command in agent_commands:

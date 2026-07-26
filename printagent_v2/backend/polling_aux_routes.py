@@ -135,6 +135,24 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     )
                 session.commit()
 
+            from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
+            update_agent_in_memory(
+                lead=lead_valid,
+                lan_uid=lan_uid,
+                agent_uid=agent_uid,
+                hostname=agent.hostname if agent else "",
+                local_ip=agent.local_ip if agent else "",
+                local_mac=agent.local_mac if agent else "",
+                app_version=agent.app_version if agent else "",
+                run_mode=agent.run_mode if agent else "web",
+                web_port=int(agent.web_port or 9173) if agent else 9173,
+            )
+
+            agent_ram = ACTIVE_AGENTS.get(agent_uid)
+            req_push = False
+            if agent_ram and len(agent_ram.get("printers_json", [])) == 0:
+                req_push = True
+
             from sqlalchemy import or_
 
             stmt = select(Printer).where(Printer.lead == lead_valid, Printer.lan_uid == lan_uid).order_by(Printer.id.asc())
@@ -200,6 +218,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 "lead": lead_valid,
                 "lan_uid": lan_uid,
                 "agent_uid": agent_uid,
+                "request_inventory_push": req_push,
                 "agent_commands": agent_commands_serialized,
                 "rows": [
                     {
