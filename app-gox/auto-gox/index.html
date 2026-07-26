@@ -94,39 +94,53 @@
       <h1 id="installer-title" style="display:none">Auto-Gox Installer Hub</h1>
       <h2 class="section-title">Chọn tác vụ cài đặt</h2>
       
-      <!-- Big Action Buttons -->
-      <div class="action-grid">
-        <div id="btn-action-driver" class="action-btn-card" role="button" tabindex="0">
-          <div class="action-icon-wrapper">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-              <rect x="6" y="14" width="12" height="8" rx="1" ry="1"></rect>
-              <path d="M6 9V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"></path>
-            </svg>
-          </div>
-          <span class="action-title">Cài Driver</span>
-          <span class="action-desc">Cấu hình driver in ấn tự động cho máy tính của bạn</span>
+      <!-- 2-Column Task Selection Layout -->
+      <div class="task-selection-wrapper">
+        <!-- Column 1: Warning Banner Image -->
+        <div class="task-banner-col">
+          <img src="warning.jpg" alt="Lưu ý cài đặt" class="task-banner-img">
         </div>
 
-        <div id="btn-action-scan" class="action-btn-card" role="button" tabindex="0">
-          <div class="action-icon-wrapper">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2v8M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-              <rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect>
-            </svg>
+        <!-- Column 2: All 3 Action Buttons -->
+        <div class="action-grid-col">
+          <div id="btn-action-driver" class="action-btn-card" role="button" tabindex="0">
+            <div class="action-icon-wrapper">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                <rect x="6" y="14" width="12" height="8" rx="1" ry="1"></rect>
+                <path d="M6 9V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"></path>
+              </svg>
+            </div>
+            <div class="action-text-wrapper">
+              <span class="action-title">Cài Driver</span>
+              <span class="action-desc">Cấu hình driver in ấn tự động cho máy tính của bạn</span>
+            </div>
           </div>
-          <span class="action-title">Cài Scan</span>
-          <span class="action-desc">Cài đặt tính năng số hoá tài liệu (Scan-to-Cloud/Folder)</span>
-        </div>
 
-        <div id="btn-action-both" class="action-btn-card" role="button" tabindex="0">
-          <div class="action-icon-wrapper">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-            </svg>
+          <div id="btn-action-scan" class="action-btn-card" role="button" tabindex="0">
+            <div class="action-icon-wrapper">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v8M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                <rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect>
+              </svg>
+            </div>
+            <div class="action-text-wrapper">
+              <span class="action-title">Cài Scan</span>
+              <span class="action-desc">Cài đặt tính năng số hoá tài liệu (Scan-to-Cloud/Folder)</span>
+            </div>
           </div>
-          <span class="action-title">Cài Driver + Scan</span>
-          <span class="action-desc">Thiết lập trọn gói cả in ấn và quét tài liệu nhanh chóng</span>
+
+          <div id="btn-action-both" class="action-btn-card" role="button" tabindex="0">
+            <div class="action-icon-wrapper">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+            </div>
+            <div class="action-text-wrapper">
+              <span class="action-title">Cài Driver + Scan</span>
+              <span class="action-desc">Thiết lập trọn gói cả in ấn và quét tài liệu nhanh chóng</span>
+            </div>
+          </div>
         </div>
       </div>
 
