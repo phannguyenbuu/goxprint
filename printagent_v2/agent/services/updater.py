@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.1.92"
+DEFAULT_APP_VERSION = "2.1.93"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -88,9 +88,9 @@ class AutoUpdater:
         try:
             from agent.config import AppConfig
             config = AppConfig.load()
-            return max(300, config.get_int("modules.updater.check_interval_seconds", 300))
+            return max(30, config.get_int("modules.updater.check_interval_seconds", 60))
         except Exception:
-            return max(300, int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", "300") or "300"))
+            return max(30, int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", "60") or "60"))
 
     def status(self) -> dict[str, Any]:
         with self._lock:
