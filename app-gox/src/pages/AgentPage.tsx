@@ -1801,20 +1801,33 @@ except Exception as e:
   useEffect(() => {
     if (selectedLan) {
       const defaultTargets: Record<string, string> = {};
-      const defaultCreds: Record<string, { user: string; pass: string }> = {};
 
       selectedLan.printers.forEach((p) => {
         // Target agent default (first online agent or printer.agent_uid)
         const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
         const matchedAgent = onlineAgents.find((a) => a.agent_uid === p.agent_uid) || onlineAgents[0];
         defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
-
-        // Web credentials
-        defaultCreds[p.id] = { user: p.auth_user || p.user || '', pass: p.auth_password || p.password || '' };
       });
 
       setSelectedTargetAgents((prev) => ({ ...defaultTargets, ...prev }));
-      setCopierCredentials(defaultCreds);
+
+      setCopierCredentials((prev) => {
+        const next = { ...prev };
+        selectedLan.printers.forEach((p) => {
+          const serverUser = p.auth_user || p.user || '';
+          const serverPass = p.auth_password || p.password || '';
+          const existing = next[p.id];
+
+          if (!existing) {
+            next[p.id] = { user: serverUser, pass: serverPass };
+          } else {
+            const user = (existing.user !== undefined && existing.user !== '') ? existing.user : serverUser;
+            const pass = (existing.pass !== undefined && existing.pass !== '') ? existing.pass : serverPass;
+            next[p.id] = { user, pass };
+          }
+        });
+        return next;
+      });
     }
   }, [selectedLan]);
 
