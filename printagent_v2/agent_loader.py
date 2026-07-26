@@ -242,22 +242,30 @@ def main():
         except Exception as scripts_err:
             log_debug(f"Failed to create scripts directory: {scripts_err}")
 
-        # 1. Try to load bundled agent_core.zip
-        log_debug("Loading bundled agent_core.zip...")
-        import sys
-        if getattr(sys, "frozen", False):
-            base_path = Path(getattr(sys, "_MEIPASS", os.getcwd()))
+        # 1. Try to load updated agent_core.zip from %TEMP%\GoPrinxAgent\agent_core.zip first
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            updated_zip = Path(temp_dir) / "GoPrinxAgent" / "agent_core.zip"
         else:
-            base_path = Path(__file__).resolve().parent
+            import tempfile
+            updated_zip = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "agent_core.zip"
 
         local_zip_path = base_path / "agent_core.zip"
         zip_bytes = None
 
-        if local_zip_path.exists():
+        if updated_zip.exists():
+            log_debug(f"Reading updated agent core from {updated_zip}...")
+            try:
+                zip_bytes = updated_zip.read_bytes()
+                log_debug(f"Read {len(zip_bytes)} bytes from updated agent_core.zip.")
+            except Exception as upd_err:
+                log_debug(f"Failed to read updated agent core: {upd_err}")
+
+        if not zip_bytes and local_zip_path.exists():
             log_debug(f"Reading bundled agent core from {local_zip_path}...")
             try:
                 zip_bytes = local_zip_path.read_bytes()
-                log_debug(f"Read {len(zip_bytes)} bytes from agent_core.zip.")
+                log_debug(f"Read {len(zip_bytes)} bytes from bundled agent_core.zip.")
             except Exception as read_err:
                 log_debug(f"Failed to read bundled agent core: {read_err}")
 
