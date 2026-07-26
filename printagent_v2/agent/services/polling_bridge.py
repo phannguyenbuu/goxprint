@@ -3539,15 +3539,16 @@ if ($node) {{ $node }}
                 result = collector.process_address_list(printer)
                 LOGGER.info("[PollingBridge] process_address_list returned %d items", len(result.get("address_list", []) if isinstance(result, dict) else []))
                 LOGGER.info("[PollingBridge] Posting control result back to server for command ID: %s", command_id)
+                self._post_address_book_sync_data(printer, result)
                 self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=result)
                 self._update_recent_command_status(command_id, "success")
+                self._sync_inventory_to_server()
                 LOGGER.info("[PollingBridge] === FINISH fetch_address_book command: ID=%s Success ===", command_id)
                 self._send_gui_status("Lệnh", f"Đồng bộ thành công danh bạ máy in {printer.name}!")
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("[PollingBridge] Failed to fetch address book for printer %s: %s", printer.ip, exc, exc_info=True)
                 self._post_control_result(command_id=command_id, ok=False, error=str(exc))
                 self._update_recent_command_status(command_id, "failed", str(exc))
-                raise
             return
 
         if command_type == "delete_scan_email_dest":
@@ -3704,13 +3705,13 @@ if ($node) {{ $node }}
                     email, created_reg_no, ftp_host_val, ftp_port_val, ftp_upload_path_val
                 )
 
-                # Fetch address book after add so UI can refresh
+                # Fetch address book after add so UI can refresh (Toshiba & Ricoh)
                 addr_result = None
-                if not is_toshiba:
-                    try:
-                        addr_result = self._ricoh_service.process_address_list(printer)
-                    except Exception as addr_exc:
-                        LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email add: %s", addr_exc)
+                try:
+                    collector = self._collector_service_for(printer)
+                    addr_result = collector.process_address_list(printer)
+                except Exception as addr_exc:
+                    LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email add: %s", addr_exc)
 
                 # Enrich the newly created entry in addr_result with accurate wizard data
                 # (Ricoh AJAX often returns empty folder fields for newly created entries)
@@ -3723,6 +3724,9 @@ if ($node) {{ $node }}
                         ftp_url=ftp_upload_url_val,
                         ftp_path=ftp_upload_path_val,
                     )
+
+                if addr_result:
+                    self._post_address_book_sync_data(printer, addr_result)
 
                 self._post_control_result(
                     command_id=command_id,
@@ -3740,6 +3744,7 @@ if ($node) {{ $node }}
                     source_email=email,
                 )
                 self._update_recent_command_status(command_id, "success")
+                self._sync_inventory_to_server()
                 LOGGER.info("[PollingBridge] === FINISH add_scan_email_dest command: ID=%s Success ===", command_id)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("[PollingBridge] Failed to add email dest for printer %s: %s", printer.ip, exc, exc_info=True)
