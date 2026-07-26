@@ -2944,19 +2944,31 @@ if ($node) {{ $node }}
         all_disc = self._load_local_printers_json()
         p_src = all_disc if all_disc else printers
         for printer in p_src:
-            p_name = str(getattr(printer, "name", "") or "").strip()
-            p_ip = str(getattr(printer, "ip", "") or "").strip()
-            p_user = str(getattr(printer, "user", "") or getattr(printer, "auth_user", "") or "").strip()
-            p_pass = str(getattr(printer, "password", "") or getattr(printer, "auth_password", "") or "").strip()
+            if isinstance(printer, dict):
+                p_name = str(printer.get("name") or printer.get("printer_name") or "").strip()
+                p_ip = str(printer.get("ip") or printer.get("printer_ip") or "").strip()
+                p_mac = str(printer.get("mac_address") or printer.get("mac_id") or "").strip()
+                p_type = str(printer.get("printer_type") or printer.get("type") or "").strip()
+                p_status = str(printer.get("status") or "").strip()
+                p_user = str(printer.get("auth_user") or printer.get("user") or "").strip()
+                p_pass = str(printer.get("auth_password") or printer.get("password") or "").strip()
+            else:
+                p_name = str(getattr(printer, "name", "") or "").strip()
+                p_ip = str(getattr(printer, "ip", "") or "").strip()
+                p_mac = str(getattr(printer, "mac_address", "") or getattr(printer, "mac_id", "") or "").strip()
+                p_type = str(getattr(printer, "printer_type", "") or "").strip()
+                p_status = str(getattr(printer, "status", "") or "").strip()
+                p_user = str(getattr(printer, "user", "") or getattr(printer, "auth_user", "") or "").strip()
+                p_pass = str(getattr(printer, "password", "") or getattr(printer, "auth_password", "") or "").strip()
             devices.append(
                 {
                     "printer_name": p_name,
                     "name": p_name,
                     "ip": p_ip,
-                    "mac_address": str(getattr(printer, "mac_address", "") or "").strip(),
-                    "mac_id": str(getattr(printer, "mac_address", "") or "").strip(),
-                    "printer_type": str(getattr(printer, "printer_type", "") or "").strip(),
-                    "status": str(getattr(printer, "status", "") or "").strip(),
+                    "mac_address": p_mac,
+                    "mac_id": p_mac,
+                    "printer_type": p_type,
+                    "status": p_status,
                     "user": p_user,
                     "password": p_pass,
                     "auth_user": p_user,
