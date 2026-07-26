@@ -382,14 +382,15 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 lan_uid=target_lan_uid or (printer.lan_uid if printer else ""),
                 agent_uid=target_agent_uid or (printer.agent_uid if printer else ""),
                 printer_id=p_id,
-                printer_mac_id=p_mac or "",
+                ip=target_ip or (printer.ip if printer else ""),
                 command_type="save_printer_auth",
                 desired_enabled=True,
                 status="pending",
                 auth_user=auth_user,
                 auth_password=auth_password,
-                parameters_json=_json.dumps({
+                command_params=_json.dumps({
                     "mac_address": p_mac or clean_mac,
+                    "printer_mac_id": p_mac or clean_mac,
                     "printer_ip": target_ip or (printer.ip if printer else ""),
                     "auth_user": auth_user,
                     "auth_password": auth_password,
