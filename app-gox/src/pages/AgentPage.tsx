@@ -3133,6 +3133,8 @@ except Exception as e:
                                 type="text"
                                 style={styles.credsInput}
                                 placeholder="admin"
+                                autoComplete="new-password"
+                                name={`printer_user_${p.id}`}
                                 value={copierCredentials[p.id]?.user || ''}
                                 onChange={(e) =>
                                   setCopierCredentials((prev) => ({
@@ -3145,6 +3147,8 @@ except Exception as e:
                                 type="password"
                                 style={styles.credsInput}
                                 placeholder="mật khẩu"
+                                autoComplete="new-password"
+                                name={`printer_pass_${p.id}`}
                                 value={copierCredentials[p.id]?.pass || ''}
                                 onChange={(e) =>
                                   setCopierCredentials((prev) => ({
