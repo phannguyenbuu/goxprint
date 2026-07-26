@@ -19,7 +19,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.2.7"
+DEFAULT_APP_VERSION = "2.2.8"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -313,6 +313,9 @@ class AutoUpdater:
             return False, "Release payload missing download_url", False
         if not is_windows() or not is_frozen():
             return True, "Release available but auto-apply only runs on Windows EXE build", False
+        if download_url.lower().endswith(".exe"):
+            LOGGER.info("[Updater] Skipping self-overwriting .exe binary download to prevent file corruption. Only agent_core.zip is dynamically updated.")
+            return True, "Exe binary self-update skipped in favor of dynamic agent_core.zip update", False
         return self._download_and_restart(download_url=download_url, target_version=latest_version, expected_sha256=expected_sha)
 
     def _download_and_restart(self, download_url: str, target_version: str, expected_sha256: str) -> tuple[bool, str, bool]:
