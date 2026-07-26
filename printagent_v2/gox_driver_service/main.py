@@ -177,9 +177,13 @@ def _handle_download_and_install(data: dict) -> dict:
         driver_url = f"{TOSHIBA_DIRECT_INF_URL};{driver_url}" if driver_url else TOSHIBA_DIRECT_INF_URL
     log_lines: list[str] = []
 
-    def log(msg: str):
-        LOGGER.info(msg)
-        log_lines.append(msg)
+    try:
+        for old_tmp in Path(tempfile.gettempdir()).glob("gox_driver_*"):
+            shutil.rmtree(old_tmp, ignore_errors=True)
+        for old_tmp in Path(tempfile.gettempdir()).glob("printagent_driver_*"):
+            shutil.rmtree(old_tmp, ignore_errors=True)
+    except Exception:
+        pass
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gox_driver_"))
     try:

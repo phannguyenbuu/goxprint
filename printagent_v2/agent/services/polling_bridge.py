@@ -4419,11 +4419,17 @@ Write-Output 'INSTALLED'
                     _progress(summary)
                     LOGGER.info("Driver installation completed via SYSTEM service: %s", summary)
                     return  # Early success return, skipping standard non-admin path
-                else:
-                    raise RuntimeError(f"Service error: {res.get('error')}")
         except Exception as gds_err:
             LOGGER.warning("Failed to install driver via GoxDriverService: %s. Falling back to direct mode.", gds_err)
             _progress(f"[GDS] ⚠️ Lỗi cài qua dịch vụ: {gds_err}. Chuyển sang cài trực tiếp...")
+
+        try:
+            for old_tmp in Path(tempfile.gettempdir()).glob("gox_driver_*"):
+                shutil.rmtree(old_tmp, ignore_errors=True)
+            for old_tmp in Path(tempfile.gettempdir()).glob("printagent_driver_*"):
+                shutil.rmtree(old_tmp, ignore_errors=True)
+        except Exception:
+            pass
 
         temp_dir = Path(tempfile.mkdtemp(prefix="printagent_driver_"))
         try:
