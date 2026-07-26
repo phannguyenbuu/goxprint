@@ -1462,14 +1462,14 @@ Get-NetNeighbor -AddressFamily IPv4 |
                                         ip=ip,
                                         user=str(item.get("user", "") or "").strip(),
                                         password=str(item.get("password", "") or "").strip(),
-                                        printer_type=detected_type if detected_type != "unknown" else str(item.get("printer_type", "") or "").strip(),
+                                        printer_type=str(item.get("printer_type", "") or item.get("type", "") or "").strip(),
                                         status="online",
                                         mac_address=clean_mac or raw_mac,
                                         updated_at=str(item.get("updated_at", "") or "").strip(),
                                     ))
                             return res
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning("_load_local_printers_json failed: %s", exc)
         return []
 
     def _load_printers(self, force_live: bool = False) -> list[Printer]:
