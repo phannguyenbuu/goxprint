@@ -48,17 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initFormSubmissions();
     
     // Download Agent Card Button & Modal Handler
-    const btnDownloadCard = document.getElementById('btn-download-agent-card');
     const btnDownloadBigCta = document.getElementById('btn-download-agent-big-cta');
     const btnCopyLan = document.getElementById('btn-copy-lan');
     const warningModal = document.getElementById('download-warning-modal');
     const btnCloseWarning = document.getElementById('btn-close-warning-modal');
-
-    if (btnDownloadCard && warningModal) {
-      btnDownloadCard.addEventListener('click', () => {
-        warningModal.style.display = 'flex';
-      });
-    }
 
     if (btnDownloadBigCta && warningModal) {
       btnDownloadBigCta.addEventListener('click', () => {
@@ -89,7 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
       statusText.textContent = 'Chưa bật PrintAgent';
       lanIpEl.textContent = 'Chưa bật PrintAgent';
       if (btnCopyLan) btnCopyLan.style.display = 'none';
-      if (btnDownloadCard) btnDownloadCard.style.display = 'inline-flex';
       if (installerSection) installerSection.style.display = 'none';
       if (sectionDownloadCta) sectionDownloadCta.style.display = 'block';
       startBackgroundProbing();
@@ -108,11 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
     lanIpEl.textContent = localAgent.pc_ip || '127.0.0.1';
     
     const btnCopyLan = document.getElementById('btn-copy-lan');
-    const btnDownloadCard = document.getElementById('btn-download-agent-card');
     const installerSection = document.querySelector('.installer-section');
     const sectionDownloadCta = document.getElementById('section-download-agent-cta');
     if (btnCopyLan) btnCopyLan.style.display = 'inline-flex';
-    if (btnDownloadCard) btnDownloadCard.style.display = 'none';
     if (installerSection) installerSection.style.display = 'block';
     if (sectionDownloadCta) sectionDownloadCta.style.display = 'none';
 
