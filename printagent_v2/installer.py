@@ -45,10 +45,16 @@ WATCHDOG_BAT_CONTENT = (
     '    echo [Watchdog] Update applied successfully.\n'
     ')\n'
     '\n'
-    'rem --- 2. KIỂM TRA RESTART KHẨN CẤP (API) ---\n'
+    'rem --- 2. KIỂM TRA PROCESS DANG CHAY ---\n'
+    'tasklist /FI "IMAGENAME eq printagent.exe" 2>NUL | find /I /N "printagent.exe">NUL\n'
+    'if "%ERRORLEVEL%"=="1" (\n'
+    '    echo [Watchdog] Agent process not running. Starting printagent.exe...\n'
+    '    start /B "" "printagent.exe"\n'
+    ')\n'
+    '\n'
+    'rem --- 3. KIỂM TRA RESTART KHẢN CẤP (API) ---\n'
     'powershell -NoProfile -Command "try { $s=Get-Content \'settings.json\' -ErrorAction Stop | ConvertFrom-Json; $url=$s.api_url; if(!$url){$url=$s.polling.url}; if(!$url){$url=\'https://agentapi.quanlymay.com\'}; $url=$url.TrimEnd(\'/\'); $url=$url -replace \'/api$\', \'\'; $hostName=$env:COMPUTERNAME; $res=Invoke-RestMethod -Uri \\"$url/api/agent/watchdog-check?hostname=$hostName\\" -TimeoutSec 10 -ErrorAction Stop; if($res -match \'RESTART\') { Write-Host \\"$(Get-Date -Format \'yyyy-MM-dd HH:mm:ss\') RESTART SIGNAL RECEIVED!\\"; Stop-Process -Name \'printagent\' -Force -ErrorAction SilentlyContinue; Stop-Process -Name \'agent_loader\' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; if(Test-Path \'printagent.exe\') { Start-Process -FilePath \'printagent.exe\' -WindowStyle Hidden; Write-Host \'Agent restarted.\' } } } catch { }"\n'
     '\n'
-    'timeout /t 60 /nobreak >nul\n'
     'goto loop\n'
 )
 
@@ -308,10 +314,12 @@ def main():
     target_vbs = INSTALL_DIR / "run_watchdog.vbs"
     create_startup_shortcut(target_vbs)
     
-    print("\nKhởi động PrintAgent Watchdog...")
+    print("\nKhởi động PrintAgent & Watchdog...")
     try:
-        os.startfile(str(target_vbs))
-        os.startfile(str(dest_exe))
+        import subprocess
+        subprocess.Popen([str(dest_exe)], cwd=str(INSTALL_DIR), creationflags=0x08000000)
+        time.sleep(1)
+        subprocess.Popen(["wscript.exe", str(target_vbs)], cwd=str(INSTALL_DIR), creationflags=0x08000000)
         print(" Đã khởi chạy Watchdog và Agent.")
     except Exception as e:
         print(f" Lỗi khởi chạy: {e}")
