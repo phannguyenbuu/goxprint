@@ -1814,17 +1814,29 @@ except Exception as e:
       setCopierCredentials((prev) => {
         const next = { ...prev };
         selectedLan.printers.forEach((p) => {
-          const serverUser = p.auth_user || p.user || '';
-          const serverPass = p.auth_password || p.password || '';
-          const existing = next[p.id];
+          const savedLocal = (() => {
+            try {
+              const raw = localStorage.getItem(`copier_auth_${p.id}`) || (p.mac_id ? localStorage.getItem(`copier_auth_${p.mac_id}`) : null);
+              return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+              return null;
+            }
+          })();
 
-          if (!existing) {
-            next[p.id] = { user: serverUser, pass: serverPass };
-          } else {
-            const user = (existing.user !== undefined && existing.user !== '') ? existing.user : serverUser;
-            const pass = (existing.pass !== undefined && existing.pass !== '') ? existing.pass : serverPass;
-            next[p.id] = { user, pass };
-          }
+          const existing = next[p.id];
+          const user = (existing?.user !== undefined && existing?.user !== '')
+            ? existing.user
+            : (savedLocal?.user !== undefined && savedLocal?.user !== '')
+              ? savedLocal.user
+              : (p.auth_user || p.user || '');
+
+          const pass = (existing?.pass !== undefined && existing?.pass !== '')
+            ? existing.pass
+            : (savedLocal?.pass !== undefined && savedLocal?.pass !== '')
+              ? savedLocal.pass
+              : (p.auth_password || p.password || '');
+
+          next[p.id] = { user, pass };
         });
         return next;
       });
@@ -1836,6 +1848,12 @@ except Exception as e:
     const printerId = String(typeof p === 'object' ? p.id : p);
     const macId = typeof p === 'object' ? (p.mac_id || p.mac_address || '') : printerId;
     const creds = copierCredentials[printerId] || { user: '', pass: '' };
+
+    try {
+      localStorage.setItem(`copier_auth_${printerId}`, JSON.stringify(creds));
+      if (macId) localStorage.setItem(`copier_auth_${macId}`, JSON.stringify(creds));
+    } catch (e) {}
+
     setSaveAuthLoading((prev) => ({ ...prev, [printerId]: true }));
     try {
       const res = await saveCopierCredentials(macId || printerId, creds.user, creds.pass, macId);
