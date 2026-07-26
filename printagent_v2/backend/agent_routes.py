@@ -1149,7 +1149,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
             printer_id = printer.id if printer else 0
-            printer_lead = printer.lead if printer else lead_valid
+            printer_lead = printer.lead if printer else (active_agent.lead if active_agent else "default")
             printer_lan_uid = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else "default")
             printer_name = printer.printer_name if printer else f"Printer {printer_ip}"
 
@@ -1251,7 +1251,7 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
             printer_id = printer.id if printer else 0
-            printer_lead = printer.lead if printer else lead_valid
+            printer_lead = printer.lead if printer else (active_agent.lead if active_agent else "default")
             printer_lan_uid = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else "default")
             printer_name = printer.printer_name if printer else f"Printer {printer_ip}"
 
