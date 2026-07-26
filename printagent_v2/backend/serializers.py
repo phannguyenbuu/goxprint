@@ -206,12 +206,16 @@ def _upsert_printer_from_polling(
     auth_password: str = "",
 ) -> Printer:
     printer_ip = _to_text(ip)
-    printer_mac = _to_text(mac_address)
+    printer_mac = _to_text(mac_address).replace("-", ":").upper()
     printer_name_value = _to_text(printer_name) or "Unknown Printer"
     row = None
-    if printer_ip:
+    if printer_mac:
         row = session.execute(
-            select(Printer).where(Printer.lead == lead, Printer.lan_uid == lan_uid, Printer.ip == printer_ip).limit(1)
+            select(Printer).where(Printer.lead == lead, func.upper(Printer.mac_address) == printer_mac).limit(1)
+        ).scalar_one_or_none()
+    if row is None and printer_ip:
+        row = session.execute(
+            select(Printer).where(Printer.lead == lead, Printer.ip == printer_ip).limit(1)
         ).scalar_one_or_none()
     if row is None:
         row = session.execute(
@@ -279,7 +283,10 @@ def _upsert_printer_from_polling(
         return row
 
     row.agent_uid = agent_uid or row.agent_uid
-    row.printer_name = printer_name_value or row.printer_name
+    if printer_name_value and printer_name_value != "Unknown Printer":
+        row.printer_name = printer_name_value
+    elif not row.printer_name:
+        row.printer_name = printer_name_value or "Unknown Printer"
     row.ip = printer_ip if printer_ip else row.ip
     row.mac_address = printer_mac if printer_mac else row.mac_address
     if _to_text(auth_user):

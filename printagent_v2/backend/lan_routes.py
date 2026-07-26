@@ -228,9 +228,23 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     sync_data = dict(sync_data)
                     sync_data["address_list"] = enriched_list
 
+                p_name_resolved = str(p.printer_name or "").strip()
+                if not p_name_resolved or p_name_resolved.lower() in {"unknown", "printer", "copier"} or "đang thám dò" in p_name_resolved.lower():
+                    clean_mac = str(p.mac_address or "").replace("-", ":").upper()
+                    if clean_mac.startswith("00:80:91"):
+                        p_name_resolved = f"Toshiba Copier ({p.ip})" if p.ip else "Toshiba Copier"
+                    elif clean_mac.startswith(("00:26:73", "58:38:79", "00:00:74")):
+                        p_name_resolved = f"Ricoh Copier ({p.ip})" if p.ip else "Ricoh Copier"
+                    elif clean_mac.startswith(("00:1E:0B", "00:08:C7")):
+                        p_name_resolved = f"HP Printer ({p.ip})" if p.ip else "HP Printer"
+                    elif clean_mac.startswith(("00:1B:A9", "00:00:85")):
+                        p_name_resolved = f"Canon Printer ({p.ip})" if p.ip else "Canon Printer"
+                    else:
+                        p_name_resolved = f"Copier ({p.ip})" if p.ip else "Photocopy"
+
                 printers_by_lan[p.lan_uid].append({
                     "id": p.id,
-                    "printer_name": p.printer_name,
+                    "printer_name": p_name_resolved,
                     "ip": p.ip,
                     "mac_id": p.mac_address,
                     "is_online": p.is_online,
@@ -238,7 +252,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "auth_user": p.auth_user or "",
                     "auth_password": p.auth_password or "",
                     "address_book_sync": sync_data,
-                    "suggested_drivers": _match_printer_drivers(p.printer_name),
+                    "suggested_drivers": _match_printer_drivers(p_name_resolved),
                     "agent_uid": p.agent_uid or "",
                 })
 

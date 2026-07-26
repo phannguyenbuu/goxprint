@@ -57,19 +57,22 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
 
         with session_factory() as session:
             # Build authoritative MAC ID -> printer_name map from Printer table
-            p_stmt = select(Printer).where(Printer.mac_address != "")
+            p_stmt = select(Printer)
             if lead:
                 p_stmt = p_stmt.where(Printer.lead == lead)
-            if lan_uid:
-                p_stmt = p_stmt.where(Printer.lan_uid == lan_uid)
             p_rows = session.execute(p_stmt).scalars().all()
 
             mac_to_name: dict[str, str] = {}
+            ip_to_name: dict[str, str] = {}
             for p in p_rows:
                 p_mac = _to_text(p.mac_address).replace("-", ":").upper()
+                p_ip = _to_text(p.ip)
                 p_name = _to_text(p.printer_name)
-                if p_mac and p_name and "unknown" not in p_name.lower():
-                    mac_to_name[p_mac] = p_name
+                if p_name and "unknown" not in p_name.lower():
+                    if p_mac:
+                        mac_to_name[p_mac] = p_name
+                    if p_ip:
+                        ip_to_name[p_ip] = p_name
 
             stmt = select(DeviceInfor).where(DeviceInfor.lan_uid != "").order_by(
                 DeviceInfor.updated_at.desc(), DeviceInfor.id.desc()
@@ -98,10 +101,10 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                 counter_data = row.counter_data if isinstance(row.counter_data, dict) else {}
                 status_data = row.status_data if isinstance(row.status_data, dict) else {}
 
-                # Resolve printer_name strictly bound to MAC ID
-                resolved_name = mac_to_name.get(mac_id) or _to_text(row.printer_name)
+                # Resolve printer_name strictly bound to MAC ID or IP
+                resolved_name = mac_to_name.get(mac_id) or ip_to_name.get(_to_text(row.ip)) or _to_text(row.printer_name)
                 if not resolved_name or "unknown" in resolved_name.lower():
-                    resolved_name = mac_to_name.get(mac_id) or _to_text(row.printer_name) or "Unknown Printer"
+                    resolved_name = mac_to_name.get(mac_id) or ip_to_name.get(_to_text(row.ip)) or _to_text(row.printer_name) or "Unknown Printer"
 
                 machines.append(
                     {

@@ -217,19 +217,27 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
         }), 202
 
     @app.get("/api/commands/<int:command_id>/status")
+    @app.get("/api/commands/<int:command_id>")
     def get_printer_command_status(command_id: int) -> Any:
         """Poll the status of a PrinterControlCommand by ID."""
         with session_factory() as session:
             command = session.get(PrinterControlCommand, command_id)
             if command is None:
                 return jsonify({"ok": False, "error": "Command not found"}), 404
+            output_val = command.error_message or ""
             return jsonify({
                 "ok": True,
                 "id": command_id,
                 "status": command.status,
                 "command_type": command.command_type,
-                "error": command.error_message or "",
+                "error": output_val if command.status == "failed" else "",
+                "error_message": output_val if command.status == "failed" else "",
+                "result": output_val,
+                "output": output_val,
+                "result_payload": output_val,
+                "data": output_val,
+                "message": output_val,
                 "received_at": command.received_at.isoformat() if command.received_at else None,
                 "responded_at": command.responded_at.isoformat() if command.responded_at else None,
-                "progress_text": command.error_message if command.status == "pending" else "",
+                "progress_text": output_val if command.status == "pending" else "",
             })

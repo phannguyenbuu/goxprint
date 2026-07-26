@@ -25,7 +25,8 @@ if not key_filename:
 print("Initializing SSH client...")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-deploy_host = os.environ.get("DEPLOY_HOST", "31.97.76.62")
+deploy_host = os.environ.get("DEPLOY_HOST", "157.66.80.125")
+
 print(f"Connecting to VPS at {deploy_host} using key: {key_filename}...")
 ssh.connect(deploy_host, username='root', key_filename=key_filename)
 

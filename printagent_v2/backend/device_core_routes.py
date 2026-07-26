@@ -608,6 +608,15 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                         address_book_sync = _json.loads(cmd.error_message)
                     except Exception:
                         pass
+                res_text = cmd.error_message or ""
+                if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
+                    try:
+                        import json as _json
+                        decoded = _json.loads(res_text)
+                        if isinstance(decoded, str):
+                            res_text = decoded
+                    except Exception:
+                        pass
                 return jsonify(
                     {
                         "ok": True,
@@ -615,7 +624,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                         "command_id": command_id,
                         "id": int(cmd.printer_id),
                         "address_book_sync": address_book_sync,
-                        "result_payload": cmd.error_message or "",
+                        "result_payload": res_text,
                         "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
                         "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
                         "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,

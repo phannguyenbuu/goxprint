@@ -248,8 +248,8 @@ class PollingBridge:
                 continue
             if printer.id and not existing.id:
                 existing.id = printer.id
-            if str(printer.name or "").strip() and (
-                not str(existing.name or "").strip() or str(existing.name or "").strip() == ip
+            if str(printer.name or "").strip() and not self._is_generic_printer_name(printer.name, ip) and (
+                self._is_generic_printer_name(existing.name, ip)
             ):
                 existing.name = printer.name
             if str(printer.user or "").strip():
@@ -1156,14 +1156,345 @@ Get-NetNeighbor -AddressFamily IPv4 |
             "recent_commands": getattr(self, "_recent_commands", []),
         }
 
-    def _load_printers(self) -> list[Printer]:
+    @staticmethod
+    def _is_generic_printer_name(name: str, ip: str = "") -> bool:
+        s = str(name or "").strip()
+        if not s or s.lower() in {"unknown", "copier", "discovery", "unknown printer", "printer"}:
+            return True
+        if s.startswith("[ERROR]") or "error" in s.lower() or "failed" in s.lower():
+            return True
+        clean_ip = str(ip or "").strip()
+        if clean_ip and (s == clean_ip or s == f"Copier ({clean_ip})" or s == f"Printer ({clean_ip})"):
+            return True
+        import re
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", s):
+            return True
+        return False
+
+    @staticmethod
+    def _is_printer_vendor_mac(mac: str) -> bool:
+        clean = str(mac or "").replace("-", ":").upper()
+        # Known printer vendor MAC OUIs: Ricoh, Toshiba, Xerox, Canon, HP, Epson, Brother, Kyocera, Fujifilm, Konica Minolta
+        prefixes = (
+            "00:26:73", "58:38:79", "00:00:74", "00:80:91", "00:10:A4", "00:00:AA",
+            "00:1B:A9", "00:00:85", "00:1E:0B", "00:08:C7", "00:00:48", "00:21:B7", "00:15:99",
+            "00:25:07", "00:20:6B", "00:04:00"
+        )
+        return clean.startswith(prefixes)
+
+    @staticmethod
+    def _extract_model_from_html(html: str) -> str:
+        if not html:
+            return ""
+        import re
+        import html as html_module
+        unescaped_html = html_module.unescape(html)
+
+        # 1. Match Printer model names across ALL major brands (Ricoh, Toshiba, HP, Canon, Xerox, Brother, Epson, Kyocera, Fujifilm, Samsung, Konica)
+        patterns = [
+            # Ricoh
+            r"\b(Aficio\s+MP\s*\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(MP\s+[WCS]?\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(Pro\s+C?\d{4,5}[A-Z0-9_-]*)\b",
+            r"\b(SP\s+C?\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(RICOH\s+[A-Z0-9_\s-]{3,25})\b",
+            # Toshiba
+            r"\b(e-STUDIO\s*\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(e-STUDIO\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(TOSHIBA\s+[A-Z0-9_\s-]{3,25})\b",
+            # HP
+            r"\b(HP\s+(?:Color\s+)?(?:LaserJet|OfficeJet|PageWide|DeskJet|ENVY|Smart\s+Tank)\s+[A-Z0-9_\s-]{3,25})\b",
+            r"\b(LaserJet\s+(?:Pro\s+|Enterprise\s+|Managed\s+)?[A-Z0-9_\s-]{3,20})\b",
+            r"\b(OfficeJet\s+(?:Pro\s+)?[A-Z0-9_\s-]{3,20})\b",
+            r"\b(PageWide\s+(?:Pro\s+|Managed\s+)?[A-Z0-9_\s-]{3,20})\b",
+            # Canon
+            r"\b(imageRUNNER\s+(?:ADVANCE\s+)?[A-Z0-9_\s-]{3,25})\b",
+            r"\b(iR-ADV\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(iR\s*\d{3,4}[A-Z0-9_-]*)\b",
+            r"\b(imageCLASS\s+[A-Z0-9_\s-]{3,25})\b",
+            r"\b(PIXMA\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(MAXIFY\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Canon\s+[A-Z0-9_\s-]{3,25})\b",
+            # Xerox
+            r"\b(Xerox\s+[A-Z0-9_\s-]{3,25})\b",
+            r"\b(VersaLink\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(AltaLink\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(WorkCentre\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Phaser\s+[A-Z0-9_\s-]{3,20})\b",
+            # Brother
+            r"\b(Brother\s+[A-Z0-9_\s-]{3,25})\b",
+            r"\b(HL-[A-Z0-9_-]{3,15})\b",
+            r"\b(MFC-[A-Z0-9_-]{3,15})\b",
+            r"\b(DCP-[A-Z0-9_-]{3,15})\b",
+            # Epson
+            r"\b(Epson\s+[A-Z0-9_\s-]{3,25})\b",
+            r"\b(WorkForce\s+(?:Pro\s+)?[A-Z0-9_\s-]{3,20})\b",
+            r"\b(EcoTank\s+[A-Z0-9_\s-]{3,20})\b",
+            # Kyocera
+            r"\b(TASKalfa\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(ECOSYS\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Kyocera\s+[A-Z0-9_\s-]{3,25})\b",
+            # Fujifilm / Fuji Xerox
+            r"\b(ApeosPort\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(DocuCentre\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Fujifilm\s+[A-Z0-9_\s-]{3,25})\b",
+            # Samsung
+            r"\b(MultiXpress\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(ProXpress\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Samsung\s+[A-Z0-9_\s-]{3,25})\b",
+            # Konica Minolta
+            r"\b(bizhub\s+[A-Z0-9_\s-]{3,20})\b",
+            r"\b(Konica\s+Minolta\s+[A-Z0-9_\s-]{3,25})\b",
+        ]
+        for pat in patterns:
+            m = re.search(pat, unescaped_html, re.IGNORECASE)
+            if m:
+                res = re.sub(r"\s+", " ", m.group(1)).strip()
+                if len(res) >= 3 and not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", res):
+                    return res
+
+        # 2. Check <title>
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", unescaped_html, re.IGNORECASE | re.DOTALL)
+        if title_m:
+            t = re.sub(r"<[^>]*>", "", title_m.group(1)).strip()
+            t = re.sub(
+                r"^(Web Image Monitor|TopAccess|Device Status|Printer|Copier|System Status|HP Embedded Web Server|Embedded Web Server|Remote UI|CentreWare Internet Services|SyncThru Web Service|SyncThru|EWS)\s*[-:|]?\s*",
+                "",
+                t,
+                flags=re.IGNORECASE,
+            ).strip()
+            t_lower = t.lower()
+            if any(ign in t_lower for ign in ("router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik")):
+                return ""
+            if t and len(t) < 40 and t_lower not in {"web image monitor", "topaccess", "login", "home", "index", "main", "embedded web server", "remote ui"} and not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", t):
+                return t
+
+        return ""
+
+    @staticmethod
+    def _probe_snmp_model_name(ip: str) -> str:
+        import socket
+        import re
+        # Raw SNMP v1 request for sysDescr / sysName with community "public"
+        packet = b"\x30\x26\x02\x01\x00\x04\x06public\xa0\x19\x02\x04\x12\x34\x56\x78\x02\x01\x00\x02\x01\x00\x30\x0b\x30\x09\x06\x05\x2b\x06\x01\x02\x01\x01\x00"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1.2)
         try:
+            sock.sendto(packet, (ip, 161))
+            data, _ = sock.recvfrom(2048)
+            text = data.decode("latin1", errors="ignore")
+            m = re.search(r"(Ricoh|Toshiba|Canon|Epson|HP|Xerox|Fujifilm|Brother|MP\s*\d{3,4}|e-STUDIO\s*\d{3,4})[^\x00-\x1f\x7f-\xff]*", text, re.IGNORECASE)
+            if m:
+                clean = re.sub(r"\s+", " ", m.group(0)).strip()
+                if len(clean) >= 3 and not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", clean):
+                    return clean
+        except Exception:
+            pass
+        finally:
+            sock.close()
+        return ""
+
+    def _ensure_printer_name_via_web_probe(self, printer: Printer) -> Printer:
+        ip = str(getattr(printer, "ip", "") or "").strip()
+        curr_name = str(getattr(printer, "name", "") or "").strip()
+
+        if ip and not self._is_generic_printer_name(curr_name, ip):
+            return printer
+
+        if not ip:
+            if not printer.name:
+                printer.name = "[ERROR] Web probe failed: Missing IP address"
+                LOGGER.error("[PollingBridge] HTTP/HTTPS Probing failed: Missing IP address")
+            return printer
+
+        mac = self._normalize_mac(str(getattr(printer, "mac_address", "") or "").strip())
+        p_type = self._printer_type(str(getattr(printer, "printer_type", "") or ""))
+        probe_errors: list[str] = []
+
+        # Retry up to 3 consecutive attempts to resolve the printer name
+        for attempt in range(1, 4):
+            # 1. Standard collector probe
+            try:
+                probed = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=p_type)
+                if probed is not None and probed.name and not self._is_generic_printer_name(probed.name, ip):
+                    LOGGER.info("[PollingBridge] Attempt %s/3: Standard probe resolved name '%s' for ip=%s", attempt, probed.name, ip)
+                    printer.name = probed.name
+                    printer.printer_type = self._detect_printer_type(probed.name, mac)
+                    if probed.mac_address and not mac:
+                        printer.mac_address = probed.mac_address
+                    printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    return printer
+            except Exception as exc:
+                probe_errors.append(f"Attempt {attempt} Collector: {exc}")
+
+            # 2. Fast parallel Web UI frame probing (Ricoh header/topPage/mainFrame + Toshiba TopAccess)
+            probe_urls = [
+                f"http://{ip}/",
+                f"https://{ip}/",
+                f"http://{ip}/web/guest/en/websys/webArch/header.cgi",
+                f"http://{ip}/web/guest/en/websys/webArch/topPage.cgi",
+                f"http://{ip}/web/guest/en/websys/webArch/mainFrame.cgi",
+                f"http://{ip}/web/guest/en/websys/status/configuration.cgi",
+                f"https://{ip}/web/guest/en/websys/webArch/header.cgi",
+                f"http://{ip}/?MAIN=TOPACCESS",
+                f"https://{ip}/?MAIN=TOPACCESS",
+                f"http://{ip}/hp/device/this.LCDispatcher",
+                f"http://{ip}/m_index.cgi",
+                f"http://{ip}/general/status.html",
+            ]
+
+            import requests
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _fetch_url_model(target_url: str) -> tuple[str, str]:
+                try:
+                    resp = requests.get(target_url, timeout=2.0, verify=False)
+                    if resp.status_code in {200, 301, 302}:
+                        model = self._extract_model_from_html(resp.text)
+                        if model:
+                            return model, ""
+                        return "", f"{target_url} HTTP {resp.status_code} (no model parsed)"
+                    return "", f"{target_url} HTTP {resp.status_code}"
+                except Exception as exc:
+                    return "", f"{target_url}: {exc}"
+
+            try:
+                with ThreadPoolExecutor(max_workers=len(probe_urls)) as executor:
+                    futures = [executor.submit(_fetch_url_model, url) for url in probe_urls]
+                    for future in as_completed(futures, timeout=3.0):
+                        model_found, err_detail = future.result()
+                        if model_found and not self._is_generic_printer_name(model_found, ip):
+                            LOGGER.info("[PollingBridge] Attempt %s/3: Parallel Web UI probe resolved model '%s' for ip=%s", attempt, model_found, ip)
+                            printer.name = model_found
+                            printer.printer_type = self._detect_printer_type(model_found, mac)
+                            printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            return printer
+                        elif err_detail:
+                            probe_errors.append(err_detail)
+            except Exception as exc:
+                probe_errors.append(f"Attempt {attempt} Parallel probe error: {exc}")
+
+            # 3. SNMP sysDescr probe fallback
+            snmp_model = self._probe_snmp_model_name(ip)
+            if snmp_model and not self._is_generic_printer_name(snmp_model, ip):
+                LOGGER.info("[PollingBridge] Attempt %s/3: SNMP probe resolved model '%s' for ip=%s", attempt, snmp_model, ip)
+                printer.name = snmp_model
+                printer.printer_type = self._detect_printer_type(snmp_model, mac)
+                printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return printer
+
+            if attempt < 3:
+                time.sleep(0.5)
+
+        # 4. Probe Failed after 3 attempts: Store specific error in printer.name & write to sterror.txt via LOGGER.error
+        first_err = probe_errors[0] if probe_errors else "HTTP/HTTPS & SNMP probe timed out"
+        if len(first_err) > 60:
+            first_err = first_err[:57] + "..."
+        error_name = f"[ERROR] Web probe failed after 3 attempts for {ip}: {first_err}"
+        printer.name = error_name
+        printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        LOGGER.error("[PollingBridge] HTTP/HTTPS Probing (1) failed after 3 consecutive attempts for ip=%s: %s", ip, first_err)
+
+        return printer
+
+    def _deduplicate_printers_by_mac(self, printers: list[Printer]) -> list[Printer]:
+        by_mac: dict[str, Printer] = {}
+        by_ip: dict[str, Printer] = {}
+
+        for p in printers:
+            mac = self._normalize_mac(str(getattr(p, "mac_address", "") or ""))
+            ip = str(getattr(p, "ip", "") or "").strip()
+            p_name = str(getattr(p, "name", "") or "").strip()
+
+            if mac:
+                if mac not in by_mac:
+                    by_mac[mac] = p
+                else:
+                    existing = by_mac[mac]
+                    ex_name = str(getattr(existing, "name", "") or "").strip()
+                    ex_ip = str(getattr(existing, "ip", "") or "").strip()
+                    if self._is_generic_printer_name(ex_name, ex_ip) and not self._is_generic_printer_name(p_name, ip):
+                        by_mac[mac] = p
+                    elif not getattr(existing, "id", None) and getattr(p, "id", None):
+                        by_mac[mac] = p
+            elif ip:
+                if ip not in by_ip:
+                    by_ip[ip] = p
+
+        existing_ips_in_mac = {str(getattr(p, "ip", "") or "").strip() for p in by_mac.values() if getattr(p, "ip", None)}
+        filtered_by_ip = [p for ip, p in by_ip.items() if ip not in existing_ips_in_mac]
+
+        return list(by_mac.values()) + filtered_by_ip
+
+    @staticmethod
+    def _load_local_printers_json() -> list[Printer]:
+        try:
+            import json, os, tempfile
+            local_app = os.getenv("LOCALAPPDATA", "")
+            candidates = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent" / "printers.json",
+                Path("storage") / "data" / "printers.json",
+            ]
+            if local_app:
+                candidates.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent" / "printers.json")
+
+            for target_file in candidates:
+                if target_file.exists():
+                    with open(target_file, "r", encoding="utf-8", errors="replace") as f:
+                        raw_list = json.load(f)
+                        if isinstance(raw_list, list):
+                            res: list[Printer] = []
+                            for item in raw_list:
+                                if isinstance(item, dict):
+                                    p_name = str(item.get("name", "") or "").strip()
+                                    ip = str(item.get("ip", "") or "").strip()
+                                    raw_mac = str(item.get("mac_address", "") or "").strip()
+                                    clean_mac = raw_mac.replace("-", ":").upper() if raw_mac else ""
+
+                                    is_generic = PollingBridge._is_generic_printer_name(p_name, ip)
+                                    is_printer_mac = PollingBridge._is_printer_vendor_mac(clean_mac)
+                                    detected_type = PollingBridge._detect_printer_type(p_name, clean_mac)
+                                    is_router = any(kw in p_name.lower() for kw in ("f6600", "h3601", "router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik"))
+
+                                    # Purge non-printer devices (modems, routers, PCs, phones, TVs)
+                                    if not is_printer_mac and (is_generic or is_router or detected_type == "unknown"):
+                                        continue
+
+                                    res.append(Printer(
+                                        id=item.get("id", 0) or 0,
+                                        name=p_name,
+                                        ip=ip,
+                                        user=str(item.get("user", "") or "").strip(),
+                                        password=str(item.get("password", "") or "").strip(),
+                                        printer_type=detected_type if detected_type != "unknown" else str(item.get("printer_type", "") or "").strip(),
+                                        status="online",
+                                        mac_address=clean_mac or raw_mac,
+                                        updated_at=str(item.get("updated_at", "") or "").strip(),
+                                    ))
+                            return res
+        except Exception:
+            pass
+        return []
+
+    def _load_printers(self, force_live: bool = False) -> list[Printer]:
+        try:
+            # 1. Load existing local printers.json as the persistent base
+            existing_local = self._load_local_printers_json()
+            existing_by_mac: dict[str, Printer] = {}
+            for p in existing_local:
+                mac = self._normalize_mac(str(getattr(p, "mac_address", "") or ""))
+                if mac:
+                    existing_by_mac[mac] = p
+
+            # 2. Scan active subnet hosts
             scanner = SubnetScanner(max_workers=100)
             scan_rows = scanner.scan_subnet()
             neighbor_mac_map = self._load_neighbor_mac_map()
             printers: list[Printer] = []
             active_rows: list[tuple[str, dict[str, object]]] = []
             seen: set[str] = set()
+
             for row in scan_rows:
                 if not isinstance(row, dict):
                     continue
@@ -1174,10 +1505,19 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 active_rows.append((ip, row))
                 printer_type = self._printer_type(str(row.get("printer_type", "") or ""))
                 has_ports = bool(row.get("has_printer_ports"))
+                
+                mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=printer_type)
+                
+                # Check if this MAC already exists in local printers.json with a valid name
+                existing_p = existing_by_mac.get(mac) if mac else None
+                if existing_p and existing_p.name and not self._is_generic_printer_name(existing_p.name, ip):
+                    existing_p.ip = ip  # update IP in case DHCP assigned a new IP
+                    printers.append(existing_p)
+                    continue
+
                 if printer_type not in {"ricoh", "toshiba"}:
-                    if not has_ports:
+                    if not has_ports and not force_live:
                         continue
-                    mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type="")
                     discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type="")
                     if discovered is None:
                         discovered = Printer(
@@ -1186,13 +1526,13 @@ Get-NetNeighbor -AddressFamily IPv4 |
                             ip=ip,
                             user="",
                             password="",
-                            printer_type="toshiba" if self._toshiba_service else "ricoh",
+                            printer_type=self._detect_printer_type("", mac),
                             status="online",
                             mac_address=mac,
                         )
                     printers.append(discovered)
                     continue
-                mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=printer_type)
+
                 discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=printer_type)
                 if discovered is None:
                     discovered = Printer(
@@ -1201,84 +1541,33 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         ip=ip,
                         user="",
                         password="",
-                        printer_type=printer_type,
+                        printer_type=printer_type or self._detect_printer_type(ip, mac),
                         status="online",
                         mac_address=mac,
                     )
                 printers.append(discovered)
-                if not mac:
-                    LOGGER.warning(
-                        "Polling MAC unresolved for ip=%s type=%s (UI may still resolve from separate scan path)",
-                        ip,
-                        printer_type,
-                    )
-            if not printers and active_rows:
-                LOGGER.info(
-                    "Polling local scan found %s active hosts but no classified printer hits; probing device-info fallback",
-                    len(active_rows),
-                )
-                for ip, row in self._fallback_discovery_candidates(active_rows):
-                    preferred_type = self._printer_type(str(row.get("printer_type", "") or ""))
-                    mac = self._resolve_scanned_mac(ip, row, neighbor_mac_map, preferred_type=preferred_type)
-                    discovered = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=preferred_type)
-                    if discovered is None:
-                        continue
-                    printers.append(discovered)
-                    if not mac:
-                        LOGGER.warning(
-                            "Polling fallback MAC unresolved for ip=%s type=%s (printer was detected via device info)",
-                            ip,
-                            discovered.printer_type,
-                        )
-            if not printers and self._last_discovered_printers:
-                printers = list(self._last_discovered_printers)
-                LOGGER.debug(
-                    "Polling bridge using cached printer list: count=%s",
-                    len(printers),
-                )
-            elif not printers:
-                try:
-                    cached = self._api_client.get_printers()
-                    if cached:
-                        printers = list(cached)
-                        LOGGER.info(
-                            "Polling bridge using server printer fallback: count=%s",
-                            len(printers),
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    LOGGER.debug("Polling server printer fallback failed: %s", exc)
-            printers = self._merge_server_printers(printers)
-            ricoh_count = sum(1 for printer in printers if self._printer_type(printer.printer_type) == "ricoh")
-            toshiba_count = sum(1 for printer in printers if self._printer_type(printer.printer_type) == "toshiba")
-            LOGGER.debug(
-                "Polling bridge printers source=local_scan count=%s ricoh=%s toshiba=%s",
-                len(printers),
-                ricoh_count,
-                toshiba_count,
-            )
-            if printers:
-                self._last_discovered_printers = list(printers)
-                self._save_printers_json(printers)
+
+            # 3. Merge remaining offline printers from existing printers.json
+            scanned_macs = {self._normalize_mac(str(getattr(p, "mac_address", "") or "")) for p in printers if getattr(p, "mac_address", None)}
+            for mac, old_p in existing_by_mac.items():
+                if mac not in scanned_macs:
+                    printers.append(old_p)
+
+            # 4. Ensure names via web probe only if missing/generic (printers with resolved names skip probing)
+            now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for idx, p in enumerate(printers):
+                printers[idx] = self._ensure_printer_name_via_web_probe(p)
+                if not getattr(printers[idx], "updated_at", None):
+                    setattr(printers[idx], "updated_at", now_time)
+
+            # Deduplicate strictly by mac_address
+            printers = self._deduplicate_printers_by_mac(printers)
+
+            # Save directly to local printers.json disk file (single persistent source of truth)
+            self._save_printers_json(printers)
             return printers
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Polling bridge local scan failed: %s", exc)
-            if self._last_discovered_printers:
-                LOGGER.info(
-                    "Polling bridge falling back to cached printers after scan error: count=%s",
-                    len(self._last_discovered_printers),
-                )
-                return list(self._last_discovered_printers)
-            try:
-                cached = self._api_client.get_printers()
-                if cached:
-                    LOGGER.info(
-                        "Polling bridge falling back to server printer list after scan error: count=%s",
-                        len(cached),
-                    )
-                    self._last_discovered_printers = list(cached)
-                    return cached
-            except Exception as fallback_exc:  # noqa: BLE001
-                LOGGER.debug("Polling bridge server printer fallback after scan error failed: %s", fallback_exc)
             return []
 
     def _post_payload(self, payload: dict) -> dict:
@@ -1312,18 +1601,78 @@ Get-NetNeighbor -AddressFamily IPv4 |
         LOGGER.debug("Polling payload kept in-memory only; not writing local snapshot")
 
     @staticmethod
-    def _save_printers_json(printers: list[Any]) -> None:
+    def _detect_printer_type(name: str, mac: str = "") -> str:
+        s = str(name or "").lower()
+        clean_mac = str(mac or "").replace("-", ":").upper()
+        if "toshiba" in s or "e-studio" in s or clean_mac.startswith("00:80:91"):
+            return "toshiba"
+        if any(k in s for k in ("ricoh", "aficio", "mp ", "sp ", "pro ")) or clean_mac.startswith(("00:26:73", "58:38:79", "00:00:74")):
+            return "ricoh"
+        if any(k in s for k in ("hp", "laserjet", "officejet", "pagewide", "deskjet", "envy", "smart tank")) or clean_mac.startswith(("00:1E:0B", "00:08:C7")):
+            return "hp"
+        if any(k in s for k in ("canon", "imagerunner", "ir-adv", "ir ", "imageclass", "pixma", "maxify")) or clean_mac.startswith(("00:1B:A9", "00:00:85")):
+            return "canon"
+        if any(k in s for k in ("xerox", "versalink", "altalink", "workcentre", "phaser")) or clean_mac.startswith(("00:10:A4", "00:00:AA")):
+            return "xerox"
+        if any(k in s for k in ("brother", "mfc-", "hl-", "dcp-")) or clean_mac.startswith("00:21:B7"):
+            return "brother"
+        if any(k in s for k in ("epson", "workforce", "ecotank")) or clean_mac.startswith("00:00:48"):
+            return "epson"
+        if any(k in s for k in ("kyocera", "taskalfa", "ecosys")):
+            return "kyocera"
+        if any(k in s for k in ("fujifilm", "fuji", "apeosport", "docucentre")):
+            return "fujifilm"
+        if any(k in s for k in ("samsung", "multixpress", "proxpress")):
+            return "samsung"
+        if any(k in s for k in ("konica", "bizhub")):
+            return "konica"
+        return "unknown"
+
+    @staticmethod
+    def _save_printers_json(printers: list[Printer]) -> None:
         try:
             import json, os, tempfile
             data = []
+            seen_macs: set[str] = set()
+            seen_ips: set[str] = set()
             for p in printers:
+                ip = str(getattr(p, "ip", "") or "").strip()
+                raw_mac = str(getattr(p, "mac_address", "") or getattr(p, "mac_id", "") or "").strip()
+                clean_mac = raw_mac.replace("-", ":").upper() if raw_mac else ""
+                p_name = str(getattr(p, "name", "") or "").strip()
+
+                is_generic = PollingBridge._is_generic_printer_name(p_name, ip)
+                is_printer_mac = PollingBridge._is_printer_vendor_mac(clean_mac)
+                detected_type = PollingBridge._detect_printer_type(p_name, clean_mac)
+                is_router = any(kw in p_name.lower() for kw in ("f6600", "h3601", "router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik"))
+
+                # Filter out non-printer devices (routers, modems, PCs, phones, TVs, etc.)
+                if not is_printer_mac and (is_generic or is_router or detected_type == "unknown"):
+                    continue
+
+                if is_generic:
+                    if detected_type == "toshiba":
+                        p_name = "Toshiba Copier (Offline)" if not ip else f"Toshiba Copier ({ip})"
+                    elif detected_type == "ricoh":
+                        p_name = "Ricoh Copier (Offline)" if not ip else f"Ricoh Copier ({ip})"
+                    elif detected_type == "hp":
+                        p_name = "HP Printer (Offline)" if not ip else f"HP Printer ({ip})"
+                    elif detected_type == "canon":
+                        p_name = "Canon Printer (Offline)" if not ip else f"Canon Printer ({ip})"
+                    else:
+                        p_name = f"Printer ({ip})" if ip else "Printer"
+
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                updated_at_val = str(getattr(p, "updated_at", "") or "").strip() or now_str
+
                 data.append({
                     "id": getattr(p, "id", None),
-                    "name": str(getattr(p, "name", "") or "").strip(),
-                    "ip": str(getattr(p, "ip", "") or "").strip(),
-                    "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
-                    "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
+                    "name": p_name,
+                    "ip": ip,
+                    "mac_address": clean_mac or raw_mac,
+                    "printer_type": detected_type,
                     "user": str(getattr(p, "user", "") or "").strip(),
+                    "updated_at": updated_at_val,
                 })
             
             local_app = os.getenv("LOCALAPPDATA", "")
@@ -2504,14 +2853,12 @@ if ($node) {{ $node }}
         agent_uid = self._agent_uid or hostname
         devices: list[dict[str, str]] = []
         for printer in printers:
-            if PollingBridge._is_placeholder_printer_name(p_name, p_ip):
-                probed = PollingBridge._probe_real_device_name(p_ip)
-                if probed:
-                    p_name = probed
-                    printer.name = probed
+            p_name = str(printer.name or "").strip()
+            p_ip = str(printer.ip or "").strip()
             devices.append(
                 {
                     "printer_name": p_name,
+                    "name": p_name,
                     "ip": p_ip,
                     "mac_address": str(printer.mac_address or "").strip(),
                     "printer_type": str(printer.printer_type or "").strip(),
@@ -3380,7 +3727,12 @@ if ($node) {{ $node }}
                     LOGGER.info("[PollingBridge] exec_utility '%s': done", command_name)
                     
                     payload = context_vars.get("result_payload")
-                    payload_str = json.dumps(payload) if payload else ""
+                    if isinstance(payload, str):
+                        payload_str = payload
+                    elif payload is not None:
+                        payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
+                    else:
+                        payload_str = ""
                     self._post_control_result(command_id=command_id, ok=True, error=payload_str)
                     self._update_recent_command_status(command_id, "success", payload_str)
                     return
@@ -4882,16 +5234,33 @@ Write-Output 'INSTALLED'
                     counter_payload = collector.process_counter(printer, should_post=False)
                     status_payload = collector.process_status(printer, should_post=False)
                     counter_data = counter_payload.get("counter_data", {})
+
+                    resolved_printer_name = printer.name if printer.name and not self._is_generic_printer_name(printer.name, printer.ip) else counter_payload.get("printer_name", printer.name)
+
+                    devices_payload_list = []
+                    try:
+                        for p in printers:
+                            devices_payload_list.append({
+                                "printer_name": str(getattr(p, "name", "") or "").strip(),
+                                "ip": str(getattr(p, "ip", "") or "").strip(),
+                                "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
+                                "mac_id": str(getattr(p, "mac_address", "") or "").strip(),
+                                "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
+                            })
+                    except Exception:
+                        pass
+
                     payload = {
                         "lead": lead,
                         "lan_uid": lan_uid,
                         "agent_uid": agent_uid,
                         "hostname": hostname,
                         "local_ip": local_ip,
-                        "printer_name": counter_payload.get("printer_name", printer.name),
+                        "printer_name": resolved_printer_name,
                         "ip": counter_payload.get("ip", printer.ip),
                         "mac_id": printer.mac_address,
                         "mac_address": printer.mac_address,
+                        "devices": devices_payload_list,
                         "timestamp": counter_payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         "counter_data": counter_data,
                         "status_data": status_payload.get("status_data", {}),

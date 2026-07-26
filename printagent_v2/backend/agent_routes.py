@@ -873,6 +873,33 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "command_id": command_id,
         })
 
+    @app.get("/api/agents/<agent_uid>/commands/<int:command_id>")
+    @app.get("/api/agents/<agent_uid>/commands/<int:command_id>/status")
+    @app.get("/api/agents/<agent_uid>/utility/status/<int:command_id>")
+    def get_agent_command_status_by_uid(agent_uid: str, command_id: int) -> Any:
+        with session_factory() as session:
+            command = session.get(PrinterControlCommand, command_id)
+            if command is None:
+                return jsonify({"ok": False, "error": "Command not found"}), 404
+            output_val = command.error_message or ""
+            return jsonify({
+                "ok": True,
+                "id": command_id,
+                "agent_uid": agent_uid,
+                "status": command.status,
+                "command_type": command.command_type,
+                "error": output_val if command.status == "failed" else "",
+                "error_message": output_val if command.status == "failed" else "",
+                "result": output_val,
+                "output": output_val,
+                "result_payload": output_val,
+                "data": output_val,
+                "message": output_val,
+                "received_at": command.received_at.isoformat() if command.received_at else None,
+                "responded_at": command.responded_at.isoformat() if command.responded_at else None,
+                "progress_text": output_val if command.status == "pending" else "",
+            })
+
     @app.post("/api/agents/<agent_uid>/utility/<action>")
     def trigger_agent_utility(agent_uid: str, action: str) -> Any:
         valid_actions = {"devices_and_printers", "open_scan_folder", "dxdiag", "change_ip", "exec", "run_command", "scan_cameras"}
