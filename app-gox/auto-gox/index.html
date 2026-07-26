@@ -34,21 +34,23 @@
         <img src="goxprint.svg" alt="GoxPrint Logo" style="height: 40px; width: auto; display: block;">
       </div>
       <div style="display: flex; align-items: center; gap: 12px;">
-        <button id="btn-download-agent-header" class="btn-download-agent-header" style="display: none; background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; cursor: pointer; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(239,68,68,0.25);">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
-          </svg>
-          <span>Download Agent</span>
-        </button>
         <button id="btn-header-support" class="btn-header-support" title="Gửi yêu cầu hỗ trợ bảo hành">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
           </svg>
           <span>Yêu cầu Hỗ trợ & Bảo hành</span>
         </button>
-        <div class="status-indicator">
-          <div class="status-dot"></div>
-          <span>Hệ thống trực tuyến</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="btn-download-agent-header" class="btn-download-agent-header" style="display: none; background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(239,68,68,0.25);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+            </svg>
+            <span>Download Agent</span>
+          </button>
+          <div class="status-indicator">
+            <div class="status-dot"></div>
+            <span>Hệ thống trực tuyến</span>
+          </div>
         </div>
       </div>
     </div>
