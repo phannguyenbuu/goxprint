@@ -549,10 +549,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
     @app.get("/api/lan-sites/scan-points")
     def get_scan_points_json() -> Any:
         mac_id = request.args.get("mac_id", "").strip().upper().replace("-", ":")
+        agent_uid = request.args.get("agent_uid", "").strip()
 
         from active_agents_registry import ACTIVE_AGENTS
         res = {}
-        for agent_info in ACTIVE_AGENTS.values():
+        for a_uid, agent_info in ACTIVE_AGENTS.items():
+            if agent_uid and a_uid.lower() != agent_uid.lower():
+                continue
             printers_list = agent_info.get("printers_json") or []
             for dev in printers_list:
                 if isinstance(dev, dict):
@@ -560,7 +563,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if mac_id and dev_mac != mac_id:
                         continue
                     sync_data = dev.get("address_book_sync") or {}
-                    res[dev_mac] = {
+                    res[dev_mac or dev.get("printer_name", "printer")] = {
                         "mac_address": dev_mac,
                         "ip": dev.get("ip") or dev.get("printer_ip") or "",
                         "printer_name": dev.get("printer_name") or dev.get("name") or "",

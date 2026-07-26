@@ -322,36 +322,41 @@ export function AgentPage() {
     jsonData: null,
   });
 
-  const handleViewScanPointsJson = async (p: any) => {
-    const macClean = (p.mac_id || p.mac_address || "").replace(/-/g, ":").toUpperCase();
+  const handleViewScanPointsJson = async (target: any) => {
+    const isAgent = Boolean(target.agent_uid && !target.mac_id && !target.mac_address);
+    const macClean = (target.mac_id || target.mac_address || "").replace(/-/g, ":").toUpperCase();
+    const agentUid = target.agent_uid || target.agentUid || "";
     setScanPointsViewerModal({
       isOpen: true,
-      copierName: p.printer_name || "Máy Photocopy",
-      macId: macClean,
+      copierName: target.hostname ? `Máy tính: ${target.hostname}` : (target.printer_name || target.name || "Máy Photocopy"),
+      macId: macClean || agentUid,
       loading: true,
       jsonData: null,
     });
     try {
-      const res = await fetch(`${BASE_URL}/api/lan-sites/scan-points?mac_id=${encodeURIComponent(macClean)}`);
+      const url = isAgent
+        ? `${BASE_URL}/api/lan-sites/scan-points?agent_uid=${encodeURIComponent(agentUid)}`
+        : `${BASE_URL}/api/lan-sites/scan-points?mac_id=${encodeURIComponent(macClean)}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (data.ok && data.scan_points) {
         setScanPointsViewerModal(prev => ({
           ...prev,
           loading: false,
-          jsonData: data.scan_points[macClean] || data.scan_points || p.address_book_sync || {},
+          jsonData: isAgent ? data.scan_points : (data.scan_points[macClean] || data.scan_points || target.address_book_sync || {}),
         }));
       } else {
         setScanPointsViewerModal(prev => ({
           ...prev,
           loading: false,
-          jsonData: p.address_book_sync || { message: "Không tìm thấy dữ liệu scan_points.json trên VPS" },
+          jsonData: target.address_book_sync || { message: "Không tìm thấy dữ liệu scan_points.json trên VPS" },
         }));
       }
     } catch (err) {
       setScanPointsViewerModal(prev => ({
         ...prev,
         loading: false,
-        jsonData: p.address_book_sync || { error: "Lỗi kết nối VPS" },
+        jsonData: target.address_book_sync || { error: "Lỗi kết nối VPS" },
       }));
     }
   };
@@ -1805,11 +1810,11 @@ except Exception as e:
         defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
 
         // Web credentials
-        defaultCreds[p.id] = { user: p.auth_user || '', pass: p.auth_password || '' };
+        defaultCreds[p.id] = { user: p.auth_user || p.user || '', pass: p.auth_password || p.password || '' };
       });
 
       setSelectedTargetAgents((prev) => ({ ...defaultTargets, ...prev }));
-      setCopierCredentials((prev) => ({ ...defaultCreds, ...prev }));
+      setCopierCredentials(defaultCreds);
     }
   }, [selectedLan]);
 
