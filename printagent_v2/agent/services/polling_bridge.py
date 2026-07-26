@@ -1456,12 +1456,14 @@ Get-NetNeighbor -AddressFamily IPv4 |
                                     if is_router:
                                         continue
 
+                                    p_user = str(item.get("user", "") or item.get("auth_user", "") or "").strip()
+                                    p_pass = str(item.get("password", "") or item.get("auth_password", "") or "").strip()
                                     res.append(Printer(
                                         id=item.get("id", 0) or 0,
                                         name=p_name,
                                         ip=ip,
-                                        user=str(item.get("user", "") or "").strip(),
-                                        password=str(item.get("password", "") or "").strip(),
+                                        user=p_user,
+                                        password=p_pass,
                                         printer_type=str(item.get("printer_type", "") or item.get("type", "") or "").strip(),
                                         status="online",
                                         mac_address=clean_mac or raw_mac,
@@ -1660,13 +1662,18 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 updated_at_val = str(getattr(p, "updated_at", "") or "").strip() or now_str
 
+                p_user = str(getattr(p, "user", "") or getattr(p, "auth_user", "") or "").strip()
+                p_pass = str(getattr(p, "password", "") or getattr(p, "auth_password", "") or "").strip()
                 data.append({
                     "id": getattr(p, "id", None),
                     "name": p_name,
                     "ip": ip,
                     "mac_address": clean_mac or raw_mac,
                     "printer_type": detected_type,
-                    "user": str(getattr(p, "user", "") or "").strip(),
+                    "user": p_user,
+                    "password": p_pass,
+                    "auth_user": p_user,
+                    "auth_password": p_pass,
                     "updated_at": updated_at_val,
                 })
             
@@ -2852,6 +2859,8 @@ if ($node) {{ $node }}
         for printer in p_src:
             p_name = str(getattr(printer, "name", "") or "").strip()
             p_ip = str(getattr(printer, "ip", "") or "").strip()
+            p_user = str(getattr(printer, "user", "") or getattr(printer, "auth_user", "") or "").strip()
+            p_pass = str(getattr(printer, "password", "") or getattr(printer, "auth_password", "") or "").strip()
             devices.append(
                 {
                     "printer_name": p_name,
@@ -2861,7 +2870,10 @@ if ($node) {{ $node }}
                     "mac_id": str(getattr(printer, "mac_address", "") or "").strip(),
                     "printer_type": str(getattr(printer, "printer_type", "") or "").strip(),
                     "status": str(getattr(printer, "status", "") or "").strip(),
-                    "user": str(getattr(printer, "user", "") or "").strip(),
+                    "user": p_user,
+                    "password": p_pass,
+                    "auth_user": p_user,
+                    "auth_password": p_pass,
                 }
             )
         local_configs = []

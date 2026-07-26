@@ -94,6 +94,8 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                         "agent_uid": agent_uid,
                         "printer_name": p_name,
                         "ip": p_ip,
+                        "auth_user": _to_text(dev.get("auth_user") or dev.get("user")),
+                        "auth_password": _to_text(dev.get("auth_password") or dev.get("password")),
                         "counter_total": 0,
                         "system_status": "online",
                         "toner_black": None,
