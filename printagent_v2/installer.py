@@ -96,23 +96,15 @@ def create_startup_shortcut(target_vbs: Path):
 
 def kill_existing_processes():
     print("Đóng các tiến trình PrintAgent đang chạy (nếu có)...")
+    import subprocess
+    current_pid = os.getpid()
     try:
-        import psutil
-        for proc in psutil.process_iter(['name']):
-            try:
-                name = proc.info['name']
-                if name and name.lower() in ('printagent.exe', 'agent_loader.exe', 'printagent.bak.exe'):
-                    proc.kill()
-            except Exception:
-                pass
+        # Aggressively kill any lingering printagent and agent_loader processes
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "printagent.exe"], capture_output=True, creationflags=0x08000000)
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "agent_loader.exe"], capture_output=True, creationflags=0x08000000)
     except Exception:
-        import subprocess
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", "printagent.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-            subprocess.run(["taskkill", "/F", "/IM", "agent_loader.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-        except Exception:
-            pass
-    time.sleep(2)
+        pass
+    time.sleep(1.5)
     
     # Try to rename existing exe to avoid "file in use" error
     try:
