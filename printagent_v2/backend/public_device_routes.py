@@ -124,6 +124,40 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                     }
                 )
 
+            # Also include any Printers from Printer table (from agent printers.json discovery)
+            for p in p_rows:
+                p_mac = _to_text(p.mac_address).replace("-", ":").upper()
+                p_ip = _to_text(p.ip)
+                p_name = _to_text(p.printer_name) or "Unknown Printer"
+                dedupe_token = p_mac or f"IP:{p_ip}"
+                dedupe_key = (_to_text(p.lead), _to_text(p.lan_uid), dedupe_token)
+                if dedupe_key in seen:
+                    continue
+
+                if p.updated_at:
+                    p_updated_utc = p.updated_at if p.updated_at.tzinfo else p.updated_at.replace(tzinfo=timezone.utc)
+                    if p_updated_utc < cutoff_time:
+                        continue
+
+                seen.add(dedupe_key)
+                machines.append(
+                    {
+                        "lead": p.lead,
+                        "lan_uid": p.lan_uid,
+                        "mac_id": p_mac,
+                        "agent_uid": p.agent_uid,
+                        "printer_name": p_name,
+                        "ip": p_ip,
+                        "counter_total": 0,
+                        "system_status": "online" if p.is_online else "offline",
+                        "toner_black": None,
+                        "last_counter_at": "",
+                        "last_status_at": "",
+                        "created_at": p.created_at.isoformat() if p.created_at else "",
+                        "updated_at": p.updated_at.isoformat() if p.updated_at else "",
+                    }
+                )
+
             if check_ping and machines:
                 with ThreadPoolExecutor(max_workers=min(20, len(machines))) as executor:
                     reachability = list(executor.map(lambda m: _is_ip_reachable(m.get("ip", "")), machines))

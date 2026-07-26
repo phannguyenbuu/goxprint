@@ -250,6 +250,55 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             session.delete(ep)
                             LOGGER.info("[ingest_polling] Deleted stale DB printer ID %s (%s, IP %s, MAC %s) for lead %s - not found in agent printers.json", ep.id, ep.printer_name, ep.ip, ep.mac_address, lead)
 
+                    # Upsert DeviceInfor for every reported printer in devices_list
+                    for dev in (devices_list or []):
+                        if not isinstance(dev, dict):
+                            continue
+                        d_ip = str(dev.get("ip") or "").strip()
+                        d_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().replace("-", ":").upper()
+                        d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
+                        if not d_ip and not d_mac:
+                            continue
+                        d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead)
+                        if d_mac:
+                            d_stmt = d_stmt.where(func.upper(DeviceInfor.mac_id) == d_mac)
+                        else:
+                            d_stmt = d_stmt.where(DeviceInfor.ip == d_ip)
+                        d_obj = session.execute(d_stmt).scalars().first()
+                        if d_obj:
+                            if d_ip:
+                                d_obj.ip = d_ip
+                            if d_mac:
+                                d_obj.mac_id = d_mac
+                            if d_name:
+                                d_obj.printer_name = d_name
+                            d_obj.agent_uid = agent_uid
+                            d_obj.lan_uid = lan_uid
+                            d_obj.updated_at = utc_now
+                        else:
+                            d_obj = DeviceInfor(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                agent_uid=agent_uid,
+                                mac_id=d_mac,
+                                ip=d_ip,
+                                printer_name=d_name or "Unknown Printer",
+                                counter_data={},
+                                status_data={},
+                                updated_at=utc_now,
+                            )
+                            session.add(d_obj)
+
+                    # Purge stale DeviceInfor records for this lead not in agent printers.json
+                    existing_d = session.execute(select(DeviceInfor).where(DeviceInfor.lead == lead)).scalars().all()
+                    for ed in existing_d:
+                        ed_mac = (ed.mac_id or "").strip().upper()
+                        ed_ip = (ed.ip or "").strip()
+                        is_active = (ed_mac and ed_mac in active_macs) or (ed_ip and ed_ip in active_ips)
+                        if not is_active:
+                            session.delete(ed)
+                            LOGGER.info("[ingest_polling] Deleted stale DeviceInfor ID %s (%s, IP %s, MAC %s) for lead %s - not found in agent printers.json", ed.id, ed.printer_name, ed.ip, ed.mac_id, lead)
+
                 session.commit()
             except Exception as p_exc:  # noqa: BLE001
                 session.rollback()
