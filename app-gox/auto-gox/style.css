@@ -358,7 +358,58 @@ header {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  position: relative;
+}
+
+/* CTA Download Agent Pulsing Animation */
+@keyframes ctaPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 10px 25px -5px rgba(239, 68, 68, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(239, 68, 68, 0), 0 20px 35px -5px rgba(239, 68, 68, 0.6);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0), 0 10px 25px -5px rgba(239, 68, 68, 0.4);
+    transform: scale(1);
+  }
+}
+
+.download-cta-card {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-lg);
+  padding: 32px 24px;
+  text-align: center;
+  cursor: pointer;
+  color: #ffffff;
+  transition: var(--transition-smooth);
+  animation: ctaPulse 1.8s infinite ease-in-out;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.download-cta-card:hover {
+  transform: translateY(-4px) scale(1.03);
+  animation-play-state: paused;
+  box-shadow: 0 25px 45px -5px rgba(239, 68, 68, 0.7);
+}
+
+.download-cta-icon-wrapper {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
 }
 
 .action-btn-card:hover {
