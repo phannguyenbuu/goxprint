@@ -53,9 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (localAgent) {
       await onAgentConnected();
     } else {
-      statusDot.style.backgroundColor = '#f59e0b';
-      statusText.textContent = 'Đang tìm PrintAgent...';
-      lanIpEl.textContent = 'Đang kết nối';
+      statusDot.style.backgroundColor = '#ef4444';
+      statusText.textContent = 'Chưa bật PrintAgent';
+      lanIpEl.textContent = 'Chưa bật PrintAgent';
       startBackgroundProbing();
     }
     
@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function onAgentConnected() {
     statusDot.style.backgroundColor = '#22c55e';
     statusText.textContent = 'Đã kết nối PrintAgent';
-    lanIpEl.textContent = localAgent.pc_ip || '192.168.1.42';
+    lanIpEl.textContent = localAgent.pc_ip || '127.0.0.1';
     
     showToast('Đã kết nối thành công với PrintAgent cục bộ.', 'success');
     
@@ -152,23 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       return await Promise.any(promises);
     } catch (e) {
-      // Fallback: Query active Agent from VPS API
-      try {
-        const vpsRes = await vpsFetch('/api/public/ip/workstation');
-        if (vpsRes.ok) {
-          const vpsData = await vpsRes.json();
-          if (vpsData && vpsData.ok && vpsData.agent_uid) {
-            return {
-              lan_uid: vpsData.lan_uid || 'default',
-              agent_uid: vpsData.agent_uid || 'administrator',
-              pc_name: vpsData.hostname || 'Administrator',
-              pc_ip: vpsData.local_ip || '127.0.0.1'
-            };
-          }
-        }
-      } catch (err) {
-        // ignore
-      }
       return null;
     }
   }
