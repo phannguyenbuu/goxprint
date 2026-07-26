@@ -4524,17 +4524,30 @@ Write-Output 'INSTALLED'
                         _progress(f"[2/5] ✅ Giải nén SFX qua zipfile — {len(exe_files)} file EXE")
                     except Exception:
                         _progress(f"[2/5] 📄 Không phải ZIP, thử giải nén SFX qua dòng lệnh...")
-                        try:
-                            subprocess.run(
-                                [str(download_path), "/extract", f"/dir={extract_dir}"],
-                                capture_output=True, timeout=60,
-                                creationflags=_NO_WINDOW,
-                            )
-                            exe_files = list(extract_dir.glob("**/*.exe"))
-                            _progress(f"[2/5] ✅ Giải nén SFX thành công")
-                        except Exception as sfx_exc:
-                            _progress(f"[2/5] ⚠️ Giải nén SFX thất bại: {sfx_exc}, dùng exe trực tiếp")
+                        for sfx_flag in [["-y", f"-o{extract_dir}"], ["/extract", f"/dir={extract_dir}"], ["/s", f"/p{extract_dir}"]]:
+                            try:
+                                subprocess.run(
+                                    [str(download_path)] + sfx_flag,
+                                    capture_output=True, timeout=60,
+                                    creationflags=_NO_WINDOW,
+                                )
+                                exe_files = list(extract_dir.glob("**/*.exe"))
+                                if exe_files or list(extract_dir.glob("**/*.inf")):
+                                    _progress(f"[2/5] ✅ Giải nén SFX thành công qua {sfx_flag}")
+                                    break
+                            except Exception:
+                                pass
+                        if not exe_files and not list(extract_dir.glob("**/*.inf")):
+                            _progress(f"[2/5] ⚠️ Dùng exe trực tiếp")
                             exe_files = [download_path]
+
+                # Extract nested ZIPs if present inside extracted folder
+                for nested_zip in list(extract_dir.glob("**/*.zip")):
+                    try:
+                        with zipfile.ZipFile(nested_zip, "r") as nz:
+                            nz.extractall(nested_zip.parent)
+                    except Exception:
+                        pass
 
                 inf_files = list(extract_dir.glob("**/*.inf"))
                 _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")

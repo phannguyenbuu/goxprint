@@ -213,18 +213,27 @@ def _handle_download_and_install(data: dict) -> dict:
         try:
             with zipfile.ZipFile(download_path, "r") as z:
                 z.extractall(extract_dir)
-            log(f"    Extracted (ZIP SFX)")
+            log(f"    Extracted (ZIP)")
         except Exception as e:
-            log(f"    Not ZIP: {e} - trying silent EXE")
-            for flags in [["/s"], ["/S"], ["/VERYSILENT", "/NORESTART"]]:
+            log(f"    Not plain ZIP: {e} - trying silent SFX extraction")
+            for flags in [["-y", f"-o{extract_dir}"], ["/s", f"/p{extract_dir}"], ["/extract", str(extract_dir)], ["/s", "/v\"/qn\""], ["/s"], ["/S"], ["/VERYSILENT", "/NORESTART"]]:
                 try:
                     r = subprocess.run([str(download_path)] + flags,
                                        capture_output=True, text=True, timeout=120)
                     if r.returncode == 0:
-                        log(f"    EXE silent install OK (flags {flags})")
+                        log(f"    EXE silent install/extract OK (flags {flags})")
                         break
                 except Exception:
                     pass
+
+        # Extract any nested zip files found inside extracted folder (common in Toshiba driver packages)
+        for nested_zip in list(extract_dir.glob("**/*.zip")):
+            try:
+                with zipfile.ZipFile(nested_zip, "r") as nz:
+                    nz.extractall(nested_zip.parent)
+                log(f"    Extracted nested ZIP: {nested_zip.name}")
+            except Exception as e:
+                LOGGER.debug("Could not extract nested zip %s: %s", nested_zip, e)
 
         inf_files = [str(f) for f in extract_dir.glob("**/*.inf")]
         log(f"    Found {len(inf_files)} INF files")
