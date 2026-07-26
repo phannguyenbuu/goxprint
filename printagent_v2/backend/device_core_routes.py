@@ -344,10 +344,14 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         from active_agents_registry import ACTIVE_AGENTS
         ram_updated = False
         target_lan_uid = ""
-        target_agent_uid = ""
+        target_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
         target_ip = ""
         
         for agent_uid, agent_info in ACTIVE_AGENTS.items():
+            if not target_lan_uid:
+                target_lan_uid = agent_info.get("lan_uid") or ""
+            if not target_agent_uid:
+                target_agent_uid = agent_uid
             printers_list = agent_info.get("printers_json") or []
             for dev in printers_list:
                 if isinstance(dev, dict):
@@ -361,9 +365,12 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                         dev["user"] = auth_user
                         dev["password"] = auth_password
                         ram_updated = True
-                        target_lan_uid = agent_info.get("lan_uid") or ""
+                        target_lan_uid = agent_info.get("lan_uid") or target_lan_uid
                         target_agent_uid = agent_uid
                         target_ip = dev_ip
+
+        if not target_agent_uid and ACTIVE_AGENTS:
+            target_agent_uid = list(ACTIVE_AGENTS.keys())[0]
 
         # 2. Enqueue command for active agent to save auth directly to local printers.json disk file
         with session_factory() as session:

@@ -198,7 +198,13 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 PrinterControlCommand.status == "pending",
             )
             if agent_uid:
-                pending_agent_cmds_stmt = pending_agent_cmds_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+                pending_agent_cmds_stmt = pending_agent_cmds_stmt.where(
+                    or_(
+                        PrinterControlCommand.agent_uid == agent_uid,
+                        PrinterControlCommand.agent_uid == "",
+                        PrinterControlCommand.agent_uid.is_(None),
+                    )
+                )
             pending_agent_cmds_stmt = pending_agent_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
             pending_agent_cmds = session.execute(pending_agent_cmds_stmt).scalars().all()
 
