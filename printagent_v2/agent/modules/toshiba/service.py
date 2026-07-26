@@ -278,24 +278,34 @@ class ToshibaService:
         # 5. Connect and register destination template on Toshiba Copier
         session = requests.Session()
         session.mount("https://", ToshibaSSLAdapter())
-        base_url = f"https://{printer.ip}:10443"
+        base_urls = [
+            f"https://{printer.ip}:10443",
+            f"https://{printer.ip}",
+            f"http://{printer.ip}",
+        ]
         headers = {'Content-Type': 'text/plain; charset=UTF-8', 'Accept': '*/*'}
 
         # Resolve admin credentials
         pws = []
         if printer.password:
             pws.append(printer.password)
+        if getattr(printer, "auth_password", ""):
+            pws.append(getattr(printer, "auth_password"))
         for p in ["123456", "1234", "12345", "admin", ""]:
             if p not in pws:
                 pws.append(p)
-        user_name = printer.user or "admin"
+        user_name = printer.user or getattr(printer, "auth_user", "") or "admin"
 
         login_success = False
         active_pw = ""
+        base_url = base_urls[0]
 
-        LOGGER.info("[ToshibaService] Attempting TopAccess Login on %s...", base_url)
-        for pw in pws:
-            login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        LOGGER.info("[ToshibaService] Attempting TopAccess Login for printer %s...", printer.ip)
+        for target_url in base_urls:
+            if login_success:
+                break
+            for pw in pws:
+                login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <SetValue>
     <Authentication>
@@ -314,22 +324,20 @@ class ToshibaService:
     </Login>
 </Command>
 </DeviceInformationModel>"""
-            try:
-                r = session.post(f"{base_url}/contentwebserver", data=login_xml, headers=headers, verify=False, timeout=8)
-                if r.status_code == 200 and "<LoginResult>Success</LoginResult>" in r.text:
-                    login_success = True
-                    active_pw = pw
-                    break
-            except Exception as e:
-                LOGGER.debug("[ToshibaService] Login attempt failed with password '%s': %s", pw, e)
+                try:
+                    r = session.post(f"{target_url}/contentwebserver", data=login_xml, headers=headers, verify=False, timeout=6)
+                    if r.status_code == 200 and "<LoginResult>Success</LoginResult>" in r.text:
+                        login_success = True
+                        active_pw = pw
+                        base_url = target_url
+                        break
+                except Exception as e:
+                    LOGGER.debug("[ToshibaService] Login attempt failed at %s with password '%s': %s", target_url, pw, e)
 
         if not login_success:
-            return {
-                "ok": False,
-                "error": "Failed to login to Toshiba TopAccess. Please verify administrative credentials."
-            }
+            LOGGER.warning("[ToshibaService] TopAccess Login failed across all URLs for printer %s, attempting template registration without login...", printer.ip)
 
-        LOGGER.info("[ToshibaService] TopAccess logged in successfully using password '%s'", active_pw)
+        LOGGER.info("[ToshibaService] TopAccess active base_url: %s (password: '%s')", base_url, active_pw)
 
         # Register SCAN Group (Group 002) if not exists
         group_xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -581,8 +589,7 @@ class ToshibaService:
         """Fetch registered template/address book entries from Toshiba TopAccess."""
         LOGGER.info("[ToshibaService] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
         start_time = time.time()
-        base_url = f"http://{printer.ip}"
-
+        
         headers = {
             "Content-Type": "text/xml; charset=UTF-8",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -609,12 +616,31 @@ class ToshibaService:
 </Command>
 </DeviceInformationModel>"""
 
+        urls = [
+            f"https://{printer.ip}:10443/contentwebserver",
+            f"https://{printer.ip}/contentwebserver",
+            f"http://{printer.ip}/contentwebserver",
+        ]
+
+        session = requests.Session()
+        session.mount("https://", ToshibaSSLAdapter())
+
         entries = []
-        try:
-            r = requests.post(f"{base_url}/contentwebserver", data=get_templates_xml, headers=headers, verify=False, timeout=8)
-            if r.status_code == 200:
+        raw_resp_text = ""
+        for url in urls:
+            try:
+                r = session.post(url, data=get_templates_xml, headers=headers, verify=False, timeout=6)
+                if r.status_code == 200 and ("<Template" in r.text or "<JobTemplates" in r.text or "<GetTemplateListResult>Success" in r.text):
+                    raw_resp_text = r.text
+                    LOGGER.info("[ToshibaService] Successfully retrieved templates from %s", url)
+                    break
+            except Exception as e:
+                LOGGER.debug("[ToshibaService] Failed to fetch templates from %s: %s", url, e)
+
+        if raw_resp_text:
+            try:
                 pattern = re.compile(r'<Template[^>]*>(.*?)</Template>', re.DOTALL)
-                for match in pattern.finditer(r.text):
+                for match in pattern.finditer(raw_resp_text):
                     block = match.group(1)
                     num_match = re.search(r'<name>(\d+)</name>', block)
                     cap1_match = re.search(r'<caption1>([^<]*)</caption1>', block)
@@ -638,8 +664,8 @@ class ToshibaService:
                         "entry_id": reg_no,
                         "is_agent_local": True
                     })
-        except Exception as e:
-            LOGGER.warning("[ToshibaService] Error fetching address book from TopAccess XML: %s", e)
+            except Exception as e:
+                LOGGER.warning("[ToshibaService] Error parsing TopAccess XML template response: %s", e)
 
         elapsed = time.time() - start_time
         return {
