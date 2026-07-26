@@ -1,8 +1,8 @@
 {
-  "version": "2.3.4",
+  "version": "2.3.5",
   "download_url": "/static/releases/agent_core.zip",
-  "sha256": "e49d319550792ed2595398cead5afcdbfba914a82ba33531413a4eb2b469380b",
-  "size": 289112,
-  "notes": "Auto-packaged v2.3.4 via pack_agent_core.py",
-  "published_at": "2026-07-26T22:08:51.374375+07:00"
+  "sha256": "8074fa0d6488110c571c1d60cc9947098551410cc95e94f28ae0ff65c903300c",
+  "size": 289121,
+  "notes": "Auto-packaged v2.3.5 via pack_agent_core.py",
+  "published_at": "2026-07-26T22:12:21.063964+07:00"
 }
