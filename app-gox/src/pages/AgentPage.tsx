@@ -2937,6 +2937,26 @@ except Exception as e:
                                   }}
                                 >
                                   🛠️ Mở trang Tiện ích
+                                 </button>
+                                 <button
+                                   onClick={() => handleViewScanPointsJson(agent)}
+                                   style={{
+                                     color: '#00ccff',
+                                     fontWeight: 700,
+                                     border: '1px solid #00ccff',
+                                     borderRadius: '6px',
+                                     padding: '4px 8px',
+                                     fontSize: '0.68rem',
+                                     background: 'rgba(0, 204, 255, 0.08)',
+                                     cursor: 'pointer',
+                                     display: 'inline-flex',
+                                     alignItems: 'center',
+                                     gap: '4px',
+                                     marginLeft: '8px',
+                                   }}
+                                   title="Xem toàn bộ tệp scan_points.json trên máy tính này"
+                                 >
+                                   📋 Xem scan_points.json
                                 </button>
                               </span>
                             </div>
@@ -3234,20 +3254,7 @@ except Exception as e:
                             </div>
 
                             <div style={{ display: 'flex', gap: '6px' }}>
-                              <button
-                                style={{
-                                  ...styles.smallBtn,
-                                  padding: '6px 10px',
-                                  fontSize: '0.75rem',
-                                  height: 'auto',
-                                  background: 'rgba(0, 204, 255, 0.12)',
-                                  color: '#00ccff',
-                                  borderColor: 'rgba(0, 204, 255, 0.3)',
-                                }}
-                                onClick={() => handleViewScanPointsJson(p)}
-                              >
-                                📋 Xem scan_points.json
-                              </button>
+
                               <button
                                 style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
                                 onClick={() => handleRefetchAddressBook(p.id)}
@@ -3387,13 +3394,14 @@ except Exception as e:
                             <button
                               style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#3b82f6', color: '#3b82f6' }}
                               onClick={() => {
-                                if (!selectedAgentUid) {
-                                  showToast('Vui lòng chọn Target Agent trước', 'error');
+                                const targetAgent = selectedAgentUid || p.agent_uid || activeAgentUid || (selectedLan?.agents?.[0]?.agent_uid) || '';
+                                if (!targetAgent) {
+                                  showToast('Không tìm thấy Agent nào trong dải mạng LAN này', 'error');
                                   return;
                                 }
-                                fetchRemotePage(p.ip, '', 'GET', null, false, selectedAgentUid, 80);
+                                fetchRemotePage(p.ip, '', 'GET', null, false, targetAgent, 80);
                               }}
-                              disabled={onlineAgents.length === 0 || !selectedAgentUid}
+                              disabled={!selectedLan || !selectedLan.agents || selectedLan.agents.length === 0}
                               title="Xem trực tiếp trang quản trị Web Setting (Port 80)"
                             >
                               🌐 Web setting
