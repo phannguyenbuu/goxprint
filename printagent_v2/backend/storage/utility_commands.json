@@ -51,6 +51,14 @@
     "command_content": "import os, sys, tempfile, json\n\nexe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()\nlocal_app = os.getenv('LOCALAPPDATA', '')\ncandidates = [\n    os.path.join(local_app, 'Temp', 'GoPrinxAgent', 'printers.json'),\n    os.path.join(tempfile.gettempdir(), 'GoPrinxAgent', 'printers.json'),\n    os.path.join(exe_dir, 'storage', 'data', 'printers.json'),\n    os.path.join(exe_dir, 'printers.json'),\n]\nfound = None\nfor p in candidates:\n    if os.path.exists(p):\n        found = p\n        break\nif not found:\n    raise RuntimeError('Không tìm thấy printers.json. Đã thử:\\n' + '\\n'.join(candidates))\n\nwith open(found, 'r', encoding='utf-8', errors='replace') as f:\n    content = f.read()\ntry:\n    parsed = json.loads(content)\n    content = json.dumps(parsed, ensure_ascii=False, indent=2)\nexcept Exception:\n    pass\nmsg = f'[PATH] {found}\\n\\n{content}'\nif globals().get('context'):\n    globals()['context']['result_payload'] = msg\nelse:\n    raise RuntimeError(msg)"
   },
   {
+    "command": "view_scan_points_json",
+    "label": "Xem scan_points.json",
+    "icon": "📋",
+    "description": "Đọc và hiển thị dữ liệu các điểm scan được lưu bền vững (scan_points.json)",
+    "output_modal": true,
+    "command_content": "import os, sys, tempfile, json\n\nexe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()\nlocal_app = os.getenv('LOCALAPPDATA', '')\ncandidates = [\n    os.path.join(local_app, 'Temp', 'GoPrinxAgent', 'scan_points.json'),\n    os.path.join(tempfile.gettempdir(), 'GoPrinxAgent', 'scan_points.json'),\n    os.path.join(exe_dir, 'storage', 'data', 'scan_points.json'),\n    os.path.join(exe_dir, 'scan_points.json'),\n]\nfound = None\nfor p in candidates:\n    if os.path.exists(p):\n        found = p\n        break\nif not found:\n    raise RuntimeError('Không tìm thấy scan_points.json. Đã thử:\\n' + '\\n'.join(candidates))\n\nwith open(found, 'r', encoding='utf-8', errors='replace') as f:\n    content = f.read()\ntry:\n    parsed = json.loads(content)\n    content = json.dumps(parsed, ensure_ascii=False, indent=2)\nexcept Exception:\n    pass\nmsg = f'[PATH] {found}\\n\\n{content}'\nif globals().get('context'):\n    globals()['context']['result_payload'] = msg\nelse:\n    raise RuntimeError(msg)"
+  },
+  {
     "command": "view_stout",
     "label": "Xem stout.txt (1000 dòng)",
     "icon": "📄",

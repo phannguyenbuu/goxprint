@@ -546,26 +546,25 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             "status": "running",
             "acquired_at": datetime.now(timezone.utc).isoformat()
         }
-        return jsonify({"acquired": True, "already_synced": False})
-@lan_bp.get("/api/lan-sites/scan-points")
-def get_scan_points_json() -> Any:
-    mac_id = request.args.get("mac_id", "").strip().upper().replace("-", ":")
+    @app.get("/api/lan-sites/scan-points")
+    def get_scan_points_json() -> Any:
+        mac_id = request.args.get("mac_id", "").strip().upper().replace("-", ":")
 
-    from active_agents_registry import ACTIVE_AGENTS
-    res = {}
-    for agent_info in ACTIVE_AGENTS.values():
-        printers_list = agent_info.get("printers_json") or []
-        for dev in printers_list:
-            if isinstance(dev, dict):
-                dev_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").upper().replace("-", ":")
-                if mac_id and dev_mac != mac_id:
-                    continue
-                sync_data = dev.get("address_book_sync") or {}
-                res[dev_mac] = {
-                    "mac_address": dev_mac,
-                    "ip": dev.get("ip") or dev.get("printer_ip") or "",
-                    "printer_name": dev.get("printer_name") or dev.get("name") or "",
-                    "address_book_sync": sync_data,
-                }
+        from active_agents_registry import ACTIVE_AGENTS
+        res = {}
+        for agent_info in ACTIVE_AGENTS.values():
+            printers_list = agent_info.get("printers_json") or []
+            for dev in printers_list:
+                if isinstance(dev, dict):
+                    dev_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").upper().replace("-", ":")
+                    if mac_id and dev_mac != mac_id:
+                        continue
+                    sync_data = dev.get("address_book_sync") or {}
+                    res[dev_mac] = {
+                        "mac_address": dev_mac,
+                        "ip": dev.get("ip") or dev.get("printer_ip") or "",
+                        "printer_name": dev.get("printer_name") or dev.get("name") or "",
+                        "address_book_sync": sync_data,
+                    }
 
-    return jsonify({"ok": True, "scan_points": res})
+        return jsonify({"ok": True, "scan_points": res})
