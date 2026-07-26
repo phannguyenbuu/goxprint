@@ -33,15 +33,23 @@
       <div class="logo">
         <img src="goxprint.svg" alt="GoxPrint Logo" style="height: 40px; width: auto; display: block;">
       </div>
-      <button id="btn-header-support" class="btn-header-support" title="Gửi yêu cầu hỗ trợ bảo hành">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
-        </svg>
-        <span>Yêu cầu Hỗ trợ & Bảo hành</span>
-      </button>
-      <div class="status-indicator">
-        <div class="status-dot"></div>
-        <span>Hệ thống trực tuyến</span>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button id="btn-download-agent-header" class="btn-download-agent-header" style="display: none; background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; cursor: pointer; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(239,68,68,0.25);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+          </svg>
+          <span>Download Agent</span>
+        </button>
+        <button id="btn-header-support" class="btn-header-support" title="Gửi yêu cầu hỗ trợ bảo hành">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
+          </svg>
+          <span>Yêu cầu Hỗ trợ & Bảo hành</span>
+        </button>
+        <div class="status-indicator">
+          <div class="status-dot"></div>
+          <span>Hệ thống trực tuyến</span>
+        </div>
       </div>
     </div>
   </header>
@@ -49,7 +57,11 @@
   <main class="container">
     
     <!-- 1. Computer Information -->
-    <section class="sys-info-section">
+    <section class="sys-info-section" aria-labelledby="sys-info-title">
+      <h2 id="sys-info-title" class="section-title">
+        Thông tin máy tính
+        <span class="badge">Live</span>
+      </h2>
       <div class="sys-info-grid">
         <!-- Public IP Card -->
         <div class="info-card public">
@@ -88,58 +100,43 @@
     <!-- 2. Installer Actions & Forms -->
     <section class="installer-section" aria-labelledby="installer-title">
       <h1 id="installer-title" style="display:none">Auto-Gox Installer Hub</h1>
+      <h2 class="section-title">Chọn tác vụ cài đặt</h2>
       
-      <!-- 2-Column Task Selection Layout -->
-      <div class="task-selection-wrapper">
-        <!-- Column 1: Warning Banner Image -->
-        <div class="task-banner-col">
-          <img src="warning.jpg" alt="Lưu ý cài đặt" class="task-banner-img">
+      <!-- Big Action Buttons (Original 3-Grid) -->
+      <div class="action-grid">
+        <div id="btn-action-driver" class="action-btn-card" role="button" tabindex="0">
+          <div class="action-icon-wrapper">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+              <rect x="6" y="14" width="12" height="8" rx="1" ry="1"></rect>
+              <path d="M6 9V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"></path>
+            </svg>
+          </div>
+          <span class="action-title">Cài Driver</span>
+          <span class="action-desc">Cấu hình driver in ấn tự động cho máy tính của bạn</span>
         </div>
 
-        <!-- Column 2: All 3 Action Buttons -->
-        <div class="action-grid-col">
-          <h2 class="section-title" style="margin-top: 0; margin-bottom: 12px;">Chọn tác vụ cài đặt</h2>
-
-          <div id="btn-action-driver" class="action-btn-card" role="button" tabindex="0">
-            <div class="action-icon-wrapper">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                <rect x="6" y="14" width="12" height="8" rx="1" ry="1"></rect>
-                <path d="M6 9V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"></path>
-              </svg>
-            </div>
-            <div class="action-text-wrapper">
-              <span class="action-title">Cài Driver</span>
-              <span class="action-desc">Cấu hình driver in ấn tự động cho máy tính của bạn</span>
-            </div>
+        <div id="btn-action-scan" class="action-btn-card" role="button" tabindex="0">
+          <div class="action-icon-wrapper">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v8M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              <rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect>
+            </svg>
           </div>
-
-          <div id="btn-action-scan" class="action-btn-card" role="button" tabindex="0">
-            <div class="action-icon-wrapper">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2v8M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                <rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect>
-              </svg>
-            </div>
-            <div class="action-text-wrapper">
-              <span class="action-title">Cài Scan</span>
-              <span class="action-desc">Cài đặt tính năng số hoá tài liệu (Scan-to-Cloud/Folder)</span>
-            </div>
-          </div>
-
-          <div id="btn-action-both" class="action-btn-card" role="button" tabindex="0">
-            <div class="action-icon-wrapper">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-              </svg>
-            </div>
-            <div class="action-text-wrapper">
-              <span class="action-title">Cài Driver + Scan</span>
-              <span class="action-desc">Thiết lập trọn gói cả in ấn và quét tài liệu nhanh chóng</span>
-            </div>
-          </div>
+          <span class="action-title">Cài Scan</span>
+          <span class="action-desc">Cài đặt tính năng số hoá tài liệu (Scan-to-Cloud/Folder)</span>
         </div>
+
+        <div id="btn-action-both" class="action-btn-card" role="button" tabindex="0">
+          <div class="action-icon-wrapper">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+          </div>
+          <span class="action-title">Cài Driver + Scan</span>
+          <span class="action-desc">Thiết lập trọn gói cả in ấn và quét tài liệu nhanh chóng</span>
       </div>
+    </section>
 
       <!-- Modal Install Dialog -->
       <div id="install-modal" class="modal-overlay" style="display: none;">
@@ -329,6 +326,24 @@
       <p>&copy; 2026 Auto-Gox Support Portal. Thiết kế giao diện hiện đại & chuyên nghiệp.</p>
     </div>
   </footer>
+
+  <!-- Warning / Download Agent Modal -->
+  <div id="download-warning-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(6px); z-index: 99999; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: #ffffff; border-radius: 20px; max-width: 620px; width: 100%; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.3); display: flex; flex-direction: column; position: relative;">
+      <button id="btn-close-warning-modal" style="position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.5); color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; font-size: 18px;">✕</button>
+      <div style="background: #f8fafc; padding: 16px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+        <img src="warning.jpg" alt="Hướng dẫn cài đặt PrintAgent" style="max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 12px;">
+      </div>
+      <div style="padding: 24px; text-align: center;">
+        <h3 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin-bottom: 8px;">Cần cài đặt & kích hoạt PrintAgent</h3>
+        <p style="font-size: 14px; color: #64748b; line-height: 1.5; margin-bottom: 20px;">Vui lòng tải xuống và khởi chạy ứng dụng PrintAgent trên máy tính này để tự động kết nối máy photocopy và quét tài liệu Scan.</p>
+        <a href="https://download.goxprint.com/printagentinstall.exe" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #3b82f6; color: white; padding: 14px 28px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4); transition: all 0.2s;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+          <span>Tải xuống PrintAgent (Windows)</span>
+        </a>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast Notification Area -->
   <div id="toast-container" class="toast-container"></div>

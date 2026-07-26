@@ -47,6 +47,28 @@ document.addEventListener('DOMContentLoaded', () => {
     initSupportForm();
     initFormSubmissions();
     
+    // Download Agent Header Button & Modal Handler
+    const btnDownloadHeader = document.getElementById('btn-download-agent-header');
+    const warningModal = document.getElementById('download-warning-modal');
+    const btnCloseWarning = document.getElementById('btn-close-warning-modal');
+
+    if (btnDownloadHeader) {
+      btnDownloadHeader.addEventListener('click', () => {
+        if (warningModal) warningModal.style.display = 'flex';
+      });
+    }
+
+    if (btnCloseWarning && warningModal) {
+      btnCloseWarning.addEventListener('click', () => {
+        warningModal.style.display = 'none';
+      });
+      warningModal.addEventListener('click', (e) => {
+        if (e.target === warningModal) {
+          warningModal.style.display = 'none';
+        }
+      });
+    }
+
     // Probe local/VPS agent silently on init
     localAgent = await probeLocalAgent();
     
@@ -56,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
       statusDot.style.backgroundColor = '#ef4444';
       statusText.textContent = 'Chưa bật PrintAgent';
       lanIpEl.textContent = 'Chưa bật PrintAgent';
+      if (btnDownloadHeader) btnDownloadHeader.style.display = 'inline-flex';
       startBackgroundProbing();
     }
     
@@ -71,6 +94,9 @@ document.addEventListener('DOMContentLoaded', () => {
     statusText.textContent = 'Đã kết nối PrintAgent';
     lanIpEl.textContent = localAgent.pc_ip || '127.0.0.1';
     
+    const btnDownloadHeader = document.getElementById('btn-download-agent-header');
+    if (btnDownloadHeader) btnDownloadHeader.style.display = 'none';
+
     showToast('Đã kết nối thành công với PrintAgent cục bộ.', 'success');
     
     // Dismiss overlay if present
