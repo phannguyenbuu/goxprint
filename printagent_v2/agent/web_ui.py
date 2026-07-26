@@ -42,7 +42,7 @@ def register_ui_routes(app):
     def settings() -> Any:
         return redirect(url_for("devices"))
 
-    @app.get("/api/ui/config")
+    @app.route("/api/ui/config", methods=["GET", "OPTIONS"])
     def api_ui_config() -> Any:
         bridge: PollingBridge = app.config["POLLING_BRIDGE"]
         hostname = socket.gethostname()

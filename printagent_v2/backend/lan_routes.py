@@ -144,6 +144,23 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             
     valid_matches = [m for m in matches if m["score"] > 0]
     valid_matches.sort(key=lambda x: x["score"], reverse=True)
+    if not valid_matches and is_toshiba:
+        return [{
+            "brand": "toshiba",
+            "model": printer_name,
+            "score": 10,
+            "support_url": "https://business.toshiba.com/support",
+            "drivers": [
+                {
+                    "name": "TOSHIBA - Universal Printer Driver (PCL6 64-bit)",
+                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
+                },
+                {
+                    "name": "TOSHIBA - Generic Printer Driver",
+                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/22024/Toshiba_Generic_Printer_Driver_Installation_Package_10242025.zip"
+                }
+            ]
+        }]
     return valid_matches[:5]
 
 

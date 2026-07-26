@@ -82,12 +82,22 @@ def create_app(
     from flask_cors import CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PATCH, PUT, DELETE"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, X-Lead-Token, Access-Control-Request-Private-Network"
+            return response
+
     @app.after_request
     def add_pna_headers(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Private-Network"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PATCH, PUT, DELETE"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, X-Lead-Token"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, X-Lead-Token, Access-Control-Request-Private-Network"
         return response
     
     config = AppConfig.load()

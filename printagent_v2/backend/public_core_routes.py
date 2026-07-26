@@ -796,7 +796,16 @@ context["result_payload"] = payload
                             ).scalar_one_or_none()
             
             if not agent_node:
-                return jsonify({"ok": False, "error": "Agent workstation not found with the specified parameters"}), 404
+                lead_val = _coalesce_request_lead(request.args.get("lead"), lead_key_map)
+                agent_node = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.lead == lead_val)
+                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+
+            if not agent_node:
+                return jsonify({"ok": False, "error": "Agent workstation not found"}), 404
                 
             return jsonify({
                 "ok": True,
