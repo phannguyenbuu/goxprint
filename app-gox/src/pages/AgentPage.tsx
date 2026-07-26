@@ -307,6 +307,55 @@ export function AgentPage() {
   // Info Detail states
   const [infoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
 
+  // 📋 Scan Points Viewer Modal State
+  const [scanPointsViewerModal, setScanPointsViewerModal] = useState<{
+    isOpen: boolean;
+    copierName: string;
+    macId: string;
+    loading: boolean;
+    jsonData: any;
+  }>({
+    isOpen: false,
+    copierName: '',
+    macId: '',
+    loading: false,
+    jsonData: null,
+  });
+
+  const handleViewScanPointsJson = async (p: any) => {
+    const macClean = (p.mac_id || p.mac_address || "").replace(/-/g, ":").toUpperCase();
+    setScanPointsViewerModal({
+      isOpen: true,
+      copierName: p.printer_name || "Máy Photocopy",
+      macId: macClean,
+      loading: true,
+      jsonData: null,
+    });
+    try {
+      const res = await fetch(`${BASE_URL}/api/lan-sites/scan-points?mac_id=${encodeURIComponent(macClean)}`);
+      const data = await res.json();
+      if (data.ok && data.scan_points) {
+        setScanPointsViewerModal(prev => ({
+          ...prev,
+          loading: false,
+          jsonData: data.scan_points[macClean] || data.scan_points || p.address_book_sync || {},
+        }));
+      } else {
+        setScanPointsViewerModal(prev => ({
+          ...prev,
+          loading: false,
+          jsonData: p.address_book_sync || { message: "Không tìm thấy dữ liệu scan_points.json trên VPS" },
+        }));
+      }
+    } catch (err) {
+      setScanPointsViewerModal(prev => ({
+        ...prev,
+        loading: false,
+        jsonData: p.address_book_sync || { error: "Lỗi kết nối VPS" },
+      }));
+    }
+  };
+
   // Scroll and tracking references
   const [initialLastViewedId] = useState<string>(() => {
     return localStorage.getItem('goxprint_last_viewed_copier_id') || '';
@@ -3147,6 +3196,20 @@ except Exception as e:
                             </div>
 
                             <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                style={{
+                                  ...styles.smallBtn,
+                                  padding: '6px 10px',
+                                  fontSize: '0.75rem',
+                                  height: 'auto',
+                                  background: 'rgba(0, 204, 255, 0.12)',
+                                  color: '#00ccff',
+                                  borderColor: 'rgba(0, 204, 255, 0.3)',
+                                }}
+                                onClick={() => handleViewScanPointsJson(p)}
+                              >
+                                📋 Xem scan_points.json
+                              </button>
                               <button
                                 style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
                                 onClick={() => handleRefetchAddressBook(p.id)}
@@ -6748,6 +6811,164 @@ raise RuntimeError('\\n'.join(lines))`;
               );
             })()}
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* 📋 SCAN POINTS JSON VIEWER MODAL */}
+      <AnimatePresence>
+        {scanPointsViewerModal.isOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.85)',
+              backdropFilter: 'blur(8px)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px',
+            }}
+            onClick={() => setScanPointsViewerModal(prev => ({ ...prev, isOpen: false }))}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              style={{
+                background: '#121826',
+                border: '1px solid rgba(0, 204, 255, 0.3)',
+                borderRadius: '16px',
+                width: '100%',
+                maxWidth: '680px',
+                maxHeight: '85vh',
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+                overflow: 'hidden',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '16px 20px',
+                  borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(0, 204, 255, 0.05)',
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#00ccff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    📋 Tệp dữ liệu scan_points.json
+                  </h3>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                    {scanPointsViewerModal.copierName} · MAC: {scanPointsViewerModal.macId || 'N/A'}
+                  </div>
+                </div>
+                <button
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--color-text-secondary)',
+                    fontSize: '1.3rem',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => setScanPointsViewerModal(prev => ({ ...prev, isOpen: false }))}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+                {scanPointsViewerModal.loading ? (
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#00ccff' }}>
+                    ⏳ Đang tải nội dung tệp scan_points.json...
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                        Local Agent path: <code style={{ color: '#00ccff' }}>.../GoPrinxAgent/scan_points.json</code>
+                      </span>
+                      <button
+                        style={{
+                          background: 'rgba(0, 255, 136, 0.15)',
+                          border: '1px solid rgba(0, 255, 136, 0.3)',
+                          color: '#00ff88',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(JSON.stringify(scanPointsViewerModal.jsonData, null, 2));
+                          showToast('Đã sao chép nội dung scan_points.json!', 'success');
+                        }}
+                      >
+                        📋 Copy JSON
+                      </button>
+                    </div>
+
+                    <pre
+                      style={{
+                        background: '#0a0d14',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '8px',
+                        padding: '14px',
+                        color: '#a0aec0',
+                        fontSize: '0.8rem',
+                        fontFamily: 'Consolas, Monaco, monospace',
+                        overflowX: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        margin: 0,
+                        maxHeight: '450px',
+                      }}
+                    >
+                      {JSON.stringify(scanPointsViewerModal.jsonData, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div
+                style={{
+                  padding: '12px 20px',
+                  borderTop: '1px solid rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  background: 'rgba(0,0,0,0.2)',
+                }}
+              >
+                <button
+                  style={{
+                    background: 'var(--color-surface-light)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#fff',
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => setScanPointsViewerModal(prev => ({ ...prev, isOpen: false }))}
+                >
+                  Đóng
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
