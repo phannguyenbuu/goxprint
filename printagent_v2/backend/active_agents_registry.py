@@ -91,7 +91,7 @@ def prune_offline_agents(timeout_seconds: int = 120) -> None:
 
 
 def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
-    prune_offline_agents(timeout_seconds=120)
+    prune_offline_agents(timeout_seconds=180)
     norm_mac = mac_id.upper().replace("-", ":")
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
         devices = agent_info.get("devices", {})
@@ -109,6 +109,28 @@ def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
                 "status": dev.get("status") or {},
                 "last_seen_at": dev.get("updated_at", ""),
             }
+
+        # Also search in-memory printers_json payload from active agents
+        printers_list = agent_info.get("printers_json") or []
+        for dev in printers_list:
+            if not isinstance(dev, dict):
+                continue
+            dev_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").upper().replace("-", ":")
+            if dev_mac == norm_mac:
+                return {
+                    "ok": True,
+                    "mac_id": norm_mac,
+                    "lead": agent_info.get("lead", "default"),
+                    "lan_uid": agent_info.get("lan_uid", "default"),
+                    "agent_uid": agent_uid,
+                    "printer_name": dev.get("printer_name") or dev.get("name") or "Photocopy",
+                    "ip": dev.get("ip", ""),
+                    "auth_user": dev.get("auth_user") or dev.get("user") or "",
+                    "auth_password": dev.get("auth_password") or dev.get("password") or "",
+                    "counter": {},
+                    "status": {},
+                    "last_seen_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
+                }
     return None
 
 

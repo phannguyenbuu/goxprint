@@ -73,6 +73,24 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         if mem_device:
             return jsonify(mem_device)
 
+        with session_factory() as session:
+            p_obj = session.execute(select(Printer).where(func.upper(Printer.mac_address) == normalized_mac)).scalars().first()
+            if p_obj:
+                return jsonify({
+                    "ok": True,
+                    "mac_id": normalized_mac,
+                    "lead": p_obj.lead,
+                    "lan_uid": p_obj.lan_uid,
+                    "agent_uid": p_obj.agent_uid,
+                    "printer_name": p_obj.printer_name,
+                    "ip": p_obj.ip,
+                    "auth_user": p_obj.auth_user or "",
+                    "auth_password": p_obj.auth_password or "",
+                    "counter": {},
+                    "status": {},
+                    "last_seen_at": p_obj.updated_at.isoformat() if p_obj.updated_at else "",
+                })
+
         return jsonify({"ok": False, "error": "Device not found for mac_id in active agents"}), 404
 
 
