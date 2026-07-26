@@ -5211,7 +5211,7 @@ Write-Output 'INSTALLED'
             except Exception as exc:
                 LOGGER.warning("Failed to reload configuration: %s", exc)
 
-            if not self._config.get_bool("polling.enabled", False) or not self._config.get_bool("polling.device_enabled", True):
+            if not self._config.get_bool("polling.enabled", True) or not self._config.get_bool("polling.device_enabled", True):
                 time.sleep(1.0)
                 continue
 
