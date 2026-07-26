@@ -803,13 +803,14 @@ document.addEventListener('DOMContentLoaded', () => {
               try {
                 const driverRes = await installDriverApi(printer.id, item.brand, item.modelName, item.driverName, item.driverUrl);
                 if (driverRes.ok && driverRes.command_id) {
-                  const success = await trackCommandProgressPromise(driverRes.command_id, (msg) => {
+                  const trackerRes = await trackCommandProgressPromise(driverRes.command_id, (msg) => {
                     updateSubStepProgress(stepId, msg);
                   });
-                  if (success) {
+                  if (trackerRes.ok) {
                     setStepStatus(stepId, 'success', 'Cài đặt Driver thành công!');
                   } else {
-                    setStepStatus(stepId, 'failed', 'Cài đặt Driver thất bại!');
+                    const failReason = trackerRes.error || 'Cài đặt Driver thất bại!';
+                    setStepStatus(stepId, 'failed', failReason.startsWith('Lỗi:') ? failReason : `Lỗi: ${failReason}`);
                   }
                 } else {
                   setStepStatus(stepId, 'failed', 'Không thể tạo lệnh cài đặt Driver.');
@@ -828,13 +829,14 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
               const scanRes = await addEmailDestApi(printer.id, folderName, scanEmail);
               if (scanRes.ok && scanRes.command_id) {
-                const success = await trackCommandProgressPromise(scanRes.command_id, (msg) => {
+                const trackerRes = await trackCommandProgressPromise(scanRes.command_id, (msg) => {
                   updateSubStepProgress(stepId, msg);
                 });
-                if (success) {
+                if (trackerRes.ok) {
                   setStepStatus(stepId, 'success', 'Cấu hình Scan thành công!');
                 } else {
-                  setStepStatus(stepId, 'failed', 'Cấu hình Scan thất bại!');
+                  const failReason = trackerRes.error || 'Cấu hình Scan thất bại!';
+                  setStepStatus(stepId, 'failed', failReason.startsWith('Lỗi:') ? failReason : `Lỗi: ${failReason}`);
                 }
               } else {
                 setStepStatus(stepId, 'failed', 'Không thể tạo lệnh cấu hình Scan.');
@@ -904,8 +906,9 @@ document.addEventListener('DOMContentLoaded', () => {
           const elapsed = Date.now() - start;
           if (elapsed > 120000) { // 2 mins timeout
             clearInterval(timer);
-            onUpdate('Hết thời gian chờ phản hồi từ Agent (120s)');
-            resolve(false);
+            const timeoutErr = 'Hết thời gian chờ phản hồi từ Agent (120s)';
+            onUpdate(timeoutErr);
+            resolve({ ok: false, error: timeoutErr });
             return;
           }
 
@@ -916,13 +919,14 @@ document.addEventListener('DOMContentLoaded', () => {
           if (data.status === 'success') {
             clearInterval(timer);
             onUpdate('Hoàn thành xử lý.');
-            resolve(true);
+            resolve({ ok: true, error: '' });
           } else if (data.status === 'failed') {
             clearInterval(timer);
-            onUpdate(`Lỗi: ${data.error_message || 'Thất bại không rõ nguyên nhân'}`);
-            resolve(false);
+            const errDetail = data.error_message || data.error || data.result || 'Thất bại không rõ nguyên nhân';
+            onUpdate(`Lỗi: ${errDetail}`);
+            resolve({ ok: false, error: errDetail });
           } else {
-            const text = data.progress_text || 'Đang chờ máy Agent phản hồi...';
+            const text = data.progress_text || data.message || 'Đang chờ máy Agent phản hồi...';
             if (text !== lastText) {
               onUpdate(text);
               lastText = text;
