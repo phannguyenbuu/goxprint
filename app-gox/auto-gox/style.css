@@ -361,6 +361,12 @@ header {
 }
 
 /* CTA Download Agent Pulsing Animation */
+.download-agent-cta-section {
+  margin-top: 32px;
+  margin-bottom: 64px;
+  padding-bottom: 24px;
+}
+
 @keyframes ctaPulse {
   0% {
     box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 10px 25px -5px rgba(239, 68, 68, 0.4);
