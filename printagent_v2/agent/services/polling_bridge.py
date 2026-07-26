@@ -3505,9 +3505,10 @@ if ($node) {{ $node }}
             LOGGER.info("[PollingBridge] === START fetch_address_book command: ID=%s, printer=%s (IP=%s) ===", command_id, printer.name, printer.ip)
             self._send_gui_status("Lệnh", f"Đồng bộ danh bạ máy in {printer.name} ({printer.ip})...")
             try:
-                # Fetch the entire address book of the Ricoh machine (without auto-reconciliation)
+                # Fetch the entire address book of the copier machine (Ricoh / Toshiba)
                 LOGGER.info("[PollingBridge] Calling process_address_list for %s...", printer.ip)
-                result = self._ricoh_service.process_address_list(printer)
+                collector = self._collector_service_for(printer)
+                result = collector.process_address_list(printer)
                 LOGGER.info("[PollingBridge] process_address_list returned %d items", len(result.get("address_list", []) if isinstance(result, dict) else []))
                 LOGGER.info("[PollingBridge] Posting control result back to server for command ID: %s", command_id)
                 self._post_control_result(command_id=command_id, ok=True, error="", address_book_data=result)

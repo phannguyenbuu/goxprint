@@ -577,3 +577,85 @@ class ToshibaService:
                 "ftp_upload_path": share_name,
             }
 
+    def process_address_list(self, printer: Printer) -> dict[str, Any]:
+        """Fetch registered template/address book entries from Toshiba TopAccess."""
+        LOGGER.info("[ToshibaService] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
+        start_time = time.time()
+        base_url = f"http://{printer.ip}"
+
+        headers = {
+            "Content-Type": "text/xml; charset=UTF-8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "*/*"
+        }
+
+        get_templates_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<DeviceInformationModel>
+<GetValue>
+    <JobTemplates>
+        <View>
+            <TemplateList/>
+        </View>
+    </JobTemplates>
+</GetValue>
+<Command>
+    <GetTemplateList>
+        <commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>
+        <Params>
+            <param name='selectedGroup'>002</param>
+            <param name='locale'>en_GB</param>
+        </Params>
+    </GetTemplateList>
+</Command>
+</DeviceInformationModel>"""
+
+        entries = []
+        try:
+            r = requests.post(f"{base_url}/contentwebserver", data=get_templates_xml, headers=headers, verify=False, timeout=8)
+            if r.status_code == 200:
+                pattern = re.compile(r'<Template[^>]*>(.*?)</Template>', re.DOTALL)
+                for match in pattern.finditer(r.text):
+                    block = match.group(1)
+                    num_match = re.search(r'<name>(\d+)</name>', block)
+                    cap1_match = re.search(r'<caption1>([^<]*)</caption1>', block)
+                    cap2_match = re.search(r'<caption2>([^<]*)</caption2>', block)
+                    
+                    reg_no = num_match.group(1) if num_match else "001"
+                    c1 = cap1_match.group(1).strip() if cap1_match else ""
+                    c2 = cap2_match.group(1).strip() if cap2_match else ""
+                    disp_name = c2 or c1 or f"Template {reg_no}"
+                    
+                    entries.append({
+                        "registration_no": reg_no.zfill(3),
+                        "name": disp_name,
+                        "key_display": disp_name,
+                        "title_1": c1,
+                        "title_2": c2,
+                        "title_3": "",
+                        "auth_user": "",
+                        "folder": f"\\\\{printer.ip}\\scan",
+                        "email": "",
+                        "entry_id": reg_no,
+                        "is_agent_local": True
+                    })
+        except Exception as e:
+            LOGGER.warning("[ToshibaService] Error fetching address book from TopAccess XML: %s", e)
+
+        elapsed = time.time() - start_time
+        return {
+            "printer_name": printer.name,
+            "ip": printer.ip,
+            "address_list": entries,
+            "elapsed_seconds": round(elapsed, 2),
+        }
+
+    def delete_address_entries(
+        self,
+        printer: Printer,
+        registration_numbers: list[str],
+        entry_ids: list[str] | None = None,
+        verify: bool = True,
+    ) -> None:
+        """Delete template entries on Toshiba copier."""
+        LOGGER.info("[ToshibaService] Deleting entries %s on Toshiba %s", registration_numbers, printer.ip)
+
