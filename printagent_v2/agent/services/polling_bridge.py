@@ -2885,6 +2885,7 @@ if ($node) {{ $node }}
             except Exception:
                 pass
 
+        LOGGER.info("[PUSH INVENTORY] Pushing %d printers from printers.json/discovery to VPS for agent %s", len(devices), agent_uid)
         payload = {
             "lead": lead,
             "lan_uid": lan_uid,

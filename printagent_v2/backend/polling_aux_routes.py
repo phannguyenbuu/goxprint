@@ -929,6 +929,8 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not isinstance(devices_list, list):
             devices_list = []
 
+        LOGGER.info("[INVENTORY INGEST] Received %d devices from agent '%s' (lan_uid: %s)", len(devices_list), agent_uid, lan_uid)
+
         from active_agents_registry import update_agent_in_memory
         update_agent_in_memory(
             lead=lead_valid,
