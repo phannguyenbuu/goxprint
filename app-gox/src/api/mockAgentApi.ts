@@ -216,10 +216,10 @@ export async function mockDeleteAgent(agentId: string): Promise<AgentActionResul
 
 // ── REAL API CALLS TO VPS BACKEND ──
 
-export async function saveCopierCredentials(printerId: string, user: string, pass: string): Promise<any> {
-  return fetchApi(`/api/devices/${printerId}/credentials`, {
+export async function saveCopierCredentials(printerRef: string, user: string, pass: string, macId?: string): Promise<any> {
+  return fetchApi(`/api/devices/${encodeURIComponent(printerRef)}/credentials`, {
     method: 'PATCH',
-    body: JSON.stringify({ auth_user: user, auth_password: pass })
+    body: JSON.stringify({ auth_user: user, auth_password: pass, mac_id: macId || printerRef })
   });
 }
 

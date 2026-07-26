@@ -1814,30 +1814,59 @@ except Exception as e:
   }, [selectedLan]);
 
   // ── SAVE AUTH (WEB CREDENTIALS) ──
-  const handleSaveAuth = async (printerId: string) => {
+  const handleSaveAuth = async (p: any) => {
+    const printerId = String(typeof p === 'object' ? p.id : p);
+    const macId = typeof p === 'object' ? (p.mac_id || p.mac_address || '') : printerId;
     const creds = copierCredentials[printerId] || { user: '', pass: '' };
     setSaveAuthLoading((prev) => ({ ...prev, [printerId]: true }));
     try {
-      const res = await saveCopierCredentials(printerId, creds.user, creds.pass);
+      const res = await saveCopierCredentials(macId || printerId, creds.user, creds.pass, macId);
       if (res.ok) {
-        showToast('Đã lưu tài khoản Web UI máy photocopy thành công', 'success');
-        // Update local status in state
-        setLanSites((prevSites) =>
-          prevSites.map((site) => ({
-            ...site,
-            printers: site.printers.map((p) =>
-              String(p.id) === String(printerId)
-                ? { ...p, auth_user: creds.user, auth_password: creds.pass }
-                : p
-            ),
-          }))
-        );
+        const cmdId = res.command_id || res.id;
+        if (cmdId) {
+          showToast('Đã tạo lệnh lưu Auth, đang đợi Agent thực thi và ghi vào đĩa...', 'info', 3000);
+          pollCommandStatus(
+            cmdId,
+            printerId,
+            () => {
+              showToast('Đã lưu tài khoản Web UI thành công vào printers.json trên máy Agent!', 'success');
+              setLanSites((prevSites) =>
+                prevSites.map((site) => ({
+                  ...site,
+                  printers: site.printers.map((item) =>
+                    String(item.id) === String(printerId) || (macId && item.mac_id === macId)
+                      ? { ...item, auth_user: creds.user, auth_password: creds.pass }
+                      : item
+                  ),
+                }))
+              );
+              setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+            },
+            (errorMsg) => {
+              showToast(`Lỗi Agent lưu Auth: ${errorMsg}`, 'error');
+              setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+            },
+            'Đang thực thi lưu tài khoản vào tệp printers.json...'
+          );
+        } else {
+          showToast('Đã lưu tài khoản Web UI máy photocopy thành công', 'success');
+          setLanSites((prevSites) =>
+            prevSites.map((site) => ({
+              ...site,
+              printers: site.printers.map((item) =>
+                String(item.id) === String(printerId) || (macId && item.mac_id === macId)
+                  ? { ...item, auth_user: creds.user, auth_password: creds.pass }
+                  : item
+              ),
+            }))
+          );
+          setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+        }
       } else {
         throw new Error(res.error || 'Lưu thất bại');
       }
     } catch (err: any) {
       showToast(`Lỗi lưu Auth: ${err.message}`, 'error');
-    } finally {
       setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
     }
   };
@@ -3126,7 +3155,7 @@ except Exception as e:
                               />
                               <button
                                 style={{ ...styles.smallBtn, padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                                onClick={() => handleSaveAuth(p.id)}
+                                onClick={() => handleSaveAuth(p)}
                                 disabled={saveAuthLoading[p.id]}
                               >
                                 {saveAuthLoading[p.id] ? 'Lưu...' : 'Lưu Auth'}
