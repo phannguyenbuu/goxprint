@@ -73,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Probe local/VPS agent silently on init
     localAgent = await probeLocalAgent();
     
+    const installerSection = document.querySelector('.installer-section');
     if (localAgent) {
       await onAgentConnected();
     } else {
@@ -81,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
       lanIpEl.textContent = 'Chưa bật PrintAgent';
       if (btnCopyLan) btnCopyLan.style.display = 'none';
       if (btnDownloadCard) btnDownloadCard.style.display = 'inline-flex';
+      if (installerSection) installerSection.style.display = 'none';
       startBackgroundProbing();
     }
     
@@ -98,8 +100,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const btnCopyLan = document.getElementById('btn-copy-lan');
     const btnDownloadCard = document.getElementById('btn-download-agent-card');
+    const installerSection = document.querySelector('.installer-section');
     if (btnCopyLan) btnCopyLan.style.display = 'inline-flex';
     if (btnDownloadCard) btnDownloadCard.style.display = 'none';
+    if (installerSection) installerSection.style.display = 'block';
 
     showToast('Đã kết nối thành công với PrintAgent cục bộ.', 'success');
     
