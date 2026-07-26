@@ -81,5 +81,13 @@
     "description": "Tạo lối tắt (Shortcut) thư mục Scan (%TEMP%/GoPrinxAgent/ftp) ra màn hình Desktop của PC",
     "output_modal": true,
     "command_content": "import os, sys, tempfile, subprocess, pathlib\n\ntemp_dir = pathlib.Path(tempfile.gettempdir()) / 'GoPrinxAgent' / 'ftp'\ntemp_dir.mkdir(parents=True, exist_ok=True)\n\ndesktop_dir = pathlib.Path.home() / 'Desktop'\nif not desktop_dir.exists():\n    desktop_dir = pathlib.Path(os.path.expanduser('~')) / 'Desktop'\n\nshortcut_path = desktop_dir / 'Thu muc Scan (GoPrinx).lnk'\n\nps_cmd = f\"\"\"\n$WshShell = New-Object -ComObject WScript.Shell\n$Shortcut = $WshShell.CreateShortcut(\"{shortcut_path}\")\n$Shortcut.TargetPath = \"{temp_dir}\"\n$Shortcut.Description = \"Thu muc luu tru tep Scan cua GoPrinx PrintAgent\"\n$Shortcut.Save()\n\"\"\"\n\nres = subprocess.run(['powershell', '-NoProfile', '-Command', ps_cmd], capture_output=True, text=True, errors='ignore')\nif shortcut_path.exists():\n    msg = f\"✅ Đã tạo thành công Shortcut 'Thu muc Scan (GoPrinx).lnk' ngoài Desktop!\\nĐường dẫn gốc: {temp_dir}\"\nelse:\n    msg = f\"❌ Không thể tạo Shortcut. Lỗi: {res.stderr or res.stdout or 'Không rõ nguyên nhân'}\"\n\nif globals().get('context'):\n    globals()['context']['result_payload'] = msg\nelse:\n    raise RuntimeError(msg)"
+  },
+  {
+    "command": "clean_temp",
+    "label": "Dọn dẹp rác Temp & Driver tạm",
+    "icon": "🧹",
+    "description": "Xoá sạch toàn bộ thư mục tạm rác driver (gox_driver_*, printagent_driver_*, *.tmp) trong %TEMP% để giải phóng ổ đĩa C",
+    "output_modal": true,
+    "command_content": "import os, sys, shutil, tempfile, glob\n\ntmp = tempfile.gettempdir()\ncleaned_count = 0\nfreed_bytes = 0\nerrors = []\n\npatterns = ['gox_driver_*', 'printagent_driver_*', 'gox_temp_*', '*.tmp']\nfor pat in patterns:\n    for p in glob.glob(os.path.join(tmp, pat)):\n        try:\n            if os.path.isdir(p):\n                size = sum(os.path.getsize(os.path.join(dirpath, f)) for dirpath, _, filenames in os.walk(p) for f in filenames)\n                shutil.rmtree(p, ignore_errors=True)\n                cleaned_count += 1\n                freed_bytes += size\n            elif os.path.isfile(p):\n                size = os.path.getsize(p)\n                os.remove(p)\n                cleaned_count += 1\n                freed_bytes += size\n        except Exception as e:\n            errors.append(f'{p}: {e}')\n\nfreed_mb = freed_bytes / (1024 * 1024)\nmsg = f'✅ Đã dọn dẹp {cleaned_count} thư mục/tập tin tạm!\\nBộ nhớ giải phóng: {freed_mb:.1f} MB'\nif errors:\n    msg += f'\\n(Một số tập tin đang bận: {len(errors)})'\n\nif globals().get('context'):\n    globals()['context']['result_payload'] = msg\nelse:\n    raise RuntimeError(msg)"
   }
 ]
