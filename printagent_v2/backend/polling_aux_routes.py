@@ -925,10 +925,18 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
 
         lan_uid = _to_text(body.get("lan_uid"))
         agent_uid = _to_text(body.get("agent_uid")) or "legacy-agent"
-        devices_list = body.get("devices")
-
         if not isinstance(devices_list, list):
             devices_list = []
+
+        from active_agents_registry import update_agent_in_memory
+        update_agent_in_memory(
+            lead=lead_valid,
+            lan_uid=lan_uid,
+            agent_uid=agent_uid,
+            hostname=_to_text(body.get("hostname")),
+            local_ip=_to_text(body.get("local_ip")),
+            devices_list=devices_list,
+        )
 
         utc_now = datetime.now(timezone.utc)
         active_macs = set()

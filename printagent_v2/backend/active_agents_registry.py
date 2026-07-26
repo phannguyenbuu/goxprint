@@ -27,6 +27,7 @@ def update_agent_in_memory(
     mac_id: str = "",
     counter_data: dict[str, Any] | None = None,
     status_data: dict[str, Any] | None = None,
+    devices_list: list[dict[str, Any]] | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     key = agent_uid or "legacy-agent"
@@ -44,6 +45,7 @@ def update_agent_in_memory(
             "web_port": web_port,
             "last_seen_at": now,
             "devices": {},
+            "printers_json": devices_list or [],
         }
     else:
         agent_entry = ACTIVE_AGENTS[key]
@@ -56,6 +58,9 @@ def update_agent_in_memory(
         agent_entry["last_seen_at"] = now
 
     agent_entry = ACTIVE_AGENTS[key]
+    if isinstance(devices_list, list) and len(devices_list) > 0:
+        agent_entry["printers_json"] = devices_list
+
     devices_dict = agent_entry.setdefault("devices", {})
 
     if mac_id:

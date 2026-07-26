@@ -50,13 +50,79 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
         lead = _to_text(request.args.get("lead"))
         lan_uid = _to_text(request.args.get("lan_uid"))
         check_ping = _to_text(request.args.get("check_ping")).lower() in ("true", "1")
-        max_age_seconds = _to_int(request.args.get("max_age_seconds")) or 600  # Default 10 mins
+        max_age_seconds = _to_int(request.args.get("max_age_seconds")) or 600
+
+        # 1. Read directly from ACTIVE_AGENTS in-memory printers_json payload (bypassing PostgreSQL)
+        from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+        prune_offline_agents(timeout_seconds=180)
+
+        seen: set[tuple[str, str, str]] = set()
+        machines: list[dict[str, Any]] = []
+
+        for agent_uid, agent_info in ACTIVE_AGENTS.items():
+            a_lead = agent_info.get("lead", "default")
+            a_lan_uid = agent_info.get("lan_uid", "default")
+
+            if lead and a_lead != lead:
+                continue
+            if lan_uid and a_lan_uid != lan_uid:
+                continue
+
+            printers_list = agent_info.get("printers_json") or []
+            for dev in printers_list:
+                if not isinstance(dev, dict):
+                    continue
+                p_mac = _to_text(dev.get("mac_address") or dev.get("mac_id")).replace("-", ":").upper()
+                p_ip = _to_text(dev.get("ip"))
+                p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Unknown Printer"
+
+                if not p_ip and not p_mac:
+                    continue
+
+                dedupe_token = p_mac or f"IP:{p_ip}"
+                dedupe_key = (a_lead, a_lan_uid, dedupe_token)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                last_seen_iso = agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else ""
+                machines.append(
+                    {
+                        "lead": a_lead,
+                        "lan_uid": a_lan_uid,
+                        "mac_id": p_mac,
+                        "agent_uid": agent_uid,
+                        "printer_name": p_name,
+                        "ip": p_ip,
+                        "counter_total": 0,
+                        "system_status": "online",
+                        "toner_black": None,
+                        "last_counter_at": "",
+                        "last_status_at": "",
+                        "created_at": last_seen_iso,
+                        "updated_at": last_seen_iso,
+                    }
+                )
+
+        if machines:
+            if check_ping:
+                with ThreadPoolExecutor(max_workers=min(20, len(machines))) as executor:
+                    reachability = list(executor.map(lambda m: _is_ip_reachable(m.get("ip", "")), machines))
+                machines = [m for m, reachable in zip(machines, reachability) if reachable]
+
+            machines.sort(key=lambda x: (_to_text(x.get("lead")), _to_text(x.get("lan_uid")), _to_text(x.get("printer_name"))))
+            return jsonify(
+                {
+                    "ok": True,
+                    "count": len(machines),
+                    "machines": machines,
+                }
+            )
 
         now = datetime.now(timezone.utc)
         cutoff_time = now - timedelta(seconds=max_age_seconds)
 
         with session_factory() as session:
-            # Build authoritative MAC ID -> printer_name map from Printer table
             p_stmt = select(Printer)
             if lead:
                 p_stmt = p_stmt.where(Printer.lead == lead)
@@ -82,31 +148,29 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
             if lan_uid:
                 stmt = stmt.where(DeviceInfor.lan_uid == lan_uid)
             records = session.execute(stmt).scalars().all()
-            seen: set[tuple[str, str, str]] = set()
-            machines: list[dict[str, Any]] = []
+            seen_db: set[tuple[str, str, str]] = set()
+            db_machines: list[dict[str, Any]] = []
             for row in records:
                 mac_id = _to_text(row.mac_id).replace("-", ":").upper()
                 dedupe_token = mac_id or f"IP:{_to_text(row.ip)}"
                 dedupe_key = (_to_text(row.lead), _to_text(row.lan_uid), dedupe_token)
-                if dedupe_key in seen:
+                if dedupe_key in seen_db:
                     continue
 
-                # Filter out machines that haven't been updated/polled within max_age_seconds
                 if row.updated_at:
                     updated_at_utc = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
                     if updated_at_utc < cutoff_time:
                         continue
 
-                seen.add(dedupe_key)
+                seen_db.add(dedupe_key)
                 counter_data = row.counter_data if isinstance(row.counter_data, dict) else {}
                 status_data = row.status_data if isinstance(row.status_data, dict) else {}
 
-                # Resolve printer_name strictly bound to MAC ID or IP
                 resolved_name = mac_to_name.get(mac_id) or ip_to_name.get(_to_text(row.ip)) or _to_text(row.printer_name)
                 if not resolved_name or "unknown" in resolved_name.lower():
                     resolved_name = mac_to_name.get(mac_id) or ip_to_name.get(_to_text(row.ip)) or _to_text(row.printer_name) or "Unknown Printer"
 
-                machines.append(
+                db_machines.append(
                     {
                         "lead": row.lead,
                         "lan_uid": row.lan_uid,
@@ -124,14 +188,13 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                     }
                 )
 
-            # Also include any Printers from Printer table (from agent printers.json discovery)
             for p in p_rows:
                 p_mac = _to_text(p.mac_address).replace("-", ":").upper()
                 p_ip = _to_text(p.ip)
                 p_name = _to_text(p.printer_name) or "Unknown Printer"
                 dedupe_token = p_mac or f"IP:{p_ip}"
                 dedupe_key = (_to_text(p.lead), _to_text(p.lan_uid), dedupe_token)
-                if dedupe_key in seen:
+                if dedupe_key in seen_db:
                     continue
 
                 if p.updated_at:
@@ -139,8 +202,8 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                     if p_updated_utc < cutoff_time:
                         continue
 
-                seen.add(dedupe_key)
-                machines.append(
+                seen_db.add(dedupe_key)
+                db_machines.append(
                     {
                         "lead": p.lead,
                         "lan_uid": p.lan_uid,
@@ -158,12 +221,12 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                     }
                 )
 
-            if check_ping and machines:
-                with ThreadPoolExecutor(max_workers=min(20, len(machines))) as executor:
-                    reachability = list(executor.map(lambda m: _is_ip_reachable(m.get("ip", "")), machines))
-                online_machines = [m for m, reachable in zip(machines, reachability) if reachable]
+            if check_ping and db_machines:
+                with ThreadPoolExecutor(max_workers=min(20, len(db_machines))) as executor:
+                    reachability = list(executor.map(lambda m: _is_ip_reachable(m.get("ip", "")), db_machines))
+                online_machines = [m for m, reachable in zip(db_machines, reachability) if reachable]
             else:
-                online_machines = machines
+                online_machines = db_machines
 
             online_machines.sort(key=lambda x: (_to_text(x.get("lead")), _to_text(x.get("lan_uid")), _to_text(x.get("mac_id"))))
             return jsonify(

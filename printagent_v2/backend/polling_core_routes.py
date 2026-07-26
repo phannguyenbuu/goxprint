@@ -143,6 +143,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
             mac_id=mac_id,
             counter_data=counter_data,
             status_data=status_data,
+            devices_list=body.get("devices"),
         )
 
         def _is_placeholder_name(name_str: str, ip_str: str = "") -> bool:
