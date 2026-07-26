@@ -683,6 +683,19 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 ftp_ports=ftp_ports,
                 ftp_sites=ftp_sites,
             )
+            from active_agents_registry import update_agent_in_memory
+            update_agent_in_memory(
+                lead=lead,
+                lan_uid=lan_uid,
+                agent_uid=agent_uid,
+                hostname=hostname,
+                local_ip=local_ip,
+                local_mac=local_mac,
+                app_version=app_version,
+                run_mode=run_mode,
+                web_port=web_port,
+                devices_list=devices,
+            )
             for item in devices:
                 if not isinstance(item, dict):
                     continue

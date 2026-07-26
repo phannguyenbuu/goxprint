@@ -1637,6 +1637,39 @@ Get-NetNeighbor -AddressFamily IPv4 |
     def _save_printers_json(printers: list[Printer]) -> None:
         try:
             import json, os, tempfile
+            existing_auth_map: dict[str, tuple[str, str]] = {}
+            try:
+                local_app = os.getenv("LOCALAPPDATA", "")
+                candidates = [
+                    Path(tempfile.gettempdir()) / "GoPrinxAgent" / "printers.json",
+                    Path("storage") / "data" / "printers.json",
+                ]
+                if local_app:
+                    candidates.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent" / "printers.json")
+
+                for target_file in candidates:
+                    if target_file.exists():
+                        try:
+                            with open(target_file, "r", encoding="utf-8", errors="replace") as f:
+                                existing_items = json.load(f)
+                                if isinstance(existing_items, list):
+                                    for item in existing_items:
+                                        if isinstance(item, dict):
+                                            item_mac = str(item.get("mac_address") or item.get("mac_id") or "").strip().upper().replace("-", ":")
+                                            item_ip = str(item.get("ip") or "").strip()
+                                            u = str(item.get("auth_user") or item.get("user") or "").strip()
+                                            pw = str(item.get("auth_password") or item.get("password") or "").strip()
+                                            if u or pw:
+                                                if item_mac:
+                                                    existing_auth_map[item_mac] = (u, pw)
+                                                if item_ip:
+                                                    existing_auth_map[item_ip] = (u, pw)
+                                    break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
             data = []
             seen_macs: set[str] = set()
             seen_ips: set[str] = set()
@@ -1648,6 +1681,11 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     p_type = str(p.get("printer_type") or p.get("type") or "").strip()
                     p_user = str(p.get("auth_user") or p.get("user") or "").strip()
                     p_pass = str(p.get("auth_password") or p.get("password") or "").strip()
+                    if not p_user and not p_pass:
+                        if p_mac and p_mac in existing_auth_map:
+                            p_user, p_pass = existing_auth_map[p_mac]
+                        elif p_ip and p_ip in existing_auth_map:
+                            p_user, p_pass = existing_auth_map[p_ip]
                     p_time = str(p.get("updated_at") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     data.append({
                         "name": p_name,
@@ -1690,6 +1728,12 @@ Get-NetNeighbor -AddressFamily IPv4 |
 
                     p_user = str(getattr(p, "user", "") or getattr(p, "auth_user", "") or "").strip()
                     p_pass = str(getattr(p, "password", "") or getattr(p, "auth_password", "") or "").strip()
+                    if not p_user and not p_pass:
+                        norm_mac = clean_mac.upper() if clean_mac else ""
+                        if norm_mac and norm_mac in existing_auth_map:
+                            p_user, p_pass = existing_auth_map[norm_mac]
+                        elif ip and ip in existing_auth_map:
+                            p_user, p_pass = existing_auth_map[ip]
                     data.append({
                         "name": p_name,
                         "ip": ip,
@@ -3341,8 +3385,38 @@ if ($node) {{ $node }}
             printer.password = auth_password
 
         if command_type in {"save_printer_auth", "update_credentials", "update_copier_credentials"}:
-            cmd_mac = str(command.get("printer_mac_id") or command.get("mac_address") or getattr(printer, "mac_address", "") or "").strip().upper().replace("-", ":")
-            cmd_ip = str(command.get("printer_ip") or getattr(printer, "ip", "") or "").strip()
+            params_raw = command.get("command_params") or command.get("parameters_json") or "{}"
+            params = {}
+            if isinstance(params_raw, str) and params_raw.strip():
+                try:
+                    params = json.loads(params_raw)
+                except Exception:
+                    params = {}
+            elif isinstance(params_raw, dict):
+                params = params_raw
+
+            cmd_mac = str(
+                params.get("mac_address")
+                or params.get("printer_mac_id")
+                or command.get("printer_mac_id")
+                or command.get("mac_address")
+                or getattr(printer, "mac_address", "")
+                or ""
+            ).strip().upper().replace("-", ":")
+            
+            cmd_ip = str(
+                params.get("printer_ip")
+                or params.get("ip")
+                or command.get("printer_ip")
+                or command.get("ip")
+                or getattr(printer, "ip", "")
+                or ""
+            ).strip()
+
+            if not auth_user:
+                auth_user = str(params.get("auth_user") or "").strip()
+            if not auth_password:
+                auth_password = str(params.get("auth_password") or "").strip()
             
             if auth_user:
                 printer.user = auth_user

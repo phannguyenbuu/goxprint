@@ -11,6 +11,31 @@ LOGGER = logging.getLogger(__name__)
 ACTIVE_AGENTS: Dict[str, Dict[str, Any]] = {}
 
 
+import json
+from pathlib import Path
+
+def _load_cached_printers_for_agent(agent_uid: str) -> list[dict[str, Any]]:
+    try:
+        cache_file = Path("storage/data") / f"printers_{agent_uid}.json"
+        if cache_file.exists():
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    return []
+
+def _save_cached_printers_for_agent(agent_uid: str, devices_list: list[dict[str, Any]]) -> None:
+    try:
+        cache_dir = Path("storage/data")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"printers_{agent_uid}.json"
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(devices_list, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
 def update_agent_in_memory(
     *,
     lead: str,
@@ -33,6 +58,7 @@ def update_agent_in_memory(
     key = agent_uid or "legacy-agent"
 
     if key not in ACTIVE_AGENTS:
+        cached_printers = devices_list or _load_cached_printers_for_agent(key)
         ACTIVE_AGENTS[key] = {
             "lead": lead,
             "lan_uid": lan_uid,
@@ -45,7 +71,7 @@ def update_agent_in_memory(
             "web_port": web_port,
             "last_seen_at": now,
             "devices": {},
-            "printers_json": devices_list or [],
+            "printers_json": cached_printers,
         }
     else:
         agent_entry = ACTIVE_AGENTS[key]
@@ -56,10 +82,15 @@ def update_agent_in_memory(
         agent_entry["local_mac"] = local_mac or agent_entry["local_mac"]
         agent_entry["app_version"] = app_version or agent_entry["app_version"]
         agent_entry["last_seen_at"] = now
+        if not agent_entry.get("printers_json"):
+            cached = _load_cached_printers_for_agent(key)
+            if cached:
+                agent_entry["printers_json"] = cached
 
     agent_entry = ACTIVE_AGENTS[key]
     if isinstance(devices_list, list) and len(devices_list) > 0:
         agent_entry["printers_json"] = devices_list
+        _save_cached_printers_for_agent(key, devices_list)
 
     devices_dict = agent_entry.setdefault("devices", {})
 
