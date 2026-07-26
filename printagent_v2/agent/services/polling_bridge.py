@@ -1641,46 +1641,64 @@ Get-NetNeighbor -AddressFamily IPv4 |
             seen_macs: set[str] = set()
             seen_ips: set[str] = set()
             for p in printers:
-                ip = str(getattr(p, "ip", "") or "").strip()
-                raw_mac = str(getattr(p, "mac_address", "") or getattr(p, "mac_id", "") or "").strip()
-                clean_mac = raw_mac.replace("-", ":").upper() if raw_mac else ""
-                p_name = str(getattr(p, "name", "") or "").strip()
+                if isinstance(p, dict):
+                    p_name = str(p.get("name") or p.get("printer_name") or "").strip()
+                    p_ip = str(p.get("ip") or p.get("printer_ip") or "").strip()
+                    p_mac = str(p.get("mac_address") or p.get("mac_id") or "").strip().upper().replace("-", ":")
+                    p_type = str(p.get("printer_type") or p.get("type") or "").strip()
+                    p_user = str(p.get("auth_user") or p.get("user") or "").strip()
+                    p_pass = str(p.get("auth_password") or p.get("password") or "").strip()
+                    p_time = str(p.get("updated_at") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    data.append({
+                        "name": p_name,
+                        "ip": p_ip,
+                        "mac_address": p_mac,
+                        "printer_type": p_type,
+                        "auth_user": p_user,
+                        "auth_password": p_pass,
+                        "updated_at": p_time,
+                    })
+                else:
+                    ip = str(getattr(p, "ip", "") or "").strip()
+                    raw_mac = str(getattr(p, "mac_address", "") or getattr(p, "mac_id", "") or "").strip()
+                    clean_mac = raw_mac.replace("-", ":").upper() if raw_mac else ""
+                    p_name = str(getattr(p, "name", "") or "").strip()
 
-                is_generic = PollingBridge._is_generic_printer_name(p_name, ip)
-                is_printer_mac = PollingBridge._is_printer_vendor_mac(clean_mac)
-                detected_type = PollingBridge._detect_printer_type(p_name, clean_mac)
-                is_router = any(kw in p_name.lower() for kw in ("f6600", "h3601", "router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik"))
+                    is_generic = PollingBridge._is_generic_printer_name(p_name, ip)
+                    is_printer_mac = PollingBridge._is_printer_vendor_mac(clean_mac)
+                    detected_type = PollingBridge._detect_printer_type(p_name, clean_mac)
+                    is_router = any(kw in p_name.lower() for kw in ("f6600", "h3601", "router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik"))
 
-                # Filter out non-printer devices (routers, modems, PCs, phones, TVs, etc.)
-                if not is_printer_mac and (is_generic or is_router or detected_type == "unknown"):
-                    continue
+                    # Filter out non-printer devices (routers, modems, PCs, phones, TVs, etc.)
+                    if not is_printer_mac and (is_generic or is_router or detected_type == "unknown"):
+                        continue
 
-                if is_generic:
-                    if detected_type == "toshiba":
-                        p_name = "Toshiba Copier (Offline)" if not ip else f"Toshiba Copier ({ip})"
-                    elif detected_type == "ricoh":
-                        p_name = "Ricoh Copier (Offline)" if not ip else f"Ricoh Copier ({ip})"
-                    elif detected_type == "hp":
-                        p_name = "HP Printer (Offline)" if not ip else f"HP Printer ({ip})"
-                    elif detected_type == "canon":
-                        p_name = "Canon Printer (Offline)" if not ip else f"Canon Printer ({ip})"
-                    else:
-                        p_name = f"Printer ({ip})" if ip else "Printer"
+                    if is_generic:
+                        if detected_type == "toshiba":
+                            p_name = "Toshiba Copier (Offline)" if not ip else f"Toshiba Copier ({ip})"
+                        elif detected_type == "ricoh":
+                            p_name = "Ricoh Copier (Offline)" if not ip else f"Ricoh Copier ({ip})"
+                        elif detected_type == "hp":
+                            p_name = "HP Printer (Offline)" if not ip else f"HP Printer ({ip})"
+                        elif detected_type == "canon":
+                            p_name = "Canon Printer (Offline)" if not ip else f"Canon Printer ({ip})"
+                        else:
+                            p_name = f"Printer ({ip})" if ip else "Printer"
 
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                updated_at_val = str(getattr(p, "updated_at", "") or "").strip() or now_str
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    updated_at_val = str(getattr(p, "updated_at", "") or "").strip() or now_str
 
-                p_user = str(getattr(p, "user", "") or getattr(p, "auth_user", "") or "").strip()
-                p_pass = str(getattr(p, "password", "") or getattr(p, "auth_password", "") or "").strip()
-                data.append({
-                    "name": p_name,
-                    "ip": ip,
-                    "mac_address": clean_mac or raw_mac,
-                    "printer_type": detected_type,
-                    "auth_user": p_user,
-                    "auth_password": p_pass,
-                    "updated_at": updated_at_val,
-                })
+                    p_user = str(getattr(p, "user", "") or getattr(p, "auth_user", "") or "").strip()
+                    p_pass = str(getattr(p, "password", "") or getattr(p, "auth_password", "") or "").strip()
+                    data.append({
+                        "name": p_name,
+                        "ip": ip,
+                        "mac_address": clean_mac or raw_mac,
+                        "printer_type": detected_type,
+                        "auth_user": p_user,
+                        "auth_password": p_pass,
+                        "updated_at": updated_at_val,
+                    })
             
             local_app = os.getenv("LOCALAPPDATA", "")
             save_dirs = [
@@ -3309,6 +3327,55 @@ if ($node) {{ $node }}
             printer.user = auth_user
         if auth_password:
             printer.password = auth_password
+
+        if command_type in {"save_printer_auth", "update_credentials", "update_copier_credentials"}:
+            cmd_mac = str(command.get("printer_mac_id") or command.get("mac_address") or getattr(printer, "mac_address", "") or "").strip().upper().replace("-", ":")
+            cmd_ip = str(command.get("printer_ip") or getattr(printer, "ip", "") or "").strip()
+            
+            if auth_user:
+                printer.user = auth_user
+                printer.auth_user = auth_user
+            if auth_password:
+                printer.password = auth_password
+                printer.auth_password = auth_password
+
+            raw_items = []
+            local_app = os.getenv("LOCALAPPDATA", "")
+            candidates = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent" / "printers.json",
+                Path("storage") / "data" / "printers.json",
+            ]
+            if local_app:
+                candidates.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent" / "printers.json")
+
+            for target_file in candidates:
+                if target_file.exists():
+                    try:
+                        with open(target_file, "r", encoding="utf-8", errors="replace") as f:
+                            raw_items = json.load(f)
+                            if isinstance(raw_items, list):
+                                break
+                    except Exception:
+                        pass
+            
+            if isinstance(raw_items, list):
+                updated_any = False
+                for item in raw_items:
+                    if isinstance(item, dict):
+                        item_mac = str(item.get("mac_address") or item.get("mac_id") or "").strip().upper().replace("-", ":")
+                        item_ip = str(item.get("ip") or "").strip()
+                        if (cmd_mac and item_mac == cmd_mac) or (cmd_ip and item_ip == cmd_ip):
+                            item["auth_user"] = auth_user
+                            item["auth_password"] = auth_password
+                            updated_any = True
+                if updated_any:
+                    self._save_printers_json(raw_items)
+                    LOGGER.info("[save_printer_auth] Saved auth credentials (%s / ***) to printers.json for MAC %s / IP %s", auth_user, cmd_mac, cmd_ip)
+
+            self._post_control_result(command_id=command_id, ok=True, error="")
+            self._update_recent_command_status(command_id, "success")
+            self._push_inventory()
+            return
 
         if command_type == "trigger_utility":
             return self._apply_agent_command(command)

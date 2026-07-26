@@ -328,21 +328,79 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             action_name="lock",
         )
 
-    @app.patch("/api/devices/<device_ref>/credentials")
+    @app.patch("/api/devices/<path:device_ref>/credentials")
+    @app.post("/api/devices/<path:device_ref>/credentials")
     def device_update_credentials(device_ref: str) -> Any:
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
-        auth_user = str(body.get("auth_user", "")).strip()
-        auth_password = str(body.get("auth_password", "")).strip()
+        auth_user = str(body.get("auth_user", "") or body.get("user", "")).strip()
+        auth_password = str(body.get("auth_password", "") or body.get("password", "")).strip()
+
+        clean_mac = _normalize_mac(device_ref) or _normalize_mac(_to_text(body.get("mac_address") or body.get("mac_id")))
+        ref_text = _to_text(device_ref).strip()
+
+        # 1. Update in-memory ACTIVE_AGENTS printers_json
+        from active_agents_registry import ACTIVE_AGENTS
+        ram_updated = False
+        target_lan_uid = ""
+        target_agent_uid = ""
+        target_ip = ""
+        
+        for agent_uid, agent_info in ACTIVE_AGENTS.items():
+            printers_list = agent_info.get("printers_json") or []
+            for dev in printers_list:
+                if isinstance(dev, dict):
+                    dev_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
+                    dev_ip = _to_text(dev.get("ip") or dev.get("printer_ip"))
+                    dev_id = str(dev.get("id", ""))
+                    
+                    if (clean_mac and dev_mac == clean_mac) or (ref_text and (ref_text in {dev_id, dev_ip, dev_mac})):
+                        dev["auth_user"] = auth_user
+                        dev["auth_password"] = auth_password
+                        dev["user"] = auth_user
+                        dev["password"] = auth_password
+                        ram_updated = True
+                        target_lan_uid = agent_info.get("lan_uid") or ""
+                        target_agent_uid = agent_uid
+                        target_ip = dev_ip
+
+        # 2. Enqueue command for active agent to save auth directly to local printers.json disk file
         with session_factory() as session:
             printer = _resolve_printer_control_target(session, device_ref)
-            if printer is None:
-                return jsonify({"ok": False, "error": "Printer not found"}), 404
-            printer.auth_user = auth_user
-            printer.auth_password = auth_password
+            p_id = int(printer.id) if printer else 0
+            p_mac = _normalize_mac(printer.mac_address) if printer else clean_mac
+            
+            if printer:
+                printer.auth_user = auth_user
+                printer.auth_password = auth_password
+                session.commit()
+
+            import json as _json
+            cmd = PrinterControlCommand(
+                lead="default",
+                lan_uid=target_lan_uid or (printer.lan_uid if printer else ""),
+                agent_uid=target_agent_uid or (printer.agent_uid if printer else ""),
+                printer_id=p_id,
+                printer_mac_id=p_mac or "",
+                command_type="save_printer_auth",
+                desired_enabled=True,
+                status="pending",
+                auth_user=auth_user,
+                auth_password=auth_password,
+                parameters_json=_json.dumps({
+                    "mac_address": p_mac or clean_mac,
+                    "printer_ip": target_ip or (printer.ip if printer else ""),
+                    "auth_user": auth_user,
+                    "auth_password": auth_password,
+                }),
+                requested_at=datetime.now(timezone.utc),
+            )
+            session.add(cmd)
             session.commit()
-            return jsonify({"ok": True, "auth_user": printer.auth_user})
+            LOGGER.info("[device_update_credentials] Enqueued save_printer_auth command ID=%s for mac=%s auth_user=%s", cmd.id, p_mac, auth_user)
+
+        return jsonify({"ok": True, "auth_user": auth_user, "ram_updated": ram_updated})
 
     @app.post("/api/devices/<device_ref>/fetch-address-book")
     def device_fetch_address_book(device_ref: str) -> Any:
