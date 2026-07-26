@@ -408,7 +408,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             session.commit()
             LOGGER.info("[device_update_credentials] Enqueued save_printer_auth command ID=%s for mac=%s auth_user=%s", cmd.id, p_mac, auth_user)
 
-        return jsonify({"ok": True, "auth_user": auth_user, "ram_updated": ram_updated})
+        return jsonify({"ok": True, "auth_user": auth_user, "ram_updated": ram_updated, "command_id": cmd.id})
 
     @app.post("/api/devices/<device_ref>/fetch-address-book")
     def device_fetch_address_book(device_ref: str) -> Any:

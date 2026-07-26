@@ -3833,6 +3833,10 @@ if ($node) {{ $node }}
             except Exception as pop_exc:
                 LOGGER.warning("Failed to invoke agent command popup: %s", pop_exc)
 
+            if command_type in {"save_printer_auth", "update_credentials", "update_copier_credentials"}:
+                dummy_p = Printer(name="Photocopy")
+                return self._apply_command(dummy_p, command)
+
             if command_type == "general_settings":
                 scan_auto_open_file = params.get("scan_auto_open_file")
                 scan_auto_open_dir = params.get("scan_auto_open_dir")
