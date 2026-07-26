@@ -3020,7 +3020,16 @@ except Exception as e:
                           {/* Header details */}
                           <div style={styles.cardHeader}>
                             <div>
-                              <span style={styles.copierTitle}>🖨️ {p.printer_name || "Thiết bị Photocopy (Đang thám dò...)"}</span>
+                              <span style={styles.copierTitle}>
+                                🖨️ {(() => {
+                                  if (p.printer_name && p.printer_name.trim()) return p.printer_name.trim();
+                                  const cleanMac = (p.mac_id || "").replace(/-/g, ":").toUpperCase();
+                                  if (cleanMac.startsWith("58:38:79") || cleanMac.startsWith("00:26:73")) return "Thiết bị Ricoh (Đang thám dò...)";
+                                  if (cleanMac.startsWith("00:80:91")) return "Thiết bị Toshiba (Đang thám dò...)";
+                                  if (cleanMac.startsWith("00:11:22")) return "Thiết bị HP (Đang thám dò...)";
+                                  return "Thiết bị Photocopy (Đang thám dò...)";
+                                })()}
+                              </span>
                               <div style={styles.copierSubtitle}>IP: {p.ip} · MAC: {p.mac_id || '—'}</div>
                             </div>
                             <span
