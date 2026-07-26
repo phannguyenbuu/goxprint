@@ -1,10 +1,10 @@
 {
-  "size": 21443648,
-  "version": "2.1.82",
-  "published_at": "2026-07-26T11:56:58.362313+07:00",
-  "sha256": "7699bd4d9d9423226f32f6747689f5220723346cb445eef43f970d6c49846a24",
+  "size": 21443827,
+  "version": "2.1.84",
+  "published_at": "2026-07-26T12:05:13.809416+07:00",
+  "sha256": "11a839a595c3ae4841edcca3516f34097789eaa9a87deddc83c56b3e0e5e1f8a",
   "mandatory": true,
   "download_url": "https://download.goxprint.com/printagent.exe",
-  "notes": "Build 2.1.82: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
+  "notes": "Build 2.1.84: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
   "channel": "stable"
 }

@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from flask import Flask
+from flask import Flask, request
 from werkzeug.serving import make_server
 
 from agent.config import AppConfig

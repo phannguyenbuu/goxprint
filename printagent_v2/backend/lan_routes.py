@@ -153,7 +153,7 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             "drivers": [
                 {
                     "name": "TOSHIBA - Universal Printer Driver (PCL6 64-bit)",
-                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
+                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip;https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
                 },
                 {
                     "name": "TOSHIBA - Generic Printer Driver",
