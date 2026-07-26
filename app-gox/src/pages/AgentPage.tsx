@@ -1814,6 +1814,10 @@ except Exception as e:
       setCopierCredentials((prev) => {
         const next = { ...prev };
         selectedLan.printers.forEach((p) => {
+          // Direct auth values pushed from Agent's printers.json via RAM
+          const agentPushUser = p.auth_user || p.user || '';
+          const agentPushPass = p.auth_password || p.password || '';
+
           const savedLocal = (() => {
             try {
               const raw = localStorage.getItem(`copier_auth_${p.id}`) || (p.mac_id ? localStorage.getItem(`copier_auth_${p.mac_id}`) : null);
@@ -1826,15 +1830,15 @@ except Exception as e:
           const existing = next[p.id];
           const user = (existing?.user !== undefined && existing?.user !== '')
             ? existing.user
-            : (savedLocal?.user !== undefined && savedLocal?.user !== '')
-              ? savedLocal.user
-              : (p.auth_user || p.user || '');
+            : (agentPushUser !== '')
+              ? agentPushUser
+              : (savedLocal?.user || '');
 
           const pass = (existing?.pass !== undefined && existing?.pass !== '')
             ? existing.pass
-            : (savedLocal?.pass !== undefined && savedLocal?.pass !== '')
-              ? savedLocal.pass
-              : (p.auth_password || p.password || '');
+            : (agentPushPass !== '')
+              ? agentPushPass
+              : (savedLocal?.pass || '');
 
           next[p.id] = { user, pass };
         });
