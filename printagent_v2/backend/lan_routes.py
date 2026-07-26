@@ -157,7 +157,7 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
                 },
                 {
                     "name": "TOSHIBA - Generic Printer Driver",
-                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/22024/Toshiba_Generic_Printer_Driver_Installation_Package_10242025.zip"
+                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
                 }
             ]
         }]

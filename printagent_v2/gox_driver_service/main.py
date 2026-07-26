@@ -234,7 +234,7 @@ def _handle_download_and_install(data: dict) -> dict:
                 except Exception:
                     pass
 
-        # Extract any nested zip files found inside extracted folder (common in Toshiba driver packages)
+        # Extract any nested zip files & SFX EXEs found inside extracted folder (common in Toshiba driver packages)
         for nested_zip in list(extract_dir.glob("**/*.zip")):
             try:
                 with zipfile.ZipFile(nested_zip, "r") as nz:
@@ -242,6 +242,24 @@ def _handle_download_and_install(data: dict) -> dict:
                 log(f"    Extracted nested ZIP: {nested_zip.name}")
             except Exception as e:
                 LOGGER.debug("Could not extract nested zip %s: %s", nested_zip, e)
+
+        if not list(extract_dir.glob("**/*.inf")):
+            for nested_exe in list(extract_dir.glob("**/*.exe")):
+                try:
+                    with zipfile.ZipFile(nested_exe, "r") as nz:
+                        nz.extractall(nested_exe.parent)
+                        log(f"    Extracted nested SFX (Zip): {nested_exe.name}")
+                        continue
+                except Exception:
+                    pass
+                for sfx_flag in [["-y", f"-o{nested_exe.parent}"], ["/extract", f"/dir={nested_exe.parent}"], ["/s", f"/p{nested_exe.parent}"]]:
+                    try:
+                        r = subprocess.run([str(nested_exe)] + sfx_flag, capture_output=True, timeout=60)
+                        if list(extract_dir.glob("**/*.inf")):
+                            log(f"    Extracted nested SFX EXE: {nested_exe.name}")
+                            break
+                    except Exception:
+                        pass
 
         inf_files = [str(f) for f in extract_dir.glob("**/*.inf")]
         log(f"    Found {len(inf_files)} INF files")

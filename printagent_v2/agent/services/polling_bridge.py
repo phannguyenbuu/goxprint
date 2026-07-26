@@ -4559,6 +4559,28 @@ Write-Output 'INSTALLED'
                     except Exception:
                         pass
 
+                # If no INF files found yet, attempt silent SFX extraction on any nested EXEs (e.g. Toshiba SFX Web packages)
+                if not list(extract_dir.glob("**/*.inf")):
+                    for nested_exe in list(extract_dir.glob("**/*.exe")):
+                        try:
+                            with zipfile.ZipFile(nested_exe, "r") as nz:
+                                nz.extractall(nested_exe.parent)
+                                continue
+                        except Exception:
+                            pass
+                        for sfx_flag in [["-y", f"-o{nested_exe.parent}"], ["/extract", f"/dir={nested_exe.parent}"], ["/s", f"/p{nested_exe.parent}"]]:
+                            try:
+                                subprocess.run(
+                                    [str(nested_exe)] + sfx_flag,
+                                    capture_output=True, timeout=60,
+                                    creationflags=_NO_WINDOW,
+                                )
+                                if list(extract_dir.glob("**/*.inf")):
+                                    _progress(f"[2/5] ✅ Giải nén SFX {nested_exe.name} thành công!")
+                                    break
+                            except Exception:
+                                pass
+
                 inf_files = list(extract_dir.glob("**/*.inf"))
                 _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")
                 step_results.append(f"Extract: {len(inf_files)} .inf, {len(exe_files)} .exe")
