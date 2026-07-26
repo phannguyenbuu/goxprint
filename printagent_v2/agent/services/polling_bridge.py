@@ -832,12 +832,13 @@ Get-NetIPAddress -AddressFamily IPv4 |
         for printer in printers:
             if self._stop_event.is_set():
                 break
-            if not getattr(printer, "is_online", True) or self._printer_type(getattr(printer, "printer_type", "")) != "ricoh":
+            if not getattr(printer, "is_online", True):
                 continue
 
             try:
                 LOGGER.info("[ScanPointSync] Fetching scan points (address_list) for copier %s (IP: %s)...", printer.name, printer.ip)
-                payload = self._ricoh_service.process_address_list(printer)
+                collector = self._collector_service_for(printer)
+                payload = collector.process_address_list(printer)
                 entries = payload.get("address_list", []) if isinstance(payload, dict) else []
 
                 # --- Requirement (2): Scan Point FTP IP Repair Logic ---
@@ -877,7 +878,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                                 LOGGER.warning("[ScanPointRepair] Failed to repair scan point FTP IP on copier %s: %s", printer.ip, rep_exc)
 
                 if has_repaired:
-                    payload = self._ricoh_service.process_address_list(printer)
+                    payload = collector.process_address_list(printer)
 
                 self._post_address_book_sync_data(printer, payload)
                 LOGGER.info("[ScanPointSync] Completed scan points fetch for copier %s (%s) and saved to PostgreSQL.", printer.name, printer.ip)
