@@ -1038,14 +1038,15 @@ Get-NetNeighbor -AddressFamily IPv4 |
             self._scan_point_sync_thread.start()
             LOGGER.info("Scan point periodic sync thread initialized (5-min initial delay, 3h interval)")
 
-        # Auto-resume camera recordings on startup
+        # Auto-resume camera recordings on startup ONLY if camera.auto_resume is enabled
         try:
-            from agent.services.camera_manager import CameraManager
-            cm = CameraManager()
-            local_cfg_path = Path("storage/camera_configs.json")
-            if local_cfg_path.exists():
-                with local_cfg_path.open("r", encoding="utf-8") as f:
-                    configs = json.load(f)
+            if self._config.get_bool("camera.auto_resume", False):
+                from agent.services.camera_manager import CameraManager
+                cm = CameraManager()
+                local_cfg_path = Path("storage/camera_configs.json")
+                if local_cfg_path.exists():
+                    with local_cfg_path.open("r", encoding="utf-8") as f:
+                        configs = json.load(f)
                 import tempfile
                 default_out = str(Path(tempfile.gettempdir()) / "GoPrinxAgent" / "video")
                 output_dir = self._config.get_string("camera.output_dir", default_out)
