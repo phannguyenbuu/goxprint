@@ -204,23 +204,49 @@ class TrayController:
     def _load_icon(self) -> int:
         if not user32:
             return 0
-        exe_path = str(Path(sys.executable).resolve())
-        icon = shell32.ExtractIconW(None, exe_path, 0)
-        if icon:
-            return icon
-        return 0
+        try:
+            icon_candidates = [
+                Path("agent/icon.ico"),
+                Path("icon.ico"),
+                Path(sys.executable).parent / "agent" / "icon.ico",
+                Path(sys.executable).parent / "icon.ico",
+            ]
+            for icon_path in icon_candidates:
+                if icon_path.exists():
+                    h_icon = user32.LoadImageW(
+                        0, str(icon_path.resolve()), IMAGE_ICON, 0, 0, 0x0010 | LR_DEFAULTSIZE | LR_SHARED
+                    )
+                    if h_icon:
+                        return h_icon
+        except Exception as e:
+            LOGGER.debug("LoadImageW failed: %s", e)
+
+        try:
+            exe_path = str(Path(sys.executable).resolve())
+            icon = shell32.ExtractIconW(0, exe_path, 0)
+            if icon and int(icon) > 1:
+                return icon
+        except Exception as e:
+            LOGGER.debug("ExtractIconW failed: %s", e)
+
+        try:
+            return user32.LoadIconW(0, IDI_APPLICATION)
+        except Exception:
+            return 0
 
     def _add_tray_icon(self) -> None:
         if not user32 or not self._hwnd:
             return
         self._hicon = self._load_icon()
+        if not self._hicon and user32:
+            self._hicon = user32.LoadIconW(0, IDI_APPLICATION)
         data = NOTIFYICONDATAW()
         data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         data.hWnd = self._hwnd
         data.uID = 1
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         data.uCallbackMessage = WM_USER + 20
-        data.hIcon = self._hicon or 0
+        data.hIcon = self._hicon or user32.LoadIconW(0, IDI_APPLICATION)
         data.szTip = self._tip_text
         shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data))
         shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
