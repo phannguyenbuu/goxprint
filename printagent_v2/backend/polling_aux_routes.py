@@ -240,46 +240,59 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not ok_auth:
             return auth_error
 
-        printer_ip = _to_text(body.get("printer_ip") or body.get("ip"))
         mac_address = _normalize_mac(_to_text(body.get("mac_address") or body.get("mac_id")))
         address_book_data = body.get("address_book_data")
         if not isinstance(address_book_data, dict):
             return jsonify({"ok": False, "error": "Missing address_book_data"}), 400
 
+        if not mac_address:
+            return jsonify({"ok": False, "error": "Missing mac_address for scan_points matching"}), 400
+
+        raw_list = address_book_data.get("address_list") or []
+        enriched_list = []
+        for entry in raw_list:
+            if isinstance(entry, dict):
+                folder_str = entry.get("folder_path") or entry.get("folder") or ""
+                parsed = parse_folder_str(folder_str)
+                entry["protocol"] = parsed["protocol"]
+                entry["server_host"] = parsed["server"]
+                entry["folder_port_no"] = parsed["port"]
+                entry["path_on_folder"] = parsed["path"]
+            enriched_list.append(entry)
+
+        sync_data = {
+            "status": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "address_list": enriched_list,
+        }
+
+        # 1. Update in-memory printers_json in ACTIVE_AGENTS strictly by mac_address
+        from active_agents_registry import ACTIVE_AGENTS
+        ram_updated = False
+        for agent_info in ACTIVE_AGENTS.values():
+            printers_list = agent_info.get("printers_json") or []
+            for dev in printers_list:
+                if isinstance(dev, dict):
+                    dev_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
+                    if dev_mac == mac_address:
+                        dev["address_book_sync"] = sync_data
+                        ram_updated = True
+
+        # 2. Persist to PostgreSQL Printer table strictly by mac_address
         with session_factory() as session:
-            printer = None
-            if printer_ip:
-                printer = session.execute(
-                    select(Printer).where(Printer.lead == lead, Printer.ip == printer_ip)
-                ).scalars().first()
-            if printer is None and mac_address:
-                printer = session.execute(
-                    select(Printer).where(Printer.lead == lead, Printer.mac_address == mac_address)
-                ).scalars().first()
+            printer = session.execute(
+                select(Printer).where(Printer.lead == lead, func.upper(Printer.mac_address) == mac_address)
+            ).scalars().first()
 
             if printer:
-                raw_list = address_book_data.get("address_list") or []
-                enriched_list = []
-                for entry in raw_list:
-                    if isinstance(entry, dict):
-                        folder_str = entry.get("folder_path") or entry.get("folder") or ""
-                        parsed = parse_folder_str(folder_str)
-                        entry["protocol"] = parsed["protocol"]
-                        entry["server_host"] = parsed["server"]
-                        entry["folder_port_no"] = parsed["port"]
-                        entry["path_on_folder"] = parsed["path"]
-                    enriched_list.append(entry)
-
-                sync_data = {
-                    "status": "success",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "address_list": enriched_list,
-                }
                 printer.address_book_sync = sync_data
                 session.commit()
-                LOGGER.info("[polling_address_book_sync] Persisted address_book_sync to PostgreSQL for printer %s (%s)", printer.printer_name, printer.ip)
-                return jsonify({"ok": True, "printer_id": int(printer.id)})
-            return jsonify({"ok": False, "error": "Printer not found"}), 404
+                LOGGER.info("[polling_address_book_sync] Persisted address_book_sync by mac_address %s for printer %s", mac_address, printer.printer_name)
+
+        if ram_updated or printer:
+            return jsonify({"ok": True, "mac_address": mac_address})
+
+        return jsonify({"ok": False, "error": f"Printer not found for mac_address {mac_address}"}), 404
 
     @app.post("/api/polling/control-result")
     def polling_control_result() -> Any:
