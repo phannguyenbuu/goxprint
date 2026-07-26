@@ -243,6 +243,11 @@ def main():
             log_debug(f"Failed to create scripts directory: {scripts_err}")
 
         # 1. Try to load updated agent_core.zip from %TEMP%\GoPrinxAgent\agent_core.zip first
+        if getattr(sys, "frozen", False):
+            base_path = Path(getattr(sys, "_MEIPASS", os.getcwd()))
+        else:
+            base_path = Path(__file__).resolve().parent
+
         temp_dir = os.environ.get("TEMP")
         if temp_dir:
             updated_zip = Path(temp_dir) / "GoPrinxAgent" / "agent_core.zip"
