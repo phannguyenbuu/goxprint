@@ -393,13 +393,15 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
         # 2. Enqueue command for active agent to save auth directly to local printers.json disk file
         with session_factory() as session:
-            printer = _resolve_printer_control_target(session, device_ref)
+            printer = _resolve_printer_control_target(session, device_ref, body=body)
             p_id = int(printer.id) if printer else 0
             p_mac = _normalize_mac(printer.mac_address) if printer else clean_mac
             
             if printer:
                 printer.auth_user = auth_user
                 printer.auth_password = auth_password
+                printer.user = auth_user
+                printer.password = auth_password
                 session.commit()
 
             import json as _json

@@ -1533,12 +1533,19 @@ Get-NetNeighbor -AddressFamily IPv4 |
                             id=0,
                             name=f"Copier ({ip})",
                             ip=ip,
-                            user="",
-                            password="",
+                            user=existing_p.user if existing_p else "",
+                            password=existing_p.password if existing_p else "",
+                            auth_user=getattr(existing_p, "auth_user", "") if existing_p else "",
+                            auth_password=getattr(existing_p, "auth_password", "") if existing_p else "",
                             printer_type=self._detect_printer_type("", mac),
                             status="online",
                             mac_address=mac,
                         )
+                    elif existing_p:
+                        discovered.user = existing_p.user or getattr(discovered, "user", "")
+                        discovered.password = existing_p.password or getattr(discovered, "password", "")
+                        discovered.auth_user = getattr(existing_p, "auth_user", "") or getattr(discovered, "auth_user", "")
+                        discovered.auth_password = getattr(existing_p, "auth_password", "") or getattr(discovered, "auth_password", "")
                     printers.append(discovered)
                     continue
 
@@ -1548,12 +1555,19 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         id=0,
                         name=ip,
                         ip=ip,
-                        user="",
-                        password="",
+                        user=existing_p.user if existing_p else "",
+                        password=existing_p.password if existing_p else "",
+                        auth_user=getattr(existing_p, "auth_user", "") if existing_p else "",
+                        auth_password=getattr(existing_p, "auth_password", "") if existing_p else "",
                         printer_type=printer_type or self._detect_printer_type(ip, mac),
                         status="online",
                         mac_address=mac,
                     )
+                elif existing_p:
+                    discovered.user = existing_p.user or getattr(discovered, "user", "")
+                    discovered.password = existing_p.password or getattr(discovered, "password", "")
+                    discovered.auth_user = getattr(existing_p, "auth_user", "") or getattr(discovered, "auth_user", "")
+                    discovered.auth_password = getattr(existing_p, "auth_password", "") or getattr(discovered, "auth_password", "")
                 printers.append(discovered)
 
             # 3. Merge remaining offline printers from existing printers.json
@@ -3463,6 +3477,8 @@ if ($node) {{ $node }}
                         if (cmd_mac and item_mac == cmd_mac) or (cmd_ip and item_ip == cmd_ip):
                             item["auth_user"] = auth_user
                             item["auth_password"] = auth_password
+                            item["user"] = auth_user
+                            item["password"] = auth_password
                             updated_any = True
                 if updated_any:
                     self._save_printers_json(raw_items)
