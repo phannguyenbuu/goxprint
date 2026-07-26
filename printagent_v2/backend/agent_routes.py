@@ -1148,15 +1148,17 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 printer = session.execute(
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
-            if not printer:
-                return jsonify({"ok": False, "error": f"Printer with IP {printer_ip} not found in database"}), 404
+            printer_id = printer.id if printer else 0
+            printer_lead = printer.lead if printer else lead_valid
+            printer_lan_uid = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else "default")
+            printer_name = printer.printer_name if printer else f"Printer {printer_ip}"
 
             command = PrinterControlCommand(
-                printer_id=printer.id,
-                lead=printer.lead,
-                lan_uid=active_agent.lan_uid if active_agent else printer.lan_uid,
+                printer_id=printer_id,
+                lead=printer_lead,
+                lan_uid=printer_lan_uid,
                 agent_uid=agent_uid,
-                printer_name=printer.printer_name,
+                printer_name=printer_name,
                 ip=printer_ip,
                 command_type="trigger_utility",
                 command_params=json.dumps(params),
@@ -1248,15 +1250,17 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 printer = session.execute(
                     select(Printer).where(Printer.ip == printer_ip)
                 ).scalars().first()
-            if not printer:
-                return jsonify({"ok": False, "error": f"Printer with IP {printer_ip} not found in database"}), 404
+            printer_id = printer.id if printer else 0
+            printer_lead = printer.lead if printer else lead_valid
+            printer_lan_uid = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else "default")
+            printer_name = printer.printer_name if printer else f"Printer {printer_ip}"
 
             command = PrinterControlCommand(
-                printer_id=printer.id,
-                lead=printer.lead,
-                lan_uid=active_agent.lan_uid if active_agent else printer.lan_uid,
+                printer_id=printer_id,
+                lead=printer_lead,
+                lan_uid=printer_lan_uid,
                 agent_uid=agent_uid,
-                printer_name=printer.printer_name,
+                printer_name=printer_name,
                 ip=printer_ip,
                 command_type="trigger_utility",
                 command_params=json.dumps(params),
