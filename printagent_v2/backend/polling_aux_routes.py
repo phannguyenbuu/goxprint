@@ -33,7 +33,7 @@ from serializers import (
     _upsert_printer_from_polling,
     _apply_printer_enabled_state,
 )
-from models import Printer, PrinterControlCommand, ScanEmailAlias, AgentNode, AgentPresenceLog
+from models import Printer, PrinterControlCommand, ScanEmailAlias, AgentNode, AgentPresenceLog, DeviceInfor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -911,3 +911,129 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 "drive_sync": drive_sync_payload,
             }
         )
+
+    @app.post("/api/polling/inventory")
+    def ingest_polling_inventory() -> Any:
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
+
+        sent_token = _request_api_token()
+        ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token)
+        if not ok_auth:
+            return auth_error
+
+        lan_uid = _to_text(body.get("lan_uid"))
+        agent_uid = _to_text(body.get("agent_uid")) or "legacy-agent"
+        devices_list = body.get("devices")
+
+        if not isinstance(devices_list, list):
+            devices_list = []
+
+        utc_now = datetime.now(timezone.utc)
+        active_macs = set()
+        active_ips = set()
+        count = 0
+
+        with session_factory() as session:
+            try:
+                for dev in devices_list:
+                    if not isinstance(dev, dict):
+                        continue
+                    d_ip = str(dev.get("ip") or "").strip()
+                    d_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().replace("-", ":").upper()
+                    d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
+                    if not d_ip and not d_mac:
+                        continue
+
+                    if d_mac:
+                        active_macs.add(d_mac)
+                    if d_ip:
+                        active_ips.add(d_ip)
+
+                    # 1. Upsert Printer table
+                    p_stmt = select(Printer).where(Printer.lead == lead_valid)
+                    if d_mac:
+                        p_stmt = p_stmt.where(func.upper(Printer.mac_address) == d_mac)
+                    else:
+                        p_stmt = p_stmt.where(Printer.ip == d_ip)
+                    p_obj = session.execute(p_stmt).scalars().first()
+                    if p_obj:
+                        if d_ip:
+                            p_obj.ip = d_ip
+                        if d_mac:
+                            p_obj.mac_address = d_mac
+                        if d_name:
+                            p_obj.printer_name = d_name
+                        p_obj.agent_uid = agent_uid
+                        if lan_uid:
+                            p_obj.lan_uid = lan_uid
+                        p_obj.is_online = True
+                        p_obj.updated_at = utc_now
+                    else:
+                        p_obj = Printer(
+                            lead=lead_valid,
+                            lan_uid=lan_uid,
+                            agent_uid=agent_uid,
+                            printer_name=d_name or "Unknown Printer",
+                            ip=d_ip,
+                            mac_address=d_mac,
+                            enabled=True,
+                            is_online=True,
+                            updated_at=utc_now,
+                            auth_user="",
+                            auth_password="",
+                            address_book_sync={},
+                        )
+                        session.add(p_obj)
+
+                    # 2. Upsert DeviceInfor table
+                    d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead_valid)
+                    if d_mac:
+                        d_stmt = d_stmt.where(func.upper(DeviceInfor.mac_id) == d_mac)
+                    else:
+                        d_stmt = d_stmt.where(DeviceInfor.ip == d_ip)
+                    d_obj = session.execute(d_stmt).scalars().first()
+                    if d_obj:
+                        if d_ip:
+                            d_obj.ip = d_ip
+                        if d_mac:
+                            d_obj.mac_id = d_mac
+                        if d_name:
+                            d_obj.printer_name = d_name
+                        d_obj.agent_uid = agent_uid
+                        if lan_uid:
+                            d_obj.lan_uid = lan_uid
+                        d_obj.updated_at = utc_now
+                    else:
+                        d_obj = DeviceInfor(
+                            lead=lead_valid,
+                            lan_uid=lan_uid,
+                            agent_uid=agent_uid,
+                            mac_id=d_mac,
+                            ip=d_ip,
+                            printer_name=d_name or "Unknown Printer",
+                            counter_data={},
+                            status_data={},
+                            updated_at=utc_now,
+                        )
+                        session.add(d_obj)
+                    count += 1
+
+                # Purge stale Printer records for this lead not in agent printers.json
+                if len(devices_list) > 0 and (active_macs or active_ips):
+                    existing_printers = session.execute(select(Printer).where(Printer.lead == lead_valid)).scalars().all()
+                    for ep in existing_printers:
+                        ep_mac = (ep.mac_address or "").strip().upper()
+                        ep_ip = (ep.ip or "").strip()
+                        if not (ep_mac and ep_mac in active_macs) and not (ep_ip and ep_ip in active_ips):
+                            session.delete(ep)
+                            LOGGER.info("[inventory] Deleted stale Printer ID %s (%s, IP %s) for lead %s", ep.id, ep.printer_name, ep.ip, lead_valid)
+
+                session.commit()
+                LOGGER.info("[inventory] Ingested %d devices for lead=%s lan_uid=%s agent_uid=%s", count, lead_valid, lan_uid, agent_uid)
+            except Exception as exc:
+                session.rollback()
+                LOGGER.warning("[inventory] Ingest inventory failed: %s", exc)
+
+        return jsonify({"ok": True, "lead": lead_valid, "lan_uid": lan_uid, "agent_uid": agent_uid, "count": count})
