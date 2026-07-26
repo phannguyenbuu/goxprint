@@ -388,8 +388,24 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         d_ip = str(dev_data.get("ip") or "").strip()
                         d_mac = str(dev_mac or "").strip().replace("-", ":").upper()
                         d_name = str(dev_data.get("printer_name") or "").strip()
-                        if not d_name or (d_ip and d_ip in existing_ips) or (d_mac and d_mac in existing_macs):
+                        if not d_name:
                             continue
+
+                        matched_existing = False
+                        for p_item in lan_printers:
+                            p_item_mac = str(p_item.get("mac_id") or "").strip().replace("-", ":").upper()
+                            p_item_ip = str(p_item.get("ip") or "").strip()
+                            if (d_mac and p_item_mac == d_mac) or (d_ip and p_item_ip == d_ip):
+                                matched_existing = True
+                                cur_p_name = str(p_item.get("printer_name") or "").strip().lower()
+                                if not cur_p_name or any(kw in cur_p_name for kw in ("unknown", "copier", "thiết bị photocopy")):
+                                    p_item["printer_name"] = d_name
+                                    p_item["suggested_drivers"] = _match_printer_drivers(d_name)
+                                break
+
+                        if matched_existing:
+                            continue
+
                         lan_printers.append({
                             "id": 99000 + len(lan_printers),
                             "printer_name": d_name,

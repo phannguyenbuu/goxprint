@@ -144,21 +144,69 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
             status_data=status_data,
         )
 
-        if ip and (mac_id or (printer_name and "unknown" not in printer_name.lower())):
-            with session_factory() as session:
-                try:
+        def _is_placeholder_name(name_str: str, ip_str: str = "") -> bool:
+            if not name_str or not name_str.strip():
+                return True
+            text = str(name_str).strip().lower()
+            ip_val = str(ip_str).strip().lower()
+            if ip_val and text == ip_val:
+                return True
+            return any(kw in text for kw in ("unknown", "copier (", "thiết bị photocopy", "discovery"))
+
+        devices_list = body.get("devices")
+        with session_factory() as session:
+            try:
+                if isinstance(devices_list, list) and len(devices_list) > 0:
+                    for dev in devices_list:
+                        if not isinstance(dev, dict):
+                            continue
+                        d_ip = str(dev.get("ip") or "").strip()
+                        d_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().replace("-", ":").upper()
+                        d_name = str(dev.get("printer_name") or "").strip()
+                        if not d_ip and not d_mac:
+                            continue
+                        stmt = select(Printer).where(Printer.lead == lead)
+                        if d_mac:
+                            stmt = stmt.where(func.upper(Printer.mac_address) == d_mac)
+                        else:
+                            stmt = stmt.where(Printer.ip == d_ip)
+                        p_obj = session.execute(stmt).scalars().first()
+                        if p_obj:
+                            if d_ip:
+                                p_obj.ip = d_ip
+                            if d_mac:
+                                p_obj.mac_address = d_mac
+                            if d_name and not _is_placeholder_name(d_name, d_ip):
+                                p_obj.printer_name = d_name
+                            p_obj.agent_uid = agent_uid
+                            p_obj.lan_uid = lan_uid
+                        elif d_name and not _is_placeholder_name(d_name, d_ip):
+                            p_obj = Printer(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                agent_uid=agent_uid,
+                                printer_name=d_name,
+                                ip=d_ip,
+                                mac_address=d_mac,
+                                enabled=True,
+                                auth_user="",
+                                auth_password="",
+                                address_book_sync={},
+                            )
+                            session.add(p_obj)
+                
+                if ip and (mac_id or (printer_name and not _is_placeholder_name(printer_name, ip))):
                     stmt = select(Printer).where(Printer.lead == lead)
                     if mac_id:
-                        stmt = stmt.where(func.upper(Printer.mac_address) == mac_id)
+                        stmt = stmt.where(func.upper(Printer.mac_address) == mac_id.upper())
                     else:
                         stmt = stmt.where(Printer.ip == ip)
                     p_obj = session.execute(stmt).scalars().first()
-
                     if p_obj:
                         p_obj.ip = ip
                         if mac_id:
                             p_obj.mac_address = mac_id
-                        if printer_name and "unknown" not in printer_name.lower():
+                        if printer_name and not _is_placeholder_name(printer_name, ip):
                             p_obj.printer_name = printer_name
                         p_obj.agent_uid = agent_uid
                         p_obj.lan_uid = lan_uid
@@ -176,10 +224,10 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             address_book_sync={},
                         )
                         session.add(p_obj)
-                    session.commit()
-                except Exception as p_exc:  # noqa: BLE001
-                    session.rollback()
-                    LOGGER.warning("[ingest_polling] Auto-upsert Printer failed: %s", p_exc)
+                session.commit()
+            except Exception as p_exc:  # noqa: BLE001
+                session.rollback()
+                LOGGER.warning("[ingest_polling] Auto-upsert Printer failed: %s", p_exc)
 
         with session_factory() as session:
             is_master, emails = _is_agent_master_and_get_emails(session, lead, lan_uid, agent_uid)
