@@ -1698,18 +1698,15 @@ except Exception as e:
     }
   }, [activeModal, selectedUtilityAgent, loadUtilitySettings]);
 
-  // Filter out offline and Unknown Printers, and sort the last viewed one to the top
+  // Filter out Unknown Printers, and sort the last viewed one to the top
   const filteredPrinters = useMemo(() => {
     if (!selectedLan) return [];
     const filtered = (selectedLan.printers || []).filter((p: any) => {
-      // 1. Không show các máy in offline
-      if (!p.is_online) return false;
-      
-      // 2. Không show Unknown Printer
+      // 1. Không show Unknown Printer
       const name = (p.printer_name || '').toLowerCase().trim();
       if (name.includes('unknown') || name === 'unknown printer') return false;
 
-      // 3. Lọc generic printer như pdf, fax, brother, etc.
+      // 2. Lọc generic printer như pdf, fax, brother, etc.
       if (
         name.includes('pdf') ||
         name.includes('fax') ||
