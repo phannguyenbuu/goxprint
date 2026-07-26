@@ -1452,13 +1452,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
                                     raw_mac = str(item.get("mac_address", "") or "").strip()
                                     clean_mac = raw_mac.replace("-", ":").upper() if raw_mac else ""
 
-                                    is_generic = PollingBridge._is_generic_printer_name(p_name, ip)
-                                    is_printer_mac = PollingBridge._is_printer_vendor_mac(clean_mac)
-                                    detected_type = PollingBridge._detect_printer_type(p_name, clean_mac)
                                     is_router = any(kw in p_name.lower() for kw in ("f6600", "h3601", "router", "gateway", "tp-link", "asus", "d-link", "huawei", "zte", "totolink", "draytek", "mikrotik"))
-
-                                    # Purge non-printer devices (modems, routers, PCs, phones, TVs)
-                                    if not is_printer_mac and (is_generic or is_router or detected_type == "unknown"):
+                                    if is_router:
                                         continue
 
                                     res.append(Printer(
