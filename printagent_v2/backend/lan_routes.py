@@ -197,8 +197,59 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             if lead:
                 printer_stmt = printer_stmt.where(Printer.lead == lead)
             printer_rows = session.execute(printer_stmt).scalars().all()
-            printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            # 1. Populate printers_by_lan directly from ACTIVE_AGENTS in-memory printers_json payload (bypassing PostgreSQL)
+            from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+            prune_offline_agents(timeout_seconds=180)
+
+            seen_printers: set[tuple[str, str]] = set()
+
+            for agent_uid, agent_info in ACTIVE_AGENTS.items():
+                a_lead = agent_info.get("lead", "default")
+                a_lan_uid = agent_info.get("lan_uid", "default")
+                if lead and a_lead != lead:
+                    continue
+
+                printers_list = agent_info.get("printers_json") or []
+                for dev in printers_list:
+                    if not isinstance(dev, dict):
+                        continue
+                    p_mac = _to_text(dev.get("mac_address") or dev.get("mac_id")).replace("-", ":").upper()
+                    p_ip = _to_text(dev.get("ip"))
+                    p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
+                    p_user = _to_text(dev.get("auth_user") or dev.get("user"))
+                    p_pass = _to_text(dev.get("auth_password") or dev.get("password"))
+
+                    if not p_ip and not p_mac:
+                        continue
+
+                    dedupe_key = (a_lan_uid, p_mac or p_ip)
+                    if dedupe_key in seen_printers:
+                        continue
+                    seen_printers.add(dedupe_key)
+
+                    printers_by_lan[a_lan_uid].append({
+                        "id": f"{a_lan_uid}_{p_mac or p_ip}",
+                        "printer_name": p_name,
+                        "ip": p_ip,
+                        "mac_id": p_mac,
+                        "is_online": True,
+                        "enabled": True,
+                        "auth_user": p_user,
+                        "auth_password": p_pass,
+                        "address_book_sync": dev.get("address_book_sync") or {},
+                        "suggested_drivers": _match_printer_drivers(p_name),
+                        "agent_uid": agent_uid,
+                    })
+
+            # 2. Fallback to Database Printer table for any printers not in RAM
             for p in printer_rows:
+                p_mac = _to_text(p.mac_address).replace("-", ":").upper()
+                p_ip = _to_text(p.ip)
+                dedupe_key = (p.lan_uid, p_mac or p_ip)
+                if dedupe_key in seen_printers:
+                    continue
+                seen_printers.add(dedupe_key)
+
                 sync_data = p.address_book_sync
                 if isinstance(sync_data, str):
                     try:
