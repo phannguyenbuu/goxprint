@@ -784,6 +784,14 @@ Get-NetIPAddress -AddressFamily IPv4 |
         return {"acquired": True}
 
     def _post_address_book_sync_data(self, printer: Any, address_book_data: dict[str, Any]) -> None:
+        p_mac = str(getattr(printer, "mac_address", "") or "").strip().upper().replace("-", ":")
+        p_ip = str(getattr(printer, "ip", "") or "").strip()
+        p_name = str(getattr(printer, "name", "") or "").strip()
+
+        # Save to local scan_points.json next to printers.json
+        if p_mac:
+            self._save_scan_points_json(mac_address=p_mac, ip=p_ip, printer_name=p_name, sync_data=address_book_data)
+
         base_url = self._polling_base_url()
         if not base_url:
             return
@@ -792,8 +800,8 @@ Get-NetIPAddress -AddressFamily IPv4 |
         url = f"{base_url}/api/polling/address-book-sync"
         payload = {
             "lead": lead,
-            "printer_ip": str(getattr(printer, "ip", "") or "").strip(),
-            "mac_address": str(getattr(printer, "mac_address", "") or "").strip(),
+            "printer_ip": p_ip,
+            "mac_address": p_mac,
             "address_book_data": address_book_data,
         }
         headers = {"Content-Type": "application/json"}
@@ -1692,6 +1700,70 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     pass
         except Exception:
             pass
+
+    @staticmethod
+    def _load_scan_points_json() -> dict[str, dict[str, Any]]:
+        try:
+            import json, os, tempfile
+            local_app = os.getenv("LOCALAPPDATA", "")
+            candidates = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent" / "scan_points.json",
+                Path("storage") / "data" / "scan_points.json",
+            ]
+            if local_app:
+                candidates.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent" / "scan_points.json")
+
+            for target_file in candidates:
+                if target_file.exists():
+                    with open(target_file, "r", encoding="utf-8", errors="replace") as f:
+                        raw_data = json.load(f)
+                        if isinstance(raw_data, dict):
+                            return raw_data
+        except Exception as exc:
+            LOGGER.warning("_load_scan_points_json failed: %s", exc)
+        return {}
+
+    @staticmethod
+    def _save_scan_points_json(mac_address: str, ip: str = "", printer_name: str = "", sync_data: dict[str, Any] | None = None) -> None:
+        try:
+            import json, os, tempfile
+            norm_mac = mac_address.upper().replace("-", ":") if mac_address else ""
+            if not norm_mac:
+                return
+
+            current_points = PollingBridgeService._load_scan_points_json()
+            existing_item = current_points.get(norm_mac) or {}
+            
+            updated_item = dict(existing_item)
+            updated_item["mac_address"] = norm_mac
+            if ip:
+                updated_item["ip"] = ip
+            if printer_name:
+                updated_item["printer_name"] = printer_name
+            if isinstance(sync_data, dict):
+                updated_item["timestamp"] = sync_data.get("timestamp") or datetime.now(timezone.utc).isoformat()
+                updated_item["address_list"] = sync_data.get("address_list") or []
+
+            current_points[norm_mac] = updated_item
+
+            local_app = os.getenv("LOCALAPPDATA", "")
+            save_dirs = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent",
+                Path("storage") / "data",
+            ]
+            if local_app:
+                save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
+
+            for target_dir in save_dirs:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_file = target_dir / "scan_points.json"
+                    with open(target_file, "w", encoding="utf-8") as f:
+                        json.dump(current_points, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+        except Exception as exc:
+            LOGGER.warning("_save_scan_points_json failed: %s", exc)
 
     def _check_and_update_scripts(self, remote_scripts: dict[str, str]) -> None:
         if remote_scripts is None or not isinstance(remote_scripts, dict):
@@ -2881,6 +2953,13 @@ if ($node) {{ $node }}
                     local_configs = json.load(f)
             except Exception:
                 pass
+
+        # Merge scan_points.json into devices strictly by mac_address
+        all_scan_points = self._load_scan_points_json()
+        for dev in devices:
+            dev_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().upper().replace("-", ":")
+            if dev_mac in all_scan_points:
+                dev["address_book_sync"] = all_scan_points[dev_mac]
 
         LOGGER.info("[PUSH INVENTORY] Pushing %d printers from printers.json/discovery to VPS for agent %s", len(devices), agent_uid)
         payload = {

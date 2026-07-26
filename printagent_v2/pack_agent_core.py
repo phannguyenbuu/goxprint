@@ -18,7 +18,7 @@ def main():
     print(f"Packaging agent folder into {zip_path}...")
     
     # Dynamically read version from agent/services/updater.py
-    version = "2.1.110"
+    version = "2.1.111"
     updater_file = agent_dir / "services" / "updater.py"
     if updater_file.exists():
         import re
