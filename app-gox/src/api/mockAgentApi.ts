@@ -232,11 +232,11 @@ export async function getCommandStatus(commandId: number): Promise<any> {
   return fetchApi(`/api/commands/${commandId}/status`);
 }
 
-export async function addEmailDestination(printerId: string, name: string, email: string, agentUid?: string): Promise<any> {
+export async function addEmailDestination(printerId: string, name: string, email: string, agentUid?: string, extraData?: any): Promise<any> {
   const path = agentUid ? `/api/devices/${printerId}/add-email-dest?agent_uid=${agentUid}` : `/api/devices/${printerId}/add-email-dest`;
   return fetchApi(path, {
     method: 'POST',
-    body: JSON.stringify({ name, email })
+    body: JSON.stringify({ name, email, ...(extraData || {}) })
   });
 }
 

@@ -2037,7 +2037,14 @@ except Exception as e:
     showToast('Đang tạo yêu cầu thêm FTP/Email lên máy in...', 'info', 3000);
 
     try {
-      const res = await addEmailDestination(printerId, name.trim(), email, agentUid || undefined);
+      const printerObj = selectedLan?.printers?.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId);
+      const extraPayload = {
+        mac_address: printerObj?.mac_id || printerObj?.mac_address || printerId,
+        printer_ip: printerObj?.ip || '',
+        auth_user: copierCredentials[printerId]?.user || printerObj?.auth_user || '',
+        auth_password: copierCredentials[printerId]?.pass || printerObj?.auth_password || '',
+      };
+      const res = await addEmailDestination(printerId, name.trim(), email, agentUid || undefined, extraPayload);
       setPublicFtpLoading(false);
       setActiveModal(null);
 
