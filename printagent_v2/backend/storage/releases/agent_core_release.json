@@ -1,8 +1,8 @@
 {
-  "version": "2.1.102",
+  "version": "2.1.103",
   "download_url": "/static/releases/agent_core.zip",
-  "sha256": "b41f5d449aed3df7295710a166ef28c9897dab3b17784b0145b91b3c6d3001cb",
+  "sha256": "c130624adc3ea8d8e1634ca02f6901aa9749865ab9d00038261854071072e0c8",
   "size": 286397,
-  "notes": "Auto-packaged v2.1.102 via pack_agent_core.py",
-  "published_at": "2026-07-26T18:52:39.583429+07:00"
+  "notes": "Auto-packaged v2.1.103 via pack_agent_core.py",
+  "published_at": "2026-07-26T19:33:28.039794+07:00"
 }

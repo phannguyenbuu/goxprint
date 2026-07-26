@@ -925,6 +925,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
 
         lan_uid = _to_text(body.get("lan_uid"))
         agent_uid = _to_text(body.get("agent_uid")) or "legacy-agent"
+        devices_list = body.get("devices")
         if not isinstance(devices_list, list):
             devices_list = []
 
