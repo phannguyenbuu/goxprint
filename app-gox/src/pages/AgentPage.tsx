@@ -975,6 +975,10 @@ export function AgentPage() {
     try {
       const data = await getLanSites();
       setLanSites(data);
+      console.log("🌐 [LAN SITES DATA RECEIVED FROM VPS]:", data);
+      if (data && data.length > 0) {
+        console.log("🖨️ [PRINTERS IN SELECTED LAN]:", data[0].printers);
+      }
       
       // Auto select first LAN if none selected or invalid
       const savedLanUid = localStorage.getItem('goxprint_selected_lan_uid');
@@ -1719,6 +1723,8 @@ except Exception as e:
 
       return true;
     });
+
+    console.log("✨ [FILTERED PRINTERS RESULT FOR UI]:", filtered);
 
     if (initialLastViewedId) {
       return [...filtered].sort((a, b) => {
