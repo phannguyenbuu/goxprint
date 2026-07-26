@@ -47,14 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
     initSupportForm();
     initFormSubmissions();
     
-    // Download Agent Header Button & Modal Handler
-    const btnDownloadHeader = document.getElementById('btn-download-agent-header');
+    // Download Agent Card Button & Modal Handler
+    const btnDownloadCard = document.getElementById('btn-download-agent-card');
+    const btnCopyLan = document.getElementById('btn-copy-lan');
     const warningModal = document.getElementById('download-warning-modal');
     const btnCloseWarning = document.getElementById('btn-close-warning-modal');
 
-    if (btnDownloadHeader) {
-      btnDownloadHeader.addEventListener('click', () => {
-        if (warningModal) warningModal.style.display = 'flex';
+    if (btnDownloadCard && warningModal) {
+      btnDownloadCard.addEventListener('click', () => {
+        warningModal.style.display = 'flex';
       });
     }
 
@@ -78,7 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
       statusDot.style.backgroundColor = '#ef4444';
       statusText.textContent = 'Chưa bật PrintAgent';
       lanIpEl.textContent = 'Chưa bật PrintAgent';
-      if (btnDownloadHeader) btnDownloadHeader.style.display = 'inline-flex';
+      if (btnCopyLan) btnCopyLan.style.display = 'none';
+      if (btnDownloadCard) btnDownloadCard.style.display = 'inline-flex';
       startBackgroundProbing();
     }
     
@@ -94,8 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
     statusText.textContent = 'Đã kết nối PrintAgent';
     lanIpEl.textContent = localAgent.pc_ip || '127.0.0.1';
     
-    const btnDownloadHeader = document.getElementById('btn-download-agent-header');
-    if (btnDownloadHeader) btnDownloadHeader.style.display = 'none';
+    const btnCopyLan = document.getElementById('btn-copy-lan');
+    const btnDownloadCard = document.getElementById('btn-download-agent-card');
+    if (btnCopyLan) btnCopyLan.style.display = 'inline-flex';
+    if (btnDownloadCard) btnDownloadCard.style.display = 'none';
 
     showToast('Đã kết nối thành công với PrintAgent cục bộ.', 'success');
     
