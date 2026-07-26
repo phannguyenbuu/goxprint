@@ -3419,11 +3419,17 @@ if ($node) {{ $node }}
                 auth_password = str(params.get("auth_password") or "").strip()
             
             if auth_user:
-                printer.user = auth_user
-                printer.auth_user = auth_user
+                setattr(printer, "user", auth_user)
+                try:
+                    setattr(printer, "auth_user", auth_user)
+                except Exception:
+                    pass
             if auth_password:
-                printer.password = auth_password
-                printer.auth_password = auth_password
+                setattr(printer, "password", auth_password)
+                try:
+                    setattr(printer, "auth_password", auth_password)
+                except Exception:
+                    pass
 
             raw_items = []
             local_app = os.getenv("LOCALAPPDATA", "")
