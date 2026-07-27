@@ -203,63 +203,97 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             
             rows: list[dict[str, Any]] = []
 
-            # 1. Pipeline: mac_id -> resolve ip -> fetch counter/status from old CounterInfor & StatusInfor tables
+            # 1. Pipeline: mac_id -> resolve ip -> fetch counter & status (from RAM devices or SQL DeviceInforHistory/DeviceInfor)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
-            from models import CounterInfor, StatusInfor, Printer
+            from models import CounterInfor, StatusInfor, DeviceInfor, DeviceInforHistory, Printer
             prune_offline_agents(timeout_seconds=180)
             dummy_id = 1
+
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
                 a_lead = agent_info.get("lead", "default")
                 a_lan_uid = agent_info.get("lan_uid", "default")
                 if lead and a_lead != lead:
                     continue
+
                 printers_list = agent_info.get("printers_json") or []
+                devices_dict = agent_info.get("devices") or {}
+
                 for dev in printers_list:
                     if not isinstance(dev, dict):
                         continue
+
+                    # Bước 1: mac_id -> tìm ra ip
                     p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
                     p_ip = _to_text(dev.get("ip"))
                     p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
 
-                    # Bước 1: mac_id -> tìm ra ip (nếu p_ip chưa có, tìm ip tương ứng với mac_id từ Printer table)
                     if not p_ip and p_mac:
-                        p_obj = session.execute(
-                            select(Printer).where(
-                                Printer.lead == a_lead,
-                                func.upper(Printer.mac_address) == p_mac
-                            )
-                        ).scalars().first()
-                        if p_obj and p_obj.ip:
-                            p_ip = p_obj.ip
+                        if p_mac in devices_dict and devices_dict[p_mac].get("ip"):
+                            p_ip = devices_dict[p_mac]["ip"]
+                        else:
+                            p_obj = session.execute(
+                                select(Printer).where(
+                                    Printer.lead == a_lead,
+                                    func.upper(Printer.mac_address) == p_mac
+                                )
+                            ).scalars().first()
+                            if p_obj and p_obj.ip:
+                                p_ip = p_obj.ip
+
                     if not p_ip and not p_mac:
                         continue
 
-                    # Bước 2 & 3: Lấy counter và status từ LOGIC CŨ tuyệt đối (CounterInfor & StatusInfor) theo (lead, ip)
+                    # Bước 2 & 3: Lấy counter_data và status_data
                     counter_data = {}
                     status_data = {}
                     last_counter_at = None
                     last_status_at = None
 
-                    if p_ip:
-                        c_row = session.execute(
-                            select(CounterInfor)
-                            .where(CounterInfor.lead == a_lead, CounterInfor.ip == p_ip)
-                            .order_by(CounterInfor.timestamp.desc(), CounterInfor.id.desc())
-                            .limit(1)
-                        ).scalars().first()
-                        if c_row and isinstance(c_row.raw_payload, dict):
-                            counter_data = c_row.raw_payload
-                            last_counter_at = c_row.timestamp
+                    # Ưu tiên lấy từ RAM (devices_dict)
+                    ram_dev = None
+                    if p_mac and p_mac in devices_dict:
+                        ram_dev = devices_dict[p_mac]
+                    if not ram_dev and p_ip:
+                        for r_k, r_v in devices_dict.items():
+                            if isinstance(r_v, dict) and _to_text(r_v.get("ip")) == p_ip:
+                                ram_dev = r_v
+                                break
 
-                        s_row = session.execute(
-                            select(StatusInfor)
-                            .where(StatusInfor.lead == a_lead, StatusInfor.ip == p_ip)
-                            .order_by(StatusInfor.timestamp.desc(), StatusInfor.id.desc())
-                            .limit(1)
-                        ).scalars().first()
-                        if s_row and isinstance(s_row.raw_payload, dict):
-                            status_data = s_row.raw_payload
-                            last_status_at = s_row.timestamp
+                    if ram_dev:
+                        counter_data = ram_dev.get("counter") or ram_dev.get("counter_data") or {}
+                        status_data = ram_dev.get("status") or ram_dev.get("status_data") or {}
+
+                    # Nếu RAM chưa có, lấy từ DeviceInforHistory trong CSDL theo mac_id / ip
+                    if not counter_data and (p_mac or p_ip):
+                        d_stmt = select(DeviceInforHistory).where(DeviceInforHistory.lead == a_lead)
+                        if p_mac:
+                            d_stmt = d_stmt.where(func.upper(DeviceInforHistory.mac_id) == p_mac)
+                        elif p_ip:
+                            d_stmt = d_stmt.where(DeviceInforHistory.ip == p_ip)
+                        d_stmt = d_stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)
+                        dh_row = session.execute(d_stmt).scalars().first()
+                        if dh_row:
+                            if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
+                                counter_data = dh_row.counter_data
+                            if isinstance(dh_row.status_data, dict) and dh_row.status_data:
+                                status_data = dh_row.status_data
+                            last_counter_at = dh_row.last_counter_at or dh_row.updated_at
+                            last_status_at = dh_row.last_status_at or dh_row.updated_at
+
+                    if not counter_data and (p_mac or p_ip):
+                        d_stmt2 = select(DeviceInfor).where(DeviceInfor.lead == a_lead)
+                        if p_mac:
+                            d_stmt2 = d_stmt2.where(func.upper(DeviceInfor.mac_id) == p_mac)
+                        elif p_ip:
+                            d_stmt2 = d_stmt2.where(DeviceInfor.ip == p_ip)
+                        d_row = session.execute(d_stmt2).scalars().first()
+                        if d_row:
+                            if isinstance(d_row.counter_data, dict) and d_row.counter_data:
+                                counter_data = d_row.counter_data
+                            if not status_data and isinstance(d_row.status_data, dict) and d_row.status_data:
+                                status_data = d_row.status_data
+                            last_counter_at = d_row.last_counter_at or d_row.updated_at
+                            last_status_at = d_row.last_status_at or d_row.updated_at
 
                     now_dt = datetime.now(timezone.utc)
                     rows.append(

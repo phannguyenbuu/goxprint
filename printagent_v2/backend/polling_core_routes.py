@@ -268,6 +268,15 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
                         if not d_ip and not d_mac:
                             continue
+
+                        # Extract telemetry if included in dev or top-level body matching ip/mac
+                        dev_counter = dev.get("counter") or dev.get("counter_data") or {}
+                        dev_status = dev.get("status") or dev.get("status_data") or {}
+                        if not dev_counter and ((ip and d_ip == ip) or (d_mac and mac_id and d_mac == mac_id.upper())):
+                            dev_counter = counter_data if isinstance(counter_data, dict) else {}
+                        if not dev_status and ((ip and d_ip == ip) or (d_mac and mac_id and d_mac == mac_id.upper())):
+                            dev_status = status_data if isinstance(status_data, dict) else {}
+
                         d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead)
                         if d_mac:
                             d_stmt = d_stmt.where(func.upper(DeviceInfor.mac_id) == d_mac)
@@ -284,6 +293,12 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             d_obj.agent_uid = agent_uid
                             d_obj.lan_uid = lan_uid
                             d_obj.updated_at = utc_now
+                            if dev_counter:
+                                d_obj.counter_data = dev_counter
+                                d_obj.last_counter_at = utc_now
+                            if dev_status:
+                                d_obj.status_data = dev_status
+                                d_obj.last_status_at = utc_now
                         else:
                             d_obj = DeviceInfor(
                                 lead=lead,
@@ -292,11 +307,32 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 mac_id=d_mac,
                                 ip=d_ip,
                                 printer_name=d_name or "Unknown Printer",
-                                counter_data={},
-                                status_data={},
+                                counter_data=dev_counter,
+                                status_data=dev_status,
+                                last_counter_at=utc_now if dev_counter else None,
+                                last_status_at=utc_now if dev_status else None,
                                 updated_at=utc_now,
                             )
                             session.add(d_obj)
+
+                        # Write history snapshot if counter_data or status_data is available
+                        if dev_counter or dev_status:
+                            from models import DeviceInforHistory
+                            dh_obj = DeviceInforHistory(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                machine_uid=d_mac or (f"IP:{d_ip}" if d_ip else "unknown"),
+                                mac_id=d_mac,
+                                agent_uid=agent_uid,
+                                printer_name=d_name or "Unknown Printer",
+                                ip=d_ip,
+                                counter_data=dev_counter,
+                                status_data=dev_status,
+                                last_counter_at=utc_now if dev_counter else None,
+                                last_status_at=utc_now if dev_status else None,
+                                updated_at=utc_now,
+                            )
+                            session.add(dh_obj)
 
                     # Purge stale DeviceInfor records for this lead not in agent printers.json
                     existing_d = session.execute(select(DeviceInfor).where(DeviceInfor.lead == lead)).scalars().all()
