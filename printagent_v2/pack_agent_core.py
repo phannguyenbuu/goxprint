@@ -2,6 +2,7 @@ import zipfile
 from pathlib import Path
 import json
 import hashlib
+import sys
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -18,7 +19,7 @@ def main():
     print(f"Packaging agent folder into {zip_path}...")
     
     # Dynamically read version from agent/services/updater.py
-    version = "2.3.6"
+    version = sys.argv[1] if len(sys.argv) > 1 else "2.3.7"
     updater_file = agent_dir / "services" / "updater.py"
     if updater_file.exists():
         import re

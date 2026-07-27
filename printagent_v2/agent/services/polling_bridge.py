@@ -1306,6 +1306,33 @@ Get-NetNeighbor -AddressFamily IPv4 |
             sock.close()
         return ""
 
+    @staticmethod
+    def _probe_snmp_counter(ip: str) -> int:
+        import socket
+        if not ip:
+            return 0
+        # SNMP v1 GetRequest for OID .1.3.6.1.2.1.43.10.2.1.4.1.1 (prtMarkerLifeCount)
+        packet = b"\x30\x2f\x02\x01\x00\x04\x06public\xa0\x22\x02\x04\x12\x34\x56\x79\x02\x01\x00\x02\x01\x00\x30\x14\x30\x12\x06\x0e\x2b\x06\x01\x02\x01\x2b\x0a\x02\x01\x04\x01\x01\x00\x05\x00"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1.5)
+        try:
+            sock.sendto(packet, (ip, 161))
+            data, _ = sock.recvfrom(2048)
+            if len(data) > 10:
+                for idx in range(len(data) - 1, 10, -1):
+                    if data[idx - 1] in (0x02, 0x41):
+                        val_len = data[idx]
+                        if 1 <= val_len <= 8 and idx + val_len < len(data):
+                            val_bytes = data[idx + 1 : idx + 1 + val_len]
+                            val = int.from_bytes(val_bytes, byteorder="big", signed=False)
+                            if val > 0:
+                                return val
+        except Exception:
+            pass
+        finally:
+            sock.close()
+        return 0
+
     def _ensure_printer_name_via_web_probe(self, printer: Printer) -> Printer:
         ip = str(getattr(printer, "ip", "") or "").strip()
         curr_name = str(getattr(printer, "name", "") or "").strip()
@@ -5572,6 +5599,13 @@ Write-Output 'INSTALLED'
                     counter_payload = collector.process_counter(printer, should_post=False)
                     status_payload = collector.process_status(printer, should_post=False)
                     counter_data = counter_payload.get("counter_data", {})
+                    if not isinstance(counter_data, dict):
+                        counter_data = {}
+                    if not counter_data.get("total") or int(counter_data.get("total") or 0) <= 0:
+                        snmp_tot = self._probe_snmp_counter(printer.ip)
+                        if snmp_tot > 0:
+                            counter_data["total"] = snmp_tot
+                            counter_data["copier_bw"] = snmp_tot
 
                     resolved_printer_name = printer.name if printer.name and not self._is_generic_printer_name(printer.name, printer.ip) else counter_payload.get("printer_name", printer.name)
 
