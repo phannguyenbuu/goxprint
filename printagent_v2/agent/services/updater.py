@@ -266,7 +266,7 @@ class AutoUpdater:
             "current_sha256": current_sha,
         }
         try:
-            endpoint = "/api/agent/release"
+            endpoint = "/api/agent/core-release"
             response = session.get(f"{base_url}{endpoint}", params=params, headers=headers, timeout=20)
             response.raise_for_status()
             payload = response.json()
@@ -279,6 +279,50 @@ class AutoUpdater:
             return False, "Invalid release payload", False
         return self.apply_release_manifest(payload, base_url=base_url)
 
+    def _download_and_apply_core_zip(self, download_url: str, target_version: str, expected_sha256: str) -> tuple[bool, str, bool]:
+        core_zip_path = _get_core_zip_path()
+        try:
+            request_headers = {
+                "Cache-Control": "no-cache, no-store, max-age=0",
+                "Pragma": "no-cache",
+            }
+            if expected_sha256:
+                joiner = "&" if "?" in download_url else "?"
+                download_url = f"{download_url}{joiner}v={expected_sha256}"
+
+            with requests.get(download_url, stream=True, timeout=(20, 300), headers=request_headers) as response:
+                response.raise_for_status()
+                with core_zip_path.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            handle.write(chunk)
+
+            import zipfile
+            extract_dir = core_zip_path.parent / "agent_core"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(core_zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            LOGGER.info("[Updater] Extracted agent_core.zip v%s to %s", target_version, extract_dir)
+            with self._lock:
+                self.state.current_version = target_version or DEFAULT_APP_VERSION
+                self.state.last_success_at = _utc_now()
+                self.state.last_error = ""
+
+            relaunch_command = subprocess.list2cmdline([sys.executable, *self._current_args])
+            LOGGER.info("[Updater] Restarting agent process to apply agent_core.zip update: %s", relaunch_command)
+            subprocess.Popen(
+                relaunch_command,
+                shell=True,
+                creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                env=fresh_pyinstaller_env(),
+            )
+            sys.exit(0)
+            return True, "Updated agent_core.zip successfully", True
+        except Exception as exc:
+            LOGGER.warning("[Updater] Failed to update agent_core.zip: %s", exc)
+            return False, str(exc), False
+
     def apply_release_manifest(self, payload: dict[str, Any], base_url: str) -> tuple[bool, str, bool]:
         latest_version = str(payload.get("version") or "").strip()
         download_url = self._resolve_url(base_url, str(payload.get("download_url") or payload.get("url") or "").strip())
@@ -288,6 +332,9 @@ class AutoUpdater:
         with self._lock:
             self.state.last_available_version = latest_version
             self.state.last_download_url = download_url
+
+        if download_url.lower().endswith(".zip"):
+            return self._download_and_apply_core_zip(download_url=download_url, target_version=latest_version, expected_sha256=expected_sha)
 
         current_binary = self._current_binary_path()
         current_sha = ""
