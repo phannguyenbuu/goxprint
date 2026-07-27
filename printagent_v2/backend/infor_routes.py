@@ -203,8 +203,9 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             
             rows: list[dict[str, Any]] = []
 
-            # 1. PRIMARY SOURCE: ACTIVE_AGENTS RAM in-memory payload
+            # 1. Pipeline: mac_id -> resolve ip -> fetch counter/status from old CounterInfor & StatusInfor tables
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+            from models import CounterInfor, StatusInfor, Printer
             prune_offline_agents(timeout_seconds=180)
             dummy_id = 1
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
@@ -219,11 +220,48 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
                     p_ip = _to_text(dev.get("ip"))
                     p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
+
+                    # Bước 1: mac_id -> tìm ra ip (nếu p_ip chưa có, tìm ip tương ứng với mac_id từ Printer table)
+                    if not p_ip and p_mac:
+                        p_obj = session.execute(
+                            select(Printer).where(
+                                Printer.lead == a_lead,
+                                func.upper(Printer.mac_address) == p_mac
+                            )
+                        ).scalars().first()
+                        if p_obj and p_obj.ip:
+                            p_ip = p_obj.ip
                     if not p_ip and not p_mac:
                         continue
+
+                    # Bước 2 & 3: Lấy counter và status từ LOGIC CŨ tuyệt đối (CounterInfor & StatusInfor) theo (lead, ip)
+                    counter_data = {}
+                    status_data = {}
+                    last_counter_at = None
+                    last_status_at = None
+
+                    if p_ip:
+                        c_row = session.execute(
+                            select(CounterInfor)
+                            .where(CounterInfor.lead == a_lead, CounterInfor.ip == p_ip)
+                            .order_by(CounterInfor.timestamp.desc(), CounterInfor.id.desc())
+                            .limit(1)
+                        ).scalars().first()
+                        if c_row and isinstance(c_row.raw_payload, dict):
+                            counter_data = c_row.raw_payload
+                            last_counter_at = c_row.timestamp
+
+                        s_row = session.execute(
+                            select(StatusInfor)
+                            .where(StatusInfor.lead == a_lead, StatusInfor.ip == p_ip)
+                            .order_by(StatusInfor.timestamp.desc(), StatusInfor.id.desc())
+                            .limit(1)
+                        ).scalars().first()
+                        if s_row and isinstance(s_row.raw_payload, dict):
+                            status_data = s_row.raw_payload
+                            last_status_at = s_row.timestamp
+
                     now_dt = datetime.now(timezone.utc)
-                    counter_data = dev.get("counter") or dev.get("counter_data") or {"total": 0}
-                    status_data = dev.get("status") or dev.get("status_data") or {"printer_status": "online"}
                     rows.append(
                         serialize_infor_row(
                             row_id=dummy_id,
@@ -235,10 +273,10 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             row_mac_id=p_mac,
                             row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
                             row_is_latest=True,
-                            counter_data=counter_data,
-                            status_data=status_data,
-                            last_counter_at=now_dt,
-                            last_status_at=now_dt,
+                            counter_data=counter_data or {"total": 0},
+                            status_data=status_data or {"printer_status": "online"},
+                            last_counter_at=last_counter_at or now_dt,
+                            last_status_at=last_status_at or now_dt,
                             created_at=now_dt,
                             updated_at=now_dt,
                         )
