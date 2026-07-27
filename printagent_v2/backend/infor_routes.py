@@ -201,15 +201,13 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             _refresh_stale_offline(session=session, lead=lead)
             session.commit()
             
-            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-            
-            history_stmt = select(DeviceInforHistory).where(
-                DeviceInforHistory.updated_at >= seven_days_ago
-            ).order_by(
+            history_stmt = select(DeviceInforHistory).order_by(
                 DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()
             )
             if lead:
                 history_stmt = history_stmt.where(DeviceInforHistory.lead == lead)
+            if updated_from:
+                history_stmt = history_stmt.where(DeviceInforHistory.updated_at >= updated_from)
 
             history_rows = session.execute(history_stmt).scalars().all()
 
@@ -256,18 +254,15 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             updated_at=h.updated_at,
                         )
                     )
-            else:
-                base_stmt = select(DeviceInfor).where(
-                    DeviceInfor.updated_at >= seven_days_ago
-                ).order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+
+            if not rows:
+                base_stmt = select(DeviceInfor).order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
                 if lead:
                     base_stmt = base_stmt.where(DeviceInfor.lead == lead)
 
                 for d in session.execute(base_stmt).scalars().all():
                     counter_data = d.counter_data if isinstance(d.counter_data, dict) else {}
                     status_data = d.status_data if isinstance(d.status_data, dict) else {}
-                    if not counter_data and not status_data:
-                        continue
                     resolved_mac = _normalize_mac(d.mac_id)
                     if not resolved_mac and _to_text(d.ip):
                         resolved_mac = _resolve_public_mac(
@@ -294,6 +289,78 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             last_status_at=d.last_status_at,
                             created_at=d.created_at,
                             updated_at=d.updated_at,
+                        )
+                    )
+
+            # Fallback 1: ACTIVE_AGENTS RAM in-memory payload
+            if not rows:
+                from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+                prune_offline_agents(timeout_seconds=180)
+                dummy_id = 1
+                for agent_uid, agent_info in ACTIVE_AGENTS.items():
+                    a_lead = agent_info.get("lead", "default")
+                    a_lan_uid = agent_info.get("lan_uid", "default")
+                    if lead and a_lead != lead:
+                        continue
+                    printers_list = agent_info.get("printers_json") or []
+                    for dev in printers_list:
+                        if not isinstance(dev, dict):
+                            continue
+                        p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
+                        p_ip = _to_text(dev.get("ip"))
+                        p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
+                        if not p_ip and not p_mac:
+                            continue
+                        now_dt = datetime.now(timezone.utc)
+                        counter_data = dev.get("counter") or dev.get("counter_data") or {"total": 0}
+                        status_data = dev.get("status") or dev.get("status_data") or {"printer_status": "online"}
+                        rows.append(
+                            serialize_infor_row(
+                                row_id=dummy_id,
+                                row_lead=a_lead,
+                                row_lan_uid=a_lan_uid,
+                                row_agent_uid=agent_uid,
+                                row_printer_name=p_name,
+                                row_ip=p_ip,
+                                row_mac_id=p_mac,
+                                row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
+                                row_is_latest=True,
+                                counter_data=counter_data,
+                                status_data=status_data,
+                                last_counter_at=now_dt,
+                                last_status_at=now_dt,
+                                created_at=now_dt,
+                                updated_at=now_dt,
+                            )
+                        )
+                        dummy_id += 1
+
+            # Fallback 2: SQL Printer table
+            if not rows:
+                from models import Printer
+                p_stmt = select(Printer)
+                if lead:
+                    p_stmt = p_stmt.where(Printer.lead == lead)
+                for p in session.execute(p_stmt).scalars().all():
+                    now_dt = datetime.now(timezone.utc)
+                    p_mac = _normalize_mac(p.mac_address)
+                    rows.append(
+                        serialize_infor_row(
+                            row_id=int(p.id),
+                            row_lead=p.lead or "default",
+                            row_lan_uid=p.lan_uid or "default",
+                            row_agent_uid=p.agent_uid or "",
+                            row_printer_name=getattr(p, "printer_name", None) or getattr(p, "name", None) or "Photocopy",
+                            row_ip=p.ip or "",
+                            row_mac_id=p_mac,
+                            row_machine_uid=p_mac or (f"IP:{p.ip}" if p.ip else "unknown"),
+                            row_is_latest=True,
+                            counter_data={"total": 0},
+                            status_data={"printer_status": "online" if p.is_online else "offline"},
+                            last_counter_at=now_dt,
+                            last_status_at=now_dt,
+                            created_at=getattr(p, "created_at", now_dt),
+                            updated_at=getattr(p, "updated_at", now_dt),
                         )
                     )
 
