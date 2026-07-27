@@ -73,7 +73,7 @@ class UpdateState:
 class AutoUpdater:
     def __init__(self, project_root: Path, current_args: list[str] | None = None) -> None:
         self.project_root = project_root
-        self.current_version = os.getenv("APP_VERSION", DEFAULT_APP_VERSION).strip() or DEFAULT_APP_VERSION
+        self.current_version = DEFAULT_APP_VERSION
         self.auto_apply = _env_bool("UPDATE_AUTO_APPLY", default=False)
         self.default_command = os.getenv("UPDATE_DEFAULT_COMMAND", "git pull --ff-only").strip()
         prefix_raw = os.getenv("UPDATE_ALLOWED_PREFIX", "git pull --ff-only").strip()
