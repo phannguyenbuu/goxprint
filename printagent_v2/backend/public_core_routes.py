@@ -104,52 +104,91 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not normalized_mac:
             return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
 
-        with session_factory() as session:
-            printer = session.execute(
-                select(Printer)
-                .where(func.upper(Printer.mac_address) == normalized_mac)
-                .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-            
-            if not printer:
-                row = session.execute(
-                    select(DeviceInfor)
-                    .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
-                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+        agent_uid = None
+        ip = None
+        printer_name = None
+        lead_val = None
+        lan_uid_val = None
+
+        from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+        from models import DeviceInforHistory
+        prune_offline_agents(timeout_seconds=180)
+        for a_uid, a_info in ACTIVE_AGENTS.items():
+            printers_list = a_info.get("printers_json") or []
+            for dev in printers_list:
+                if not isinstance(dev, dict):
+                    continue
+                p_mac = _normalize_mac(dev.get("mac_address") or dev.get("mac_id"))
+                if p_mac and p_mac == normalized_mac:
+                    agent_uid = a_uid
+                    ip = _to_text(dev.get("ip"))
+                    printer_name = _to_text(dev.get("printer_name") or dev.get("name"))
+                    lead_val = a_info.get("lead", "default")
+                    lan_uid_val = a_info.get("lan_uid", "default")
+                    break
+            if agent_uid:
+                break
+
+        if not agent_uid:
+            with session_factory() as session:
+                printer = session.execute(
+                    select(Printer)
+                    .where(func.upper(Printer.mac_address) == normalized_mac)
+                    .order_by(Printer.updated_at.desc(), Printer.id.desc())
                     .limit(1)
                 ).scalar_one_or_none()
-                if not row:
-                    return jsonify({"ok": False, "error": "Device not found in database"}), 404
-                agent_uid = row.agent_uid
-                ip = row.ip
-                printer_name = row.printer_name
-            else:
-                agent_uid = printer.agent_uid
-                ip = printer.ip
-                printer_name = printer.printer_name
+                
+                if printer:
+                    agent_uid = printer.agent_uid
+                    ip = printer.ip
+                    printer_name = printer.printer_name
+                else:
+                    row = session.execute(
+                        select(DeviceInfor)
+                        .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
+                        .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                        .limit(1)
+                    ).scalar_one_or_none()
+                    if row:
+                        agent_uid = row.agent_uid
+                        ip = row.ip
+                        printer_name = row.printer_name
+                    else:
+                        dh_row = session.execute(
+                            select(DeviceInforHistory)
+                            .where(func.upper(DeviceInforHistory.mac_id) == normalized_mac)
+                            .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
+                            .limit(1)
+                        ).scalar_one_or_none()
+                        if dh_row:
+                            agent_uid = dh_row.agent_uid
+                            ip = dh_row.ip
+                            printer_name = dh_row.printer_name
 
-            # Determine printer_type from printer_name
-            name_lower = printer_name.lower() if printer_name else ""
-            if "toshiba" in name_lower:
-                printer_type = "toshiba"
-            elif "epson" in name_lower:
-                printer_type = "epson"
-            else:
-                printer_type = "ricoh"
+        if not agent_uid:
+            return jsonify({"ok": False, "error": "Device not found in database or active agents"}), 404
 
-        with session_factory() as session:
-            agent = session.execute(
-                select(AgentNode)
-                .where(AgentNode.agent_uid == agent_uid)
-                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-                .limit(1)
-            ).scalars().first()
-            if not agent or not agent.is_online:
-                return jsonify({"ok": False, "error": "Agent managing this device is offline"}), 400
+        name_lower = (printer_name or "").lower()
+        if "toshiba" in name_lower:
+            printer_type = "toshiba"
+        elif "epson" in name_lower:
+            printer_type = "epson"
+        else:
+            printer_type = "ricoh"
 
-            lead_val = agent.lead
-            lan_uid_val = agent.lan_uid
+        if not lead_val or not lan_uid_val:
+            with session_factory() as session:
+                agent = session.execute(
+                    select(AgentNode)
+                    .where(AgentNode.agent_uid == agent_uid)
+                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                    .limit(1)
+                ).scalars().first()
+                if not agent or not agent.is_online:
+                    return jsonify({"ok": False, "error": "Agent managing this device is offline"}), 400
+
+                lead_val = agent.lead
+                lan_uid_val = agent.lan_uid
 
         code_content = """
 import json
