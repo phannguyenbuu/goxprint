@@ -201,59 +201,103 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             _refresh_stale_offline(session=session, lead=lead)
             session.commit()
             
-            history_stmt = select(DeviceInforHistory).order_by(
-                DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()
-            )
-            if lead:
-                history_stmt = history_stmt.where(DeviceInforHistory.lead == lead)
-            if updated_from:
-                history_stmt = history_stmt.where(DeviceInforHistory.updated_at >= updated_from)
-
-            history_rows = session.execute(history_stmt).scalars().all()
-
             rows: list[dict[str, Any]] = []
-            if history_rows:
-                latest_by_lan_mac: set[tuple[str, str, str]] = set()
-                for h in history_rows:
-                    counter_data = h.counter_data if isinstance(h.counter_data, dict) else {}
-                    status_data = h.status_data if isinstance(h.status_data, dict) else {}
-                    if not counter_data and not status_data:
+
+            # 1. PRIMARY SOURCE: ACTIVE_AGENTS RAM in-memory payload
+            from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
+            prune_offline_agents(timeout_seconds=180)
+            dummy_id = 1
+            for agent_uid, agent_info in ACTIVE_AGENTS.items():
+                a_lead = agent_info.get("lead", "default")
+                a_lan_uid = agent_info.get("lan_uid", "default")
+                if lead and a_lead != lead:
+                    continue
+                printers_list = agent_info.get("printers_json") or []
+                for dev in printers_list:
+                    if not isinstance(dev, dict):
                         continue
-                    resolved_mac = _normalize_mac(h.mac_id)
-                    if not resolved_mac and _to_text(h.ip):
-                        resolved_mac = _resolve_public_mac(
-                            session=session,
-                            lead=_to_text(h.lead),
-                            lan_uid=_to_text(h.lan_uid),
-                            ip=_to_text(h.ip),
-                            incoming_mac="",
-                        )
-                    machine_uid = _to_text(h.machine_uid) or resolved_mac or (f"IP:{_to_text(h.ip)}" if _to_text(h.ip) else "")
-                    is_latest = False
-                    if resolved_mac:
-                        latest_key = (_to_text(h.lead), _to_text(h.lan_uid), resolved_mac)
-                        if latest_key not in latest_by_lan_mac:
-                            latest_by_lan_mac.add(latest_key)
-                            is_latest = True
+                    p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
+                    p_ip = _to_text(dev.get("ip"))
+                    p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
+                    if not p_ip and not p_mac:
+                        continue
+                    now_dt = datetime.now(timezone.utc)
+                    counter_data = dev.get("counter") or dev.get("counter_data") or {"total": 0}
+                    status_data = dev.get("status") or dev.get("status_data") or {"printer_status": "online"}
                     rows.append(
                         serialize_infor_row(
-                            row_id=int(h.id),
-                            row_lead=h.lead,
-                            row_lan_uid=h.lan_uid,
-                            row_agent_uid=h.agent_uid,
-                            row_printer_name=h.printer_name,
-                            row_ip=h.ip,
-                            row_mac_id=resolved_mac,
-                            row_machine_uid=machine_uid,
-                            row_is_latest=is_latest,
+                            row_id=dummy_id,
+                            row_lead=a_lead,
+                            row_lan_uid=a_lan_uid,
+                            row_agent_uid=agent_uid,
+                            row_printer_name=p_name,
+                            row_ip=p_ip,
+                            row_mac_id=p_mac,
+                            row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
+                            row_is_latest=True,
                             counter_data=counter_data,
                             status_data=status_data,
-                            last_counter_at=h.last_counter_at,
-                            last_status_at=h.last_status_at,
-                            created_at=h.created_at,
-                            updated_at=h.updated_at,
+                            last_counter_at=now_dt,
+                            last_status_at=now_dt,
+                            created_at=now_dt,
+                            updated_at=now_dt,
                         )
                     )
+                    dummy_id += 1
+
+            # 2. FALLBACK ONLY IF RAM IS EMPTY (e.g. right after server reboot)
+            if not rows:
+                history_stmt = select(DeviceInforHistory).order_by(
+                    DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()
+                )
+                if lead:
+                    history_stmt = history_stmt.where(DeviceInforHistory.lead == lead)
+                if updated_from:
+                    history_stmt = history_stmt.where(DeviceInforHistory.updated_at >= updated_from)
+
+                history_rows = session.execute(history_stmt).scalars().all()
+                if history_rows:
+                    latest_by_lan_mac: set[tuple[str, str, str]] = set()
+                    for h in history_rows:
+                        counter_data = h.counter_data if isinstance(h.counter_data, dict) else {}
+                        status_data = h.status_data if isinstance(h.status_data, dict) else {}
+                        if not counter_data and not status_data:
+                            continue
+                        resolved_mac = _normalize_mac(h.mac_id)
+                        if not resolved_mac and _to_text(h.ip):
+                            resolved_mac = _resolve_public_mac(
+                                session=session,
+                                lead=_to_text(h.lead),
+                                lan_uid=_to_text(h.lan_uid),
+                                ip=_to_text(h.ip),
+                                incoming_mac="",
+                            )
+                        machine_uid = _to_text(h.machine_uid) or resolved_mac or (f"IP:{_to_text(h.ip)}" if _to_text(h.ip) else "")
+                        is_latest = False
+                        if resolved_mac:
+                            latest_key = (_to_text(h.lead), _to_text(h.lan_uid), resolved_mac)
+                            if latest_key not in latest_by_lan_mac:
+                                latest_by_lan_mac.add(latest_key)
+                                is_latest = True
+                        rows.append(
+                            serialize_infor_row(
+                                row_id=int(h.id),
+                                row_lead=h.lead,
+                                row_lan_uid=h.lan_uid,
+                                row_agent_uid=h.agent_uid,
+                                row_printer_name=h.printer_name,
+                                row_ip=h.ip,
+                                row_mac_id=resolved_mac,
+                                row_machine_uid=machine_uid,
+                                row_is_latest=is_latest,
+                                counter_data=counter_data,
+                                status_data=status_data,
+                                last_counter_at=h.last_counter_at,
+                                last_status_at=h.last_status_at,
+                                created_at=h.created_at,
+                                updated_at=h.updated_at,
+                            )
+                        )
 
             if not rows:
                 base_stmt = select(DeviceInfor).order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
@@ -292,50 +336,6 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         )
                     )
 
-            # Fallback 1: ACTIVE_AGENTS RAM in-memory payload
-            if not rows:
-                from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
-                prune_offline_agents(timeout_seconds=180)
-                dummy_id = 1
-                for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                    a_lead = agent_info.get("lead", "default")
-                    a_lan_uid = agent_info.get("lan_uid", "default")
-                    if lead and a_lead != lead:
-                        continue
-                    printers_list = agent_info.get("printers_json") or []
-                    for dev in printers_list:
-                        if not isinstance(dev, dict):
-                            continue
-                        p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
-                        p_ip = _to_text(dev.get("ip"))
-                        p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
-                        if not p_ip and not p_mac:
-                            continue
-                        now_dt = datetime.now(timezone.utc)
-                        counter_data = dev.get("counter") or dev.get("counter_data") or {"total": 0}
-                        status_data = dev.get("status") or dev.get("status_data") or {"printer_status": "online"}
-                        rows.append(
-                            serialize_infor_row(
-                                row_id=dummy_id,
-                                row_lead=a_lead,
-                                row_lan_uid=a_lan_uid,
-                                row_agent_uid=agent_uid,
-                                row_printer_name=p_name,
-                                row_ip=p_ip,
-                                row_mac_id=p_mac,
-                                row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
-                                row_is_latest=True,
-                                counter_data=counter_data,
-                                status_data=status_data,
-                                last_counter_at=now_dt,
-                                last_status_at=now_dt,
-                                created_at=now_dt,
-                                updated_at=now_dt,
-                            )
-                        )
-                        dummy_id += 1
-
-            # Fallback 2: SQL Printer table
             if not rows:
                 from models import Printer
                 p_stmt = select(Printer)
