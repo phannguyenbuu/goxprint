@@ -11,7 +11,7 @@ from typing import Any
 from flask import Flask, jsonify, request
 from sqlalchemy import select
 
-from utils import _to_text, _format_datetime_ui, _apply_date_filters
+from utils import _to_text, _format_datetime_ui, _apply_date_filters, _normalize_mac
 from serializers import _refresh_stale_agent_offline, _refresh_stale_offline
 from app_helpers import _serialize_audit_payload_iso
 from models import LanSite, AgentNode, LanEmail, Printer, DeviceInfor
@@ -68,7 +68,7 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
         ]
         
     matches = []
-    query_numbers = [t for t in query_tokens if t.isdigit() or (any(c.isdigit() for c in t) and len(t) >= 2)]
+    digits_in_query = re.findall(r'\d+', printer_name)
     
     for brand, catalog in brands_to_search:
         for item in catalog:
@@ -88,22 +88,13 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             if name_lower in model_lower or model_lower in name_lower:
                 score += 30
                 
-            # Numeric token matching
-            numeric_match = True
-            for q_num in query_numbers:
-                matched_num = False
-                for m_tok in model_tokens:
-                    if q_num in m_tok or m_tok in q_num:
-                        matched_num = True
-                        break
-                if not matched_num:
-                    numeric_match = False
-                    break
-                    
-            if numeric_match and query_numbers:
-                score += 100
-            elif query_numbers and not numeric_match:
-                score -= 50
+            # Digits match bonus / penalty
+            digits_in_model = re.findall(r'\d+', model_name)
+            if digits_in_query and digits_in_model:
+                if set(digits_in_query) & set(digits_in_model):
+                    score += 100
+                else:
+                    score -= 100
                 
             # Length penalty
             score -= abs(len(printer_name) - len(model_name)) * 0.5
@@ -118,7 +109,15 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             elif brand == "toshiba":
                 drivers_field = item.get("drivers", [])
                 for d in drivers_field:
-                    drivers_list.append({"name": d.get("name") or d.get("description") or "Driver", "url": d.get("download_url") or ""})
+                    d_url = str(d.get("download_url") or "").strip()
+                    d_name = str(d.get("name") or d.get("description") or "Driver").strip()
+                    item_dict = {"name": d_name, "url": d_url}
+                    if "CSW2202CUPD01.zip" in d_url or "Universal" in d_name:
+                        if item_dict not in drivers_list:
+                            drivers_list.insert(0, item_dict)
+                    else:
+                        if item_dict not in drivers_list:
+                            drivers_list.append(item_dict)
                 support_url = f"https://business.toshiba.com/product/{item.get('slug', '')}#downloads" if item.get('slug') else ""
             else: # fujifilm
                 links = item.get("all_links", [])
@@ -152,12 +151,8 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             "support_url": "https://business.toshiba.com/support",
             "drivers": [
                 {
-                    "name": "TOSHIBA - Universal Printer Driver (PCL6 64-bit)",
-                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip;https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
-                },
-                {
-                    "name": "TOSHIBA - Generic Printer Driver",
-                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
+                    "name": "TOSHIBA e-STUDIO Universal Printer Driver (CSW2202CUPD01.zip)",
+                    "url": "https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
                 }
             ]
         }]
@@ -211,6 +206,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     continue
 
                 printers_list = agent_info.get("printers_json") or []
+                printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
                 for dev in printers_list:
                     if not isinstance(dev, dict):
                         continue
@@ -228,6 +224,16 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         continue
                     seen_printers.add(dedupe_key)
 
+                    sync_data = dev.get("address_book_sync") or {}
+                    if not sync_data and p_mac:
+                        try:
+                            from models import ScanPoint
+                            sp_rec = session.get(ScanPoint, p_mac)
+                            if sp_rec and sp_rec.address_book_data:
+                                sync_data = sp_rec.address_book_data
+                        except Exception:
+                            pass
+
                     printers_by_lan[a_lan_uid].append({
                         "id": f"{a_lan_uid}_{p_mac or p_ip}",
                         "printer_name": p_name,
@@ -237,7 +243,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "enabled": True,
                         "auth_user": p_user,
                         "auth_password": p_pass,
-                        "address_book_sync": dev.get("address_book_sync") or {},
+                        "address_book_sync": sync_data,
                         "suggested_drivers": _match_printer_drivers(p_name),
                         "agent_uid": agent_uid,
                     })
@@ -424,6 +430,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         if d_mac:
                             existing_macs.add(d_mac)
 
+                lan_printers = [
+                    p for p in lan_printers 
+                    if not any(kw in str(p.get("printer_name", "")).lower() for kw in ["[error]", "f6600", "f66", "h3601", "h36", "f671y", "router", "gateway", "modem", "viettel", "vnpt", "fpt", "zte", "huawei"])
+                ]
+
                 # Perform strict deduplication:
                 # Prioritize valid named printers over Unknown Printer
                 # Prioritize printers with address book sync data
@@ -557,16 +568,44 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             if agent_uid and a_uid.lower() != agent_uid.lower():
                 continue
             printers_list = agent_info.get("printers_json") or []
+            printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
             for dev in printers_list:
                 if isinstance(dev, dict):
-                    dev_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").upper().replace("-", ":")
+                    p_name_val = str(dev.get("printer_name") or dev.get("name") or "").lower()
+                    if any(kw in p_name_val for kw in ["f671y", "f6600", "f66", "h3601", "h36", "router", "gateway", "modem", "viettel", "vnpt", "fpt", "zte", "huawei", "[error]"]):
+                        continue
+                    dev_mac = _normalize_mac(dev.get("mac_address") or dev.get("mac_id"))
+                    if not dev_mac:
+                        continue
                     if mac_id and dev_mac != mac_id:
                         continue
                     sync_data = dev.get("address_book_sync") or {}
-                    res[dev_mac or dev.get("printer_name", "printer")] = {
+                    sp_agent_uid = a_uid
+                    sp_updated_at = ""
+
+                    try:
+                        from models import ScanPoint
+                        with session_factory() as db_sess:
+                            sp_rec = db_sess.get(ScanPoint, dev_mac)
+                            if sp_rec:
+                                if not sync_data and sp_rec.address_book_data:
+                                    sync_data = sp_rec.address_book_data
+                                if sp_rec.agent_uid:
+                                    sp_agent_uid = sp_rec.agent_uid
+                                if sp_rec.updated_at:
+                                    sp_updated_at = sp_rec.updated_at.isoformat()
+                    except Exception:
+                        pass
+
+                    if not sp_updated_at and isinstance(sync_data, dict):
+                        sp_updated_at = str(sync_data.get("timestamp") or "")
+
+                    res[dev_mac] = {
                         "mac_address": dev_mac,
                         "ip": dev.get("ip") or dev.get("printer_ip") or "",
                         "printer_name": dev.get("printer_name") or dev.get("name") or "",
+                        "agent_uid": sp_agent_uid,
+                        "updated_at": sp_updated_at,
                         "address_book_sync": sync_data,
                     }
 

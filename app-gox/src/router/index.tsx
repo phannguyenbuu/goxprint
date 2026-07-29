@@ -145,7 +145,8 @@ export function AppRouter() {
               <Route path="/history" element={<RepairHistoryPage />} />
               <Route path="/agents" element={<AgentPage />} />
               <Route path="/tech" element={<AgentPage />} />
-              <Route path="/downloads" element={<DownloadPage />} />
+              <Route path="/downloads" element={<Navigate to="/jobs" replace />} />
+              <Route path="/jobs" element={<DownloadPage />} />
               <Route path="/drivers" element={<DriversPage />} />
               <Route path="/account" element={<AccountPage />} />
             </Route>

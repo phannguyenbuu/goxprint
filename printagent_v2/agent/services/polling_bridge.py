@@ -33,6 +33,20 @@ DEFAULT_WEB_PORT = 9173
 SCAN_UPLOAD_STATE_FILE = Path("storage/data/scan_upload_state.json")
 MAX_SCAN_UPLOAD_HISTORY = 5000
 
+PRINTER_ACTION_COMMANDS: list[str] = [
+    "save_printer_auth",
+    "update_credentials",
+    "update_copier_credentials",
+    "fetch_address_book",
+    "add_scan_email_dest",
+    "delete_scan_email_dest",
+    "address_modify",
+    "add_scan_point",
+    "add_email",
+    "delete_email",
+    "enable_disable",
+]
+
 
 class PollingBridge:
     def __init__(
@@ -125,7 +139,9 @@ class PollingBridge:
         return str(value or "").strip().lower()
 
     def _collector_service_for(self, printer: Printer) -> RicohService | ToshibaService:
-        if self._toshiba_service is not None and self._printer_type(printer.printer_type) == "toshiba":
+        ptype = str(getattr(printer, "printer_type", "") or "").lower()
+        pname = str(getattr(printer, "name", "") or "").lower()
+        if self._toshiba_service is not None and any(kw in ptype or kw in pname for kw in ("toshiba", "estudio", "e-studio")):
             return self._toshiba_service
         return self._ricoh_service
 
@@ -722,42 +738,129 @@ Get-NetIPAddress -AddressFamily IPv4 |
             except Exception as exc:
                 LOGGER.warning("Periodic polling_when_ip_change call failed: %s", exc)
 
-    def _scan_point_sync_loop(self) -> None:
-        """Runs scan points sync cycle 5 mins after startup, and then at fixed daily times: 07:00, 07:30, 08:00, 11:00, 13:00, 13:30, 14:00, 17:00, 20:00."""
-        target_times = {"07:00", "07:30", "08:00", "11:00", "13:00", "13:30", "14:00", "17:00", "20:00"}
-        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started. Target times: %s", sorted(target_times))
-        
-        # 1. Initial 5-minute wait post-startup / auto-update
-        for _ in range(300):
-            if self._stop_event.is_set():
-                return
-            time.sleep(1.0)
-
-        # Initial cycle post-startup
+    def _sync_down_scan_points_from_vps(self) -> None:
+        """
+        Per user directive:
+        1. Fetch all scan_points from VPS (GET /api/lan-sites/scan-points?lead=default).
+        2. Filter items matching printers managed by this agent (by MAC address / IP).
+        3. Write filtered result to local scan_points.json ONLY for user inspection (never read for logic).
+        """
         try:
-            LOGGER.info("[ScanPointSync] Running initial post-startup scan points sync cycle...")
+            base_url = self._polling_base_url()
+            if not base_url:
+                return
+            lead = self._config.get_string("polling.lead", "default").strip()
+            url = f"{base_url}/api/lan-sites/scan-points?lead={lead}"
+            
+            headers = {}
+            token = self._config.get_string("polling.token").strip()
+            if token:
+                headers["X-API-Token"] = token
+                
+            import requests
+            resp = requests.get(url, headers=headers, timeout=10)
+            if not resp.ok:
+                LOGGER.warning("[ScanPointSyncDown] VPS fetch scan-points returned HTTP %s", resp.status_code)
+                return
+                
+            resp_data = resp.json()
+            vps_points = {}
+            if isinstance(resp_data, dict):
+                vps_points = resp_data.get("scan_points") or resp_data
+            elif isinstance(resp_data, list):
+                for item in resp_data:
+                    if isinstance(item, dict):
+                        m_id = str(item.get("mac_address") or item.get("mac_id") or item.get("mac") or "").upper().replace("-", ":")
+                        if m_id:
+                            vps_points[m_id] = item
+                            
+            if not isinstance(vps_points, dict):
+                return
+
+            # Collect managed printer MACs & IPs for this agent
+            managed_macs = set()
+            managed_ips = set()
+            printers = self._load_local_printers_json() or self._load_printers() or getattr(self, "_last_discovered_printers", [])
+            for p in printers:
+                p_mac = str(getattr(p, "mac_address", "") or getattr(p, "mac_id", "") or "").upper().replace("-", ":")
+                p_ip = str(getattr(p, "ip", "") or "").strip()
+                if p_mac:
+                    managed_macs.add(p_mac)
+                if p_ip:
+                    managed_ips.add(p_ip)
+
+            filtered_points = {}
+            for k_mac, sp_item in vps_points.items():
+                if not isinstance(sp_item, dict):
+                    continue
+                item_mac = str(sp_item.get("mac_address") or sp_item.get("mac_id") or k_mac).upper().replace("-", ":")
+                item_ip = str(sp_item.get("ip") or "").strip()
+                item_agent = str(sp_item.get("agent_uid") or "").strip()
+                
+                # Match if item belongs to printers managed by this agent or matching agent_uid
+                if (item_mac in managed_macs) or (item_ip in managed_ips) or (item_agent and item_agent == self._agent_uid) or not managed_macs:
+                    key = item_mac or item_ip
+                    if key:
+                        filtered_points[key] = sp_item
+
+            self._write_scan_points_json_to_disk(filtered_points)
+            LOGGER.info("[ScanPointSyncDown] Updated local scan_points.json from VPS with %d managed printer scan points", len(filtered_points))
+        except Exception as exc:
+            LOGGER.warning("[ScanPointSyncDown] Failed to fetch/sync scan points from VPS: %s", exc)
+
+    @classmethod
+    def _write_scan_points_json_to_disk(cls, points_data: dict[str, Any]) -> None:
+        try:
+            import json, os, tempfile
+            local_app = os.getenv("LOCALAPPDATA", "")
+            user_prof = os.getenv("USERPROFILE", "")
+            save_dirs = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent",
+                Path("storage") / "data",
+                Path("C:/Users/Kythuat-02/AppData/Local/Temp/GoPrinxAgent"),
+                Path("C:/ProgramData/GoPrinxAgent"),
+            ]
+            if user_prof:
+                save_dirs.insert(0, Path(user_prof) / "AppData" / "Local" / "Temp" / "GoPrinxAgent")
+            if local_app:
+                save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
+
+            for target_dir in save_dirs:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_file = target_dir / "scan_points.json"
+                    with open(target_file, "w", encoding="utf-8") as f:
+                        json.dump(points_data, f, indent=2, ensure_ascii=False)
+                except Exception as file_exc:
+                    LOGGER.warning("[ScanPointSyncDown] Failed writing scan_points.json to %s: %s", target_dir, file_exc)
+        except Exception as exc:
+            LOGGER.warning("_write_scan_points_json_to_disk failed: %s", exc)
+
+    def _scan_point_sync_loop(self) -> None:
+        """Periodic sync thread: scans real address books from printers, posts to VPS, then downloads scan_points from VPS to scan_points.json."""
+        LOGGER.info("[ScanPointSync] Scheduled scan points sync thread started.")
+        
+        # Initial sync down from VPS at startup
+        try:
+            self._sync_down_scan_points_from_vps()
+        except Exception as exc:
+            LOGGER.warning("[ScanPointSync] Initial VPS sync down failed: %s", exc)
+        
+        # Initial real address book scan cycle
+        try:
+            LOGGER.info("[ScanPointSync] Running initial real address book scan cycle...")
             self.run_scan_point_sync_cycle()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             LOGGER.error("[ScanPointSync] Initial scan points sync cycle failed: %s", exc, exc_info=True)
 
-        last_synced_key = ""
-
-        # 2. Fixed schedule loop
+        # Periodic loop every 30 seconds
         while not self._stop_event.is_set():
             try:
-                now = datetime.now()
-                now_time = now.strftime("%H:%M")
-                now_key = now.strftime("%Y-%m-%d %H:%M")
+                self._sync_down_scan_points_from_vps()
+            except Exception as exc:
+                LOGGER.error("[ScanPointSync] Periodic scan points sync down failed: %s", exc)
 
-                if now_time in target_times and now_key != last_synced_key:
-                    last_synced_key = now_key
-                    slot_key = now.strftime("%Y-%m-%d_%H:%M")
-                    LOGGER.info("[ScanPointSync] Fixed schedule trigger at %s (slot: %s)...", now_time, slot_key)
-                    self.run_scan_point_sync_cycle(slot=slot_key)
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.error("[ScanPointSync] Fixed schedule scan points sync cycle failed: %s", exc, exc_info=True)
-
-            for _ in range(10):
+            for _ in range(30):
                 if self._stop_event.is_set():
                     break
                 time.sleep(1.0)
@@ -790,10 +893,6 @@ Get-NetIPAddress -AddressFamily IPv4 |
         p_ip = str(getattr(printer, "ip", "") or "").strip()
         p_name = str(getattr(printer, "name", "") or "").strip()
 
-        # Save to local scan_points.json next to printers.json
-        if p_mac:
-            self._save_scan_points_json(mac_address=p_mac, ip=p_ip, printer_name=p_name, sync_data=address_book_data)
-
         base_url = self._polling_base_url()
         if not base_url:
             return
@@ -802,8 +901,10 @@ Get-NetIPAddress -AddressFamily IPv4 |
         url = f"{base_url}/api/polling/address-book-sync"
         payload = {
             "lead": lead,
+            "agent_uid": self._agent_uid,
             "printer_ip": p_ip,
             "mac_address": p_mac,
+            "printer_name": p_name,
             "address_book_data": address_book_data,
         }
         headers = {"Content-Type": "application/json"}
@@ -813,16 +914,14 @@ Get-NetIPAddress -AddressFamily IPv4 |
             import requests
             resp = requests.post(url, json=payload, headers=headers, timeout=15)
             LOGGER.debug("[_post_address_book_sync_data] Response status: %s", resp.status_code)
+            
+            # Immediately download updated scan points from VPS to local scan_points.json for inspection
+            self._sync_down_scan_points_from_vps()
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("[_post_address_book_sync_data] Failed to post address book sync data to VPS: %s", exc)
 
     def run_scan_point_sync_cycle(self, slot: str = "") -> None:
-        if slot:
-            lock_resp = self._acquire_lan_sync_lock(slot)
-            if not lock_resp.get("acquired"):
-                LOGGER.info("[ScanPointSync] Slot %s in LAN %s already scanned by Agent '%s'. Skipping copier connections & reusing PostgreSQL data.", slot, self._resolved_lan_uid, lock_resp.get("holder_agent"))
-                return
-        printers = self._load_printers()
+        printers = self._load_local_printers_json() or self._load_printers()
         if not printers:
             LOGGER.info("[ScanPointSync] No printers configured for scan point sync.")
             return
@@ -880,11 +979,30 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 if has_repaired:
                     payload = collector.process_address_list(printer)
 
+                p_mac = str(getattr(printer, "mac_address", "") or "").strip().upper().replace("-", ":")
+                p_ip = str(getattr(printer, "ip", "") or "").strip()
+                p_name = str(getattr(printer, "name", "") or "").strip()
+                if p_mac or p_ip:
+                    self._save_scan_points_json(mac_address=p_mac, ip=p_ip, printer_name=p_name, sync_data=payload)
+
                 self._post_address_book_sync_data(printer, payload)
-                LOGGER.info("[ScanPointSync] Completed scan points fetch for copier %s (%s) and saved to PostgreSQL.", printer.name, printer.ip)
+                LOGGER.info("[ScanPointSync] Completed scan points fetch for copier %s (%s) and saved to scan_points.json & PostgreSQL.", printer.name, printer.ip)
 
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("[ScanPointSync] Failed scan point sync for printer %s (%s): %s", printer.name, printer.ip, exc)
+                p_mac = str(getattr(printer, "mac_address", "") or "").strip().upper().replace("-", ":")
+                p_ip = str(getattr(printer, "ip", "") or "").strip()
+                p_name = str(getattr(printer, "name", "") or "").strip()
+                if p_mac or p_ip:
+                    err_text = str(exc)
+                    err_entry = {
+                        "registration_no": "ERR",
+                        "name": f"[ERROR] {err_text}",
+                        "type": "Error",
+                        "error_details": err_text,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                    self._save_scan_points_json(mac_address=p_mac, ip=p_ip, printer_name=p_name, sync_data={"address_list": [err_entry], "error": err_text})
 
         LOGGER.info("[ScanPointSync] Finished scan points sync cycle for all online copiers.")
 
@@ -1037,9 +1155,10 @@ Get-NetNeighbor -AddressFamily IPv4 |
             LOGGER.info("IP change polling thread initialized")
 
         if not self._scan_point_sync_thread or not self._scan_point_sync_thread.is_alive():
+            self._ensure_scan_points_json_exists()
             self._scan_point_sync_thread = threading.Thread(target=self._scan_point_sync_loop, daemon=True, name="polling-scan-point-sync")
             self._scan_point_sync_thread.start()
-            LOGGER.info("Scan point periodic sync thread initialized (5-min initial delay, 3h interval)")
+            LOGGER.info("Scan point periodic sync thread initialized (30-sec initial delay, fixed schedule)")
 
         # Auto-resume camera recordings on startup ONLY if camera.auto_resume is enabled
         try:
@@ -1497,6 +1616,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
 
                                     p_user = str(item.get("auth_user", "") or item.get("user", "") or "").strip()
                                     p_pass = str(item.get("auth_password", "") or item.get("password", "") or "").strip()
+                                    p_is_online = bool(item.get("is_online", True)) if "is_online" in item else (str(item.get("status", "")).lower() != "offline")
                                     res.append(Printer(
                                         id=item.get("id", 0) or 0,
                                         name=p_name,
@@ -1504,7 +1624,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
                                         user=p_user,
                                         password=p_pass,
                                         printer_type=str(item.get("printer_type", "") or item.get("type", "") or "").strip(),
-                                        status="online",
+                                        status="online" if p_is_online else "offline",
+                                        is_online=p_is_online,
                                         mac_address=clean_mac or raw_mac,
                                         updated_at=str(item.get("updated_at", "") or "").strip(),
                                     ))
@@ -1548,6 +1669,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 existing_p = existing_by_mac.get(mac) if mac else None
                 if existing_p and existing_p.name and not self._is_generic_printer_name(existing_p.name, ip):
                     existing_p.ip = ip  # update IP in case DHCP assigned a new IP
+                    existing_p.status = "online"
+                    existing_p.is_online = True
                     printers.append(existing_p)
                     continue
 
@@ -1566,6 +1689,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
                             auth_password=getattr(existing_p, "auth_password", "") if existing_p else "",
                             printer_type=self._detect_printer_type("", mac),
                             status="online",
+                            is_online=True,
                             mac_address=mac,
                         )
                     elif existing_p:
@@ -1573,6 +1697,8 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         discovered.password = existing_p.password or getattr(discovered, "password", "")
                         discovered.auth_user = getattr(existing_p, "auth_user", "") or getattr(discovered, "auth_user", "")
                         discovered.auth_password = getattr(existing_p, "auth_password", "") or getattr(discovered, "auth_password", "")
+                        discovered.status = "online"
+                        discovered.is_online = True
                     printers.append(discovered)
                     continue
 
@@ -1588,6 +1714,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         auth_password=getattr(existing_p, "auth_password", "") if existing_p else "",
                         printer_type=printer_type or self._detect_printer_type(ip, mac),
                         status="online",
+                        is_online=True,
                         mac_address=mac,
                     )
                 elif existing_p:
@@ -1595,27 +1722,46 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     discovered.password = existing_p.password or getattr(discovered, "password", "")
                     discovered.auth_user = getattr(existing_p, "auth_user", "") or getattr(discovered, "auth_user", "")
                     discovered.auth_password = getattr(existing_p, "auth_password", "") or getattr(discovered, "auth_password", "")
+                    discovered.status = "online"
+                    discovered.is_online = True
                 printers.append(discovered)
 
-            # 3. Merge remaining offline printers from existing printers.json
+            # 3. Merge remaining offline printers into local printers.json (keep auth & config persistent)
             scanned_macs = {self._normalize_mac(str(getattr(p, "mac_address", "") or "")) for p in printers if getattr(p, "mac_address", None)}
+            all_persistent_printers: list[Printer] = list(printers)
             for mac, old_p in existing_by_mac.items():
                 if mac not in scanned_macs:
-                    printers.append(old_p)
+                    old_p.status = "offline"
+                    old_p.is_online = False
+                    all_persistent_printers.append(old_p)
 
-            # 4. Ensure names via web probe only if missing/generic (printers with resolved names skip probing)
+            # 4. Ensure names via web probe only for online printers
             now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            for idx, p in enumerate(printers):
-                printers[idx] = self._ensure_printer_name_via_web_probe(p)
-                if not getattr(printers[idx], "updated_at", None):
-                    setattr(printers[idx], "updated_at", now_time)
+            valid_printers = []
+            for p in all_persistent_printers:
+                if getattr(p, "status", "online") == "online":
+                    p = self._ensure_printer_name_via_web_probe(p)
+                
+                if str(getattr(p, "name", "")).startswith("[ERROR] Web probe failed"):
+                    LOGGER.info("[ScanPointSync] Excluding printer ip=%s because web probe failed.", getattr(p, "ip", ""))
+                    continue
 
-            # Deduplicate strictly by mac_address
-            printers = self._deduplicate_printers_by_mac(printers)
+                if not getattr(p, "updated_at", None):
+                    setattr(p, "updated_at", now_time)
+                valid_printers.append(p)
+            
+            all_persistent_printers = valid_printers
 
-            # Save directly to local printers.json disk file (single persistent source of truth)
-            self._save_printers_json(printers)
-            return printers
+            # Deduplicate strictly by mac_address, filter out printers without MAC
+            all_persistent_printers = self._deduplicate_printers_by_mac(all_persistent_printers)
+            all_persistent_printers = [p for p in all_persistent_printers if self._normalize_mac(str(getattr(p, "mac_address", "") or ""))]
+
+            # Save ALL printers (online & offline) directly to local printers.json disk file
+            self._save_printers_json(all_persistent_printers)
+
+            # Return ALL printers (online + offline) for VPS push; VPS & frontend handle filtering
+            LOGGER.info("[ScanPointSync] Persistent printers in local printers.json: %d (online=%d, offline=%d)", len(all_persistent_printers), sum(1 for p in all_persistent_printers if getattr(p, 'is_online', False)), sum(1 for p in all_persistent_printers if not getattr(p, 'is_online', True)))
+            return all_persistent_printers
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Polling bridge local scan failed: %s", exc)
             return []
@@ -1732,11 +1878,13 @@ Get-NetNeighbor -AddressFamily IPv4 |
                         elif p_ip and p_ip in existing_auth_map:
                             p_user, p_pass = existing_auth_map[p_ip]
                     p_time = str(p.get("updated_at") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    p_is_online = bool(p.get("is_online", True)) if str(p.get("status", "")).lower() != "offline" else False
                     data.append({
                         "name": p_name,
                         "ip": p_ip,
                         "mac_address": p_mac,
                         "printer_type": p_type,
+                        "is_online": p_is_online,
                         "auth_user": p_user,
                         "auth_password": p_pass,
                         "updated_at": p_time,
@@ -1779,21 +1927,28 @@ Get-NetNeighbor -AddressFamily IPv4 |
                             p_user, p_pass = existing_auth_map[norm_mac]
                         elif ip and ip in existing_auth_map:
                             p_user, p_pass = existing_auth_map[ip]
+                    p_is_online = bool(getattr(p, "is_online", True)) if str(getattr(p, "status", "")).lower() != "offline" else False
                     data.append({
                         "name": p_name,
                         "ip": ip,
                         "mac_address": clean_mac or raw_mac,
                         "printer_type": detected_type,
+                        "is_online": p_is_online,
                         "auth_user": p_user,
                         "auth_password": p_pass,
                         "updated_at": updated_at_val,
                     })
             
             local_app = os.getenv("LOCALAPPDATA", "")
+            user_prof = os.getenv("USERPROFILE", "")
             save_dirs = [
                 Path(tempfile.gettempdir()) / "GoPrinxAgent",
                 Path("storage") / "data",
+                Path("C:/Users/Kythuat-02/AppData/Local/Temp/GoPrinxAgent"),
+                Path("C:/ProgramData/GoPrinxAgent"),
             ]
+            if user_prof:
+                save_dirs.insert(0, Path(user_prof) / "AppData" / "Local" / "Temp" / "GoPrinxAgent")
             if local_app:
                 save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
 
@@ -1808,14 +1963,16 @@ Get-NetNeighbor -AddressFamily IPv4 |
         except Exception:
             pass
 
-    @staticmethod
-    def _load_scan_points_json() -> dict[str, dict[str, Any]]:
+    @classmethod
+    def _load_scan_points_json(cls) -> dict[str, dict[str, Any]]:
         try:
             import json, os, tempfile
             local_app = os.getenv("LOCALAPPDATA", "")
             candidates = [
                 Path(tempfile.gettempdir()) / "GoPrinxAgent" / "scan_points.json",
                 Path("storage") / "data" / "scan_points.json",
+                Path("C:/Users/Kythuat-02/AppData/Local/Temp/GoPrinxAgent/scan_points.json"),
+                Path("C:/ProgramData/GoPrinxAgent/scan_points.json"),
             ]
             if local_app:
                 candidates.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent" / "scan_points.json")
@@ -1830,34 +1987,110 @@ Get-NetNeighbor -AddressFamily IPv4 |
             LOGGER.warning("_load_scan_points_json failed: %s", exc)
         return {}
 
-    @staticmethod
-    def _save_scan_points_json(mac_address: str, ip: str = "", printer_name: str = "", sync_data: dict[str, Any] | None = None) -> None:
+    @classmethod
+    def _ensure_scan_points_json_exists(cls) -> None:
+        try:
+            import json, os, tempfile
+            local_app = os.getenv("LOCALAPPDATA", "")
+            user_prof = os.getenv("USERPROFILE", "")
+            save_dirs = [
+                Path(tempfile.gettempdir()) / "GoPrinxAgent",
+                Path("storage") / "data",
+                Path("C:/Users/Kythuat-02/AppData/Local/Temp/GoPrinxAgent"),
+                Path("C:/ProgramData/GoPrinxAgent"),
+            ]
+            if user_prof:
+                save_dirs.insert(0, Path(user_prof) / "AppData" / "Local" / "Temp" / "GoPrinxAgent")
+            if local_app:
+                save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
+
+            existing_data = cls._load_scan_points_json() or {}
+            seeded_data = dict(existing_data)
+
+            try:
+                for target_dir in save_dirs:
+                    p_file = target_dir / "printers.json"
+                    if p_file.exists():
+                        with open(p_file, "r", encoding="utf-8") as pf:
+                            p_list = json.load(pf)
+                            if isinstance(p_list, list):
+                                for p in p_list:
+                                    if isinstance(p, dict):
+                                        mac = str(p.get("mac_address") or p.get("mac_id") or "").upper().replace("-", ":")
+                                        ip = str(p.get("ip") or "").strip()
+                                        name = str(p.get("name") or p.get("printer_name") or "").strip()
+                                        key = mac or ip
+                                        if key:
+                                            old_item = seeded_data.get(key) or (seeded_data.get(mac) if mac else {}) or {}
+                                            item = dict(old_item)
+                                            item["mac_address"] = mac or old_item.get("mac_address") or ""
+                                            item["ip"] = ip or old_item.get("ip") or ""
+                                            item["printer_name"] = name or old_item.get("printer_name") or ""
+                                            item["timestamp"] = datetime.now(timezone.utc).isoformat()
+                                            if "address_list" not in item:
+                                                item["address_list"] = []
+                                            seeded_data[key] = item
+                                            if mac:
+                                                seeded_data[mac] = item
+                                break
+            except Exception:
+                pass
+
+            for target_dir in save_dirs:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_file = target_dir / "scan_points.json"
+                    with open(target_file, "w", encoding="utf-8") as f:
+                        json.dump(seeded_data, f, indent=2, ensure_ascii=False)
+                    LOGGER.info("[ScanPointSync] Immediately updated scan_points.json at %s with %d items", target_file, len(seeded_data))
+                except Exception:
+                    pass
+        except Exception as exc:
+            LOGGER.warning("_ensure_scan_points_json_exists failed: %s", exc)
+
+    @classmethod
+    def _save_scan_points_json(cls, mac_address: str, ip: str = "", printer_name: str = "", sync_data: dict[str, Any] | None = None) -> None:
         try:
             import json, os, tempfile
             norm_mac = mac_address.upper().replace("-", ":") if mac_address else ""
-            if not norm_mac:
+            key = norm_mac or ip
+            if not key:
                 return
 
-            current_points = PollingBridgeService._load_scan_points_json()
-            existing_item = current_points.get(norm_mac) or {}
+            current_points = cls._load_scan_points_json()
+            existing_item = current_points.get(key) or (current_points.get(norm_mac) if norm_mac else {}) or (current_points.get(ip) if ip else {}) or {}
             
             updated_item = dict(existing_item)
-            updated_item["mac_address"] = norm_mac
+            if norm_mac:
+                updated_item["mac_address"] = norm_mac
             if ip:
                 updated_item["ip"] = ip
             if printer_name:
                 updated_item["printer_name"] = printer_name
             if isinstance(sync_data, dict):
                 updated_item["timestamp"] = sync_data.get("timestamp") or datetime.now(timezone.utc).isoformat()
-                updated_item["address_list"] = sync_data.get("address_list") or []
+                new_list = sync_data.get("address_list")
+                err_msg = str(sync_data.get("error") or "").strip()
+                if err_msg:
+                    # Per user directive: if offline/error, remove [ERROR] entries and set address_list = []
+                    updated_item["address_list"] = []
+                elif isinstance(new_list, list):
+                    updated_item["address_list"] = new_list
 
-            current_points[norm_mac] = updated_item
+            current_points[key] = updated_item
+            if norm_mac and key != norm_mac:
+                current_points[norm_mac] = updated_item
 
             local_app = os.getenv("LOCALAPPDATA", "")
+            user_prof = os.getenv("USERPROFILE", "")
             save_dirs = [
                 Path(tempfile.gettempdir()) / "GoPrinxAgent",
                 Path("storage") / "data",
+                Path("C:/Users/Kythuat-02/AppData/Local/Temp/GoPrinxAgent"),
+                Path("C:/ProgramData/GoPrinxAgent"),
             ]
+            if user_prof:
+                save_dirs.insert(0, Path(user_prof) / "AppData" / "Local" / "Temp" / "GoPrinxAgent")
             if local_app:
                 save_dirs.insert(0, Path(local_app) / "Temp" / "GoPrinxAgent")
 
@@ -1867,8 +2100,9 @@ Get-NetNeighbor -AddressFamily IPv4 |
                     target_file = target_dir / "scan_points.json"
                     with open(target_file, "w", encoding="utf-8") as f:
                         json.dump(current_points, f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
+                    LOGGER.info("[ScanPointSync] Saved scan_points.json at %s for printer '%s' (IP: %s, MAC: %s)", target_file, printer_name, ip, norm_mac)
+                except Exception as file_exc:
+                    LOGGER.warning("[ScanPointSync] Failed writing to %s: %s", target_dir, file_exc)
         except Exception as exc:
             LOGGER.warning("_save_scan_points_json failed: %s", exc)
 
@@ -3049,6 +3283,8 @@ if ($node) {{ $node }}
                 p_status = str(getattr(printer, "status", "") or "").strip()
                 p_user = str(getattr(printer, "user", "") or getattr(printer, "auth_user", "") or "").strip()
                 p_pass = str(getattr(printer, "password", "") or getattr(printer, "auth_password", "") or "").strip()
+            if not p_mac:
+                continue  # Skip printers without MAC — MAC is the primary key
             devices.append(
                 {
                     "printer_name": p_name,
@@ -3057,7 +3293,8 @@ if ($node) {{ $node }}
                     "mac_address": p_mac,
                     "mac_id": p_mac,
                     "printer_type": p_type,
-                    "status": p_status,
+                    "status": p_status or "online",
+                    "is_online": p_status != "offline",
                     "user": p_user,
                     "password": p_pass,
                     "auth_user": p_user,
@@ -3433,6 +3670,49 @@ if ($node) {{ $node }}
         
         self._update_recent_command_status(command_id, "processing")
         self._post_command_ack(command_id)
+
+        # Parse command_params if present to extract printer IP & MAC
+        params_raw = command.get("command_params") or command.get("parameters_json") or "{}"
+        params = {}
+        if isinstance(params_raw, str) and params_raw.strip():
+            try:
+                params = json.loads(params_raw)
+            except Exception:
+                params = {}
+        elif isinstance(params_raw, dict):
+            params = params_raw
+
+        cmd_ip = str(
+            params.get("printer_ip")
+            or params.get("ip")
+            or command.get("printer_ip")
+            or command.get("ip")
+            or getattr(printer, "ip", "")
+            or ""
+        ).strip()
+
+        cmd_mac = str(
+            params.get("mac_address")
+            or params.get("printer_mac_id")
+            or command.get("printer_mac_id")
+            or command.get("mac_address")
+            or getattr(printer, "mac_address", "")
+            or ""
+        ).strip().upper().replace("-", ":")
+
+        if cmd_ip:
+            printer.ip = cmd_ip
+        if cmd_mac:
+            printer.mac_address = cmd_mac
+
+        # If IP is still missing, try to resolve IP from MAC address in local scan_points / scanned printers
+        if not getattr(printer, "ip", "") and cmd_mac:
+            for p in getattr(self, "_last_scanned_printers", []):
+                p_mac = str(getattr(p, "mac_address", "") or getattr(p, "mac_id", "")).strip().upper().replace("-", ":")
+                if p_mac == cmd_mac:
+                    printer.ip = getattr(p, "ip", "")
+                    break
+
         auth_user = str(command.get("auth_user", "") or "").strip()
         auth_password = str(command.get("auth_password", "") or "").strip()
         if auth_user:
@@ -3597,18 +3877,28 @@ if ($node) {{ $node }}
 
                 LOGGER.info("[PollingBridge] Deleting scan destination reg_no=%s entry_id=%s on printer=%s", reg_no, entry_id, printer.ip)
 
-                # Delete on copier
-                self._ricoh_service.delete_address_entries(
-                    printer=printer,
-                    registration_numbers=[reg_no],
-                    entry_ids=[entry_id] if entry_id else None,
-                    verify=True,
-                )
+                # Delete on copier — branch by printer type
+                is_toshiba = self._printer_type(printer.printer_type) == "toshiba"
+                if is_toshiba and self._toshiba_service is not None:
+                    self._toshiba_service.delete_address_entries(
+                        printer=printer,
+                        registration_numbers=[reg_no],
+                        entry_ids=[entry_id] if entry_id else None,
+                        verify=True,
+                    )
+                else:
+                    self._ricoh_service.delete_address_entries(
+                        printer=printer,
+                        registration_numbers=[reg_no],
+                        entry_ids=[entry_id] if entry_id else None,
+                        verify=True,
+                    )
 
                 # Fetch address book after delete so UI can refresh
                 addr_result = None
                 try:
-                    addr_result = self._ricoh_service.process_address_list(printer)
+                    collector = self._collector_service_for(printer)
+                    addr_result = collector.process_address_list(printer)
                 except Exception as addr_exc:
                     LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email delete: %s", addr_exc)
 
@@ -3645,21 +3935,34 @@ if ($node) {{ $node }}
 
                 LOGGER.info("[PollingBridge] Modifying scan destination reg_no=%s on printer=%s", reg_no, printer.ip)
 
-                # Modify on copier
-                result = self._ricoh_service.modify_address_user_wizard(
-                    printer=printer,
-                    registration_no=reg_no,
-                    name=name,
-                    email=email,
-                    folder=folder,
-                    user_code=user_code,
-                    fields=fields,
-                )
+                # Modify on copier — branch by printer type
+                is_toshiba = self._printer_type(printer.printer_type) == "toshiba"
+                if is_toshiba and self._toshiba_service is not None and hasattr(self._toshiba_service, 'modify_address_user_wizard'):
+                    result = self._toshiba_service.modify_address_user_wizard(
+                        printer=printer,
+                        registration_no=reg_no,
+                        name=name,
+                        email=email,
+                        folder=folder,
+                        user_code=user_code,
+                        fields=fields,
+                    )
+                else:
+                    result = self._ricoh_service.modify_address_user_wizard(
+                        printer=printer,
+                        registration_no=reg_no,
+                        name=name,
+                        email=email,
+                        folder=folder,
+                        user_code=user_code,
+                        fields=fields,
+                    )
 
                 # Fetch address book after modify so UI can refresh
                 addr_result = None
                 try:
-                    addr_result = self._ricoh_service.process_address_list(printer)
+                    collector = self._collector_service_for(printer)
+                    addr_result = collector.process_address_list(printer)
                 except Exception as addr_exc:
                     LOGGER.warning("[PollingBridge] Failed to fetch address book after successful email modify: %s", addr_exc)
 
@@ -3903,7 +4206,7 @@ if ($node) {{ $node }}
             except Exception as pop_exc:
                 LOGGER.warning("Failed to invoke agent command popup: %s", pop_exc)
 
-            if command_type in {"save_printer_auth", "update_credentials", "update_copier_credentials"}:
+            if command_type in PRINTER_ACTION_COMMANDS:
                 dummy_p = Printer(name="Photocopy")
                 return self._apply_command(dummy_p, command)
 
@@ -3920,6 +4223,31 @@ if ($node) {{ $node }}
                 self._post_control_result(command_id=command_id, ok=True, error="")
                 self._update_recent_command_status(command_id, "success")
                 
+            elif command_type == "install_driver":
+                try:
+                    driver_brand = str(command.get("driver_brand", "") or params.get("driver_brand", "") or "").strip()
+                    driver_model = str(command.get("driver_model", "") or params.get("driver_model", "") or "").strip()
+                    driver_name = str(command.get("driver_name", "") or params.get("driver_name", "") or "").strip()
+                    driver_url = str(command.get("driver_url", "") or params.get("driver_url", "") or "").strip()
+                    printer_ip = str(command.get("ip", "") or params.get("ip", "") or "").strip()
+                    
+                    self._send_gui_status("Cài đặt", f"Bắt đầu cài đặt driver {driver_name} cho {printer_ip}...")
+                    self._handle_install_driver(
+                        command_id=command_id,
+                        printer_ip=printer_ip,
+                        brand=driver_brand,
+                        model=driver_model,
+                        driver_name=driver_name,
+                        driver_url=driver_url,
+                    )
+                    self._post_control_result(command_id=command_id, ok=True, error="")
+                    self._update_recent_command_status(command_id, "success")
+                    self._send_gui_status("Cài đặt", f"Cài đặt thành công driver {driver_name} cho {printer_ip}!")
+                except Exception as exc:
+                    LOGGER.error("Failed to install driver for printer %s: %s", command.get("ip"), exc)
+                    self._post_control_result(command_id=command_id, ok=False, error=str(exc))
+                    self._update_recent_command_status(command_id, "failed", str(exc))
+
             elif command_type == "trigger_utility":
                 action = str(params.get("action", "")).strip()
                 import sys
@@ -4534,13 +4862,10 @@ Write-Output 'INSTALLED'
         import shutil
         import subprocess
         import os
+        import sys
 
         LOGGER.info("Starting driver installation printer_ip=%s brand=%s model=%s driver_name=%s driver_url=%s",
                     printer_ip, brand, model, driver_name, driver_url)
-
-        TOSHIBA_DIRECT_INF_URL = "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
-        if ("toshiba" in (brand or "").lower() or "toshiba" in (model or "").lower() or "e-studio" in (model or "").lower()) and TOSHIBA_DIRECT_INF_URL not in driver_url:
-            driver_url = f"{TOSHIBA_DIRECT_INF_URL};{driver_url}" if driver_url else TOSHIBA_DIRECT_INF_URL
 
         _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0x08000000
         step_results: list[str] = []
@@ -4895,8 +5220,19 @@ Write-Output 'INSTALLED'
                             except Exception:
                                 pass
 
-                inf_files = list(extract_dir.glob("**/*.inf"))
-                _progress(f"[2/5] 📂 Tìm thấy: {len(inf_files)} .inf, {len(exe_files)} .exe")
+                all_infs = list(extract_dir.glob("**/*.inf"))
+                is_64 = sys.maxsize > 2**32 or os.environ.get("PROCESSOR_ARCHITECTURE") == "AMD64" or os.environ.get("PROCESSOR_ARCHITEW6432") == "AMD64"
+                if is_64:
+                    matched_infs = [f for f in all_infs if "64" in str(f.parent).lower() or "x64" in str(f.parent).lower() or "amd64" in str(f.parent).lower()]
+                    if matched_infs:
+                        inf_files = matched_infs
+                    else:
+                        inf_files = [f for f in all_infs if "32" not in str(f.parent).lower() and "x86" not in str(f.parent).lower()] or all_infs
+                else:
+                    matched_infs = [f for f in all_infs if "32" in str(f.parent).lower() or "x86" in str(f.parent).lower()]
+                    inf_files = matched_infs if matched_infs else all_infs
+
+                _progress(f"[2/5] 📂 Tìm thấy: {len(all_infs)} .inf ({len(inf_files)} khớp OS { '64-bit' if is_64 else '32-bit' }), {len(exe_files)} .exe")
                 step_results.append(f"Extract: {len(inf_files)} .inf, {len(exe_files)} .exe")
 
                 if not exe_files and not inf_files:
@@ -4906,6 +5242,7 @@ Write-Output 'INSTALLED'
                 _progress(f"[3/5] 📌 Cài driver vào Windows Driver Store...")
                 pnp_ok = 0
                 pnp_fail = 0
+                pnp_err_details = []
                 if inf_files:
                     for i, inf in enumerate(inf_files, 1):
                         _progress(f"[3/5] pnputil ({i}/{len(inf_files)}): {inf.name}")
@@ -4915,15 +5252,24 @@ Write-Output 'INSTALLED'
                                 capture_output=True, text=True, timeout=120,
                                 creationflags=_NO_WINDOW,
                             )
-                            if result.returncode == 0:
+                            out_text = (result.stdout or "") + " " + (result.stderr or "")
+                            is_pnp_success = (
+                                result.returncode in (0, 3010) or
+                                "successfully" in out_text.lower() or
+                                "up-to-date" in out_text.lower() or
+                                "already exists" in out_text.lower()
+                            )
+                            if is_pnp_success:
                                 pnp_ok += 1
-                                _progress(f"[3/5] ✅ {inf.name} — OK")
+                                _progress(f"[3/5] ✅ {inf.name} — OK (DriverStore updated)")
                             else:
                                 pnp_fail += 1
-                                err_msg = (result.stderr or result.stdout or '').strip()[:200]
+                                err_msg = out_text.strip()[:200]
+                                pnp_err_details.append(f"{inf.name}: {err_msg}")
                                 _progress(f"[3/5] ⚠️ {inf.name} — exit {result.returncode}: {err_msg}")
                         except Exception as pnp_exc:
                             pnp_fail += 1
+                            pnp_err_details.append(f"{inf.name}: {pnp_exc}")
                             _progress(f"[3/5] ❌ {inf.name} — {pnp_exc}")
                     _progress(f"[3/5] 📊 pnputil: {pnp_ok} OK, {pnp_fail} lỗi")
                 else:
@@ -4964,9 +5310,11 @@ Write-Output 'INSTALLED'
                     # Combine spooler and inf-file driver names
                     search_pool = list(set(all_drivers + inf_driver_names))
                     matched_name = find_best_driver_match(search_pool, brand, model)
+                    if not matched_name and inf_driver_names:
+                        matched_name = inf_driver_names[0]
+                        _progress(f"[4/5] 📌 Chọn driver trực tiếp từ file INF: '{matched_name}'")
                     
                     if matched_name:
-                        # If matched driver exists in inf files but is not registered in spooler yet, register it explicitly
                         if matched_name not in all_drivers and matched_name in inf_driver_names:
                             _progress(f"[4/5] 📌 Đăng ký driver '{matched_name}' từ Driver Store vào Spooler...")
                             try:
@@ -5049,20 +5397,28 @@ Write-Output 'INSTALLED'
                             _progress(f"[5/5] ✅ Máy in đã tồn tại")
                             step_results.append("Printer: đã tồn tại")
                             add_ok = True
+                        elif inf_files and pnp_ok == 0:
+                            err_summary = "; ".join(pnp_err_details[:2]) if pnp_err_details else "Cần quyền Admin"
+                            _progress(f"[5/5] ❌ Bỏ qua Add-Printer vì pnputil cài driver thất bại (0/len(inf_files)): {err_summary}")
+                            step_results.append(f"Printer: LỖI (pnputil thất bại: {err_summary}. Chạy lại bộ cài printagentinstall.exe mới nhất bằng Admin)")
                         else:
-                            add_result = subprocess.run(
-                                [powershell_path, "-Command",
-                                 f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
-                                capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
-                            )
-                            if add_result.returncode == 0:
-                                _progress(f"[5/5] ✅ Thêm máy in thành công!")
-                                step_results.append(f"Printer: {printer_queue_name} ✅")
-                                add_ok = True
-                            else:
-                                err = add_result.stderr.strip()[:200]
-                                _progress(f"[5/5] ❌ Lỗi Add-Printer: {err}")
-                                step_results.append("Printer: LỖI")
+                            try:
+                                add_result = subprocess.run(
+                                    [powershell_path, "-Command",
+                                     f"Add-Printer -Name '{printer_queue_name}' -DriverName '{installed_driver_name}' -PortName '{port_name}'"],
+                                    capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
+                                )
+                                if add_result.returncode == 0:
+                                    _progress(f"[5/5] ✅ Thêm máy in thành công!")
+                                    step_results.append(f"Printer: {printer_queue_name} ✅")
+                                    add_ok = True
+                                else:
+                                    err = (add_result.stderr or add_result.stdout or '').strip()[:200]
+                                    _progress(f"[5/5] ❌ Lỗi Add-Printer: {err}")
+                                    step_results.append(f"Printer: LỖI ({err or 'exit ' + str(add_result.returncode)})")
+                            except subprocess.TimeoutExpired:
+                                _progress("[5/5] ❌ Lỗi Add-Printer: Quá thời gian chờ (15s)")
+                                step_results.append("Printer: LỖI (Add-Printer treo 15s — Thiếu quyền Admin hoặc chưa chạy GoxDriverService)")
 
                         if add_ok:
                             try:
@@ -5075,7 +5431,7 @@ Write-Output 'INSTALLED'
 
                     except Exception as add_exc:
                         _progress(f"[5/5] ❌ Lỗi: {add_exc}")
-                        step_results.append("Printer: LỖI")
+                        step_results.append(f"Printer: LỖI ({add_exc})")
                 else:
                     _progress("[5/5] ⚠️ Bỏ qua Add-Printer vì port lỗi")
                     step_results.append("Printer: BỎ QUA (port lỗi)")
@@ -5556,9 +5912,17 @@ Write-Output 'INSTALLED'
                 self._push_inventory(printers, hostname=hostname, local_ip=local_ip, lan_uid=lan_uid, fingerprint=fingerprint)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Polling inventory sync failed: %s", exc)
+
+            # Sync down latest scan points from VPS for managed printers & update local scan_points.json
+            try:
+                self._sync_down_scan_points_from_vps()
+            except Exception as sp_exc:
+                LOGGER.debug("Scan points sync-down failed: %s", sp_exc)
             # Legacy FTP control command queue (superseded by _reconcile_scan_address_ftp)
             pass
-            self._last_cycle_total_printers = len(printers)
+            # Per-printer polling only processes online printers (ping-verified by SubnetScanner)
+            online_printers = [p for p in printers if getattr(p, "is_online", True) and getattr(p, "status", "online") != "offline"]
+            self._last_cycle_total_printers = len(online_printers)
             self._last_cycle_ricoh_printers = 0
             self._last_cycle_sent = 0
             self._last_cycle_failed = 0
@@ -5610,19 +5974,14 @@ Write-Output 'INSTALLED'
                     resolved_printer_name = printer.name if printer.name and not self._is_generic_printer_name(printer.name, printer.ip) else counter_payload.get("printer_name", printer.name)
 
                     devices_payload_list = []
-                    try:
-                        all_disc = self._load_local_printers_json()
-                        p_src = all_disc if all_disc else printers
-                        for p in p_src:
-                            devices_payload_list.append({
-                                "printer_name": str(getattr(p, "name", "") or "").strip(),
-                                "ip": str(getattr(p, "ip", "") or "").strip(),
-                                "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
-                                "mac_id": str(getattr(p, "mac_address", "") or "").strip(),
-                                "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
-                            })
-                    except Exception:
-                        pass
+                    for p in printers:
+                        devices_payload_list.append({
+                            "printer_name": str(getattr(p, "name", "") or "").strip(),
+                            "ip": str(getattr(p, "ip", "") or "").strip(),
+                            "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
+                            "mac_id": str(getattr(p, "mac_address", "") or "").strip(),
+                            "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
+                        })
 
                     payload = {
                         "lead": lead,
@@ -5687,9 +6046,13 @@ Write-Output 'INSTALLED'
                                 
                     self._printer_physical_statuses[printer.ip] = sys_status
                     self._printer_online_states[printer.ip] = True
+                    printer.is_online = True
+                    printer.status = "online"
                 except Exception as exc:  # noqa: BLE001
                     self._printer_online_states[printer.ip] = False
                     self._printer_physical_statuses[printer.ip] = "Offline"
+                    printer.is_online = False
+                    printer.status = "offline"
                     with cycle_lock:
                         self._last_cycle_failed += 1
                         self._last_error = str(exc)
@@ -5756,12 +6119,12 @@ Write-Output 'INSTALLED'
                         LOGGER.warning("Polling fallback post failed for %s (%s): %s", printer.name, printer.ip, post_exc)
 
             # Poll printers in parallel using ThreadPoolExecutor
-            if printers:
-                with ThreadPoolExecutor(max_workers=min(6, len(printers))) as executor:
-                    executor.map(_process_single_printer, printers)
+            if online_printers:
+                with ThreadPoolExecutor(max_workers=min(6, len(online_printers))) as executor:
+                    executor.map(_process_single_printer, online_printers)
             
-            # Disabled saving printer states to local JSON cache to ensure live queries only
-            pass
+            # NOTE: printers.json is saved once in _load_printers() with ALL printers (online+offline).
+            # Do NOT save again here — it would overwrite offline printers and cause flickering.
 
             LOGGER.info(
                 "Polling cycle done: total=%s ricoh=%s sent=%s failed=%s",

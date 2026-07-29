@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from flask import Flask, jsonify, request
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 
 from utils import _to_text
 from app_helpers import _serialize_audit_payload_iso
@@ -90,8 +90,15 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
             }
         )
 
-    @app.post("/api/devices/<device_ref>/install-driver")
-    def device_install_driver(device_ref: str) -> Any:
+    @app.post("/api/devices/install-driver")
+    def device_install_driver_general() -> Any:
+        return _handle_device_install_driver(device_ref="")
+
+    @app.post("/api/devices/<path:device_ref>/install-driver")
+    def device_install_driver_by_ref(device_ref: str = "") -> Any:
+        return _handle_device_install_driver(device_ref=device_ref)
+
+    def _handle_device_install_driver(device_ref: str = "") -> Any:
         body = request.get_json(silent=True) or {}
         brand = str(body.get("brand", "")).strip()
         model = str(body.get("model", "")).strip()
@@ -100,78 +107,29 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
         target_agent_uid = str(body.get("agent_uid", "")).strip()
 
         if not brand or not model or not driver_name or not driver_url:
-            return jsonify({"ok": False, "error": "brand, model, driver_name, and driver_url are required"}), 400
+            return jsonify({"ok": False, "error": "brand, model, driver_name, and driver_url are required"}), 200
 
-        all_urls = [driver_url]
-        try:
-            from pathlib import Path
-            import json
-            brand_clean = brand.lower().strip()
-            catalog_file = Path("storage/drivers") / f"{brand_clean}.json"
-            if catalog_file.exists():
-                with open(catalog_file, encoding="utf-8") as f:
-                    catalog_data = json.load(f)
-
-                model_obj = None
-                if isinstance(catalog_data, list):
-                    for item in catalog_data:
-                        if str(item.get("model", "")).strip().lower() == model.lower().strip():
-                            model_obj = item
-                            break
-
-                if model_obj:
-                    model_links = []
-                    drivers_field = model_obj.get("drivers")
-                    if isinstance(drivers_field, dict):
-                        for u in drivers_field.values():
-                            if isinstance(u, str):
-                                model_links.append(u.strip())
-                    elif isinstance(drivers_field, list):
-                        for d in drivers_field:
-                            if isinstance(d, dict) and "download_url" in d:
-                                model_links.append(str(d["download_url"]).strip())
-
-                    if not model_links:
-                        all_links_field = model_obj.get("all_links")
-                        if isinstance(all_links_field, list):
-                            for u in all_links_field:
-                                if isinstance(u, str):
-                                    model_links.append(u.strip())
-
-                    generic_keywords = [
-                        "diagnostic", "diagnostictool", "diagnostic_tool", "utility",
-                        "webinstaller", "web_installer", "installer", "easysetup",
-                        "easy_setup", "opkpcl6", "opkps", "mmdspcl6", "mmd2pcl6", "xps"
-                    ]
-
-                    import os
-                    for u in model_links:
-                        if not u or u in all_urls:
-                            continue
-                        filename = os.path.basename(u.split("?")[0]).lower()
-                        if any(k in filename for k in generic_keywords):
-                            continue
-                        all_urls.append(u)
-        except Exception as e:
-            LOGGER.warning("Failed to collect alternative driver URLs in device_install_driver: %s", e)
-
-        driver_url_combined = ";".join(all_urls)
+        driver_url_combined = driver_url
 
         requested_at = datetime.now(timezone.utc)
         with session_factory() as session:
-            printer = _resolve_printer_control_target(session, device_ref)
+            printer = _resolve_printer_control_target(session, device_ref, body)
             if printer is None:
-                return jsonify({"ok": False, "error": "Printer not found"}), 404
+                return jsonify({"ok": False, "error": f"Printer not found for reference '{device_ref}'"}), 200
 
             pending = session.execute(
                 select(PrinterControlCommand).where(
-                    PrinterControlCommand.printer_id == printer.id,
+                    or_(
+                        and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                        and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                    ),
                     PrinterControlCommand.status == "pending",
+                    PrinterControlCommand.command_type == "install_driver",
                 )
             ).scalars().all()
             for cmd in pending:
-                cmd.status = "failed"
-                cmd.error_message = "Superseded by newer command"
+                cmd.status = "superseded"
+                cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                 cmd.responded_at = requested_at
 
             from models import AgentNode

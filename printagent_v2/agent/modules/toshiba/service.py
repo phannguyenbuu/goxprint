@@ -590,13 +590,27 @@ class ToshibaService:
         LOGGER.info("[ToshibaService] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
         start_time = time.time()
         
+        session = requests.Session()
+        urls = [
+            f"http://{printer.ip}/eBridge/cgi/TopAccess.cgi",
+            f"https://{printer.ip}/eBridge/cgi/TopAccess.cgi",
+            f"http://{printer.ip}/cgi/TopAccess.cgi",
+            f"https://{printer.ip}/cgi/TopAccess.cgi",
+            f"http://{printer.ip}/TopAccess/cgi/TopAccess.cgi",
+        ]
+
         headers = {
             "Content-Type": "text/xml; charset=UTF-8",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Accept": "*/*"
         }
 
-        get_templates_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        groups = ["001", "002", "003", "000"]
+        entries = []
+        seen_ids = set()
+
+        for group in groups:
+            get_templates_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <GetValue>
     <JobTemplates>
@@ -609,63 +623,56 @@ class ToshibaService:
     <GetTemplateList>
         <commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>
         <Params>
-            <param name='selectedGroup'>002</param>
+            <param name='selectedGroup'>{group}</param>
             <param name='locale'>en_GB</param>
         </Params>
     </GetTemplateList>
 </Command>
 </DeviceInformationModel>"""
 
-        urls = [
-            f"https://{printer.ip}:10443/contentwebserver",
-            f"https://{printer.ip}/contentwebserver",
-            f"http://{printer.ip}/contentwebserver",
-        ]
+            raw_resp_text = ""
+            for url in urls:
+                try:
+                    r = session.post(url, data=get_templates_xml, headers=headers, verify=False, timeout=5)
+                    if r.status_code == 200 and ("<Template" in r.text or "<JobTemplates" in r.text or "<GetTemplateListResult>Success" in r.text):
+                        raw_resp_text = r.text
+                        LOGGER.info("[ToshibaService] Successfully retrieved templates from %s group %s", url, group)
+                        break
+                except Exception as e:
+                    LOGGER.debug("[ToshibaService] Failed to fetch templates from %s group %s: %s", url, group, e)
 
-        session = requests.Session()
-        session.mount("https://", ToshibaSSLAdapter())
-
-        entries = []
-        raw_resp_text = ""
-        for url in urls:
-            try:
-                r = session.post(url, data=get_templates_xml, headers=headers, verify=False, timeout=6)
-                if r.status_code == 200 and ("<Template" in r.text or "<JobTemplates" in r.text or "<GetTemplateListResult>Success" in r.text):
-                    raw_resp_text = r.text
-                    LOGGER.info("[ToshibaService] Successfully retrieved templates from %s", url)
-                    break
-            except Exception as e:
-                LOGGER.debug("[ToshibaService] Failed to fetch templates from %s: %s", url, e)
-
-        if raw_resp_text:
-            try:
-                pattern = re.compile(r'<Template[^>]*>(.*?)</Template>', re.DOTALL)
-                for match in pattern.finditer(raw_resp_text):
-                    block = match.group(1)
-                    num_match = re.search(r'<name>(\d+)</name>', block)
-                    cap1_match = re.search(r'<caption1>([^<]*)</caption1>', block)
-                    cap2_match = re.search(r'<caption2>([^<]*)</caption2>', block)
-                    
-                    reg_no = num_match.group(1) if num_match else "001"
-                    c1 = cap1_match.group(1).strip() if cap1_match else ""
-                    c2 = cap2_match.group(1).strip() if cap2_match else ""
-                    disp_name = c2 or c1 or f"Template {reg_no}"
-                    
-                    entries.append({
-                        "registration_no": reg_no.zfill(3),
-                        "name": disp_name,
-                        "key_display": disp_name,
-                        "title_1": c1,
-                        "title_2": c2,
-                        "title_3": "",
-                        "auth_user": "",
-                        "folder": f"\\\\{printer.ip}\\scan",
-                        "email": "",
-                        "entry_id": reg_no,
-                        "is_agent_local": True
-                    })
-            except Exception as e:
-                LOGGER.warning("[ToshibaService] Error parsing TopAccess XML template response: %s", e)
+            if raw_resp_text:
+                try:
+                    pattern = re.compile(r'<Template[^>]*>(.*?)</Template>', re.DOTALL)
+                    for match in pattern.finditer(raw_resp_text):
+                        block = match.group(1)
+                        num_match = re.search(r'<name>(\d+)</name>', block)
+                        cap1_match = re.search(r'<caption1>([^<]*)</caption1>', block)
+                        cap2_match = re.search(r'<caption2>([^<]*)</caption2>', block)
+                        
+                        reg_no = num_match.group(1) if num_match else "001"
+                        if reg_no in seen_ids:
+                            continue
+                        seen_ids.add(reg_no)
+                        c1 = cap1_match.group(1).strip() if cap1_match else ""
+                        c2 = cap2_match.group(1).strip() if cap2_match else ""
+                        disp_name = c2 or c1 or f"Template {reg_no}"
+                        
+                        entries.append({
+                            "registration_no": reg_no.zfill(3),
+                            "name": disp_name,
+                            "key_display": disp_name,
+                            "title_1": c1,
+                            "title_2": c2,
+                            "title_3": "",
+                            "auth_user": "",
+                            "folder": f"\\\\{printer.ip}\\scan",
+                            "email": "",
+                            "entry_id": reg_no,
+                            "is_agent_local": True
+                        })
+                except Exception as e:
+                    LOGGER.warning("[ToshibaService] Error parsing TopAccess XML template response: %s", e)
 
         elapsed = time.time() - start_time
         return {

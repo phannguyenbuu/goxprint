@@ -26,12 +26,14 @@ from utils import (
     _parse_timestamp,
     _safe_path_token,
     _safe_relative_path_parts,
+    _normalize_mac,
 )
 from serializers import (
     _refresh_stale_agent_offline,
     _upsert_lan_and_agent,
     _upsert_printer_from_polling,
     _apply_printer_enabled_state,
+    _set_printer_online_state,
 )
 from models import Printer, PrinterControlCommand, ScanEmailAlias, AgentNode, AgentPresenceLog, DeviceInfor
 
@@ -177,41 +179,41 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             pending_cmds_stmt = select(PrinterControlCommand).where(
                 PrinterControlCommand.lead == lead_valid,
                 PrinterControlCommand.lan_uid == lan_uid,
-                PrinterControlCommand.printer_id != 0,
                 PrinterControlCommand.status == "pending",
             )
             if agent_uid:
-                pending_cmds_stmt = pending_cmds_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
-            pending_cmds_stmt = pending_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
-            pending_cmds = session.execute(pending_cmds_stmt).scalars().all()
-            pending_by_printer: dict[int, PrinterControlCommand] = {}
-            for cmd in pending_cmds:
-                if cmd.printer_id in pending_by_printer:
-                    continue
-                pending_by_printer[int(cmd.printer_id)] = cmd
-
-            pending_agent_cmds_stmt = select(PrinterControlCommand).where(
-                PrinterControlCommand.lead == lead_valid,
-                PrinterControlCommand.lan_uid == lan_uid,
-                PrinterControlCommand.printer_id == 0,
-                PrinterControlCommand.command_type != "emergency_restart",
-                PrinterControlCommand.status == "pending",
-            )
-            if agent_uid:
-                pending_agent_cmds_stmt = pending_agent_cmds_stmt.where(
+                pending_cmds_stmt = pending_cmds_stmt.where(
                     or_(
                         PrinterControlCommand.agent_uid == agent_uid,
+                        PrinterControlCommand.agent_uid == "default",
                         PrinterControlCommand.agent_uid == "",
                         PrinterControlCommand.agent_uid.is_(None),
                     )
                 )
-            pending_agent_cmds_stmt = pending_agent_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
-            pending_agent_cmds = session.execute(pending_agent_cmds_stmt).scalars().all()
+            pending_cmds_stmt = pending_cmds_stmt.order_by(PrinterControlCommand.requested_at.asc(), PrinterControlCommand.id.asc())
+            pending_cmds = session.execute(pending_cmds_stmt).scalars().all()
+            pending_by_printer: dict[int, PrinterControlCommand] = {}
+            pending_agent_cmds = []
+            for cmd in pending_cmds:
+                if cmd.printer_id and int(cmd.printer_id) > 0:
+                    if int(cmd.printer_id) not in pending_by_printer:
+                        pending_by_printer[int(cmd.printer_id)] = cmd
+                else:
+                    pending_agent_cmds.append(cmd)
 
             agent_commands_serialized = [
                 {
                     "id": int(cmd.id),
                     "command_type": cmd.command_type,
+                    "printer_id": int(cmd.printer_id or 0),
+                    "printer_name": cmd.printer_name or "",
+                    "ip": cmd.ip or "",
+                    "driver_brand": cmd.driver_brand or "",
+                    "driver_model": cmd.driver_model or "",
+                    "driver_name": cmd.driver_name or "",
+                    "driver_url": cmd.driver_url or "",
+                    "auth_user": cmd.auth_user or "",
+                    "auth_password": cmd.auth_password or "",
                     "command_params": cmd.command_params or "",
                     "requested_at": cmd.requested_at.isoformat() if cmd.requested_at else "",
                 }
@@ -265,7 +267,110 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not ok_auth:
             return auth_error
 
+        posting_agent_uid = _to_text(body.get("agent_uid")) or _to_text(request.args.get("agent_uid")) or _to_text(body.get("lead")) or "kythuat02"
+
+        # Check if body is a bulk dictionary of scan_points (keyed by MAC address)
+        bulk_items = {}
+        if isinstance(body.get("scan_points"), dict):
+            bulk_items = body.get("scan_points")
+        elif "address_book_data" not in body and any(_normalize_mac(k) for k in body.keys()):
+            bulk_items = body
+
+        if bulk_items:
+            try:
+                saved_count = 0
+                from models import ScanPoint
+                from sqlalchemy import delete
+                from active_agents_registry import ACTIVE_AGENTS
+
+                with session_factory() as db_session:
+                    for k, item in bulk_items.items():
+                        if not isinstance(item, dict):
+                            continue
+                        mac_address = _normalize_mac(item.get("mac_address") or item.get("mac_id") or k)
+                        if not mac_address:
+                            continue
+                        printer_name = _to_text(item.get("printer_name") or item.get("name"))
+                        if any(kw in printer_name.lower() for kw in ["f671y", "f6600", "f66", "h3601", "h36", "router", "gateway", "modem", "viettel", "vnpt", "fpt", "zte", "huawei", "[error]"]):
+                            continue
+                        printer_ip = _to_text(item.get("ip") or item.get("printer_ip"))
+                        
+                        raw_list = item.get("address_list") or []
+                        if not raw_list and isinstance(item.get("address_book_data"), dict):
+                            raw_list = item.get("address_book_data", {}).get("address_list") or []
+
+                        enriched_list = []
+                        for entry in raw_list:
+                            if isinstance(entry, dict):
+                                try:
+                                    folder_str = str(entry.get("folder_path") or entry.get("folder") or "")
+                                    parsed = parse_folder_str(folder_str)
+                                    entry["protocol"] = parsed.get("protocol", "")
+                                    entry["server_host"] = parsed.get("server", "")
+                                    entry["folder_port_no"] = parsed.get("port", "")
+                                    entry["path_on_folder"] = parsed.get("path", "")
+                                except Exception:
+                                    pass
+                            enriched_list.append(entry)
+
+                        sync_data = {
+                            "status": "success",
+                            "timestamp": item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                            "address_list": enriched_list,
+                        }
+
+                        # 1. Update in-memory ACTIVE_AGENTS
+                        for agent_info in ACTIVE_AGENTS.values():
+                            printers_list = agent_info.get("printers_json") or []
+                            for dev in printers_list:
+                                if isinstance(dev, dict):
+                                    dev_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
+                                    if dev_mac == mac_address:
+                                        dev["address_book_sync"] = sync_data
+
+                        # 2. Persist to PostgreSQL scan_points
+                        db_session.execute(delete(ScanPoint).where(ScanPoint.mac_id == mac_address))
+                        try:
+                            new_record = ScanPoint(
+                                mac_id=mac_address,
+                                printer_name=printer_name,
+                                ip=printer_ip,
+                                agent_uid=posting_agent_uid,
+                                address_book_data=sync_data,
+                                status="success",
+                            )
+                            db_session.add(new_record)
+                            db_session.flush()
+                        except Exception:
+                            db_session.rollback()
+                            db_session.execute(delete(ScanPoint).where(ScanPoint.mac_id == mac_address))
+                            new_record = ScanPoint(
+                                mac_id=mac_address,
+                                printer_name=printer_name,
+                                ip=printer_ip,
+                                address_book_data=sync_data,
+                                status="success",
+                            )
+                            db_session.add(new_record)
+                            db_session.flush()
+                        saved_count += 1
+
+                    db_session.commit()
+
+                LOGGER.info("[polling_address_book_sync] Ingested bulk scan_points dictionary (%d items) for agent_uid=%s", saved_count, posting_agent_uid)
+                return jsonify({"ok": True, "bulk_saved": saved_count, "stored": "postgresql_database"})
+            except Exception as exc:
+                LOGGER.exception("[polling_address_book_sync] Bulk ingest failed: %s", exc)
+                return jsonify({"ok": False, "error": str(exc)}), 500
+
         mac_address = _normalize_mac(_to_text(body.get("mac_address") or body.get("mac_id")))
+        printer_ip = _to_text(body.get("printer_ip") or body.get("ip"))
+        printer_name = _to_text(body.get("printer_name") or body.get("name"))
+        
+        # Exclude router/gateway devices like F671Y
+        if any(kw in printer_name.lower() for kw in ["f671y", "f6600", "f66", "h3601", "h36", "router", "gateway", "modem", "viettel", "vnpt", "fpt", "zte", "huawei", "[error]"]):
+            return jsonify({"ok": False, "error": "Router/Error device excluded from scan_points"}), 400
+
         address_book_data = body.get("address_book_data")
         if not isinstance(address_book_data, dict):
             return jsonify({"ok": False, "error": "Missing address_book_data"}), 400
@@ -303,21 +408,41 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         dev["address_book_sync"] = sync_data
                         ram_updated = True
 
-        # 2. Persist to PostgreSQL Printer table strictly by mac_address
-        with session_factory() as session:
-            printer = session.execute(
-                select(Printer).where(Printer.lead == lead, func.upper(Printer.mac_address) == mac_address)
-            ).scalars().first()
+        # 2. Persist to PostgreSQL scan_points table (strictly match & replace by mac_id)
+        try:
+            from models import ScanPoint
+            from sqlalchemy import delete
+            with session_factory() as db_session:
+                db_session.execute(delete(ScanPoint).where(ScanPoint.mac_id == mac_address))
+                try:
+                    new_record = ScanPoint(
+                        mac_id=mac_address,
+                        printer_name=printer_name,
+                        ip=printer_ip,
+                        agent_uid=posting_agent_uid,
+                        address_book_data=sync_data,
+                        status="success",
+                    )
+                    db_session.add(new_record)
+                    db_session.commit()
+                except Exception:
+                    db_session.rollback()
+                    db_session.execute(delete(ScanPoint).where(ScanPoint.mac_id == mac_address))
+                    new_record = ScanPoint(
+                        mac_id=mac_address,
+                        printer_name=printer_name,
+                        ip=printer_ip,
+                        address_book_data=sync_data,
+                        status="success",
+                    )
+                    db_session.add(new_record)
+                    db_session.commit()
+            LOGGER.info("[polling_address_book_sync] Replaced scan_points in PostgreSQL database for mac_id %s (agent_uid=%s)", mac_address, posting_agent_uid)
+        except Exception as db_exc:
+            LOGGER.warning("[polling_address_book_sync] Could not persist scan_points to PostgreSQL database: %s", db_exc)
 
-            if printer:
-                printer.address_book_sync = sync_data
-                session.commit()
-                LOGGER.info("[polling_address_book_sync] Persisted address_book_sync by mac_address %s for printer %s", mac_address, printer.printer_name)
-
-        if ram_updated or printer:
-            return jsonify({"ok": True, "mac_address": mac_address})
-
-        return jsonify({"ok": False, "error": f"Printer not found for mac_address {mac_address}"}), 404
+        LOGGER.info("[polling_address_book_sync] Stored address_book_sync for mac_address %s (ram_updated=%s)", mac_address, ram_updated)
+        return jsonify({"ok": True, "mac_address": mac_address, "stored": "postgresql_database"})
 
     @app.post("/api/polling/control-result")
     def polling_control_result() -> Any:
@@ -707,23 +832,10 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     continue
                 printer_name = _to_text(item.get("printer_name")) or _to_text(item.get("name"))
                 ip = _to_text(item.get("ip"))
-                existed = None
-                if ip:
-                    existed = session.execute(
-                        select(Printer).where(Printer.lead == lead, Printer.lan_uid == lan_uid, Printer.ip == ip).limit(1)
-                    ).scalar_one_or_none()
-                elif printer_name:
-                    existed = session.execute(
-                        select(Printer)
-                        .where(
-                            Printer.lead == lead,
-                            Printer.lan_uid == lan_uid,
-                            Printer.agent_uid == agent_uid,
-                            Printer.printer_name == printer_name,
-                            Printer.ip == "",
-                        )
-                        .limit(1)
-                    ).scalar_one_or_none()
+                mac_address = _normalize_mac(_to_text(item.get("mac_address") or item.get("mac_id")))
+                if not mac_address:
+                    continue  # Skip printers without MAC
+                is_online = _to_text(item.get("status")).lower() != "offline"
                 _upsert_printer_from_polling(
                     session=session,
                     lead=lead,
@@ -732,16 +844,31 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     printer_name=printer_name,
                     ip=ip,
                     event_time=timestamp,
-                    touch_seen=False,
-                    mark_online_on_create=False,
-                    mac_address=_to_text(item.get("mac_address")),
+                    touch_seen=is_online,
+                    mark_online_on_create=is_online,
+                    mac_address=mac_address,
                     auth_user=_to_text(item.get("auth_user") or item.get("user")),
                     auth_password=_to_text(item.get("auth_password") or item.get("password")),
                 )
-                if existed is None:
-                    inserted += 1
-                else:
-                    updated += 1
+                updated += 1
+            # Mark printers not in the new inventory as offline
+            pushed_macs = {_normalize_mac(_to_text(item.get("mac_address") or item.get("mac_id"))) for item in devices if isinstance(item, dict)}
+            pushed_macs.discard("")
+            if pushed_macs:
+                from sqlalchemy import func
+                existing_printers = session.execute(
+                    select(Printer).where(
+                        Printer.lead == lead,
+                        Printer.lan_uid == lan_uid,
+                        Printer.agent_uid == agent_uid,
+                        Printer.is_online.is_(True),
+                    )
+                ).scalars().all()
+                for ep in existing_printers:
+                    ep_mac = _normalize_mac(_to_text(ep.mac_address))
+                    if ep_mac and ep_mac not in pushed_macs:
+                        _set_printer_online_state(session, ep, False, timestamp)
+
             # Ingest cameras inventory
             cameras = body.get("cameras") if isinstance(body.get("cameras"), list) else []
             

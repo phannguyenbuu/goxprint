@@ -253,6 +253,18 @@ export function AgentPage() {
     onConfirm: () => {},
   });
 
+  const [deleteScanPointModal, setDeleteScanPointModal] = useState<{
+    isOpen: boolean;
+    printerId: string;
+    entry: any;
+    agentUid: string;
+  }>({
+    isOpen: false,
+    printerId: '',
+    entry: null,
+    agentUid: '',
+  });
+
   const [installDriverModal, setInstallDriverModal] = useState<{
     isOpen: boolean;
     printerId: string;
@@ -2379,69 +2391,74 @@ except Exception as e:
 
   // ── DELETE DESTINATION ──
   const handleDeleteDest = (printerId: string, entry: any) => {
+    const targetAgent = getTargetAgentUid(printerId) || (selectedLan?.agents?.find((a) => a.is_online)?.agent_uid || '');
+    setDeleteScanPointModal({
+      isOpen: true,
+      printerId,
+      entry,
+      agentUid: targetAgent,
+    });
+  };
+
+  const handleConfirmDeleteScanPoint = async () => {
+    const { printerId, entry, agentUid } = deleteScanPointModal;
+    if (!printerId || !entry) return;
+
+    setDeleteScanPointModal((p) => ({ ...p, isOpen: false }));
+
     const emailVal = entry.email_address || entry.email || '';
     const folderVal = entry.physical_path || entry.folder || entry.folder_path || '';
     const destVal = (emailVal || folderVal || '').trim();
     const regNo = String(entry.registration_no || '').trim();
 
-    setConfirmModal({
-      isOpen: true,
-      title: 'Xác nhận xóa',
-      message: `Bạn có chắc chắn muốn xóa điểm scan này khỏi máy photocopy?\nEmail/Folder: ${destVal}`,
-      onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-
-        // Checking if it is a private LAN email
-        const emailsList = selectedLan?.emails || [];
-        const matchedEmail = emailsList.find((e) => e.email.toLowerCase().trim() === destVal.toLowerCase().trim());
-        
-        if (matchedEmail && matchedEmail.id) {
-          // Direct deletion from LAN Emails
-          showToast('Đang xóa điểm scan private khỏi LAN...', 'info', 3000);
-          try {
-            const res = await deleteLanEmail(matchedEmail.id);
-            if (res.ok) {
-              showToast('Đã xóa thành công!', 'success');
-              await fetchLanSitesData();
-            } else {
-              throw new Error(res.error || 'Không thể xóa');
-            }
-          } catch (err: any) {
-            showToast(`Lỗi xóa: ${err.message}`, 'error');
-          }
-          return;
+    // Checking if it is a private LAN email
+    const emailsList = selectedLan?.emails || [];
+    const matchedEmail = emailsList.find((e) => e.email.toLowerCase().trim() === destVal.toLowerCase().trim());
+    
+    if (matchedEmail && matchedEmail.id) {
+      // Direct deletion from LAN Emails
+      showToast('Đang xóa điểm scan private khỏi LAN...', 'info', 3000);
+      try {
+        const res = await deleteLanEmail(matchedEmail.id);
+        if (res.ok) {
+          showToast('Đã xóa thành công!', 'success');
+          await fetchLanSitesData();
+        } else {
+          throw new Error(res.error || 'Không thể xóa');
         }
-
-        // Copier Address Book entry deletion (requires command status polling)
-        const targetAgent = getTargetAgentUid(printerId);
-        showToast('Gửi lệnh xóa điểm scan trên máy photocopy...', 'info', 3000);
-
-        try {
-          const res = await deleteEmailDestination(printerId, regNo, entry.entry_id || '', targetAgent || undefined);
-          if (!res.ok || !res.command_id) {
-            throw new Error(res.error || 'Không thể tạo lệnh xóa');
-          }
-
-          pollCommandStatus(
-            res.command_id,
-            printerId,
-            async (pollData: any) => {
-              showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
-              await fetchLanSitesData();
-              if (pollData && pollData.address_book_sync) {
-                setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
-              }
-            },
-            (errorMsg) => {
-              showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
-            },
-            `⌛ Đang xóa điểm scan #${regNo}...`
-          );
-        } catch (err: any) {
-          showToast(`Lỗi gửi lệnh xóa: ${err.message}`, 'error');
-        }
+      } catch (err: any) {
+        showToast(`Lỗi xóa: ${err.message}`, 'error');
       }
-    });
+      return;
+    }
+
+    // Copier Address Book entry deletion (requires command status polling)
+    showToast('Gửi lệnh xóa điểm scan trên máy photocopy...', 'info', 3000);
+
+    try {
+      const res = await deleteEmailDestination(printerId, regNo, entry.entry_id || '', agentUid || undefined);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh xóa');
+      }
+
+      pollCommandStatus(
+        res.command_id,
+        printerId,
+        async (pollData: any) => {
+          showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
+          await fetchLanSitesData();
+          if (pollData && pollData.address_book_sync) {
+            setLiveAddressBooks((prev) => ({ ...prev, [printerId]: pollData.address_book_sync }));
+          }
+        },
+        (errorMsg) => {
+          showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
+        },
+        `⌛ Đang xóa điểm scan #${regNo}...`
+      );
+    } catch (err: any) {
+      showToast(`Lỗi gửi lệnh xóa: ${err.message}`, 'error');
+    }
   };
 
   const handleEditIP = (printerId: string, entry: any) => {
@@ -5696,6 +5713,88 @@ raise RuntimeError('\\n'.join(lines))`;
                     color: 'var(--color-secondary)',
                   }}
                   onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy bỏ
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE SCAN POINT MODAL WITH TARGET AGENT DROPDOWN */}
+      <AnimatePresence>
+        {deleteScanPointModal.isOpen && (
+          <div style={styles.confirmOverlay} onClick={() => setDeleteScanPointModal((prev) => ({ ...prev, isOpen: false }))}>
+            <motion.div
+              style={{ ...styles.confirmModalCard, maxWidth: '440px', width: '90%' }}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+            >
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>⚠️ Xác nhận xóa điểm scan</h3>
+                <button
+                  style={styles.modalCloseBtn}
+                  onClick={() => setDeleteScanPointModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={styles.modalBody}>
+                <div style={{ marginBottom: '14px', color: 'var(--color-text)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                  Tên điểm scan: <strong>"{deleteScanPointModal.entry?.name || deleteScanPointModal.entry?.name_1 || deleteScanPointModal.entry?.email_address || deleteScanPointModal.entry?.folder || deleteScanPointModal.entry?.registration_no || 'không tên'}"</strong>
+                  {deleteScanPointModal.entry?.registration_no && (
+                    <span style={{ display: 'block', color: 'var(--color-muted)', fontSize: '0.78rem', marginTop: '2px' }}>
+                      Mã đăng ký: #{deleteScanPointModal.entry?.registration_no}
+                    </span>
+                  )}
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Relay Agent thực thi *</label>
+                  <select
+                    style={styles.modalInput}
+                    value={deleteScanPointModal.agentUid}
+                    onChange={(e) => setDeleteScanPointModal((p) => ({ ...p, agentUid: e.target.value }))}
+                  >
+                    {((selectedLan && selectedLan.agents) || [])
+                      .filter((a) => a.is_online)
+                      .map((a) => (
+                        <option key={a.agent_uid} value={a.agent_uid}>
+                          {a.hostname} ({a.local_ip})
+                        </option>
+                      ))}
+                  </select>
+                  <span style={styles.formHelpText}>Chọn máy Agent trong mạng LAN sẽ gửi lệnh xóa tới máy photocopy.</span>
+                </div>
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    background: 'var(--color-error)',
+                    borderColor: 'var(--color-error)',
+                    color: 'white',
+                  }}
+                  onClick={handleConfirmDeleteScanPoint}
+                >
+                  Xác nhận xóa
+                </button>
+                <button
+                  style={{
+                    ...styles.smallBtn,
+                    padding: '10px 16px',
+                    fontSize: '0.82rem',
+                    borderColor: 'var(--color-secondary)',
+                    color: 'var(--color-secondary)',
+                  }}
+                  onClick={() => setDeleteScanPointModal((prev) => ({ ...prev, isOpen: false }))}
                 >
                   Hủy bỏ
                 </button>

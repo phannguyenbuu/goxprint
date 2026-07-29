@@ -269,13 +269,48 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         if not d_ip and not d_mac:
                             continue
 
-                        # Extract telemetry if included in dev or top-level body matching ip/mac
-                        dev_counter = dev.get("counter") or dev.get("counter_data") or {}
-                        dev_status = dev.get("status") or dev.get("status_data") or {}
-                        if not dev_counter and ((ip and d_ip == ip) or (d_mac and mac_id and d_mac == mac_id.upper())):
-                            dev_counter = counter_data if isinstance(counter_data, dict) else {}
-                        if not dev_status and ((ip and d_ip == ip) or (d_mac and mac_id and d_mac == mac_id.upper())):
-                            dev_status = status_data if isinstance(status_data, dict) else {}
+                        if not dev_counter:
+                            try:
+                                c_hist_stmt = select(CounterInfor).where(CounterInfor.lead == lead)
+                                if d_mac:
+                                    c_hist_stmt = c_hist_stmt.where(func.upper(CounterInfor.mac_id) == d_mac)
+                                else:
+                                    c_hist_stmt = c_hist_stmt.where(CounterInfor.ip == d_ip)
+                                c_hist = session.execute(c_hist_stmt.order_by(CounterInfor.created_at.desc(), CounterInfor.id.desc()).limit(1)).scalars().first()
+                                if c_hist:
+                                    dev_counter = c_hist.raw_payload or {
+                                        "total": c_hist.total or 0,
+                                        "copier_bw": c_hist.copier_bw or 0,
+                                        "printer_bw": c_hist.printer_bw or 0,
+                                        "a3_dlt": c_hist.a3_dlt or 0,
+                                        "duplex": c_hist.duplex or 0,
+                                    }
+                            except Exception as c_exc:
+                                LOGGER.warning("[ingest_polling] CounterInfor lookup error: %s", c_exc)
+
+                        if not dev_counter and d_ip:
+                            try:
+                                cb_hist = session.execute(
+                                    select(CounterBaseline).where(CounterBaseline.ip == d_ip)
+                                    .order_by(CounterBaseline.baseline_timestamp.desc(), CounterBaseline.id.desc()).limit(1)
+                                ).scalars().first()
+                                if cb_hist and isinstance(cb_hist.raw_payload, dict):
+                                    dev_counter = cb_hist.raw_payload
+                            except Exception as cb_exc:
+                                LOGGER.warning("[ingest_polling] CounterBaseline lookup error: %s", cb_exc)
+
+                        if not dev_status:
+                            try:
+                                s_hist_stmt = select(StatusInfor).where(StatusInfor.lead == lead)
+                                if d_mac:
+                                    s_hist_stmt = s_hist_stmt.where(func.upper(StatusInfor.mac_id) == d_mac)
+                                else:
+                                    s_hist_stmt = s_hist_stmt.where(StatusInfor.ip == d_ip)
+                                s_hist = session.execute(s_hist_stmt.order_by(StatusInfor.created_at.desc(), StatusInfor.id.desc()).limit(1)).scalars().first()
+                                if s_hist and isinstance(s_hist.raw_payload, dict):
+                                    dev_status = s_hist.raw_payload
+                            except Exception as s_exc:
+                                LOGGER.warning("[ingest_polling] StatusInfor lookup error: %s", s_exc)
 
                         d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead)
                         if d_mac:
@@ -307,8 +342,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 mac_id=d_mac,
                                 ip=d_ip,
                                 printer_name=d_name or "Unknown Printer",
-                                counter_data=dev_counter,
-                                status_data=dev_status,
+                                counter_data=dev_counter or {},
+                                status_data=dev_status or {},
                                 last_counter_at=utc_now if dev_counter else None,
                                 last_status_at=utc_now if dev_status else None,
                                 updated_at=utc_now,

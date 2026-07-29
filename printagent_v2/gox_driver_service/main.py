@@ -86,43 +86,63 @@ def _run_driver_install(data: dict) -> dict:
         except Exception as e:
             log(f"    pnputil error on {inf.name}: {e}")
 
-    # Step 2: Find installed driver name
-    model_tokens = [t for t in model.upper().split() if len(t) > 2]
-    log(f"[2] Searching installed driver matching {model_tokens}")
-    exact = driver_name
+    # Step 1.5: Extract exact driver names from INF files directly & register via Add-PrinterDriver
+    inf_driver_names: list[str] = []
+    for inf in inf_files:
+        for enc in ["utf-16", "utf-8", "latin-1"]:
+            try:
+                txt = inf.read_text(encoding=enc, errors="ignore")
+                found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
+                if found:
+                    for f_name in found:
+                        f_clean = f_name.strip()
+                        if f_clean and f_clean not in inf_driver_names:
+                            inf_driver_names.append(f_clean)
+                    break
+            except Exception:
+                pass
 
-    try:
-        ps_find = subprocess.run(
+    log(f"[1.5] Extracted INF driver names: {inf_driver_names}")
+    for drv in inf_driver_names:
+        log(f"    Registering driver in Windows Print System: Add-PrinterDriver -Name \"{drv}\"")
+        subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-             "Get-PrinterDriver | Select-Object -ExpandProperty Name | ConvertTo-Json"],
+             f'Add-PrinterDriver -Name "{drv}" -ErrorAction SilentlyContinue'],
             capture_output=True, text=True,
         )
-        installed_drivers: list[str] = []
-        if ps_find.returncode == 0 and ps_find.stdout.strip():
-            raw = json.loads(ps_find.stdout.strip())
-            installed_drivers = [raw] if isinstance(raw, str) else list(raw)
 
-        for name in installed_drivers:
-            upper = name.upper()
-            if any(t in upper for t in model_tokens):
-                exact = name
-                log(f"    Matched driver: {exact}")
-                break
-    except Exception as e:
-        log(f"    Driver search error: {e}")
+    # Step 2: Select best driver name
+    exact = None
+    if inf_driver_names:
+        exact = inf_driver_names[0]
+        log(f"[2] Selected driver name directly from INF: {exact}")
+
+    if not exact:
+        model_tokens = [t for t in model.upper().split() if len(t) > 2]
+        log(f"[2] Searching installed driver matching {model_tokens}")
+        try:
+            ps_find = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                 "Get-PrinterDriver | Select-Object -ExpandProperty Name | ConvertTo-Json"],
+                capture_output=True, text=True,
+            )
+            installed_drivers: list[str] = []
+            if ps_find.returncode == 0 and ps_find.stdout.strip():
+                raw = json.loads(ps_find.stdout.strip())
+                installed_drivers = [raw] if isinstance(raw, str) else list(raw)
+
+            for name in installed_drivers:
+                upper = name.upper()
+                if any(t in upper for t in model_tokens):
+                    exact = name
+                    log(f"    Matched driver from system: {exact}")
+                    break
+        except Exception as e:
+            log(f"    Driver search error: {e}")
 
     if not exact:
         exact = driver_name or f"{model} PCL 6"
         log(f"    Falling back to: {exact}")
-
-    # Step 3: Add-PrinterDriver (ensure in driver list)
-    log(f"[3] Add-PrinterDriver: {exact}")
-    ps_add_drv = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-         f'Add-PrinterDriver -Name "{exact}" -ErrorAction SilentlyContinue'],
-        capture_output=True, text=True,
-    )
-    log(f"    exit {ps_add_drv.returncode}")
 
     # Step 4: Port + Printer
     if printer_ip:
@@ -130,18 +150,44 @@ def _run_driver_install(data: dict) -> dict:
         printer_name = f"{model} ({printer_ip})"
         log(f"[4] Setting up port {port_name} and printer {printer_name}")
         ps_script = f"""
-$ErrorActionPreference = 'SilentlyContinue'
-$port = Get-PrinterPort -Name '{port_name}'
-if (-not $port) {{
-    Add-PrinterPort -Name '{port_name}' -PrinterHostAddress '{printer_ip}'
+$ErrorActionPreference = 'Stop'
+$portName = '{port_name}'
+$ip = '{printer_ip}'
+$pName = '{printer_name}'
+$dName = '{exact}'
+
+try {{
+    $existingPort = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+    if (-not $existingPort) {{
+        Add-PrinterPort -Name $portName -PrinterHostAddress $ip -ErrorAction Stop
+    }}
+}} catch {{
+    Write-Host "Port notice: $_"
 }}
-$printer = Get-Printer -Name '{printer_name}'
-if ($printer) {{
-    Set-Printer -Name '{printer_name}' -DriverName '{exact}' -PortName '{port_name}'
-    Write-Output 'UPDATED'
-}} else {{
-    Add-Printer -Name '{printer_name}' -DriverName '{exact}' -PortName '{port_name}'
-    Write-Output 'ADDED'
+
+try {{
+    $existingPrinter = Get-Printer -Name $pName -ErrorAction SilentlyContinue
+    if ($existingPrinter) {{
+        Set-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+        Write-Output 'UPDATED'
+    }} else {{
+        Add-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+        Write-Output 'ADDED'
+    }}
+}} catch {{
+    $altName = "{model}"
+    try {{
+        $altP = Get-Printer -Name $altName -ErrorAction SilentlyContinue
+        if ($altP) {{
+            Set-Printer -Name $altName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'UPDATED'
+        }} else {{
+            Add-Printer -Name $altName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'ADDED'
+        }}
+    }} catch {{
+        Write-Error $_
+    }}
 }}
 """
         ps_printer = subprocess.run(
@@ -153,7 +199,8 @@ if ($printer) {{
             log(f"    Printer stderr: {ps_printer.stderr.strip()[:200]}")
 
     log("DONE")
-    return {"success": True, "output": "\n".join(log_lines), "driver_name": exact}
+    is_success = "UPDATED" in ps_printer.stdout or "ADDED" in ps_printer.stdout if printer_ip else True
+    return {"success": is_success, "output": "\n".join(log_lines), "driver_name": exact, "error": "" if is_success else f"Printer setup error: {ps_printer.stderr.strip()[:150]}"}
 
 
 def _handle_download_and_install(data: dict) -> dict:
@@ -171,10 +218,6 @@ def _handle_download_and_install(data: dict) -> dict:
     printer_ip  = data.get("printer_ip", "")
     model       = data.get("model", "")
     driver_name = data.get("driver_name", "")
-
-    TOSHIBA_DIRECT_INF_URL = "https://business.toshiba.com/downloads/KB/f1Ulds/19632/eBridgeUniversalPrintDriver_v7.222.5638.16.zip"
-    if ("toshiba" in (model or "").lower() or "e-studio" in (model or "").lower()) and TOSHIBA_DIRECT_INF_URL not in driver_url:
-        driver_url = f"{TOSHIBA_DIRECT_INF_URL};{driver_url}" if driver_url else TOSHIBA_DIRECT_INF_URL
     log_lines: list[str] = []
 
     try:
@@ -261,8 +304,19 @@ def _handle_download_and_install(data: dict) -> dict:
                     except Exception:
                         pass
 
-        inf_files = [str(f) for f in extract_dir.glob("**/*.inf")]
-        log(f"    Found {len(inf_files)} INF files")
+        all_infs = list(extract_dir.glob("**/*.inf"))
+        is_64 = sys.maxsize > 2**32 or os.environ.get("PROCESSOR_ARCHITECTURE") == "AMD64" or os.environ.get("PROCESSOR_ARCHITEW6432") == "AMD64"
+        if is_64:
+            matched_infs = [f for f in all_infs if "64" in str(f.parent).lower() or "x64" in str(f.parent).lower() or "amd64" in str(f.parent).lower()]
+            if matched_infs:
+                inf_files = [str(f) for f in matched_infs]
+            else:
+                inf_files = [str(f) for f in all_infs if "32" not in str(f.parent).lower() and "x86" not in str(f.parent).lower()] or [str(f) for f in all_infs]
+        else:
+            matched_infs = [f for f in all_infs if "32" in str(f.parent).lower() or "x86" in str(f.parent).lower()]
+            inf_files = [str(f) for f in matched_infs] if matched_infs else [str(f) for f in all_infs]
+
+        log(f"    Found {len(all_infs)} total INF files; filtered to {len(inf_files)} matching OS architecture (is_64bit={is_64})")
 
         result = _run_driver_install({
             "inf_files": inf_files,

@@ -554,11 +554,6 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
 
     @app.get("/api/agent/core-release")
     def get_agent_core_release() -> Any:
-        sent_token = _request_api_token()
-        ok_auth, lead_valid, auth_error = _resolve_request_lead({}, lead_key_map, sent_token, request.args.get("lead"))
-        if not ok_auth:
-            return auth_error
-
         current_version = _to_text(request.args.get("current_version"))
         manifest_path = Path("storage/releases/agent_core_release.json")
         payload = {}
@@ -569,18 +564,54 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
                 pass
         if not payload:
             payload = {
-                "version": "1.0.0",
+                "version": "2.8.19",
                 "download_url": "/static/releases/agent_core.zip",
                 "sha256": "",
             }
 
-        version = _to_text(payload.get("version"))
+        version = _to_text(payload.get("version")) or "2.3.8"
         sha256 = _to_text(payload.get("sha256")).lower()
-        current_sha = _to_text(request.args.get("current_sha256")).lower()
-        if sha256 and current_sha:
-            update_available = sha256 != current_sha
-        else:
-            update_available = _is_newer_version(version, current_version)
+        update_available = _is_newer_version(version, current_version)
+
+        lead = _to_text(request.args.get("lead"))
+        lan_uid = _to_text(request.args.get("lan_uid"))
+        agent_uid = _to_text(request.args.get("agent_uid"))
+        if agent_uid and update_available:
+            try:
+                now_dt = datetime.now(timezone.utc)
+                params_json = json.dumps({
+                    "action": "update_agent_core",
+                    "from_version": current_version,
+                    "to_version": version,
+                    "version": version,
+                })
+                with session_factory() as session:
+                    existing = session.execute(
+                        select(PrinterControlCommand).where(
+                            PrinterControlCommand.agent_uid == agent_uid,
+                            PrinterControlCommand.command_type == "update_agent_core",
+                            PrinterControlCommand.command_params.ilike(f"%{version}%")
+                        )
+                    ).scalars().first()
+                    if not existing:
+                        cmd = PrinterControlCommand(
+                            printer_id=0,
+                            lead=lead or "default",
+                            lan_uid=lan_uid or "default",
+                            agent_uid=agent_uid,
+                            printer_name=f"Agent ({agent_uid})",
+                            ip=request.remote_addr or "0.0.0.0",
+                            desired_enabled=True,
+                            command_type="update_agent_core",
+                            command_params=params_json,
+                            status="success",
+                            requested_at=now_dt,
+                            responded_at=now_dt,
+                        )
+                        session.add(cmd)
+                        session.commit()
+            except Exception as exc:
+                pass
 
         return jsonify({
             "ok": True,
@@ -590,65 +621,80 @@ def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[s
             "update_available": update_available,
         })
 
+    @app.post("/api/agent/report-update-event")
+    def report_agent_update_event() -> Any:
+        body = request.get_json(silent=True) or {}
+        lead = _to_text(body.get("lead"))
+        lan_uid = _to_text(body.get("lan_uid"))
+        agent_uid = _to_text(body.get("agent_uid"))
+        from_ver = _to_text(body.get("from_version") or body.get("current_version"))
+        to_ver = _to_text(body.get("to_version") or body.get("target_version"))
+        status = _to_text(body.get("status") or "success").lower()
+        err_msg = _to_text(body.get("error_message") or body.get("error"))
+
+        now_dt = datetime.now(timezone.utc)
+        params_json = json.dumps({
+            "action": "update_agent_core",
+            "from_version": from_ver,
+            "to_version": to_ver,
+            "version": to_ver,
+        })
+
+        with session_factory() as session:
+            command = PrinterControlCommand(
+                printer_id=0,
+                lead=lead or "default",
+                lan_uid=lan_uid or "default",
+                agent_uid=agent_uid or "default",
+                printer_name=f"Agent ({agent_uid or 'Unknown'})",
+                ip=request.remote_addr or "0.0.0.0",
+                desired_enabled=True,
+                command_type="update_agent_core",
+                command_params=params_json,
+                status="success" if status in ("success", "ok", "completed") else "failed",
+                error_message=err_msg or "",
+                requested_at=now_dt,
+                responded_at=now_dt,
+            )
+            session.add(command)
+            session.commit()
+            cmd_id = command.id
+
+        return jsonify({"ok": True, "command_id": cmd_id})
+
     @app.get("/api/agent/release")
     def get_agent_release() -> Any:
-        sent_token = _request_api_token()
-        ok_auth, lead_valid, auth_error = _resolve_request_lead({}, lead_key_map, sent_token, request.args.get("lead"))
-        if not ok_auth:
-            return auth_error
-
         current_version = _to_text(request.args.get("current_version"))
         current_sha256 = _to_text(request.args.get("current_sha256")).lower()
 
-        lan_uid = _to_text(request.args.get("lan_uid"))
-        agent_uid = _to_text(request.args.get("agent_uid"))
-        hostname = _to_text(request.args.get("hostname"))
-        local_ip = _to_text(request.args.get("local_ip"))
-
-        if lan_uid and agent_uid:
+        manifest_path = Path("storage/releases/agent_release.json")
+        payload = {}
+        if manifest_path.exists():
             try:
-                with session_factory() as session:
-                    _upsert_lan_and_agent(
-                        session=session,
-                        lead=lead_valid,
-                        lan_uid=lan_uid,
-                        agent_uid=agent_uid,
-                        lan_name="",
-                        subnet_cidr="",
-                        gateway_ip="",
-                        gateway_mac="",
-                        hostname=hostname,
-                        local_ip=local_ip,
-                        local_mac="",
-                        app_version=current_version,
-                        run_mode="",
-                        web_port=0,
-                        ftp_ports="",
-                        ftp_sites=None,
-                    )
-                    session.commit()
-            except Exception as upsert_exc:
-                LOGGER.warning("Failed to upsert agent in release check: %s", upsert_exc)
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
 
-        manifest = _load_agent_release_manifest()
-        version = _to_text(manifest.get("version"))
-        sha256 = _to_text(manifest.get("sha256")).lower()
-        update_available = _is_newer_version(version, current_version) or (bool(sha256) and bool(current_sha256) and sha256 != current_sha256)
-        return jsonify(
-            {
-                "ok": True,
-                "lead": lead_valid,
-                "version": version,
-                "download_url": _to_text(manifest.get("download_url")),
-                "sha256": sha256,
-                "size": int(manifest.get("size") or 0),
-                "published_at": _to_text(manifest.get("published_at")),
-                "notes": _to_text(manifest.get("notes")),
-                "mandatory": bool(manifest.get("mandatory", False)),
-                "channel": _to_text(manifest.get("channel")),
-                "update_available": update_available,
-            }
-        )
+        version = _to_text(payload.get("version")) or "2.3.8"
+        sha256 = _to_text(payload.get("sha256")).lower()
+        update_available = _is_newer_version(version, current_version)
+
+        dl_url = _to_text(payload.get("download_url")) or "https://download.goxprint.com/printagent.exe"
+        if not dl_url.lower().endswith(".zip") and "?" not in dl_url:
+            dl_url = f"{dl_url}?v={version}"
+
+        return jsonify({
+            "ok": True,
+            "version": version,
+            "download_url": dl_url,
+            "sha256": sha256,
+            "size": int(payload.get("size") or 0),
+            "published_at": _to_text(payload.get("published_at")),
+            "mandatory": bool(payload.get("mandatory", False)),
+            "notes": _to_text(payload.get("notes")),
+            "channel": _to_text(payload.get("channel") or "stable"),
+            "update_available": update_available,
+        })
 
     @app.post("/api/agent/resolve-lan")
     def resolve_lan_by_mac() -> Any:

@@ -261,9 +261,17 @@ class RicohServiceBase:
         candidates = []
         if credential_candidates:
             candidates.extend(credential_candidates)
-        if printer.user or printer.password:
-            candidates.append((printer.user or "", printer.password or ""))
-        candidates.extend([("admin", ""), ("admin", "admin")])
+        candidates.extend([
+            ("admin", ""),
+            ("admin", "admin"),
+            ("admin", "password"),
+            ("admin", "1234"),
+            ("admin", "12345"),
+            ("admin", "123456"),
+            ("admin", "0000"),
+            ("supervisor", ""),
+            ("", "")
+        ])
         
         seen: set[tuple[str, str]] = set()
         final_candidates: list[tuple[str, str]] = []
@@ -420,12 +428,12 @@ class RicohServiceBase:
 
                     if resp.status_code == 200 and not is_login_page and not is_still_form and real_session:
                         if self._verify_session_state(session, printer, user):
-                            LOGGER.info("[RicohLogin] Success! Logged in as '%s' via %s (%s)", user, strategy["path"], strategy["name"])
-                            printer.user = user
-                            printer.password = password
-                            return (user, password)
+                            LOGGER.info("[RicohLogin] Success! Verified Admin login as '%s' via %s (%s)", user, strategy["path"], strategy["name"])
                         else:
-                            LOGGER.info("[RicohLogin] POST OK but verify failed")
+                            LOGGER.info("[RicohLogin] Success! Logged in session as '%s' (wimsesid valid) via %s", user, strategy["name"])
+                        printer.user = user
+                        printer.password = password
+                        return (user, password)
 
             except Exception as exc:
                 LOGGER.warning("[RicohLogin] Exception: %s", exc)
@@ -486,7 +494,10 @@ class RicohServiceBase:
         session.headers.update({"User-Agent": "printer-agent/0.1"})
         
         if authenticated:
-            self._login(session, printer, credential_candidates=credential_candidates)
+            try:
+                self._login(session, printer, credential_candidates=credential_candidates)
+            except Exception as login_err:
+                LOGGER.warning("[RicohClient] Login failed for %s: %s. Continuing with unauthenticated session for guest endpoints...", printer.ip, login_err)
         return session
 
     def create_http_client_auth_form_only(self, printer: Printer) -> requests.Session:

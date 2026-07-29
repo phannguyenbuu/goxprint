@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from flask import Flask, jsonify, request
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from utils import (
     UI_TZ,
@@ -205,7 +205,8 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
 
             # 1. Pipeline: mac_id -> resolve ip -> fetch counter & status (from RAM devices or SQL DeviceInforHistory/DeviceInfor)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
-            from models import CounterInfor, StatusInfor, DeviceInfor, DeviceInforHistory, Printer
+            from sqlalchemy import select, func
+            from models import CounterInfor, CounterBaseline, StatusInfor, DeviceInfor, DeviceInforHistory, Printer
             prune_offline_agents(timeout_seconds=180)
             dummy_id = 1
 
@@ -216,6 +217,7 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     continue
 
                 printers_list = agent_info.get("printers_json") or []
+                printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
                 devices_dict = agent_info.get("devices") or {}
 
                 for dev in printers_list:
@@ -226,6 +228,21 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     p_mac = _normalize_mac(_to_text(dev.get("mac_address") or dev.get("mac_id")))
                     p_ip = _to_text(dev.get("ip"))
                     p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
+                    p_type = _to_text(dev.get("printer_type") or dev.get("type")).lower()
+                    p_name_lower = p_name.lower()
+
+                    if p_name.startswith("[ERROR]") or "probe failed" in p_name_lower or "[error]" in p_name_lower:
+                        continue
+
+                    # Bỏ qua modem mạng, router, gateway, switch, access point
+                    router_keywords = [
+                        "router", "modem", "gateway", "access point", "switch", "f671y", "draytek",
+                        "tp-link", "tplink", "mikrotik", "cisco", "tenda", "netgear", "linksys", "asus",
+                        "hgw", "g-97", "hg8145", "hg8045", "ont", "zte", "totolink",
+                        "f6600", "f66", "h3601", "h36"
+                    ]
+                    if any(kw in p_name_lower for kw in router_keywords) or any(kw in p_type for kw in ["router", "gateway", "modem", "switch", "access_point"]):
+                        continue
 
                     if not p_ip and p_mac:
                         if p_mac in devices_dict and devices_dict[p_mac].get("ip"):
@@ -263,37 +280,148 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         counter_data = ram_dev.get("counter") or ram_dev.get("counter_data") or {}
                         status_data = ram_dev.get("status") or ram_dev.get("status_data") or {}
 
-                    # Nếu RAM chưa có, lấy từ DeviceInforHistory trong CSDL theo mac_id / ip
-                    if not counter_data and (p_mac or p_ip):
-                        d_stmt = select(DeviceInforHistory).where(DeviceInforHistory.lead == a_lead)
-                        if p_mac:
-                            d_stmt = d_stmt.where(func.upper(DeviceInforHistory.mac_id) == p_mac)
-                        elif p_ip:
-                            d_stmt = d_stmt.where(DeviceInforHistory.ip == p_ip)
-                        d_stmt = d_stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)
-                        dh_row = session.execute(d_stmt).scalars().first()
-                        if dh_row:
-                            if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
-                                counter_data = dh_row.counter_data
-                            if isinstance(dh_row.status_data, dict) and dh_row.status_data:
-                                status_data = dh_row.status_data
-                            last_counter_at = dh_row.last_counter_at or dh_row.updated_at
-                            last_status_at = dh_row.last_status_at or dh_row.updated_at
+                    from sqlalchemy import or_
 
+                    # 1. Nếu RAM chưa có, lấy từ DeviceInforHistory trong CSDL theo mac_id / ip
                     if not counter_data and (p_mac or p_ip):
-                        d_stmt2 = select(DeviceInfor).where(DeviceInfor.lead == a_lead)
-                        if p_mac:
-                            d_stmt2 = d_stmt2.where(func.upper(DeviceInfor.mac_id) == p_mac)
-                        elif p_ip:
-                            d_stmt2 = d_stmt2.where(DeviceInfor.ip == p_ip)
-                        d_row = session.execute(d_stmt2).scalars().first()
-                        if d_row:
-                            if isinstance(d_row.counter_data, dict) and d_row.counter_data:
-                                counter_data = d_row.counter_data
-                            if not status_data and isinstance(d_row.status_data, dict) and d_row.status_data:
-                                status_data = d_row.status_data
-                            last_counter_at = d_row.last_counter_at or d_row.updated_at
-                            last_status_at = d_row.last_status_at or d_row.updated_at
+                        try:
+                            d_stmt = select(DeviceInforHistory).where(DeviceInforHistory.lead == a_lead)
+                            if p_mac and p_ip:
+                                d_stmt = d_stmt.where(or_(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac, DeviceInforHistory.ip == p_ip))
+                            elif p_mac:
+                                d_stmt = d_stmt.where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
+                            elif p_ip:
+                                d_stmt = d_stmt.where(DeviceInforHistory.ip == p_ip)
+                            dh_row = session.execute(d_stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)).scalars().first()
+                            if dh_row:
+                                if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
+                                    counter_data = dh_row.counter_data
+                                if isinstance(dh_row.status_data, dict) and dh_row.status_data:
+                                    status_data = dh_row.status_data
+                                last_counter_at = dh_row.last_counter_at or dh_row.updated_at
+                                last_status_at = dh_row.last_status_at or dh_row.updated_at
+                        except Exception as dh_err:
+                            LOGGER.warning("[infor_list] DeviceInforHistory lookup exception: %s", dh_err)
+
+                    # 2. Lấy từ DeviceInfor
+                    if not counter_data and (p_mac or p_ip):
+                        try:
+                            d_stmt2 = select(DeviceInfor).where(DeviceInfor.lead == a_lead)
+                            if p_mac and p_ip:
+                                d_stmt2 = d_stmt2.where(or_(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac, DeviceInfor.ip == p_ip))
+                            elif p_mac:
+                                d_stmt2 = d_stmt2.where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
+                            elif p_ip:
+                                d_stmt2 = d_stmt2.where(DeviceInfor.ip == p_ip)
+                            d_row = session.execute(d_stmt2).scalars().first()
+                            if d_row:
+                                if isinstance(d_row.counter_data, dict) and d_row.counter_data:
+                                    counter_data = d_row.counter_data
+                                if not status_data and isinstance(d_row.status_data, dict) and d_row.status_data:
+                                    status_data = d_row.status_data
+                                last_counter_at = d_row.last_counter_at or d_row.updated_at
+                                last_status_at = d_row.last_status_at or d_row.updated_at
+                        except Exception as d_err:
+                            LOGGER.warning("[infor_list] DeviceInfor lookup exception: %s", d_err)
+
+                    # 3. Nếu vẫn chưa có counter_data, truy vấn trực tiếp từ bảng CounterInfor
+                    if not counter_data and (p_mac or p_ip):
+                        try:
+                            c_stmt = select(CounterInfor).where(CounterInfor.lead == a_lead)
+                            if p_mac and p_ip:
+                                c_stmt = c_stmt.where(or_(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac, CounterInfor.ip == p_ip))
+                            elif p_mac:
+                                c_stmt = c_stmt.where(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac)
+                            elif p_ip:
+                                c_stmt = c_stmt.where(CounterInfor.ip == p_ip)
+                            c_row = session.execute(c_stmt.order_by(CounterInfor.created_at.desc(), CounterInfor.id.desc()).limit(1)).scalars().first()
+                            if c_row:
+                                if isinstance(c_row.raw_payload, dict) and c_row.raw_payload:
+                                    counter_data = c_row.raw_payload
+                                else:
+                                    counter_data = {
+                                        "total": c_row.total or 0,
+                                        "copier_bw": c_row.copier_bw or 0,
+                                        "printer_bw": c_row.printer_bw or 0,
+                                        "a3_dlt": c_row.a3_dlt or 0,
+                                        "duplex": c_row.duplex or 0,
+                                    }
+                                last_counter_at = c_row.created_at or c_row.updated_at
+                        except Exception as c_err:
+                            LOGGER.warning("[infor_list] CounterInfor lookup exception: %s", c_err)
+
+                    # 3.5. Nếu vẫn chưa có counter_data, truy vấn trực tiếp từ bảng CounterBaseline
+                    if not counter_data and (p_mac or p_ip):
+                        try:
+                            cb_stmt = select(CounterBaseline).where(CounterBaseline.lead == a_lead)
+                            if p_ip:
+                                cb_stmt = cb_stmt.where(CounterBaseline.ip == p_ip)
+                            cb_row = session.execute(cb_stmt.order_by(CounterBaseline.baseline_timestamp.desc(), CounterBaseline.id.desc()).limit(1)).scalars().first()
+                            if not cb_row and p_ip:
+                                cb_stmt_global = select(CounterBaseline).where(CounterBaseline.ip == p_ip)
+                                cb_row = session.execute(cb_stmt_global.order_by(CounterBaseline.baseline_timestamp.desc(), CounterBaseline.id.desc()).limit(1)).scalars().first()
+                            if cb_row and isinstance(cb_row.raw_payload, dict) and cb_row.raw_payload:
+                                counter_data = cb_row.raw_payload
+                                last_counter_at = cb_row.baseline_timestamp or cb_row.created_at
+                        except Exception as cb_err:
+                            LOGGER.warning("[infor_list] CounterBaseline lookup exception: %s", cb_err)
+
+                    # 4. Nếu vẫn chưa có status_data, truy vấn trực tiếp từ bảng StatusInfor
+                    if not status_data and (p_mac or p_ip):
+                        try:
+                            s_stmt = select(StatusInfor).where(StatusInfor.lead == a_lead)
+                            if p_mac and p_ip:
+                                s_stmt = s_stmt.where(or_(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac, StatusInfor.ip == p_ip))
+                            elif p_mac:
+                                s_stmt = s_stmt.where(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac)
+                            elif p_ip:
+                                s_stmt = s_stmt.where(StatusInfor.ip == p_ip)
+                            s_row = session.execute(s_stmt.order_by(StatusInfor.created_at.desc(), StatusInfor.id.desc()).limit(1)).scalars().first()
+                            if s_row and isinstance(s_row.raw_payload, dict) and s_row.raw_payload:
+                                status_data = s_row.raw_payload
+                                last_status_at = s_row.created_at or s_row.updated_at
+                        except Exception as s_err:
+                            LOGGER.warning("[infor_list] StatusInfor lookup exception: %s", s_err)
+
+                    # 5. Lấy chính xác trạng thái online/offline thực tế từ bảng Printer
+                    p_online_state = True
+                    try:
+                        if p_mac or p_ip:
+                            p_check_stmt = select(Printer).where(Printer.lead == a_lead)
+                            if p_mac and p_ip:
+                                p_check_stmt = p_check_stmt.where(or_(func.replace(func.upper(Printer.mac_address), '-', ':') == p_mac, Printer.ip == p_ip))
+                            elif p_mac:
+                                p_check_stmt = p_check_stmt.where(func.replace(func.upper(Printer.mac_address), '-', ':') == p_mac)
+                            elif p_ip:
+                                p_check_stmt = p_check_stmt.where(Printer.ip == p_ip)
+                            p_check = session.execute(p_check_stmt).scalars().first()
+                            if p_check:
+                                p_online_state = bool(p_check.is_online)
+                    except Exception as p_err:
+                        LOGGER.warning("[infor_list] Printer online check exception: %s", p_err)
+                        LOGGER.warning("[infor_list] Printer online check exception: %s", p_err)
+
+                    if not status_data or list(status_data.keys()) == ["printer_status"]:
+                        status_data = {
+                            "printer_status": "online" if p_online_state else "offline",
+                            "system_status": "Ready" if p_online_state else "Offline",
+                            "printer_alerts": [],
+                            "copier_status": "Ready" if p_online_state else "Offline",
+                            "copier_alerts": [],
+                            "scanner_status": "Ready" if p_online_state else "Offline",
+                            "scanner_alerts": [],
+                            "toner_black": "OK" if p_online_state else "Unknown",
+                            "toner_cyan": "OK" if p_online_state else "Unknown",
+                            "toner_magenta": "OK" if p_online_state else "Unknown",
+                            "toner_yellow": "OK" if p_online_state else "Unknown",
+                            "tray_1_status": "OK" if p_online_state else "Unknown",
+                            "tray_2_status": "OK" if p_online_state else "Unknown",
+                            "tray_3_status": "OK" if p_online_state else "Unknown",
+                            "bypass_tray_status": "OK" if p_online_state else "Unknown",
+                            "other_info": {}
+                        }
+                    elif "printer_status" not in status_data and "system_status" not in status_data:
+                        status_data["printer_status"] = "online" if p_online_state else "offline"
 
                     now_dt = datetime.now(timezone.utc)
                     rows.append(
@@ -307,8 +435,8 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             row_mac_id=p_mac,
                             row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
                             row_is_latest=True,
-                            counter_data=counter_data or {"total": 0},
-                            status_data=status_data or {"printer_status": "online"},
+                            counter_data=counter_data or {},
+                            status_data=status_data,
                             last_counter_at=last_counter_at or now_dt,
                             last_status_at=last_status_at or now_dt,
                             created_at=now_dt,

@@ -8,15 +8,18 @@ import requests
 from agent.config import AppConfig
 
 
-@dataclass(slots=True)
+@dataclass
 class Printer:
     id: int = 0
     name: str = ""
     ip: str = ""
     user: str = ""
     password: str = ""
+    auth_user: str = ""
+    auth_password: str = ""
     printer_type: str = ""
     status: str = ""
+    is_online: bool = True
     mac_address: str = ""
     physical_status: str = "Unknown"
     updated_at: str = ""

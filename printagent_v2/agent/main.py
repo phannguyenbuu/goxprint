@@ -481,34 +481,9 @@ def main() -> int:
         instance_lock, is_primary = acquire_single_instance(instance_name)
         log_debug(f"Single instance lock acquisition complete: is_primary={is_primary}")
         if not is_primary:
-            log_debug("Another GoPrinxAgent process is already running. Checking if existing process is responsive...")
-            is_responsive = False
-            try:
-                import urllib.request
-                req = urllib.request.Request(f"http://127.0.0.1:{args.port}/api/status", headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=1.5) as response:
-                    if response.status == 200:
-                        is_responsive = True
-            except Exception:
-                is_responsive = False
-
-            if not is_responsive:
-                log_debug("Existing GoPrinxAgent process is unresponsive/zombie. Terminating duplicate processes...")
-                if sys.platform == "win32":
-                    try:
-                        import subprocess
-                        curr_pid = os.getpid()
-                        ps_cmd = f"Get-CimInstance Win32_Process -Filter \"name like '%printagent%'\" | Where-Object {{ $_.ProcessId -ne {curr_pid} }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
-                        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, creationflags=0x08000000)
-                        time.sleep(1.0)
-                        instance_lock, is_primary = acquire_single_instance(instance_name)
-                    except Exception as k_err:
-                        log_debug(f"Failed to kill zombie process: {k_err}")
-
-            if not is_primary:
-                log_debug("Another healthy GoPrinxAgent process is already running. Exiting main().")
-                logging.debug("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
-                return 0
+            log_debug(f"Another GoPrinxAgent process is already running for mode={args.mode}. Exiting main().")
+            logging.debug("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
+            return 0
 
         startup_ok = False
         startup_note = "skipped"

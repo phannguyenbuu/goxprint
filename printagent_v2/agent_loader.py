@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 def log_debug(msg):
@@ -220,6 +221,11 @@ def _get_core_zip_path() -> Path:
 def main():
     try:
         log_debug("Entered main()")
+        if getattr(sys, 'frozen', False):
+            base_path = Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent))
+        else:
+            base_path = Path(__file__).resolve().parent
+
         Path("storage/data").mkdir(parents=True, exist_ok=True)
         log_debug("Created storage/data directory.")
         
@@ -230,36 +236,43 @@ def main():
 
         # Ensure dynamic scripts directory exists
         log_debug("Ensuring dynamic scripts directory exists...")
-        temp_dir = os.environ.get("TEMP")
-        if temp_dir:
-            scripts_dir = Path(temp_dir) / "GoPrinxAgent" / "scripts"
-        else:
-            import tempfile
-            scripts_dir = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "scripts"
+        temp_base = os.environ.get("TEMP") or tempfile.gettempdir()
+        scripts_dir = Path(temp_base) / "GoPrinxAgent" / "scripts"
         try:
             scripts_dir.mkdir(parents=True, exist_ok=True)
             log_debug(f"Dynamic scripts directory set to: {scripts_dir}")
         except Exception as scripts_err:
             log_debug(f"Failed to create scripts directory: {scripts_err}")
 
-        # 1. Try to load updated agent_core.zip from %TEMP%\GoPrinxAgent\agent_core.zip first
-        if getattr(sys, "frozen", False):
-            base_path = Path(getattr(sys, "_MEIPASS", os.getcwd()))
-        else:
-            base_path = Path(__file__).resolve().parent
+        # 1. Search all candidate locations for updated agent_core.zip and pick the NEWEST one by mtime
+        candidate_zips = [
+            Path(temp_base) / "GoPrinxAgent" / "agent_core.zip",
+            Path(tempfile.gettempdir()) / "GoPrinxAgent" / "agent_core.zip",
+            Path("C:/ProgramData/GoPrinxAgent/agent_core.zip"),
+        ]
+        local_app_dir = os.environ.get("LOCALAPPDATA")
+        if local_app_dir:
+            candidate_zips.append(Path(local_app_dir) / "Temp" / "GoPrinxAgent" / "agent_core.zip")
+            candidate_zips.append(Path(local_app_dir) / "GoPrinxAgent" / "agent_core.zip")
 
-        temp_dir = os.environ.get("TEMP")
-        if temp_dir:
-            updated_zip = Path(temp_dir) / "GoPrinxAgent" / "agent_core.zip"
-        else:
-            import tempfile
-            updated_zip = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "agent_core.zip"
+        newest_zip = None
+        newest_mtime = 0.0
+        for z_path in candidate_zips:
+            try:
+                if z_path.exists() and z_path.stat().st_size > 1000:
+                    mt = z_path.stat().st_mtime
+                    if mt > newest_mtime:
+                        newest_mtime = mt
+                        newest_zip = z_path
+            except Exception:
+                pass
 
+        updated_zip = newest_zip or (Path(tempfile.gettempdir()) / "GoPrinxAgent" / "agent_core.zip")
         local_zip_path = base_path / "agent_core.zip"
         zip_bytes = None
 
-        if updated_zip.exists():
-            log_debug(f"Reading updated agent core from {updated_zip}...")
+        if newest_zip is not None:
+            log_debug(f"Reading newest updated agent core from {updated_zip} (mtime ts: {newest_mtime})...")
             try:
                 zip_bytes = updated_zip.read_bytes()
                 log_debug(f"Read {len(zip_bytes)} bytes from updated agent_core.zip.")
@@ -275,11 +288,35 @@ def main():
                 log_debug(f"Failed to read bundled agent core: {read_err}")
 
         if not zip_bytes:
+            core_download_url = f"{base_url}/static/releases/agent_core.zip"
+            log_debug(f"agent_core.zip not found locally. Attempting auto-download from {core_download_url}...")
+            try:
+                req = urllib.request.Request(
+                    core_download_url,
+                    headers={
+                        "User-Agent": "GoPrinxAgentLoader/2.0",
+                        "Cache-Control": "no-cache",
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    zip_bytes = resp.read()
+                if zip_bytes:
+                    log_debug(f"Downloaded {len(zip_bytes)} bytes for agent_core.zip successfully.")
+                    try:
+                        updated_zip.parent.mkdir(parents=True, exist_ok=True)
+                        updated_zip.write_bytes(zip_bytes)
+                        log_debug(f"Saved downloaded core to {updated_zip}")
+                    except Exception as save_err:
+                        log_debug(f"Failed saving core zip to temp: {save_err}")
+            except Exception as dl_err:
+                log_debug(f"Failed to auto-download agent_core.zip: {dl_err}")
+
+        if not zip_bytes:
             log_debug("Error: Could not find or read bundled agent_core.zip. Cannot start agent.")
-            safe_input("Press Enter to exit...")
             sys.exit(1)
             
         log_debug("Loading agent core in-memory...")
+        importer = None
         try:
             importer = MemoryZipImporter(zip_bytes)
             sys.meta_path.insert(0, importer)
@@ -292,15 +329,11 @@ def main():
             log_debug("Imported agent.main successfully. Calling main()...")
             try:
                 sys.exit(agent.main.main())
+            except SystemExit as sys_exit:
+                raise sys_exit
             except Exception as e:
                 import traceback
                 log_debug(f"CRASH in main(): {traceback.format_exc()}")
-                sys.exit(1)
-            except BaseException as run_exc:
-                import traceback
-                log_debug(f"Fatal error running agent core: {run_exc}\n{traceback.format_exc()}")
-                sys.stdout.flush()
-                safe_input("Press Enter to exit...")
                 sys.exit(1)
         except SystemExit as sys_exit:
             log_debug(f"SystemExit raised with code: {sys_exit.code}")
@@ -309,8 +342,42 @@ def main():
         except BaseException as run_exc:
             import traceback
             log_debug(f"Fatal error running agent core: {run_exc}\n{traceback.format_exc()}")
+            
+            # Emergency Recovery: If loaded zip was corrupted in temp, purge it & fetch fresh release from VPS!
+            if updated_zip.exists():
+                try:
+                    log_debug(f"Purging corrupted cached core: {updated_zip}")
+                    updated_zip.unlink(missing_ok=True)
+                except Exception as del_err:
+                    log_debug(f"Failed to delete corrupted zip: {del_err}")
+                
+                log_debug("Attempting emergency fresh redownload of agent_core.zip from VPS...")
+                try:
+                    core_download_url = f"{base_url}/static/releases/agent_core.zip?t={int(time.time() * 1000)}"
+                    req = urllib.request.Request(
+                        core_download_url,
+                        headers={"User-Agent": "GoPrinxAgentLoader/2.0", "Cache-Control": "no-cache"}
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        fresh_bytes = resp.read()
+                    if fresh_bytes:
+                        updated_zip.parent.mkdir(parents=True, exist_ok=True)
+                        updated_zip.write_bytes(fresh_bytes)
+                        log_debug(f"Downloaded fresh agent_core.zip ({len(fresh_bytes)} bytes). Retrying execution...")
+                        if importer in sys.meta_path:
+                            sys.meta_path.remove(importer)
+                        fresh_importer = MemoryZipImporter(fresh_bytes)
+                        sys.meta_path.insert(0, fresh_importer)
+                        for mod in list(sys.modules.keys()):
+                            if mod.startswith("agent"):
+                                sys.modules.pop(mod, None)
+                        import agent.main
+                        log_debug("Emergency recovery success! Running agent.main.main()...")
+                        sys.exit(agent.main.main())
+                except Exception as rec_err:
+                    log_debug(f"Emergency recovery failed: {rec_err}")
+            
             sys.stdout.flush()
-            safe_input("Press Enter to exit...")
             sys.exit(1)
     except BaseException as main_exc:
         import traceback

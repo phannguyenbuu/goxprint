@@ -6,7 +6,19 @@ from pathlib import Path
 import urllib.request
 import ctypes
 
+def log_install(msg: str) -> None:
+    try:
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            log_file = Path(temp_dir) / "printagent_installer.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+                f.flush()
+    except Exception:
+        pass
+
 def msg_box(title, text, is_error=False):
+    log_install(f"{'[ERROR] ' if is_error else '[INFO] '}{title}: {text}")
     style = 0x10 if is_error else 0x40
     try:
         ctypes.windll.user32.MessageBoxW(0, text, title, style)
@@ -167,58 +179,86 @@ def download_printagent(dest_path: Path, api_url: str) -> bool:
     
     print(f"URL tải xuống: {download_url}")
     
-    # Headers strict anti-cache enforcement
-    req = urllib.request.Request(
-        download_url,
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            "User-Agent": "GoxPrintAgentInstaller/2.0"
-        }
-    )
+    import ssl
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
     
-    try:
-        with urllib.request.urlopen(req, timeout=45) as response:
-            total_size = int(response.headers.get('content-length', 0))
-            block_size = 1024 * 64
-            downloaded = 0
-            
-            with open(dest_path, 'wb') as f:
-                while True:
-                    buffer = response.read(block_size)
-                    if not buffer:
-                        break
-                    downloaded += len(buffer)
-                    f.write(buffer)
-                    
-                    if total_size > 0:
-                        percent = (downloaded / total_size) * 100
-                        mb_downloaded = downloaded / (1024 * 1024)
-                        mb_total = total_size / (1024 * 1024)
-                        if sys.stdout:
-                            try:
-                                sys.stdout.write(f"\r Đang tải: {percent:.1f}% ({mb_downloaded:.2f} MB / {mb_total:.2f} MB)...")
-                                sys.stdout.flush()
-                            except Exception:
-                                pass
-                    else:
-                        mb_downloaded = downloaded / (1024 * 1024)
-                        if sys.stdout:
-                            try:
-                                sys.stdout.write(f"\r Đang tải: {mb_downloaded:.2f} MB...")
-                                sys.stdout.flush()
-                            except Exception:
-                                pass
-            if sys.stdout:
-                try:
-                    print("\n Tải xuống hoàn tất thành công!")
-                except Exception:
-                    pass
-            return True
-    except Exception as e:
-        print(f"\n Lỗi khi tải xuống PrintAgent: {e}")
-        return False
+    candidate_urls = [
+        download_url,
+        f"https://agentapi.quanlymay.com/static/releases/printagent.exe?{cache_buster}",
+        f"http://agentapi.quanlymay.com/static/releases/printagent.exe?{cache_buster}",
+    ]
+    
+    last_err = None
+    for target_url in candidate_urls:
+        req = urllib.request.Request(
+            target_url,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "User-Agent": "GoxPrintAgentInstaller/2.0"
+            }
+        )
+        try:
+            tmp_path = dest_path.with_suffix('.tmp')
+            with urllib.request.urlopen(req, timeout=45, context=ssl_ctx) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 1024 * 64
+                downloaded = 0
+                
+                with open(tmp_path, 'wb') as f:
+                    while True:
+                        buffer = response.read(block_size)
+                        if not buffer:
+                            break
+                        downloaded += len(buffer)
+                        f.write(buffer)
+                        
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            mb_downloaded = downloaded / (1024 * 1024)
+                            mb_total = total_size / (1024 * 1024)
+                            if sys.stdout:
+                                try:
+                                    sys.stdout.write(f"\r Đang tải: {percent:.1f}% ({mb_downloaded:.2f} MB / {mb_total:.2f} MB)...")
+                                    sys.stdout.flush()
+                                except Exception:
+                                    pass
+                        else:
+                            mb_downloaded = downloaded / (1024 * 1024)
+                            if sys.stdout:
+                                try:
+                                    sys.stdout.write(f"\r Đang tải: {mb_downloaded:.2f} MB...")
+                                    sys.stdout.flush()
+                                except Exception:
+                                    pass
+                if sys.stdout:
+                    try:
+                        print("\n Tải xuống hoàn tất thành công!")
+                    except Exception:
+                        pass
+                
+                # Replace destination file safely
+                if dest_path.exists():
+                    try:
+                        old_path = dest_path.with_suffix('.old')
+                        if old_path.exists():
+                            try: old_path.unlink()
+                            except Exception: pass
+                        dest_path.rename(old_path)
+                    except Exception:
+                        try: dest_path.unlink()
+                        except Exception: pass
+                tmp_path.replace(dest_path)
+                return True
+        except Exception as e:
+            last_err = e
+            print(f"\n Thử URL {target_url} thất bại: {e}")
+    
+    log_install(f"All download URLs failed. Last error: {last_err}")
+    return False
 
 def configure_settings_json():
     settings_path = INSTALL_DIR / "settings.json"
@@ -247,6 +287,85 @@ def configure_settings_json():
         print(" Đã cập nhật polling status và counter thành 60 giây trong settings.json.")
     except Exception as e:
         print(f" Không thể cập nhật settings.json: {e}")
+
+def download_agent_core(api_url: str) -> None:
+    temp_dir = os.environ.get("TEMP")
+    if temp_dir:
+        dest_zip = Path(temp_dir) / "GoPrinxAgent" / "agent_core.zip"
+    else:
+        import tempfile
+        dest_zip = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "agent_core.zip"
+    
+    base_url = api_url.strip().rstrip("/")
+    if base_url.endswith("/api"):
+        base_url = base_url[:-4]
+    
+    download_url = f"{base_url}/static/releases/agent_core.zip?t={int(time.time() * 1000)}"
+    import ssl
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    try:
+        dest_zip.parent.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "GoxPrintAgentInstaller/2.0", "Cache-Control": "no-cache"}
+        )
+        with urllib.request.urlopen(req, timeout=45, context=ssl_ctx) as response:
+            dest_zip.write_bytes(response.read())
+        print(" Đã tải trước gói agent_core.zip thành công.")
+    except Exception as e:
+        print(f" Cảnh báo: Không thể tải trước agent_core.zip: {e}")
+
+def setup_gox_driver_service(api_url: str) -> None:
+    """Download GoxDriverService.exe and register it as a Windows Service under LocalSystem."""
+    try:
+        install_dir = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "GoxDriverService"
+        install_dir.mkdir(parents=True, exist_ok=True)
+        gds_exe = install_dir / "GoxDriverService.exe"
+        
+        base_url = api_url.strip().rstrip("/")
+        if base_url.endswith("/api"):
+            base_url = base_url[:-4]
+            
+        download_url = f"{base_url}/static/releases/GoxDriverService.exe?t={int(time.time() * 1000)}"
+        print(f"Đang tải dịch vụ GoxDriverService từ {download_url}...")
+        
+        import ssl
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "GoxPrintAgentInstaller/2.0", "Cache-Control": "no-cache"}
+        )
+        with urllib.request.urlopen(req, timeout=45, context=ssl_ctx) as response:
+            gds_exe.write_bytes(response.read())
+        print(" Đã tải GoxDriverService.exe thành công.")
+        
+        import subprocess
+        _NO_WIN = 0x08000000
+        # Stop existing service if running
+        subprocess.run(["sc.exe", "stop", "GoxDriverService"], capture_output=True, creationflags=_NO_WIN)
+        time.sleep(1)
+        
+        # Try registering via pywin32 command 'install' first
+        r_inst = subprocess.run([str(gds_exe), "install"], capture_output=True, creationflags=_NO_WIN)
+        if r_inst.returncode != 0:
+            # Fallback to sc.exe create under LocalSystem
+            subprocess.run([
+                "sc.exe", "create", "GoxDriverService",
+                f'binPath="{gds_exe}"', "start=", "auto", "obj=", "LocalSystem",
+                'DisplayName="Gox Driver Service"'
+            ], capture_output=True, creationflags=_NO_WIN)
+            
+        # Configure auto restart & start service
+        subprocess.run(["sc.exe", "failure", "GoxDriverService", "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000"], capture_output=True, creationflags=_NO_WIN)
+        subprocess.run(["sc.exe", "start", "GoxDriverService"], capture_output=True, creationflags=_NO_WIN)
+        print(" Đã đăng ký và khởi chạy GoxDriverService (LocalSystem) thành công!")
+    except Exception as e:
+        print(f" Cảnh báo: Không thể tự động cài đặt GoxDriverService: {e}")
 
 def main():
     print("==============================================")
@@ -286,7 +405,6 @@ def main():
     success = download_printagent(dest_exe, api_url)
     if not success:
         print("\n Lỗi: Không thể tải xuống PrintAgent từ máy chủ.")
-        # If fallback exists, try to reuse it, otherwise fail
         if (INSTALL_DIR / "printagent.old.exe").exists() and not dest_exe.exists():
             try:
                 shutil.copy2(INSTALL_DIR / "printagent.old.exe", dest_exe)
@@ -298,6 +416,12 @@ def main():
         else:
             msg_box("Lỗi tải xuống", "Không thể tải xuống PrintAgent từ máy chủ.", is_error=True)
             sys.exit(1)
+
+    # 3. Pre-download agent_core.zip so loader starts immediately without waiting
+    download_agent_core(api_url)
+    
+    # 4. Install GoxDriverService under LocalSystem (SYSTEM) account for 100% UAC-free silent driver installs
+    setup_gox_driver_service(api_url)
             
     print("\nCài đặt file thành công!")
     configure_settings_json()
@@ -328,4 +452,33 @@ def main():
     time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    log_install(f"Started printagentinstall.exe. Args: {sys.argv}")
+    
+    # Force Windows UAC Admin Elevation prompt if not running as Administrator
+    try:
+        def is_admin() -> bool:
+            try:
+                return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                return False
+
+        if not is_admin():
+            log_install("Not running as Administrator. Triggering UAC elevation prompt (runas)...")
+            params = " ".join([f'"{a}"' for a in sys.argv[1:]])
+            ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+            if int(ret) > 32:
+                # Successfully launched elevated child process, exit current non-admin process
+                sys.exit(0)
+            else:
+                log_install(f"UAC elevation prompt rejected or failed with code {ret}")
+    except Exception as elev_exc:
+        log_install(f"Elevation check exception: {elev_exc}")
+
+    try:
+        main()
+    except Exception as fatal_exc:
+        import traceback
+        err_msg = f"FATAL INSTALLER ERROR: {fatal_exc}\n{traceback.format_exc()}"
+        log_install(err_msg)
+        msg_box("Lỗi Cài Đặt Khẩn Cấp", f"Cài đặt thất bại:\n{fatal_exc}\n\nXem chi tiết tại %TEMP%\\printagent_installer.log", is_error=True)
+        sys.exit(1)

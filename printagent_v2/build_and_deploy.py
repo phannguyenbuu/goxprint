@@ -46,20 +46,30 @@ def main():
     
     update_file_content(
         pack_path,
-        r'(version\s*=\s*")[^"]+(")',
+        r'(VERSION_DEFAULT\s*=\s*")[^"]+(")',
         rf'\g<1>{new_version}\g<2>'
     )
+
+    agent_routes_path = root / "backend" / "agent_routes.py"
+    if agent_routes_path.exists():
+        update_file_content(
+            agent_routes_path,
+            r'("version":\s*")[^"]+(")',
+            rf'\g<1>{new_version}\g<2>'
+        )
     
     python_exe = sys.executable
-    # 3. Package and build
+    # 3. Package core zip FIRST with explicit version argument
+    print(f"\n--- Packaging latest agent_core.zip v{new_version} ---")
+    subprocess.run([python_exe, str(pack_path), new_version], cwd=str(root), check=True)
+
+    # 4. Compile loader and installer exe with PyInstaller
     print("\n--- Compiling loader and packing core with PyInstaller ---")
     try:
-        subprocess.run(["powershell", "-File", "build_agent_loader_exe.ps1"], cwd=str(root), check=True)
+        subprocess.run(["powershell", "-File", "build_agent_loader_exe.ps1", new_version], cwd=str(root), check=True)
     except Exception as build_err:
         print(f"Error compiling loader via PowerShell: {build_err}")
         print("Falling back to manual packaging and existing exe...")
-        python_exe = sys.executable
-        subprocess.run([python_exe, str(root / "pack_agent_core.py")], cwd=str(root), check=True)
         
     # Copy loader printagent.exe to backend static releases and update manifest
     print("\n--- Copying printagent.exe and updating agent_release.json ---")
@@ -105,7 +115,7 @@ def main():
             "size": exe_size,
             "published_at": now_str,
             "mandatory": True,
-            "download_url": "https://download.goxprint.com/printagent.exe",
+            "download_url": "https://agentapi.quanlymay.com/static/releases/agent_core.zip",
             "notes": f"Build {new_version}: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
             "channel": "stable"
         })

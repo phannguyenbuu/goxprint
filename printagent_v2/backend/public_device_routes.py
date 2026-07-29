@@ -69,6 +69,7 @@ def register_public_device_routes(app: Flask, session_factory: Any) -> None:
                 continue
 
             printers_list = agent_info.get("printers_json") or []
+            printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
             for dev in printers_list:
                 if not isinstance(dev, dict):
                     continue

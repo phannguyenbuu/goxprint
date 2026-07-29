@@ -1,4 +1,4 @@
-﻿# Project Memory
+# Project Memory
 
 File nÃ y dÃ¹ng nhÆ° handover note Ä‘á»ƒ láº§n sau quay láº¡i dá»± Ã¡n nhanh hÆ¡n.
 
@@ -98,4 +98,12 @@ ss -ltnp | grep 8005
 
 - Ä‘á»•i public API: sá»­a `backend/PUBLIC_API.md` trÆ°á»›c
 - Ä‘á»•i deploy reality: sá»­a `README.md` vÃ  file nÃ y ngay
-- Ä‘á»•i polling/control flow: sá»­a `docs/AGENTS.md` vÃ  `docs/ENDPOINT.md`
+- Ä‘á»•- đổi polling/control flow: sửa `docs/AGENTS.md` và `docs/ENDPOINT.md`
+
+## Quy trình Nâng Version & Build Deploy Bắt Buộc
+
+Khi thay đổi code hoặc nâng version của PrintAgent:
+1. **LUÔN chạy duy nhất lệnh chuẩn**: `python build_and_deploy.py <version>`
+2. **KHÔNG BAO GIỜ**: Chỉ nâng version file mà không rebuild `.exe`, hoặc chỉ pack zip mà không deploy backend VPS.
+3. **Cấu hình PyInstaller**: Luôn giữ `upx=False` trong spec file để không làm hỏng dữ liệu Tcl/Tk (`_tk_data/tk.tcl`).
+4. Tham khảo chi tiết tại file [RULES.md](file:///d:/Dropbox/_Documents/Goxprint/printagent_v2/RULES.md).

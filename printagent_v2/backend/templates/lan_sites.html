@@ -1282,6 +1282,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         showToast(`✔ Registration #${regNo} deleted from copier successfully!`, 'success');
                         setTimeout(() => location.reload(), 1500);
+                    } else if (statusData.status === 'superseded') {
+                        clearInterval(pollTimer);
+                        if (statusCell) {
+                            statusCell.textContent = `⏭ Máy photo đang bận xử lý, vui lòng thử lại sau`;
+                            statusCell.style.color = '#fbbf24';
+                        }
+                        showToast(`⏭ Máy photo đang bận xử lý lệnh khác, vui lòng thử lại sau`, 'warning');
                     } else if (statusData.status === 'failed') {
                         clearInterval(pollTimer);
                         const nowStr = new Date().toLocaleString('vi-VN');

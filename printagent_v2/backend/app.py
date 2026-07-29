@@ -107,7 +107,7 @@ from models import (
 
 LOGGER = logging.getLogger(__name__)
 UI_TZ = timezone(timedelta(hours=7))
-ONLINE_STALE_SECONDS = 60
+ONLINE_STALE_SECONDS = 300
 SCAN_UPLOAD_ROOT = Path("storage/uploads/scans")
 LAST_DATA_FILE = Path("storage/data/last_data.json")
 PUBLIC_API_FILE = Path("PUBLIC_API.md")

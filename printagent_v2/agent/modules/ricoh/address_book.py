@@ -358,8 +358,8 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     remain = {str(getattr(e, "entry_id", "") or "").strip() for e in verify_entries if getattr(e, "entry_id", "")}
                     failed = [eid for eid in ids if eid in remain]
                 else:
-                    remain = {str(getattr(e, "registration_no", "") or "").strip() for e in verify_entries if getattr(e, "registration_no", "")}
-                    failed = [reg for reg in regs if reg in remain]
+                    remain = {norm(str(getattr(e, "registration_no", "") or "")) for e in verify_entries if getattr(e, "registration_no", "")}
+                    failed = [reg for reg in regs if norm(reg) in remain]
                 
                 if not failed:
                     break
@@ -421,7 +421,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
             if "reportListDummyRow" in row:
                 continue
             cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
-            if len(cells) < 8:
+            if len(cells) < 4:
                 continue
             
             entry_id = ""
@@ -431,22 +431,36 @@ Get-NetIPAddress -AddressFamily IPv4 |
             if id_match:
                 entry_id = id_match.group(1)
             else:
-                # Fallback: Parse from adrsGetUserWizard.cgi?entryIndexIn=XXX or similar CHANGE link
                 fallback_match = re.search(r'entryIndexIn=(\d+)', row, re.I)
                 if fallback_match:
                     entry_id = fallback_match.group(1)
 
+            c0 = self._strip_html(cells[0])
+            c1 = self._strip_html(cells[1]) if len(cells) > 1 else ""
+            c2 = self._strip_html(cells[2]) if len(cells) > 2 else ""
+            c3 = self._strip_html(cells[3]) if len(cells) > 3 else ""
+            c4 = self._strip_html(cells[4]) if len(cells) > 4 else ""
+            c5 = self._strip_html(cells[5]) if len(cells) > 5 else ""
+            c6 = self._strip_html(cells[6]) if len(cells) > 6 else ""
+            c7 = self._strip_html(cells[7]) if len(cells) > 7 else ""
+
+            # Flexible column mapping for 4, 5, 6, 7, 8+ cell tables
+            reg_no = c0 if c0.isdigit() or len(c0) <= 4 else (c1 if c1.isdigit() else "001")
+            p_name = c3 if len(cells) >= 8 and c3 and c3 != "-" else (c2 if len(cells) >= 6 and c2 and c2 != "-" else (c1 if c1 and c1 != "-" else c0))
+            email = c6 if len(cells) >= 8 else (c5 if len(cells) >= 7 else (c4 if "@" in c4 else ""))
+            folder = c7 if len(cells) >= 8 else (c6 if len(cells) >= 7 else (c5 if "\\" in c5 or "/" in c5 else ""))
+
             entry = AddressEntry(
-                type=self._strip_html(cells[1]),
-                registration_no=self._strip_html(cells[2]),
-                name=self._strip_html(cells[3]),
-                user_code=self._strip_html(cells[4]),
-                date_last_used=self._strip_html(cells[5]),
-                email_address=self._strip_html(cells[6]),
-                folder=self._strip_html(cells[7]),
+                type=c1 if len(cells) >= 8 else "User",
+                registration_no=reg_no,
+                name=p_name,
+                user_code=c4 if len(cells) >= 8 else "",
+                date_last_used=c5 if len(cells) >= 8 else "",
+                email_address=email,
+                folder=folder,
                 entry_id=entry_id,
             )
-            if entry.name and entry.name != "-" and entry.registration_no:
+            if entry.name and entry.name != "-":
                 entries.append(entry)
         return entries
 
@@ -600,63 +614,70 @@ Get-NetIPAddress -AddressFamily IPv4 |
                     self._login(session, printer)
 
             try:
-                LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", list_url)
-                resp = session.get(list_url, timeout=10)
-                html = resp.text
-                if self._is_session_full(html):
-                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
-                if self._is_copier_busy(html):
-                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
-                wim_token = self._extract_wim_token(html)
-                if not wim_token:
-                    wim_token = self._extract_hidden_inputs(html).get("wimToken", "")
-                if wim_token:
-                    LOGGER.info("[RicohAddressBook] wimToken DETECTED: %s", wim_token)
+                candidate_paths = [
+                    "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL",
+                    "/web/guest/en/address/adrsList.cgi?modeIn=LIST_ALL"
+                ]
+                for c_path in candidate_paths:
+                    l_url = f"{base_url}{c_path}"
+                    LOGGER.info("[RicohAddressBook] Fetching HTML list page to get wimToken: GET %s", l_url)
+                    resp = session.get(l_url, timeout=10)
+                    html = resp.text
+                    if self._is_session_full(html):
+                        raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                    if self._is_copier_busy(html):
+                        raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+                    wim_token = self._extract_wim_token(html)
+                    if not wim_token:
+                        wim_token = self._extract_hidden_inputs(html).get("wimToken", "")
+                    if wim_token or ("Address List" in html or "adrsList" in html):
+                        LOGGER.info("[RicohAddressBook] HTML list page fetched successfully from %s (wimToken: %s)", c_path, wim_token)
+                        break
             except Exception as e:
                 LOGGER.warning("[RicohAddressBook] Failed to fetch list page: %s", e)
                 continue
 
-            # 3. Fetch entries via AJAX (direct session.get, matching test_list_address.py)
-            if not wim_token:
-                continue
-            ajax_url = f"{base_url}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={wim_token}"
-            try:
-                LOGGER.info("[RicohAddressBook] Fetching entries via AJAX: GET %s", ajax_url)
-                ajax_resp = session.get(ajax_url, timeout=8)
-                if self._is_session_full(ajax_resp.text):
-                    raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
-                if self._is_copier_busy(ajax_resp.text):
-                    raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
-                LOGGER.info("[RicohAddressBook] AJAX response: status=%d, length=%d", ajax_resp.status_code, len(ajax_resp.text))
-                if ajax_resp.status_code == 200 and "[" in ajax_resp.text and "authForm" not in ajax_resp.text and "login" not in ajax_resp.text.lower():
-                    entries = self.parse_ajax_address_list(ajax_resp.text)
-                    if entries:
-                        LOGGER.info("[RicohAddressBook] Success! Retrieved %d entries from AJAX", len(entries))
+            # 3. Fetch entries via AJAX or parse from HTML
+            if wim_token:
+                ajax_url = f"{base_url}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={wim_token}"
+                try:
+                    LOGGER.info("[RicohAddressBook] Fetching entries via AJAX: GET %s", ajax_url)
+                    ajax_resp = session.get(ajax_url, timeout=8)
+                    if self._is_session_full(ajax_resp.text):
+                        raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+                    if self._is_copier_busy(ajax_resp.text):
+                        raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+                    LOGGER.info("[RicohAddressBook] AJAX response: status=%d, length=%d", ajax_resp.status_code, len(ajax_resp.text))
+                    if ajax_resp.status_code == 200 and "[" in ajax_resp.text and "authForm" not in ajax_resp.text and "login" not in ajax_resp.text.lower():
+                        entries = self.parse_ajax_address_list(ajax_resp.text)
+                        if entries:
+                            LOGGER.info("[RicohAddressBook] Success! Retrieved %d entries from AJAX", len(entries))
 
-                        # Merge summary header if we have the HTML page
-                        if html:
-                            try:
-                                html_entries = self.parse_address_list(html)
-                                summary_header = html_entries[0] if html_entries else None
-                                if summary_header and summary_header.type == "Summary":
-                                    entries = [summary_header, *entries]
-                                    LOGGER.info("[RicohAddressBook] Merged AJAX entries with HTML summary header")
-                            except Exception as parse_exc:
-                                LOGGER.debug("[RicohAddressBook] Failed to parse HTML summary header (non-critical): %s", parse_exc)
-                        break  # Success, stop retrying
-                else:
-                    LOGGER.warning("[RicohAddressBook] AJAX response looks invalid (attempt %d, possible login page or no array data)", attempt + 1)
-            except Exception as ajax_exc:
-                LOGGER.warning("[RicohAddressBook] AJAX fetch failed (attempt %d): %s", attempt + 1, ajax_exc)
-            
-        # 4. Fallback to HTML table parsing if AJAX yields no entries
-        if not entries and html:
-            try:
-                LOGGER.info("[RicohAddressBook] Fallback: Parsing address list from HTML table...")
-                entries = self.parse_address_list(html)
-                LOGGER.info("[RicohAddressBook] Fallback success! Retrieved %d entries from HTML", len(entries))
-            except Exception as html_exc:
-                LOGGER.error("[RicohAddressBook] Fallback HTML parsing failed: %s", html_exc)
+                            # Merge summary header if we have the HTML page
+                            if html:
+                                try:
+                                    html_entries = self.parse_address_list(html)
+                                    summary_header = html_entries[0] if html_entries else None
+                                    if summary_header and summary_header.type == "Summary":
+                                        entries = [summary_header, *entries]
+                                        LOGGER.info("[RicohAddressBook] Merged AJAX entries with HTML summary header")
+                                except Exception as parse_exc:
+                                    LOGGER.debug("[RicohAddressBook] Failed to parse HTML summary header (non-critical): %s", parse_exc)
+                            break  # Success, stop retrying
+                    else:
+                        LOGGER.warning("[RicohAddressBook] AJAX response looks invalid (attempt %d)", attempt + 1)
+                except Exception as ajax_exc:
+                    LOGGER.warning("[RicohAddressBook] AJAX fetch failed (attempt %d): %s", attempt + 1, ajax_exc)
+
+            if not entries and html:
+                try:
+                    LOGGER.info("[RicohAddressBook] Parsing address list from HTML table (attempt %d)...", attempt + 1)
+                    entries = self.parse_address_list(html)
+                    if entries:
+                        LOGGER.info("[RicohAddressBook] Fallback success! Retrieved %d entries from HTML", len(entries))
+                        break
+                except Exception as html_exc:
+                    LOGGER.warning("[RicohAddressBook] HTML parsing failed (attempt %d): %s", attempt + 1, html_exc)
 
         # Bypassed detailed config fetch loop because it executes slow sequential HTTP requests for every entry,
         # causing the GUI to hang when the address book contains multiple entries.

@@ -18,8 +18,9 @@ def main():
     
     print(f"Packaging agent folder into {zip_path}...")
     
+    VERSION_DEFAULT = "2.8.19"
     # Dynamically read version from agent/services/updater.py
-    version = sys.argv[1] if len(sys.argv) > 1 else "2.3.7"
+    version = sys.argv[1] if len(sys.argv) > 1 else VERSION_DEFAULT
     updater_file = agent_dir / "services" / "updater.py"
     if updater_file.exists():
         import re

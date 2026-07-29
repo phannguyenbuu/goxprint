@@ -213,7 +213,7 @@ def _upsert_printer_from_polling(
         row = session.execute(
             select(Printer).where(Printer.lead == lead, func.upper(Printer.mac_address) == printer_mac).limit(1)
         ).scalar_one_or_none()
-    if row is None and printer_ip:
+    if row is None and printer_ip and not printer_mac:
         row = session.execute(
             select(Printer).where(Printer.lead == lead, Printer.ip == printer_ip).limit(1)
         ).scalar_one_or_none()
@@ -362,7 +362,7 @@ def _apply_printer_enabled_state(session: Any, printer: Printer, enabled: bool, 
 
 
 def _refresh_stale_offline(session: Any, lead: str = "", lan_uid: str = "", agent_uid: str = "") -> None:
-    ONLINE_STALE_SECONDS = 60
+    ONLINE_STALE_SECONDS = 300
     stale_before = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_STALE_SECONDS)
     stmt = select(Printer).where(Printer.is_online.is_(True), Printer.updated_at < stale_before)
     if lead:

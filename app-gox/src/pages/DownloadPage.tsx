@@ -21,8 +21,8 @@ interface JobItem {
 function getCommandName(type: string, paramsStr: string): string {
   if (type === 'trigger_utility') {
     try {
-      const params = JSON.parse(paramsStr);
-      const cmd = params.command;
+      const params = JSON.parse(paramsStr || '{}');
+      const cmd = params.command || params.action || params.utility_type || params.cmd_name || params.type || '';
       if (cmd === 'query_device_now') return '🔍 Truy vấn Máy in tức thì';
       if (cmd === 'start_camera_recorder') return '📹 Kích hoạt Ghi hình Camera';
       if (cmd === 'stop_camera_recorder') return '⏹️ Dừng ghi hình Camera';
@@ -31,15 +31,30 @@ function getCommandName(type: string, paramsStr: string): string {
       if (cmd === 'delete_camera_file') return '🗑️ Xóa tệp video Camera';
       if (cmd === 'list_camera_files') return '📂 Lấy danh sách video';
       if (cmd === 'get_camera_status') return '📊 Xem trạng thái ghi hình';
-      return `⚙️ Lệnh tiện ích: ${cmd}`;
+      if (cmd === 'start_tunnel') return '🌐 Mở kết nối Web Proxy (SSH Tunnel)';
+      if (cmd === 'stop_tunnel') return '🔌 Đóng kết nối Web Proxy';
+      return cmd ? `⚙️ Lệnh tiện ích: ${cmd}` : '⚙️ Lệnh tiện ích';
     } catch {
       return '⚙️ Lệnh tiện ích';
+    }
+  }
+  if (type === 'update_agent_core' || type === 'update_core') {
+    try {
+      const params = JSON.parse(paramsStr || '{}');
+      const ver = params.to_version || params.version || '';
+      return ver ? `🚀 Cập nhật Agent Core (.zip) -> v${ver}` : '🚀 Cập nhật Agent Core (.zip)';
+    } catch {
+      return '🚀 Cập nhật Agent Core (.zip)';
     }
   }
   if (type === 'emergency_restart') return '🔄 Khởi động lại Agent';
   if (type === 'general_settings') return '⚙️ Cập nhật cấu hình Agent';
   if (type === 'add_scan_email_dest') return '📧 Thêm đích quét Email';
   if (type === 'delete_scan_email_dest') return '🗑️ Xóa đích quét Email';
+  if (type === 'fetch_address_book') return '📖 Đồng bộ danh bạ máy in';
+  if (type === 'address_modify') return '✏️ Chỉnh sửa điểm scan';
+  if (type === 'install_driver') return '🖨️ Cài đặt Driver máy in';
+  if (type === 'save_printer_auth' || type === 'update_credentials') return '🔑 Cập nhật mật khẩu máy in';
   return `⚡ Lệnh hệ thống: ${type}`;
 }
 

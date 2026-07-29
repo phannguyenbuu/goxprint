@@ -8,8 +8,10 @@ local_dist = root_dir.parent / "app-gox" / "dist"
 # Determine SSH key path dynamically
 home = Path.home()
 key_candidates = [
+    home / ".ssh" / "id_ed25519_20260422_155451",
     home / ".ssh" / "id_ed25519",
     home / ".ssh" / "id_rsa",
+    Path(r"C:\Users\Kythuat-02\.ssh\id_ed25519_20260422_155451"),
     Path(r"C:\Users\nguyenbuu.DESKTOP-TOEFTR1\.ssh\id_ed25519"),
 ]
 

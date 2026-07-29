@@ -636,6 +636,8 @@ class FtpControlCommand(Base):
     agent_uid: Mapped[str] = mapped_column(String(128), index=True, default="legacy-agent")
     action: Mapped[str] = mapped_column(String(64), default="")
     site_name: Mapped[str] = mapped_column(String(255), default="")
+
+
     new_site_name: Mapped[str] = mapped_column(String(255), default="")
     local_path: Mapped[str] = mapped_column(Text, default="")
     port: Mapped[int] = mapped_column(Integer, nullable=True)
@@ -650,5 +652,18 @@ class FtpControlCommand(Base):
     error_message: Mapped[str] = mapped_column(Text, default="")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+
+
+class ScanPoint(Base):
+    __tablename__ = "scan_points"
+
+    mac_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    printer_name: Mapped[str | None] = mapped_column(String(255), nullable=True, default="")
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
+    agent_uid: Mapped[str | None] = mapped_column(String(128), nullable=True, default="")
+    address_book_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(64), nullable=True, default="success")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)

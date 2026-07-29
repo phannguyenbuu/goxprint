@@ -19,8 +19,8 @@ Write-Host "Installing/checking dependencies..." -ForegroundColor Cyan
 & $venvPython -m pip install --upgrade pip | Out-Null
 & $venvPython -m pip install -r requirements.txt pyinstaller | Out-Null
 
-Write-Host "Packaging latest agent_core.zip..." -ForegroundColor Cyan
-& $venvPython pack_agent_core.py
+$versionArg = if ($args.Count -gt 0) { $args[0] } else { "" }
+& $venvPython pack_agent_core.py $versionArg
 
 Write-Host "Running PyInstaller with agent_loader.spec..." -ForegroundColor Cyan
 & $venvPython -m PyInstaller --clean agent_loader.spec

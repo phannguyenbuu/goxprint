@@ -133,10 +133,32 @@ try:
     )
     _, out, err = ssh.exec_command(remote_cmd)
     # Wait for the command to finish
-    out.read()
     print("Cache-busted copies created successfully on VPS.")
+
+    print(f"Logging release job for v{version_str} into database...")
+    remote_cmd_job = (
+        f"/opt/printagent/venv/bin/python3 -c \""
+        f"import json, sys; sys.path.insert(0, '/opt/printagent'); "
+        f"from init_db import session_factory; "
+        f"from models import PrinterControlCommand, AgentNode; "
+        f"from datetime import datetime, timezone; "
+        f"with session_factory() as session: "
+        f"    agents = session.query(AgentNode).all(); "
+        f"    now_dt = datetime.now(timezone.utc); "
+        f"    for a in (agents or [None]): "
+        f"        uid = a.agent_uid if a else 'default'; "
+        f"        lead = a.lead if a else 'default'; "
+        f"        lan = a.lan_uid if a else 'default'; "
+        f"        existing = session.query(PrinterControlCommand).filter(PrinterControlCommand.agent_uid == uid, PrinterControlCommand.command_type == 'update_agent_core', PrinterControlCommand.command_params.like(f'%{version_str}%')).first(); "
+        f"        if not existing: "
+        f"            cmd = PrinterControlCommand(printer_id=0, lead=lead, lan_uid=lan, agent_uid=uid, printer_name=f'Agent ({{uid}})', ip='0.0.0.0', desired_enabled=True, command_type='update_agent_core', command_params=json.dumps({{'action': 'update_agent_core', 'to_version': '{version_str}', 'version': '{version_str}'}}), status='success', requested_at=now_dt, responded_at=now_dt); "
+        f"            session.add(cmd); "
+        f"    session.commit(); "
+        f"\""
+    )
+    ssh.exec_command(remote_cmd_job)
 except Exception as e:
-    print(f"Warning: Failed to create cache-busted copies on VPS: {e}")
+    print(f"Warning: Failed to create cache-busted copies or log release job on VPS: {e}")
 
 ssh.close()
 print("Done!")

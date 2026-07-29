@@ -7,6 +7,8 @@ import subprocess
 import sys
 import threading
 import hashlib
+import tempfile
+import time
 import urllib.parse
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -19,7 +21,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.3.7"
+DEFAULT_APP_VERSION = "2.8.20"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -73,7 +75,27 @@ class UpdateState:
 class AutoUpdater:
     def __init__(self, project_root: Path, current_args: list[str] | None = None) -> None:
         self.project_root = project_root
-        self.current_version = DEFAULT_APP_VERSION
+        
+        disk_ver = ""
+        try:
+            for notice_path in [
+                UPDATE_NOTICE_FILE,
+                Path(tempfile.gettempdir()) / "GoPrinxAgent" / "update_notice.json",
+                Path("C:/ProgramData/GoPrinxAgent/update_notice.json"),
+            ]:
+                if notice_path.exists():
+                    try:
+                        n_data = json.loads(notice_path.read_text(encoding="utf-8"))
+                        v = str(n_data.get("version") or "").strip()
+                        if v:
+                            disk_ver = v
+                            break
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        self.current_version = disk_ver or DEFAULT_APP_VERSION
         self.auto_apply = _env_bool("UPDATE_AUTO_APPLY", default=False)
         self.default_command = os.getenv("UPDATE_DEFAULT_COMMAND", "git pull --ff-only").strip()
         prefix_raw = os.getenv("UPDATE_ALLOWED_PREFIX", "git pull --ff-only").strip()
@@ -297,31 +319,106 @@ class AutoUpdater:
                         if chunk:
                             handle.write(chunk)
 
-            import zipfile
-            extract_dir = core_zip_path.parent / "agent_core"
-            extract_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(core_zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+            # Copy downloaded core zip to all candidate locations to guarantee loader picks it up
+            target_dirs = [
+                Path(os.environ.get("TEMP", "")) / "GoPrinxAgent",
+                Path(tempfile.gettempdir()) / "GoPrinxAgent",
+                Path("C:/ProgramData/GoPrinxAgent"),
+            ]
+            local_app_dir = os.environ.get("LOCALAPPDATA")
+            if local_app_dir:
+                target_dirs.append(Path(local_app_dir) / "Temp" / "GoPrinxAgent")
+                target_dirs.append(Path(local_app_dir) / "GoPrinxAgent")
 
-            LOGGER.info("[Updater] Extracted agent_core.zip v%s to %s", target_version, extract_dir)
+            # First: purge stale zips + extracted dirs at ALL locations so loader can't pick old ones
+            for t_dir in target_dirs:
+                try:
+                    stale_zip = t_dir / "agent_core.zip"
+                    if stale_zip.exists() and stale_zip != core_zip_path:
+                        stale_zip.unlink(missing_ok=True)
+                    stale_extract = t_dir / "agent_core"
+                    if stale_extract.is_dir():
+                        import shutil as _shutil
+                        _shutil.rmtree(stale_extract, ignore_errors=True)
+                except Exception:
+                    pass
+
+            # Then: copy fresh zip to all locations
+            for t_dir in target_dirs:
+                try:
+                    t_dir.mkdir(parents=True, exist_ok=True)
+                    t_zip = t_dir / "agent_core.zip"
+                    if t_zip != core_zip_path:
+                        import shutil
+                        shutil.copy2(core_zip_path, t_zip)
+                except Exception:
+                    pass
+
+            LOGGER.info("[Updater] Updated agent_core.zip v%s at %s", target_version, core_zip_path)
+            from_ver = self.state.current_version
             with self._lock:
                 self.state.current_version = target_version or DEFAULT_APP_VERSION
                 self.state.last_success_at = _utc_now()
                 self.state.last_error = ""
 
-            relaunch_command = subprocess.list2cmdline([sys.executable, *self._current_args])
-            LOGGER.info("[Updater] Restarting agent process to apply agent_core.zip update: %s", relaunch_command)
+            for notice_path in [
+                UPDATE_NOTICE_FILE,
+                Path(tempfile.gettempdir()) / "GoPrinxAgent" / "update_notice.json",
+                Path("C:/ProgramData/GoPrinxAgent/update_notice.json"),
+            ]:
+                try:
+                    self._write_update_notice(notice_path, target_version)
+                except Exception:
+                    pass
+
+            self._report_update_to_vps(from_version=from_ver, to_version=target_version, status="success")
+
+            args_str = " ".join([f'"{a}"' if " " in a else a for a in self._current_args])
+            delay_relaunch_cmd = f'cmd.exe /c "ping 127.0.0.1 -n 2 > nul & "{sys.executable}" {args_str}"'
+            LOGGER.info("[Updater] Delay-restarting agent process for v%s: %s", target_version, delay_relaunch_cmd)
             subprocess.Popen(
-                relaunch_command,
+                delay_relaunch_cmd,
                 shell=True,
-                creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 env=fresh_pyinstaller_env(),
             )
-            sys.exit(0)
+            time.sleep(0.2)
+            os._exit(0)
             return True, "Updated agent_core.zip successfully", True
         except Exception as exc:
             LOGGER.warning("[Updater] Failed to update agent_core.zip: %s", exc)
+            self._report_update_to_vps(from_version=self.state.current_version, to_version=target_version, status="failed", error_msg=str(exc))
             return False, str(exc), False
+
+    def _report_update_to_vps(self, from_version: str, to_version: str, status: str = "success", error_msg: str = "") -> None:
+        try:
+            from agent.config import AppConfig
+            cfg = AppConfig.load()
+            base_url = cfg.get_string("polling.url").strip().rstrip("/")
+            lead = cfg.get_string("polling.lead").strip()
+            token = cfg.get_string("polling.token").strip()
+            raw_agent_uid = cfg.get_string("polling.agent_uid", "").strip()
+            import socket
+            agent_uid = raw_agent_uid or socket.gethostname()
+
+            if base_url:
+                endpoint = f"{base_url}/api/agent/report-update-event"
+                payload = {
+                    "lead": lead,
+                    "agent_uid": agent_uid,
+                    "from_version": from_version,
+                    "to_version": to_version,
+                    "status": status,
+                    "error_message": error_msg,
+                }
+                headers = {"Content-Type": "application/json"}
+                if token:
+                    headers["X-Lead-Token"] = token
+                    headers["X-API-Token"] = token
+                requests.post(endpoint, json=payload, headers=headers, timeout=5)
+                LOGGER.info("[Updater] Reported update event to VPS: v%s -> v%s (%s)", from_version, to_version, status)
+        except Exception as report_exc:
+            LOGGER.warning("[Updater] Failed reporting update event to VPS: %s", report_exc)
 
     def apply_release_manifest(self, payload: dict[str, Any], base_url: str) -> tuple[bool, str, bool]:
         latest_version = str(payload.get("version") or "").strip()
@@ -333,36 +430,37 @@ class AutoUpdater:
             self.state.last_available_version = latest_version
             self.state.last_download_url = download_url
 
-        if download_url.lower().endswith(".zip"):
-            return self._download_and_apply_core_zip(download_url=download_url, target_version=latest_version, expected_sha256=expected_sha)
+        is_different = (latest_version != self.state.current_version)
+        is_newer = self._is_newer_version(latest_version, self.state.current_version)
+        is_mandatory = bool(payload.get("mandatory", True))
 
-        current_binary = self._current_binary_path()
-        current_sha = ""
-        if current_binary is not None and current_binary.exists():
-            try:
-                current_sha = self._sha256_file(current_binary)
-            except Exception:  # noqa: BLE001
-                current_sha = ""
+        # Also check if the local agent_core.zip SHA differs from manifest (allows hotfix without version bump)
+        sha_mismatch = False
+        if expected_sha and not is_newer and not is_different:
+            local_zip = _get_core_zip_path()
+            if local_zip.exists():
+                try:
+                    local_sha = self._sha256_file(local_zip).lower()
+                    sha_mismatch = (local_sha != expected_sha)
+                    if sha_mismatch:
+                        LOGGER.info("[Updater] Same version v%s but SHA mismatch (local=%s, remote=%s). Forcing update.", self.state.current_version, local_sha[:12], expected_sha[:12])
+                except Exception:
+                    sha_mismatch = True  # Can't verify → update to be safe
 
-        if expected_sha and current_sha and expected_sha == current_sha:
-            with self._lock:
-                if latest_version:
-                    self.state.current_version = latest_version
-                self.state.pending_version = ""
-                self.state.last_error = ""
-            return True, "Already on latest build", False
+        if not (is_newer or (is_different and is_mandatory) or sha_mismatch):
+            LOGGER.debug("[Updater] Already on target version v%s (server v%s). No update required.", self.state.current_version, latest_version)
+            return True, "Already on target version", False
 
-        if not update_available and latest_version and not self._is_newer_version(latest_version, self.state.current_version):
-            return True, "Already on latest version", False
-        if not update_available and not latest_version:
-            return True, "No release available", False
         if not download_url:
             return False, "Release payload missing download_url", False
-        if not is_windows() or not is_frozen():
-            return True, "Release available but auto-apply only runs on Windows EXE build", False
-        if download_url.lower().endswith(".exe"):
-            LOGGER.info("[Updater] Skipping self-overwriting .exe binary download to prevent file corruption. Only agent_core.zip is dynamically updated.")
-            return True, "Exe binary self-update skipped in favor of dynamic agent_core.zip update", False
+
+        clean_url = download_url.split("?")[0].lower()
+        if clean_url.endswith(".zip"):
+            return self._download_and_apply_core_zip(download_url=download_url, target_version=latest_version, expected_sha256=expected_sha)
+        elif clean_url.endswith(".exe"):
+            core_zip_url = self._resolve_url(base_url, "/static/releases/agent_core.zip")
+            LOGGER.info("[Updater] Manifest returned .exe URL (%s). Redirecting to dynamic agent_core.zip update at %s", download_url, core_zip_url)
+            return self._download_and_apply_core_zip(download_url=core_zip_url, target_version=latest_version, expected_sha256="")
         return self._download_and_restart(download_url=download_url, target_version=latest_version, expected_sha256=expected_sha)
 
     def _download_and_restart(self, download_url: str, target_version: str, expected_sha256: str) -> tuple[bool, str, bool]:

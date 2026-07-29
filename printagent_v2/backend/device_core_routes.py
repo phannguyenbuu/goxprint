@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import time as time_module
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from flask import Flask, jsonify, request
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, and_
 
 from utils import _to_text, _normalize_mac
 from serializers import (
@@ -19,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[str, Any] | None = None) -> Printer | None:
+    import re
     ref_list = [device_ref]
     if body and isinstance(body, dict):
         for k in ["mac_address", "mac_id", "printer_mac_id", "printer_id", "id", "printer_ip", "ip"]:
@@ -26,6 +28,20 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
             if v:
                 ref_list.append(v)
 
+    ref_str = _to_text(device_ref)
+    if ref_str:
+        # Extract embedded MAC addresses (00:80:91:B6:18:FF or 00-80-91-B6-18-FF)
+        for m in re.findall(r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", ref_str):
+            norm = _normalize_mac(m)
+            if norm and norm not in ref_list:
+                ref_list.append(norm)
+
+        # Extract embedded IP addresses
+        for ip in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", ref_str):
+            if ip not in ref_list:
+                ref_list.append(ip)
+
+    # 1. Try querying PostgreSQL database first
     for ref in ref_list:
         if not ref:
             continue
@@ -49,7 +65,6 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
             if p:
                 return p
         if raw_ref:
-            import re
             if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_ref):
                 p = (
                     session.execute(
@@ -63,27 +78,111 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
                 )
                 if p:
                     return p
+
+    # 1b. Try querying PostgreSQL scan_points table
+    try:
+        from models import ScanPoint
+        for ref in ref_list:
+            if not ref:
+                continue
+            normalized_mac = _normalize_mac(ref)
+            if normalized_mac:
+                sp = session.get(ScanPoint, normalized_mac)
+                if sp:
+                    p = Printer(
+                        id=0,
+                        mac_address=sp.mac_id,
+                        ip=sp.ip or "",
+                        printer_name=sp.printer_name or "Photocopy",
+                        agent_uid=sp.agent_uid or "",
+                        lead="default",
+                        lan_uid="default",
+                        enabled=True,
+                    )
+                    return p
+    except Exception:
+        pass
+
+    # 2. Fallback: Search in-memory ACTIVE_AGENTS RAM registry for RAM-only printers
+    try:
+        from active_agents_registry import ACTIVE_AGENTS
+        for a_uid, agent_info in ACTIVE_AGENTS.items():
+            printers_list = agent_info.get("printers_json") or []
+            if not isinstance(printers_list, list):
+                continue
+            for p_dict in printers_list:
+                if not isinstance(p_dict, dict):
+                    continue
+                p_mac = _normalize_mac(p_dict.get("mac_address") or p_dict.get("mac_id") or "")
+                p_ip = str(p_dict.get("ip") or "").strip()
+                p_name = str(p_dict.get("printer_name") or p_dict.get("name") or "").strip()
+                
+                matched = False
+                for ref in ref_list:
+                    if not ref:
+                        continue
+                    n_ref = _normalize_mac(ref)
+                    if n_ref and p_mac and n_ref == p_mac:
+                        matched = True
+                        break
+                    raw = _to_text(ref).strip()
+                    if raw and (raw == p_ip or raw == p_name):
+                        matched = True
+                        break
+
+                if not matched and p_mac and p_mac in _normalize_mac(ref_str):
+                    matched = True
+
+                if matched:
+                    return Printer(
+                        id=0,
+                        lead=agent_info.get("lead") or "default",
+                        lan_uid=agent_info.get("lan_uid") or "",
+                        agent_uid=a_uid,
+                        printer_name=p_name or "Copier",
+                        ip=p_ip,
+                        mac_address=p_mac or str(p_dict.get("mac_address") or ""),
+                        auth_user=str(p_dict.get("auth_user") or ""),
+                        auth_password=str(p_dict.get("auth_password") or ""),
+                        enabled=True,
+                        is_online=True,
+                    )
+    except Exception as exc:
+        LOGGER.warning("Error resolving printer control target from ACTIVE_AGENTS: %s", exc)
+
     return None
 
 
-def _resolve_target_agent_uid(session: Any, printer: Printer, req_agent_uid: str) -> str:
+def _resolve_target_agent_uid(session: Any, printer: Printer | None, req_agent_uid: str, mac_address: str = "") -> str:
     agent_uid = req_agent_uid.strip()
-    if agent_uid:
+    if agent_uid and agent_uid != "default":
         return agent_uid
-    # Fallback to an online agent on the printer's LAN
-    from models import AgentNode
-    online_agent = session.execute(
-        select(AgentNode)
-        .where(
-            AgentNode.lead == printer.lead,
-            AgentNode.lan_uid == printer.lan_uid,
-            AgentNode.is_online.is_(True)
-        )
-        .order_by(AgentNode.id.asc())
-    ).scalars().first()
-    if online_agent:
-        return online_agent.agent_uid
-    return printer.agent_uid or ""
+
+    mac = _normalize_mac(mac_address or (printer.mac_address if printer else ""))
+    if mac:
+        try:
+            from models import ScanPoint
+            sp = session.get(ScanPoint, mac)
+            if sp and sp.agent_uid and sp.agent_uid != "default":
+                return sp.agent_uid
+        except Exception:
+            pass
+
+    if printer and printer.agent_uid and printer.agent_uid != "default":
+        return printer.agent_uid
+
+    try:
+        from models import AgentNode
+        online_agent = session.execute(
+            select(AgentNode)
+            .order_by(AgentNode.last_seen_at.desc())
+        ).scalars().first()
+        if online_agent and online_agent.agent_uid:
+            return online_agent.agent_uid
+    except Exception:
+        pass
+
+    return "default"
 
 
 def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
@@ -159,13 +258,16 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
             pending = session.execute(
                 select(PrinterControlCommand).where(
-                    PrinterControlCommand.printer_id == printer.id,
+                    or_(
+                        and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                        and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                    ),
                     PrinterControlCommand.status == "pending",
                 )
             ).scalars().all()
             for cmd in pending:
-                cmd.status = "failed"
-                cmd.error_message = "Superseded by newer command"
+                cmd.status = "superseded"
+                cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                 cmd.responded_at = requested_at
 
             from models import AgentNode
@@ -251,6 +353,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         )
 
     def _submit_printer_fetch_address_book_command(device_ref: Any) -> Any:
+        import json as _json
         requested_at = datetime.now(timezone.utc)
         body = request.get_json(silent=True) or {}
         with session_factory() as session:
@@ -271,23 +374,28 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             printer_lead_val = printer.lead if printer else (active_agent.lead if active_agent else "default")
             printer_lan_val = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else device_ref)
             printer_name_val = printer.printer_name if printer else str(body.get("printer_name") or "Photocopy")
-            printer_ip_val = printer.ip if printer else str(body.get("printer_ip") or body.get("ip") or "0.0.0.0")
+            frontend_ip = str(body.get("printer_ip") or body.get("ip") or "").strip()
+            printer_ip_val = frontend_ip or (printer.ip if printer else "0.0.0.0")
             printer_enabled_val = printer.enabled if printer else True
             printer_auth_user_val = (printer.auth_user if printer else str(body.get("auth_user") or "")) or ""
             printer_auth_pass_val = (printer.auth_password if printer else str(body.get("auth_password") or "")) or ""
 
-            target_agent_uid = req_agent_uid or (printer.agent_uid if printer else "") or (active_agent.agent_uid if active_agent else "")
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
 
             if printer:
                 pending = session.execute(
                     select(PrinterControlCommand).where(
-                        PrinterControlCommand.printer_id == printer.id,
+                        or_(
+                            and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                            and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                        ),
                         PrinterControlCommand.status == "pending",
+                        PrinterControlCommand.command_type == command_type,
                     )
                 ).scalars().all()
                 for cmd in pending:
-                    cmd.status = "failed"
-                    cmd.error_message = "Superseded by newer command"
+                    cmd.status = "superseded"
+                    cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                     cmd.responded_at = requested_at
 
             command = PrinterControlCommand(
@@ -301,6 +409,12 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 command_type="fetch_address_book",
                 auth_user=printer_auth_user_val,
                 auth_password=printer_auth_pass_val,
+                command_params=_json.dumps({
+                    "printer_ip": printer_ip_val,
+                    "ip": printer_ip_val,
+                    "mac_address": printer_mac_value,
+                    "printer_mac_id": printer_mac_value,
+                }),
                 status="pending",
                 error_message="",
                 requested_at=requested_at,
@@ -470,23 +584,28 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             printer_lead_val = printer.lead if printer else (active_agent.lead if active_agent else "default")
             printer_lan_val = active_agent.lan_uid if active_agent else (printer.lan_uid if printer else device_ref)
             printer_name_val = printer.printer_name if printer else str(body.get("name") or body.get("printer_name") or "Photocopy")
-            printer_ip_val = printer.ip if printer else str(body.get("printer_ip") or body.get("ip") or "0.0.0.0")
+            frontend_ip = str(body.get("printer_ip") or body.get("ip") or "").strip()
+            printer_ip_val = frontend_ip or (printer.ip if printer else "0.0.0.0")
             printer_enabled_val = printer.enabled if printer else True
             printer_auth_user_val = (printer.auth_user if printer else str(body.get("auth_user") or "")) or ""
             printer_auth_pass_val = (printer.auth_password if printer else str(body.get("auth_password") or "")) or ""
 
-            target_agent_uid = req_agent_uid or (printer.agent_uid if printer else "") or (active_agent.agent_uid if active_agent else "")
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
 
             if printer:
                 pending = session.execute(
                     select(PrinterControlCommand).where(
-                        PrinterControlCommand.printer_id == printer.id,
+                        or_(
+                            and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                            and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                        ),
                         PrinterControlCommand.status == "pending",
+                        PrinterControlCommand.command_type == command_type,
                     )
                 ).scalars().all()
                 for cmd in pending:
-                    cmd.status = "failed"
-                    cmd.error_message = "Superseded by newer command"
+                    cmd.status = "superseded"
+                    cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                     cmd.responded_at = requested_at
 
             command = PrinterControlCommand(
@@ -500,7 +619,14 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 command_type="add_scan_email_dest",
                 auth_user=printer_auth_user_val,
                 auth_password=printer_auth_pass_val,
-                command_params=_json.dumps({"email": email, "name": name}),
+                command_params=_json.dumps({
+                    "email": email,
+                    "name": name,
+                    "printer_ip": printer_ip_val,
+                    "ip": printer_ip_val,
+                    "mac_address": printer_mac_value,
+                    "printer_mac_id": printer_mac_value,
+                }),
                 status="pending",
                 error_message="",
                 requested_at=requested_at,
@@ -532,27 +658,34 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
         requested_at = datetime.now(timezone.utc)
         with session_factory() as session:
-            printer = _resolve_printer_control_target(session, device_ref)
+            printer = _resolve_printer_control_target(session, device_ref, body=body)
             if printer is None:
                 return jsonify({"ok": False, "error": "Printer not found"}), 404
             printer_id_value = int(printer.id)
             printer_mac_value = _normalize_mac(printer.mac_address) or printer.mac_address or ""
 
-            # Cancel existing pending commands for this printer to avoid session conflicts
+            # Cancel existing pending delete commands for this printer to avoid session conflicts
             pending = session.execute(
                 select(PrinterControlCommand).where(
-                    PrinterControlCommand.printer_id == printer.id,
+                    or_(
+                        and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                        and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                    ),
                     PrinterControlCommand.status == "pending",
+                    PrinterControlCommand.command_type == "delete_scan_email_dest",
                 )
             ).scalars().all()
             for cmd in pending:
-                cmd.status = "failed"
-                cmd.error_message = "Superseded by newer command"
+                cmd.status = "superseded"
+                cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                 cmd.responded_at = requested_at
 
-            # Resolve target_agent_uid
-            req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
-            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
+            # Resolve target_agent_uid (prioritize req_agent_uid passed from Frontend / UI)
+            req_agent_uid = request.args.get("agent_uid", "").strip() or str(body.get("agent_uid", "")).strip()
+            target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
+
+            frontend_ip = str(body.get("printer_ip") or body.get("ip") or "").strip()
+            effective_ip = frontend_ip or (printer.ip if printer else "")
 
             command = PrinterControlCommand(
                 printer_id=printer.id,
@@ -560,12 +693,19 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 lan_uid=printer.lan_uid,
                 agent_uid=target_agent_uid,
                 printer_name=printer.printer_name,
-                ip=printer.ip,
+                ip=effective_ip,
                 desired_enabled=printer.enabled,
                 command_type="delete_scan_email_dest",
                 auth_user=printer.auth_user or "",
                 auth_password=printer.auth_password or "",
-                command_params=_json.dumps({"registration_no": reg_no, "entry_id": entry_id}),
+                command_params=_json.dumps({
+                    "registration_no": reg_no,
+                    "entry_id": entry_id,
+                    "printer_ip": effective_ip,
+                    "ip": effective_ip,
+                    "mac_address": printer_mac_value,
+                    "printer_mac_id": printer_mac_value,
+                }),
                 status="pending",
                 error_message="",
                 requested_at=requested_at,
@@ -608,16 +748,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             printer_id_val = body.get("printer_id") or body.get("id")
             requested_at = datetime.now(timezone.utc)
             with session_factory() as session:
-                printer = None
-                if printer_id_val:
-                    try:
-                        printer = session.get(Printer, int(printer_id_val))
-                    except Exception:
-                        pass
-                if printer is None:
-                    printer = session.execute(
-                        select(Printer).where(Printer.ip == ip)
-                    ).scalars().first()
+                printer = _resolve_printer_control_target(session, ip, body=body)
                 if printer is None:
                     return jsonify({"ok": False, "error": f"Printer with IP {ip} not found"}), 404
 
@@ -626,17 +757,34 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
                 pending = session.execute(
                     select(PrinterControlCommand).where(
-                        PrinterControlCommand.printer_id == printer.id,
+                        or_(
+                            and_(printer.id != 0, PrinterControlCommand.printer_id == printer.id),
+                            and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
+                        ),
                         PrinterControlCommand.status == "pending",
+                        PrinterControlCommand.command_type == "address_modify",
                     )
                 ).scalars().all()
                 for cmd in pending:
-                    cmd.status = "failed"
-                    cmd.error_message = "Superseded by newer command"
+                    cmd.status = "superseded"
+                    cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                     cmd.responded_at = requested_at
 
                 req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
                 target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
+
+                cmd_params_dict = {
+                    "registration_no": registration_no,
+                    "name": name,
+                    "email": email,
+                    "folder": folder,
+                    "user_code": user_code,
+                    "fields": fields,
+                    "printer_ip": printer.ip or ip,
+                    "ip": printer.ip or ip,
+                    "mac_address": printer_mac_value,
+                    "printer_mac_id": printer_mac_value,
+                }
 
                 command = PrinterControlCommand(
                     printer_id=printer.id,
@@ -644,19 +792,12 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     lan_uid=printer.lan_uid,
                     agent_uid=target_agent_uid,
                     printer_name=printer.printer_name,
-                    ip=printer.ip,
+                    ip=printer.ip or ip,
                     desired_enabled=printer.enabled,
                     command_type="address_modify",
                     auth_user=printer.auth_user or "",
                     auth_password=printer.auth_password or "",
-                    command_params=_json.dumps({
-                        "registration_no": registration_no,
-                        "name": name,
-                        "email": email,
-                        "folder": folder,
-                        "user_code": user_code,
-                        "fields": fields
-                    }),
+                    command_params=_json.dumps(cmd_params_dict),
                     status="pending",
                     error_message="",
                     requested_at=requested_at,
@@ -736,7 +877,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                             "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
                         }
                     ),
-                    409,
+                    200,
                 )
             return jsonify(
                 {
