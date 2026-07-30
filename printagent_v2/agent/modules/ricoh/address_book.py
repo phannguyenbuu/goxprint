@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import socket
 import time
 import subprocess
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any

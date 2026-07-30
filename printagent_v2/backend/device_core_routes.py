@@ -390,7 +390,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                             and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
                         ),
                         PrinterControlCommand.status == "pending",
-                        PrinterControlCommand.command_type == command_type,
+                        PrinterControlCommand.command_type == "fetch_address_book",
                     )
                 ).scalars().all()
                 for cmd in pending:
@@ -600,7 +600,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                             and_(printer.id == 0, PrinterControlCommand.printer_id == 0, PrinterControlCommand.ip == printer.ip)
                         ),
                         PrinterControlCommand.status == "pending",
-                        PrinterControlCommand.command_type == command_type,
+                        PrinterControlCommand.command_type == "add_scan_email_dest",
                     )
                 ).scalars().all()
                 for cmd in pending:

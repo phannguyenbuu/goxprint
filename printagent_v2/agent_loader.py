@@ -37,7 +37,7 @@ except Exception:
     pass
 
 try:
-    log_debug("Starting initial CWD and console setup...")
+    # CWD and console setup
     # Change CWD to the executable parent directory when frozen to prevent write errors in default CWD (like system32)
     # Hide console window and redirect stdout/stderr when frozen to prevent crashes and capture logs
     if getattr(sys, "frozen", False):
@@ -53,7 +53,6 @@ try:
         try:
             exe_dir = Path(sys.executable).resolve().parent
             os.chdir(exe_dir)
-            log_debug(f"Changed CWD to: {exe_dir}")
         except Exception as e:
             log_debug(f"Failed to change CWD: {e}")
         if not any(arg in sys.argv for arg in ["--debug", "test", "--console"]):
@@ -62,7 +61,6 @@ try:
                 log_dir.mkdir(parents=True, exist_ok=True)
                 sys.stdout = open(log_dir / "loader.txt", "a", encoding="utf-8", buffering=1)
                 sys.stderr = sys.stdout
-                log_debug("Redirected stdout/stderr to loader.txt")
             except Exception as e:
                 log_debug(f"Failed to redirect stdout: {e}")
                 try:
@@ -78,7 +76,6 @@ except Exception as e:
     log_debug(f"Error during console/CWD setup: {e}")
 
 try:
-    log_debug("Importing standard libraries...")
     import json
     import sqlite3
     import hashlib
@@ -86,9 +83,7 @@ try:
     import zipfile
     import requests
     import flask_cors
-    log_debug("Standard libraries imported successfully.")
 
-    log_debug("Importing bundled/dynamic dependencies...")
     import xml.etree.ElementTree
     import ipaddress
     import ftplib
@@ -111,7 +106,7 @@ try:
     import pyftpdlib.handlers
     import pyftpdlib.servers
     import unicodedata
-    log_debug("Dependencies imported successfully.")
+    log_debug("Loader imports OK")
 
     from importlib.machinery import ModuleSpec
 except Exception as e:

@@ -54,7 +54,7 @@ function getDestinationStatusHtml(entry: any, emails: any[], agents: any[]) {
     return { label: '✔ ACTIVE', type: 'success', title: '' };
   }
 
-  const masterAgent = (agents || []).find(a => a.is_master && a.is_online) || (agents || []).find(a => a.is_online) || (agents || [])[0];
+  const masterAgent = (agents || []).find(a => a.is_master && a.is_agent_active) || (agents || []).find(a => a.is_agent_active) || (agents || [])[0];
   if (masterAgent) {
     const site = (masterAgent.ftp_sites || []).find((s: any) => Number(s.port) === Number(portNumber));
     if (site) {
@@ -355,7 +355,13 @@ export function AgentPage() {
         setScanPointsViewerModal(prev => ({
           ...prev,
           loading: false,
-          jsonData: isAgent ? data.scan_points : (data.scan_points[macClean] || data.scan_points || target.address_book_sync || {}),
+          jsonData: isAgent
+            ? data.scan_points
+            : (data.scan_points[macClean] && Object.keys(data.scan_points[macClean]).length > 0
+                ? data.scan_points[macClean]
+                : (Object.keys(data.scan_points).length > 0
+                    ? data.scan_points
+                    : target.address_book_sync || {})),
         }));
       } else {
         setScanPointsViewerModal(prev => ({
@@ -1046,16 +1052,17 @@ export function AgentPage() {
         console.log("🖨️ [PRINTERS IN SELECTED LAN]:", data[0].printers);
       }
       
-      // Auto select first LAN if none selected or invalid
-      const savedLanUid = localStorage.getItem('goxprint_selected_lan_uid');
-      const isValidSaved = savedLanUid && data.some(site => site.lan_uid === savedLanUid);
+      // Auto select first LAN only if none selected or current selection becomes invalid
       if (data.length > 0) {
-        if (isValidSaved) {
-          setSelectedLanUid(savedLanUid);
-        } else {
-          setSelectedLanUid(data[0].lan_uid);
+        setSelectedLanUid((prev) => {
+          const isCurrentValid = prev && data.some(site => site.lan_uid === prev);
+          if (isCurrentValid) return prev; // Don't overwrite user's current selection
+          const savedLanUid = localStorage.getItem('goxprint_selected_lan_uid');
+          const isValidSaved = savedLanUid && data.some(site => site.lan_uid === savedLanUid);
+          if (isValidSaved) return savedLanUid;
           localStorage.setItem('goxprint_selected_lan_uid', data[0].lan_uid);
-        }
+          return data[0].lan_uid;
+        });
       }
     } catch (err) {
       console.error(err);
@@ -1097,7 +1104,7 @@ export function AgentPage() {
   }, [lanSites, selectedLanUid]);
 
   const onlineAgents = useMemo(() => {
-    return (selectedLan?.agents || []).filter((a: any) => a.is_online);
+    return (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
   }, [selectedLan]);
 
   const activeAgentUid = useMemo(() => {
@@ -1144,7 +1151,7 @@ export function AgentPage() {
     const pId = Number(printerId);
     const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId);
     if (!printer || !selectedLan) return '';
-    const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_online);
+    const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_agent_active);
     const selected = selectedTargetAgents[pId];
     if (selected) {
       const isSelOnline = onlineAgents.some((a: any) => a.agent_uid === selected);
@@ -1787,6 +1794,9 @@ except Exception as e:
         return false;
       }
 
+      // 3. Ẩn copier offline
+      if (!p.is_online) return false;
+
       return true;
     });
 
@@ -1816,7 +1826,7 @@ except Exception as e:
 
       selectedLan.printers.forEach((p) => {
         // Target agent default (first online agent or printer.agent_uid)
-        const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
+        const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_agent_active);
         const matchedAgent = onlineAgents.find((a) => a.agent_uid === p.agent_uid) || onlineAgents[0];
         defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
       });
@@ -2391,7 +2401,7 @@ except Exception as e:
 
   // ── DELETE DESTINATION ──
   const handleDeleteDest = (printerId: string, entry: any) => {
-    const targetAgent = getTargetAgentUid(printerId) || (selectedLan?.agents?.find((a) => a.is_online)?.agent_uid || '');
+    const targetAgent = getTargetAgentUid(printerId) || (selectedLan?.agents?.find((a) => a.is_agent_active)?.agent_uid || '');
     setDeleteScanPointModal({
       isOpen: true,
       printerId,
@@ -2800,12 +2810,12 @@ except Exception as e:
           ) : (
             <select
               value={selectedLanUid}
-              onChange={(e) => setSelectedLanUid(e.target.value)}
+              onChange={(e) => { setSelectedLanUid(e.target.value); localStorage.setItem('goxprint_selected_lan_uid', e.target.value); }}
               style={styles.lanSelect}
             >
               {lanSites.map((site) => (
                 <option key={site.lan_uid} value={site.lan_uid}>
-                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.length ?? 0} máy Photo)
+                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.filter((p: any) => p.is_online).length ?? 0} máy Photo)
                 </option>
               ))}
             </select>
@@ -2822,7 +2832,7 @@ except Exception as e:
             }}
             onClick={() => setActiveTab('agents')}
           >
-            💻 Máy tính ({selectedLan?.agents?.filter((a: any) => a.is_online).length ?? 0})
+            💻 Máy tính ({selectedLan?.agents?.filter((a: any) => a.is_agent_active).length ?? 0})
           </button>
           <button
             style={{
@@ -2866,11 +2876,11 @@ except Exception as e:
                 style={styles.tabContent}
               >
                 <AnimatedList>
-                  {selectedLan.agents.filter((a: any) => a.is_online).length === 0 ? (
+                  {selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0 ? (
                     <div style={styles.emptyText}>Không có Agent nào đang online trong mạng LAN này.</div>
                   ) : (
-                    selectedLan.agents.filter((a: any) => a.is_online).map((agent) => {
-                      const isOnline = agent.is_online;
+                    selectedLan.agents.filter((a: any) => a.is_agent_active).map((agent) => {
+                      const isOnline = agent.is_agent_active;
                       return (
                         <GlowCard key={agent.agent_uid}>
                           <div style={styles.cardHeader}>
@@ -3148,12 +3158,20 @@ except Exception as e:
                       const driversExpanded = expandedDrivers[p.id] || false;
                       const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
                       
-                      const parseSyncObj = (raw: any) => {
+                      const parseSyncObj = (raw: any): any => {
                         if (!raw) return null;
-                        if (typeof raw === 'string') {
-                          try { return JSON.parse(raw); } catch { return null; }
+                        let obj: any = raw;
+                        if (typeof obj === 'string') {
+                          try { obj = JSON.parse(obj); } catch { return null; }
                         }
-                        return typeof raw === 'object' ? raw : null;
+                        if (typeof obj !== 'object') return null;
+                        // Unwrap nested address_book_sync until we find address_list
+                        let depth = 0;
+                        while (obj && typeof obj === 'object' && !Array.isArray(obj.address_list) && obj.address_book_sync && depth < 5) {
+                          obj = obj.address_book_sync;
+                          depth++;
+                        }
+                        return obj;
                       };
 
                       const liveSync = parseSyncObj(liveAddressBooks[p.id]);
@@ -3171,7 +3189,7 @@ except Exception as e:
                       const statusMsg = commandStatus[p.id]?.message || '';
 
                       // Filter online agents for relays
-                      const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_online);
+                      const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_agent_active);
                       const selectedAgentUid = getTargetAgentUid(p.id);
 
                       return (
@@ -3200,12 +3218,12 @@ except Exception as e:
                             <span
                               style={{
                                 ...styles.statusBadge,
-                                color: p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                borderColor: p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)',
-                                background: p.is_online ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)',
+                                color: !p.probed ? '#ffa502' : (p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)'),
+                                borderColor: !p.probed ? '#ffa502' : (p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)'),
+                                background: !p.probed ? 'rgba(255, 165, 2, 0.08)' : (p.is_online ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)'),
                               }}
                             >
-                              {p.is_online ? 'ONLINE' : 'OFFLINE'}
+                              {!p.probed ? '⏳ ĐANG XÁC ĐỊNH...' : (p.is_online ? 'ONLINE' : 'OFFLINE')}
                             </span>
                           </div>
 
@@ -4571,7 +4589,7 @@ except Exception as e:
                         onChange={(e) => setPublicFtpData((p) => ({ ...p, agentUid: e.target.value }))}
                       >
                         {((selectedLan && selectedLan.agents) || [])
-                          .filter((a) => a.is_online)
+                          .filter((a) => a.is_agent_active)
                           .map((a) => (
                             <option key={a.agent_uid} value={a.agent_uid}>
                               {a.hostname} ({a.local_ip})
@@ -5761,7 +5779,7 @@ raise RuntimeError('\\n'.join(lines))`;
                     onChange={(e) => setDeleteScanPointModal((p) => ({ ...p, agentUid: e.target.value }))}
                   >
                     {((selectedLan && selectedLan.agents) || [])
-                      .filter((a) => a.is_online)
+                      .filter((a) => a.is_agent_active)
                       .map((a) => (
                         <option key={a.agent_uid} value={a.agent_uid}>
                           {a.hostname} ({a.local_ip})
@@ -5849,11 +5867,11 @@ raise RuntimeError('\\n'.join(lines))`;
                       setInstallDriverModal((prev) => ({ ...prev, selectedAgentUid: e.target.value }))
                     }
                   >
-                    {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_online).length === 0) ? (
+                    {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0) ? (
                       <option value="">(Không có Agent online trong LAN này)</option>
                     ) : (
                       selectedLan.agents
-                        .filter((a: any) => a.is_online)
+                        .filter((a: any) => a.is_agent_active)
                         .map((a: any) => (
                           <option key={a.agent_uid} value={a.agent_uid}>
                             {a.hostname} ({a.local_ip})

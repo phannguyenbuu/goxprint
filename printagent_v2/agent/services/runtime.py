@@ -163,45 +163,147 @@ def acquire_single_instance(name: str) -> tuple[SingleInstanceLock | None, bool]
             file_handle.seek(0)
             msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
     except Exception:
+        # File lock failed — another process holds it. Try to read its PID and check if alive.
         try:
-            file_handle.close()
-        except Exception:
-            pass
-        return None, False
+            file_handle.seek(0)
+            old_pid_str = file_handle.read().decode("utf-8", errors="replace").strip()
+            old_pid = int(old_pid_str) if old_pid_str.isdigit() else 0
+            if old_pid and old_pid != os.getpid():
+                # Check if old process is still alive
+                import subprocess as _sp
+                result = _sp.run(
+                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=0x08000000,
+                )
+                if f"{old_pid}" not in result.stdout:
+                    # Old process is dead — force release file lock
+                    LOGGER.warning("[SingleInstance] Stale lock from dead PID %d. Force-releasing.", old_pid)
+                    try:
+                        file_handle.close()
+                    except Exception:
+                        pass
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    # Re-open and re-acquire file lock
+                    file_handle = open(lock_path, "a+b")
+                    file_handle.seek(0)
+                    file_handle.truncate(0)
+                    file_handle.write(f"{os.getpid()}\n".encode("utf-8"))
+                    file_handle.flush()
+                    os.fsync(file_handle.fileno())
+                    if msvcrt is not None:
+                        file_handle.seek(0)
+                        msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    # Old process is still alive — kill it if it's printagent
+                    LOGGER.warning("[SingleInstance] Lock held by live PID %d. Force-killing.", old_pid)
+                    try:
+                        _sp.run(
+                            ["taskkill", "/F", "/PID", str(old_pid)],
+                            capture_output=True, timeout=10,
+                            creationflags=0x08000000,
+                        )
+                        import time
+                        time.sleep(3)
+                        file_handle.close()
+                        lock_path.unlink(missing_ok=True)
+                        file_handle = open(lock_path, "a+b")
+                        file_handle.seek(0)
+                        file_handle.truncate(0)
+                        file_handle.write(f"{os.getpid()}\n".encode("utf-8"))
+                        file_handle.flush()
+                        os.fsync(file_handle.fileno())
+                        if msvcrt is not None:
+                            file_handle.seek(0)
+                            msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    except Exception as kill_exc:
+                        LOGGER.warning("[SingleInstance] Failed to kill PID %d: %s", old_pid, kill_exc)
+                        try:
+                            file_handle.close()
+                        except Exception:
+                            pass
+                        return None, False
+        except Exception as stale_exc:
+            LOGGER.debug("[SingleInstance] Stale lock check failed: %s", stale_exc)
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+            return None, False
 
     kernel32 = ctypes.windll.kernel32
-    mutex = kernel32.CreateMutexW(None, False, name)
-    if not mutex:
-        try:
-            if msvcrt is not None:
-                file_handle.seek(0)
-                msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
-        except Exception:
-            pass
-        try:
-            file_handle.close()
-        except Exception:
-            pass
-        raise OSError("CreateMutexW failed")
 
-    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+    # Retry mutex acquisition up to 5 times (handles restart race condition)
+    max_retries = 5
+    retry_delay = 3  # seconds
+    for attempt in range(max_retries):
+        mutex = kernel32.CreateMutexW(None, False, name)
+        if not mutex:
+            try:
+                if msvcrt is not None:
+                    file_handle.seek(0)
+                    msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+            raise OSError("CreateMutexW failed")
+
+        if kernel32.GetLastError() != ERROR_ALREADY_EXISTS:
+            # Successfully acquired — we are the primary instance
+            return SingleInstanceLock(name=name, handle=int(mutex), file_handle=file_handle, lock_path=lock_path), True
+
+        # Mutex held by another process; close handle and retry
         try:
             kernel32.CloseHandle(mutex)
         except Exception:
             pass
-        try:
-            if msvcrt is not None:
-                file_handle.seek(0)
-                msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
-        except Exception:
-            pass
-        try:
-            file_handle.close()
-        except Exception:
-            pass
-        return None, False
 
-    return SingleInstanceLock(name=name, handle=int(mutex), file_handle=file_handle, lock_path=lock_path), True
+        if attempt < max_retries - 1:
+            import time
+            time.sleep(retry_delay)
+
+    # All retries exhausted — try to kill the holding process as last resort
+    try:
+        file_handle.seek(0)
+        old_pid_str = file_handle.read().decode("utf-8", errors="replace").strip()
+        old_pid = int(old_pid_str) if old_pid_str.isdigit() else 0
+        if old_pid and old_pid != os.getpid():
+            import subprocess as _sp
+            LOGGER.warning("[SingleInstance] Mutex retries exhausted. Force-killing PID %d.", old_pid)
+            _sp.run(
+                ["taskkill", "/F", "/PID", str(old_pid)],
+                capture_output=True, timeout=10,
+                creationflags=0x08000000,
+            )
+            import time
+            time.sleep(3)
+            # Final attempt
+            mutex = kernel32.CreateMutexW(None, False, name)
+            if mutex and kernel32.GetLastError() != ERROR_ALREADY_EXISTS:
+                return SingleInstanceLock(name=name, handle=int(mutex), file_handle=file_handle, lock_path=lock_path), True
+            if mutex:
+                kernel32.CloseHandle(mutex)
+    except Exception as last_exc:
+        LOGGER.warning("[SingleInstance] Last-resort kill failed: %s", last_exc)
+
+    # Truly cannot acquire
+    try:
+        if msvcrt is not None:
+            file_handle.seek(0)
+            msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+    except Exception:
+        pass
+    try:
+        file_handle.close()
+    except Exception:
+        pass
+    return None, False
 
 
 def _gui_python_exe() -> str:

@@ -53,7 +53,7 @@ export async function mockGetAgents(lanUid?: string): Promise<Agent[]> {
             hostname: agent.hostname || agent.agent_uid || 'Agent',
             ipAddress: agent.local_ip || '',
             os: 'Windows',
-            status: agent.is_online ? 'online' : 'offline',
+            status: (agent.is_agent_active ?? agent.is_online) ? 'online' : 'offline',
             lastSeen: agent.updated_at || '',
             driverInstalled: true,
             scanSmbInstalled: false,

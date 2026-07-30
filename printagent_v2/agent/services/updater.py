@@ -21,7 +21,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.8.20"
+DEFAULT_APP_VERSION = "2.8.53"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -373,16 +373,83 @@ class AutoUpdater:
 
             self._report_update_to_vps(from_version=from_ver, to_version=target_version, status="success")
 
-            args_str = " ".join([f'"{a}"' if " " in a else a for a in self._current_args])
-            delay_relaunch_cmd = f'cmd.exe /c "ping 127.0.0.1 -n 2 > nul & "{sys.executable}" {args_str}"'
-            LOGGER.info("[Updater] Delay-restarting agent process for v%s: %s", target_version, delay_relaunch_cmd)
+            # Re-check if an even newer version exists before restarting
+            # This prevents cascading restarts (e.g. v22→v23 restart, v23→v24 restart)
+            try:
+                base_url = ""
+                try:
+                    from agent.config import AppConfig
+                    cfg = AppConfig.load()
+                    base_url = cfg.get_string("polling.url").strip().rstrip("/")
+                except Exception:
+                    pass
+                if base_url:
+                    recheck_resp = requests.get(
+                        f"{base_url}/api/agent/core-release",
+                        params={"current_version": target_version},
+                        timeout=10,
+                    )
+                    if recheck_resp.ok:
+                        recheck_data = recheck_resp.json()
+                        newer_version = str(recheck_data.get("version") or "").strip()
+                        if newer_version and self._is_newer_version(newer_version, target_version):
+                            LOGGER.info("[Updater] Found even newer v%s (current download: v%s). Downloading latest before restart...", newer_version, target_version)
+                            newer_url = self._resolve_url(base_url, str(recheck_data.get("download_url") or recheck_data.get("url") or "").strip())
+                            newer_sha = str(recheck_data.get("sha256") or "").strip().lower()
+                            if newer_url:
+                                return self._download_and_apply_core_zip(newer_url, newer_version, newer_sha)
+            except Exception as recheck_exc:
+                LOGGER.debug("[Updater] Re-check for newer version failed (non-critical): %s", recheck_exc)
+
+            relaunch_command = subprocess.list2cmdline([sys.executable, *self._current_args])
+            current_pid = os.getpid()
+
+            # Write a .bat helper that survives parent exit (same pattern as exe update)
+            helper_script = Path(tempfile.gettempdir()) / "GoPrinxAgent" / "restart_agent.bat"
+            helper_script.parent.mkdir(parents=True, exist_ok=True)
+            helper_lines = [
+                "@echo off",
+                "setlocal enabledelayedexpansion",
+                f"set OLD_PID={current_pid}",
+                "set RETRIES=0",
+                "",
+                "rem ── Wait for old process to exit (max ~30s) ──",
+                ":wait_old_exit",
+                'tasklist /FI "PID eq %OLD_PID%" 2>nul | find /I "%OLD_PID%" >nul',
+                "if errorlevel 1 goto do_kill",
+                "set /a RETRIES=!RETRIES!+1",
+                "if !RETRIES! GEQ 30 goto do_kill",
+                "ping 127.0.0.1 -n 2 > nul",
+                "goto wait_old_exit",
+                "",
+                ":do_kill",
+                "rem Kill ALL remaining printagent processes",
+                "taskkill /F /IM printagent.exe >nul 2>&1",
+                "ping 127.0.0.1 -n 3 > nul",
+                "",
+                "rem ── Relaunch agent (hidden) ──",
+                f'start "" {relaunch_command}',
+                "",
+                "rem Cleanup bat",
+                "ping 127.0.0.1 -n 2 > nul",
+                'del "%~f0"',
+            ]
+            helper_script.write_text("\r\n".join(helper_lines) + "\r\n", encoding="utf-8")
+            LOGGER.info("[Updater] Wrote restart helper: %s (PID %d, relaunch: %s)", helper_script, current_pid, relaunch_command)
+
+            helper_cmd = ["cmd.exe", "/c", str(helper_script)]
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0  # SW_HIDE
             subprocess.Popen(
-                delay_relaunch_cmd,
-                shell=True,
+                helper_cmd,
+                cwd=str(helper_script.parent),
+                close_fds=True,
                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                startupinfo=si,
                 env=fresh_pyinstaller_env(),
             )
-            time.sleep(0.2)
+            time.sleep(0.5)
             os._exit(0)
             return True, "Updated agent_core.zip successfully", True
         except Exception as exc:
@@ -569,8 +636,8 @@ class AutoUpdater:
                 ")",
                 "",
                 "rem ── Phase 5: Launch new agent FIRST, then cleanup ──",
-                f'start /B "" {relaunch_command}',
-                f'start /B "" {relaunch_ftp_command}',
+                f'start "" {relaunch_command}',
+                f'start "" {relaunch_ftp_command}',
                 "",
                 "rem Try to delete .bak in background (non-blocking)",
                 "ping 127.0.0.1 -n 3 > nul",
@@ -581,13 +648,13 @@ class AutoUpdater:
                 ":rename_failed",
                 "rem Rename failed after max retries - try to launch whatever is available",
                 f'if exist "{str(current_binary)}" (',
-                f'    start /B "" {relaunch_command}',
-                f'    start /B "" {relaunch_ftp_command}',
+                f'    start "" {relaunch_command}',
+                f'    start "" {relaunch_ftp_command}',
                 ") else (",
                 f'    if exist "{str(staged_binary)}" (',
                 f'        rename "{str(staged_binary)}" "{current_binary.name}"',
-                f'        start /B "" {relaunch_command}',
-                f'        start /B "" {relaunch_ftp_command}',
+                f'        start "" {relaunch_command}',
+                f'        start "" {relaunch_ftp_command}',
                 "    )",
                 ")",
                 'del "%~f0"',

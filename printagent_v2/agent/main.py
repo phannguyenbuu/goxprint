@@ -358,11 +358,9 @@ def clean_stuck_bak_processes() -> None:
 
 def main() -> int:
     clean_stuck_bak_processes()
-    log_debug("agent.main.main() entered.")
     instance_lock = None
     try:
         runtime_root = _ensure_runtime_root()
-        log_debug(f"runtime_root resolved to: {runtime_root}")
         
         # Pre-parse mode to determine log file names and avoid Windows file lock sharing violations
         is_ftp_worker = False
@@ -375,24 +373,18 @@ def main() -> int:
             elif arg == '--mode=""' or arg == "--mode=''":
                 is_ftp_worker = True
 
-        log_debug(f"is_ftp_worker: {is_ftp_worker}, is_gui_mode: {is_gui_mode}. Setting up logging...")
         stdout_path, stderr_path = setup_logging(runtime_root, is_ftp_worker=is_ftp_worker)
-        log_debug(f"Logging setup complete. stdout_path: {stdout_path}, stderr_path: {stderr_path}")
+        log_debug(f"main() started: root={runtime_root}, ftp={is_ftp_worker}, logs={stdout_path}")
         
         if not is_gui_mode:
             try:
-                log_debug("Loading dynamic scripts...")
                 load_dynamic_scripts()
-                log_debug("Dynamic scripts loaded successfully.")
             except Exception as exc:
-                log_debug(f"Failed loading dynamic scripts: {exc}")
+                log_debug(f"Dynamic scripts failed: {exc}")
                 logging.error("Failed loading dynamic scripts: %s", exc)
-        else:
-            log_debug("Skipping dynamic scripts loading for GUI mode.")
 
-        log_debug("Loading configuration...")
         config = AppConfig.load()
-        log_debug("Configuration loaded.")
+        log_debug(f"Config loaded: {config.get_string('polling.url', '')}")
 
 
         log_debug("Parsing arguments...")
@@ -443,7 +435,7 @@ def main() -> int:
             help="Duration of the sliced clip in seconds",
         )
         args = parser.parse_args()
-        log_debug(f"Arguments parsed: mode={args.mode}, host={args.host}, port={args.port}, debug={args.debug}, get_video={getattr(args, 'get_video', False)}")
+        log_debug(f"Args: mode={args.mode}, host={args.host}, port={args.port}")
 
         if getattr(args, "get_video", False):
             from agent.services.camera_manager import CameraManager
@@ -477,45 +469,32 @@ def main() -> int:
         else:
             instance_name = "Global\\GoPrinxAgentMain"
 
-        log_debug(f"Acquiring single instance lock for: {instance_name}...")
         instance_lock, is_primary = acquire_single_instance(instance_name)
-        log_debug(f"Single instance lock acquisition complete: is_primary={is_primary}")
+        log_debug(f"Instance lock: {instance_name}, primary={is_primary}")
         if not is_primary:
-            log_debug(f"Another GoPrinxAgent process is already running for mode={args.mode}. Exiting main().")
+            log_debug(f"Another process running for mode={args.mode}. Exiting.")
             logging.debug("Another GoPrinxAgent process is already running for mode=%s; skipping startup", args.mode)
             return 0
 
         startup_ok = False
         startup_note = "skipped"
         if args.mode != "gui":
-            log_debug("Performing startup registration...")
-            ftp_enabled = config.get_bool("modules.ftp.enabled", True)
-            if args.mode == "":
-                if ftp_enabled:
+            try:
+                main_cmd = startup_command_for_current_exe(args.mode, args.host, args.port) if args.mode else startup_command_for_current_exe(args.mode)
+                startup_ok, startup_note = ensure_startup_registration(
+                    app_name="GoPrinxAgentFtpWorker" if is_ftp_worker else "GoPrinxAgent",
+                    command=main_cmd,
+                )
+                if not is_ftp_worker and config.get_bool("modules.ftp.enabled", True):
                     worker_cmd = startup_command_for_current_exe("")
-                    startup_ok, startup_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-                else:
-                    log_debug("FTP worker is disabled; skipping startup registration")
-                    logging.info("FTP worker is disabled; skipping startup registration")
-            else:
-                if args.mode == "web":
-                    main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-                elif args.mode == "service":
-                    main_cmd = startup_command_for_current_exe("service")
-                else:
-                    main_cmd = startup_command_for_current_exe("web", args.host, args.port)
-                startup_ok, startup_note = ensure_startup_registration(command=main_cmd)
-                
-                if ftp_enabled:
-                    worker_cmd = startup_command_for_current_exe("")
-                    worker_ok, worker_note = ensure_startup_registration(app_name="GoPrinxAgentFtpWorker", command=worker_cmd)
-                    log_debug(f"FTP worker startup registration: {worker_ok} ({worker_note})")
-                    logging.info("FTP worker startup registration: %s (%s)", worker_ok, worker_note)
-                else:
-                    log_debug("FTP worker is disabled; skipping FTP worker registration")
-                    logging.info("FTP worker is disabled; skipping FTP worker registration")
-                    
-            log_debug(f"Startup registration complete. startup_ok: {startup_ok} ({startup_note})")
+                    worker_ok, worker_note = ensure_startup_registration(
+                        app_name="GoPrinxAgentFtpWorker",
+                        command=worker_cmd,
+                    )
+            except Exception as e:
+                log_debug(f"Startup registration error: {e}")
+                logging.error("Startup registration failed: %s", e)
+            log_debug(f"Startup reg: {startup_ok} ({startup_note})")
             logging.info("Startup registration: %s (%s)", startup_ok, startup_note)
         
 

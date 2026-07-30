@@ -586,60 +586,161 @@ class ToshibaService:
             }
 
     def process_address_list(self, printer: Printer) -> dict[str, Any]:
-        """Fetch registered template/address book entries from Toshiba TopAccess."""
+        """Fetch registered template/address book entries from Toshiba TopAccess.
+
+        Flow (matching reference repo photo_scan_setup_toshiba):
+        1. Detect working base URL (HTTP/HTTPS)
+        2. Login via XML SetValue/Command Login
+        3. Set LICENSE_SETTINGS session payload
+        4. GetTemplateList for each group
+        5. Parse <Template> entries
+        6. Logout
+        """
         LOGGER.info("[ToshibaService] === START process_address_list for printer %s (IP: %s) ===", printer.name, printer.ip)
         start_time = time.time()
-        
-        session = requests.Session()
-        urls = [
-            f"http://{printer.ip}/eBridge/cgi/TopAccess.cgi",
-            f"https://{printer.ip}/eBridge/cgi/TopAccess.cgi",
-            f"http://{printer.ip}/cgi/TopAccess.cgi",
-            f"https://{printer.ip}/cgi/TopAccess.cgi",
-            f"http://{printer.ip}/TopAccess/cgi/TopAccess.cgi",
-        ]
 
-        headers = {
+        import socket
+        try:
+            local_ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            local_ip = "0.0.0.0"
+
+        session = requests.Session()
+        try:
+            session.mount("https://", ToshibaSSLAdapter())
+        except Exception:
+            pass
+
+        xml_headers = {
             "Content-Type": "text/xml; charset=UTF-8",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "*/*"
+            "Accept": "*/*",
+        }
+        plain_headers = {
+            "Content-Type": "text/plain; charset=UTF-8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "*/*",
         }
 
-        groups = ["001", "002", "003", "000"]
-        entries = []
-        seen_ids = set()
+        # --- Step 1: Detect working base URL ---
+        base_urls = [
+            f"https://{printer.ip}:10443",
+            f"https://{printer.ip}",
+            f"http://{printer.ip}",
+        ]
+        cgi_endpoints = [
+            "/contentwebserver",
+            "/eBridge/cgi/TopAccess.cgi",
+            "/cgi/TopAccess.cgi",
+            "/TopAccess/cgi/TopAccess.cgi",
+        ]
 
-        for group in groups:
-            get_templates_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # --- Step 2: Login ---
+        pws = []
+        if printer.password:
+            pws.append(printer.password)
+        if getattr(printer, "auth_password", ""):
+            pws.append(getattr(printer, "auth_password"))
+        for p in ["123456", "1234", "12345", "admin", ""]:
+            if p not in pws:
+                pws.append(p)
+        user_name = printer.user or getattr(printer, "auth_user", "") or "admin"
+
+        login_success = False
+        base_url = base_urls[0]
+        active_cgi = "/contentwebserver"
+
+        LOGGER.info("[ToshibaService] Attempting TopAccess Login for address list on %s (user=%s, pw_count=%d)...", printer.ip, user_name, len(pws))
+        for target_url in base_urls:
+            if login_success:
+                break
+            for pw in pws:
+                login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <GetValue>
-    <JobTemplates>
-        <View>
-            <TemplateList/>
-        </View>
-    </JobTemplates>
+    <Authentication>
+        <UserCredential/>
+    </Authentication>
 </GetValue>
+<SetValue>
+    <Authentication>
+        <UserCredential>
+            <userName>{user_name}</userName>
+            <passwd>{pw}</passwd>
+            <ipaddress>{local_ip}</ipaddress>
+            <applicationType>TOP_ACCESS</applicationType>
+        </UserCredential>
+    </Authentication>
+</SetValue>
 <Command>
-    <GetTemplateList>
-        <commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>
-        <Params>
-            <param name='selectedGroup'>{group}</param>
-            <param name='locale'>en_GB</param>
-        </Params>
-    </GetTemplateList>
+    <Login>
+        <commandNode>Authentication/UserCredential</commandNode>
+        <Params><appName>TOPACCESS</appName></Params>
+    </Login>
 </Command>
 </DeviceInformationModel>"""
+                for cgi in cgi_endpoints:
+                    try:
+                        r = session.post(f"{target_url}{cgi}", data=login_xml, headers=plain_headers, verify=False, timeout=8)
+                        LOGGER.info("[ToshibaService] Login POST %s%s pw='%s' => status=%d len=%d hasSuccess=%s",
+                                    target_url, cgi, pw[:3] + "***", r.status_code, len(r.text),
+                                    "<LoginResult>Success" in r.text)
+                        if r.status_code == 200 and "<LoginResult>Success</LoginResult>" in r.text:
+                            login_success = True
+                            base_url = target_url
+                            active_cgi = cgi
+                            LOGGER.info("[ToshibaService] LOGIN OK via %s%s (user=%s)", target_url, cgi, user_name)
+                            break
+                    except Exception as e:
+                        LOGGER.debug("[ToshibaService] Login attempt %s%s failed: %s", target_url, cgi, e)
+                if login_success:
+                    break
+            if login_success:
+                break
+
+        if not login_success:
+            LOGGER.warning("[ToshibaService] Login FAILED for %s. Trying unauthenticated template query...", printer.ip)
+
+        cgi_url = f"{base_url}{active_cgi}"
+
+        # --- Step 3: Set LICENSE_SETTINGS (required by some Toshiba firmware) ---
+        try:
+            license_xml = """<DeviceInformationModel><SetValue overrideDelta="false"><Payload><path>TopAccess/SessionInfo/LICENSE_SETTINGS</path><value>,METASCAN:NO,PDF-A:YES,EWB:YES,IPSEC:NO,</value></Payload></SetValue></DeviceInformationModel>"""
+            session.post(cgi_url, data=license_xml, headers=plain_headers, verify=False, timeout=5)
+        except Exception:
+            pass
+
+        # --- Step 4: GetTemplateList for each group ---
+        groups = ["001", "002", "003", "000"]
+        entries: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for group in groups:
+            get_templates_xml = f"""<DeviceInformationModel><GetValue><JobTemplates><View><TemplateList/></View></JobTemplates></GetValue><Command><GetTemplateList><commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode><Params><param name='selectedGroup'>{group}</param><param name='viewXpath'>JobTemplates/View/TemplateList</param><param name='currentPage'>1</param><param name='pageSize'>60</param><param name='definedTemplates'>false</param><param name='inputGroupPassword'></param><param name='locale'>en_GB</param></Params></GetTemplateList></Command></DeviceInformationModel>"""
 
             raw_resp_text = ""
-            for url in urls:
+            # Try active CGI first, then fallback to all CGI paths
+            try_urls = [cgi_url]
+            for bu in base_urls:
+                for cgi in cgi_endpoints:
+                    full = f"{bu}{cgi}"
+                    if full not in try_urls:
+                        try_urls.append(full)
+
+            for url in try_urls:
                 try:
-                    r = session.post(url, data=get_templates_xml, headers=headers, verify=False, timeout=5)
-                    if r.status_code == 200 and ("<Template" in r.text or "<JobTemplates" in r.text or "<GetTemplateListResult>Success" in r.text):
+                    r = session.post(url, data=get_templates_xml, headers=xml_headers, verify=False, timeout=10)
+                    has_template = "<Template" in r.text
+                    has_job = "<JobTemplates" in r.text
+                    has_success = "<GetTemplateListResult>Success" in r.text
+                    snippet = r.text[:200].replace('\n', ' ').replace('\r', '')
+                    LOGGER.info("[ToshibaService] GetTemplates POST %s group=%s => status=%d len=%d hasTemplate=%s hasSuccess=%s snippet=%s",
+                                url, group, r.status_code, len(r.text), has_template, has_success, snippet)
+                    if r.status_code == 200 and (has_template or has_job or has_success):
                         raw_resp_text = r.text
-                        LOGGER.info("[ToshibaService] Successfully retrieved templates from %s group %s", url, group)
                         break
                 except Exception as e:
-                    LOGGER.debug("[ToshibaService] Failed to fetch templates from %s group %s: %s", url, group, e)
+                    LOGGER.debug("[ToshibaService] GetTemplates %s group=%s => ERROR: %s", url, group, e)
 
             if raw_resp_text:
                 try:
@@ -649,7 +750,11 @@ class ToshibaService:
                         num_match = re.search(r'<name>(\d+)</name>', block)
                         cap1_match = re.search(r'<caption1>([^<]*)</caption1>', block)
                         cap2_match = re.search(r'<caption2>([^<]*)</caption2>', block)
-                        
+
+                        # Extract SMB store info if available
+                        smb_path_match = re.search(r'<StorePath>([^<]*)</StorePath>', block)
+                        smb_user_match = re.search(r'<UserName>([^<]*)</UserName>', block)
+
                         reg_no = num_match.group(1) if num_match else "001"
                         if reg_no in seen_ids:
                             continue
@@ -657,7 +762,10 @@ class ToshibaService:
                         c1 = cap1_match.group(1).strip() if cap1_match else ""
                         c2 = cap2_match.group(1).strip() if cap2_match else ""
                         disp_name = c2 or c1 or f"Template {reg_no}"
-                        
+                        smb_path = smb_path_match.group(1).strip() if smb_path_match else ""
+                        smb_user = smb_user_match.group(1).strip() if smb_user_match else ""
+                        folder = smb_path or f"\\\\{printer.ip}\\scan"
+
                         entries.append({
                             "registration_no": reg_no.zfill(3),
                             "name": disp_name,
@@ -665,16 +773,28 @@ class ToshibaService:
                             "title_1": c1,
                             "title_2": c2,
                             "title_3": "",
-                            "auth_user": "",
-                            "folder": f"\\\\{printer.ip}\\scan",
+                            "auth_user": smb_user,
+                            "folder": folder,
                             "email": "",
                             "entry_id": reg_no,
-                            "is_agent_local": True
+                            "protocol": "SMB" if smb_path else "",
+                            "is_agent_local": True,
                         })
                 except Exception as e:
                     LOGGER.warning("[ToshibaService] Error parsing TopAccess XML template response: %s", e)
 
+        # --- Step 6: Logout ---
+        try:
+            logout_xml = """<?xml version="1.0" encoding="UTF-8"?><DeviceInformationModel><Command><Logout><commandNode>Authentication/UserCredential</commandNode></Logout></Command></DeviceInformationModel>"""
+            session.post(cgi_url, data=logout_xml, headers=plain_headers, verify=False, timeout=5)
+            LOGGER.info("[ToshibaService] Logged out from %s", printer.ip)
+        except Exception:
+            pass
+        finally:
+            session.close()
+
         elapsed = time.time() - start_time
+        LOGGER.info("[ToshibaService] === DONE process_address_list for %s: %d entries in %.1fs ===", printer.ip, len(entries), elapsed)
         return {
             "printer_name": printer.name,
             "ip": printer.ip,

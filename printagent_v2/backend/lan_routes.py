@@ -206,7 +206,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     continue
 
                 printers_list = agent_info.get("printers_json") or []
-                printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
+                printers_list = [p for p in printers_list if isinstance(p, dict)]
                 for dev in printers_list:
                     if not isinstance(dev, dict):
                         continue
@@ -234,12 +234,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         except Exception:
                             pass
 
+                    p_is_online = bool(dev.get("is_online", True)) if _to_text(dev.get("status")).lower() != "offline" else False
                     printers_by_lan[a_lan_uid].append({
                         "id": f"{a_lan_uid}_{p_mac or p_ip}",
                         "printer_name": p_name,
                         "ip": p_ip,
                         "mac_id": p_mac,
-                        "is_online": True,
+                        "is_online": p_is_online,
+                        "probed": bool(dev.get("probed", False)),
                         "enabled": True,
                         "auth_user": p_user,
                         "auth_password": p_pass,
@@ -270,13 +272,15 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "run_mode": agent_info.get("run_mode", "web"),
                     "web_port": agent_info.get("web_port", 9173),
                     "is_master": True,
+                    "is_agent_active": True,
                     "is_online": True,
                     "updated_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
                 }
                 agents_by_lan[a_lan_uid].append(agent_dict)
                 active_agents_by_lan[a_lan_uid].append(agent_dict)
 
-            # 2. Add fallback active agents from DB (AgentNode) seen within last 5 minutes
+            # 2. Add fallback agents from DB (AgentNode) seen within last 5 minutes
+            # These agents are NOT in ACTIVE_AGENTS (RAM), so they are offline
             five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
             db_agent_stmt = select(AgentNode).where(AgentNode.last_seen_at >= five_mins_ago)
             if lead:
@@ -286,6 +290,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 a_lan_uid = db_a.lan_uid or "default"
                 existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
                 if db_a.agent_uid not in existing_uids:
+                    # Agent is in DB but NOT in RAM → it's offline
                     agent_dict = {
                         "agent_uid": db_a.agent_uid,
                         "hostname": db_a.hostname or "",
@@ -295,12 +300,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "run_mode": db_a.run_mode or "web",
                         "web_port": db_a.web_port or 9173,
                         "is_master": True,
-                        "is_online": db_a.is_online,
+                        "is_agent_active": False,
+                        "is_online": False,
                         "updated_at": db_a.last_seen_at.isoformat() if db_a.last_seen_at else "",
                     }
                     agents_by_lan[a_lan_uid].append(agent_dict)
-                    if db_a.is_online:
-                        active_agents_by_lan[a_lan_uid].append(agent_dict)
+                    # Do NOT add to active_agents_by_lan — these are offline
 
             # 3. Dynamic LanSite creation & mapping for all active LANs
             rows_list = list(rows)
@@ -377,6 +382,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "ip": dev_ip,
                         "mac_id": dev_mac,
                         "is_online": False,
+                        "probed": False,
                         "enabled": True,
                         "auth_user": "",
                         "auth_password": "",
@@ -417,7 +423,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                             "printer_name": d_name,
                             "ip": d_ip,
                             "mac_id": d_mac,
-                            "is_online": True,
+                            "is_online": bool(dev_data.get("is_online", True)),
+                            "probed": bool(dev_data.get("probed", False)),
                             "enabled": True,
                             "auth_user": "",
                             "auth_password": "",
@@ -466,8 +473,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         continue
                     seen_keys.add(key)
 
-                    is_online = bool(p.get("enabled") != False)
-                    p["is_online"] = is_online
+                    p["is_online"] = p.get("is_online", False)
                     deduped_printers.append(p)
 
                 out_rows.append({
@@ -600,13 +606,69 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if not sp_updated_at and isinstance(sync_data, dict):
                         sp_updated_at = str(sync_data.get("timestamp") or "")
 
-                    res[dev_mac] = {
+                    # Unwrap any nested address_book_sync to get flat sync_data
+                    flat_sync = sync_data
+                    while isinstance(flat_sync, dict) and "address_book_sync" in flat_sync and "address_list" not in flat_sync:
+                        flat_sync = flat_sync["address_book_sync"]
+
+                    # Build flat item: metadata + sync fields merged at same level
+                    item = {
                         "mac_address": dev_mac,
                         "ip": dev.get("ip") or dev.get("printer_ip") or "",
                         "printer_name": dev.get("printer_name") or dev.get("name") or "",
                         "agent_uid": sp_agent_uid,
                         "updated_at": sp_updated_at,
-                        "address_book_sync": sync_data,
                     }
+                    if isinstance(flat_sync, dict):
+                        item["address_list"] = flat_sync.get("address_list", [])
+                        item["status"] = flat_sync.get("status", "")
+                        item["timestamp"] = flat_sync.get("timestamp", "")
+                    res[dev_mac] = item
+
+        # DB fallback: if RAM registry returned nothing, query PostgreSQL directly
+        if not res:
+            try:
+                from models import ScanPoint
+                with session_factory() as db_sess:
+                    if mac_id:
+                        sp_rec = db_sess.get(ScanPoint, mac_id)
+                        if sp_rec and sp_rec.address_book_data:
+                            db_sync = sp_rec.address_book_data
+                            while isinstance(db_sync, dict) and "address_book_sync" in db_sync and "address_list" not in db_sync:
+                                db_sync = db_sync["address_book_sync"]
+                            res[mac_id] = {
+                                "mac_address": mac_id,
+                                "ip": (db_sync.get("ip", "") if isinstance(db_sync, dict) else ""),
+                                "printer_name": (db_sync.get("printer_name", "") if isinstance(db_sync, dict) else ""),
+                                "agent_uid": sp_rec.agent_uid or "",
+                                "updated_at": sp_rec.updated_at.isoformat() if sp_rec.updated_at else "",
+                                "address_list": (db_sync.get("address_list", []) if isinstance(db_sync, dict) else []),
+                                "status": (db_sync.get("status", "") if isinstance(db_sync, dict) else ""),
+                                "timestamp": (db_sync.get("timestamp", "") if isinstance(db_sync, dict) else ""),
+                            }
+                    else:
+                        from sqlalchemy import select
+                        stmt = select(ScanPoint)
+                        if agent_uid:
+                            stmt = stmt.where(ScanPoint.agent_uid == agent_uid)
+                        for sp_rec in db_sess.execute(stmt).scalars():
+                            if sp_rec.address_book_data:
+                                sp_mac = sp_rec.mac_address or ""
+                                db_sync = sp_rec.address_book_data
+                                while isinstance(db_sync, dict) and "address_book_sync" in db_sync and "address_list" not in db_sync:
+                                    db_sync = db_sync["address_book_sync"]
+                                res[sp_mac] = {
+                                    "mac_address": sp_mac,
+                                    "ip": (db_sync.get("ip", "") if isinstance(db_sync, dict) else ""),
+                                    "printer_name": (db_sync.get("printer_name", "") if isinstance(db_sync, dict) else ""),
+                                    "agent_uid": sp_rec.agent_uid or "",
+                                    "updated_at": sp_rec.updated_at.isoformat() if sp_rec.updated_at else "",
+                                    "address_list": (db_sync.get("address_list", []) if isinstance(db_sync, dict) else []),
+                                    "status": (db_sync.get("status", "") if isinstance(db_sync, dict) else ""),
+                                    "timestamp": (db_sync.get("timestamp", "") if isinstance(db_sync, dict) else ""),
+                                }
+            except Exception:
+                pass
 
         return jsonify({"ok": True, "scan_points": res})
+

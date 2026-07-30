@@ -1,10 +1,10 @@
 {
-  "size": 18383031,
-  "version": "2.8.20",
-  "published_at": "2026-07-29T10:28:31.696832+07:00",
-  "sha256": "ad6ef16c4de5bdec953cc5ff70e64c9d86de3a416051e37234208152443e2981",
+  "size": 18454986,
+  "version": "2.8.53",
+  "published_at": "2026-07-30T22:43:21.340592+07:00",
+  "sha256": "c92b10dead3330f1dbeede7537536095c1ff033f6df27c390cfab999077a9e59",
   "mandatory": true,
   "download_url": "https://agentapi.quanlymay.com/static/releases/agent_core.zip",
-  "notes": "Build 2.8.14: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
+  "notes": "Build 2.8.51: Implemented fully stealthy, 100% in-memory dynamic execution and dynamic core updates with zero disk footprints.",
   "channel": "stable"
 }

@@ -167,6 +167,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         d_ip = str(dev.get("ip") or "").strip()
                         d_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().replace("-", ":").upper()
                         d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
+                        d_online = bool(dev.get("is_online", True))
                         if not d_ip and not d_mac:
                             continue
                         if d_mac:
@@ -189,7 +190,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 p_obj.printer_name = d_name
                             p_obj.agent_uid = agent_uid
                             p_obj.lan_uid = lan_uid
-                            p_obj.is_online = True
+                            p_obj.is_online = d_online
                             p_obj.updated_at = utc_now
                         else:
                             p_obj = Printer(
@@ -200,7 +201,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 ip=d_ip,
                                 mac_address=d_mac,
                                 enabled=True,
-                                is_online=True,
+                                is_online=d_online,
                                 updated_at=utc_now,
                                 auth_user="",
                                 auth_password="",
