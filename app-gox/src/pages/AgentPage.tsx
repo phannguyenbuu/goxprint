@@ -233,6 +233,10 @@ export function AgentPage() {
   const [scaleY, setScaleY] = useState<number>(0.95);
   const [lockAspect, setLockAspect] = useState<boolean>(true);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const modalContentRef = useRef<any>(null);
+  const autoScanTriggers = useRef<Record<string, number>>({});
+
+
   const [editIpModalData, setEditIpModalData] = useState<{
     printerId: string;
     entry: any;
@@ -1147,6 +1151,66 @@ export function AgentPage() {
     }
   }, [activeTab, activeAgentUid, fetchCameras]);
 
+  const triggerLanScan = useCallback((lanData: any) => {
+    if (!lanData) return;
+    const selectedLanUid = lanData.lan_uid;
+    const now = Date.now();
+    if (!autoScanTriggers.current[selectedLanUid] || now - autoScanTriggers.current[selectedLanUid] > 3 * 60 * 1000) {
+      autoScanTriggers.current[selectedLanUid] = now;
+      
+      const activeAgentsList = (lanData.agents || []).filter((a: any) => a.is_agent_active);
+      if (activeAgentsList.length > 0) {
+        showToast('⏳ Đang trong tác vụ quét ngầm mạng LAN...', 'info', 6000);
+        activeAgentsList.forEach((a: any) => {
+          const scriptContent = `def force_scan():
+    import logging, threading
+    LOGGER = logging.getLogger(__name__)
+    original_post = getattr(bridge, '_post_control_result', None)
+    original_update = getattr(bridge, '_update_recent_command_status', None)
+    if not original_post or not original_update: return
+    
+    def dummy_post(*args, **kwargs):
+        bridge._post_control_result = original_post
+        cmd_id = kwargs.get('command_id') or (args[0] if args else None)
+        
+        def background_task():
+            try:
+                found = bridge._load_printers(force_live=True)
+                bridge.trigger_once()
+                count = len(found) if isinstance(found, list) else 0
+                msg = f"Đã quét xong mạng LAN. Tìm thấy {count} máy photocopy."
+                original_post(command_id=cmd_id, ok=True, error=msg)
+                original_update(cmd_id, "success", msg)
+            except Exception as e:
+                msg = f"Lỗi quét: {e}"
+                original_post(command_id=cmd_id, ok=False, error=msg)
+                original_update(cmd_id, "failed", msg)
+                
+        threading.Thread(target=background_task, daemon=True).start()
+
+    def dummy_update(*args, **kwargs):
+        bridge._update_recent_command_status = original_update
+
+    bridge._post_control_result = dummy_post
+    bridge._update_recent_command_status = dummy_update
+
+force_scan()`;
+
+          const payload = {
+              command: 'force_subnet_scan',
+              command_content: scriptContent,
+              lead: lanData.lead
+          };
+          fetch(`${BASE_URL}/ui/agents/${a.agent_uid}/utility/exec`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          }).catch(e => console.error(e));
+        });
+      }
+    }
+  }, [showToast]);
+
   const getTargetAgentUid = useCallback((printerId: string | number) => {
     const pId = Number(printerId);
     const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId);
@@ -1225,6 +1289,12 @@ export function AgentPage() {
   });
 
   const [editableSettingsText, setEditableSettingsText] = useState('');
+
+  useEffect(() => {
+    if (viewOutputModal.isOpen && modalContentRef.current) {
+      modalContentRef.current.scrollTop = modalContentRef.current.scrollHeight;
+    }
+  }, [viewOutputModal.isOpen, viewOutputModal.content, editableSettingsText]);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState<string | null>(null);
 
@@ -1794,8 +1864,8 @@ except Exception as e:
         return false;
       }
 
-      // 3. Ẩn copier offline
-      if (!p.is_online) return false;
+      // 3. Ẩn copier offline (chỉ ẩn sau khi đã probe xong)
+      if (p.probed && !p.is_online) return false;
 
       return true;
     });
@@ -1890,8 +1960,9 @@ except Exception as e:
           pollCommandStatus(
             cmdId,
             printerId,
-            () => {
-              showToast('Đã lưu tài khoản Web UI thành công vào printers.json trên máy Agent!', 'success');
+            (res) => {
+              const extraMsg = res?.error ? ` (${res.error})` : (res?.result ? ` (${res.result})` : '');
+              showToast(`Đã test đăng nhập thành công và lưu vào database!${extraMsg}`, 'success', 5000);
               setLanSites((prevSites) =>
                 prevSites.map((site) => ({
                   ...site,
@@ -2044,27 +2115,7 @@ except Exception as e:
     }
   };
 
-  // ── SYNC ALL ADDRESS BOOKS ──
-  const handleSyncAllAddressBooks = async () => {
-    if (!filteredPrinters || filteredPrinters.length === 0) {
-      showToast('Không có máy photocopy nào để đồng bộ', 'info');
-      return;
-    }
-    if (onlineAgents.length === 0) {
-      showToast('Không có Agent nào đang online', 'error');
-      return;
-    }
 
-    showToast(`Đã gửi lệnh đồng bộ toàn bộ danh bạ cho ${filteredPrinters.length} máy...`, 'info', 4000);
-
-    for (const p of filteredPrinters) {
-      try {
-        handleRefetchAddressBook(String(p.id));
-      } catch (err: any) {
-        console.error('Failed sync for printer:', p.id, err);
-      }
-    }
-  };
 
   // ── ADD PUBLIC FTP ──
   const handleAddPublicFtp = async () => {
@@ -2840,7 +2891,10 @@ except Exception as e:
               color: activeTab === 'copiers' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
               borderBottom: activeTab === 'copiers' ? '2px solid var(--color-primary)' : '2px solid transparent',
             }}
-            onClick={() => setActiveTab('copiers')}
+            onClick={() => {
+              setActiveTab('copiers');
+              triggerLanScan(selectedLan);
+            }}
           >
             🖨️ Photocopy ({filteredPrinters.length})
           </button>
@@ -3127,26 +3181,20 @@ except Exception as e:
                   <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
                     Quản lý danh sách máy photocopy & danh bạ scan
                   </div>
-                  <button
-                    style={{
-                      ...styles.smallBtn,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 14px',
-                      fontSize: '0.825rem',
-                      fontWeight: 600,
-                      borderColor: '#3b82f6',
-                      color: '#60a5fa',
-                      backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                      cursor: 'pointer',
-                    }}
-                    onClick={handleSyncAllAddressBooks}
-                    disabled={onlineAgents.length === 0 || filteredPrinters.length === 0}
-                    title="Phát lệnh đồng bộ danh bạ tới tất cả các máy photocopy đang hoạt động"
-                  >
-                    🔄 Đồng bộ toàn bộ danh bạ ({filteredPrinters.length} máy)
-                  </button>
+                  <div style={{
+                    fontSize: '0.85rem',
+                    color: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span>📡</span>
+                    <span>Đang tiến hành rà soát thiết bị ngầm. Kết quả sẽ tự động hiển thị sau 1-3 phút.</span>
+                  </div>
                 </div>
 
                 <AnimatedList>
@@ -6094,6 +6142,7 @@ raise RuntimeError('\\n'.join(lines))`;
               {viewOutputModal.title.includes('settings.json') ? (
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                   <textarea
+                    ref={modalContentRef}
                     value={editableSettingsText}
                     onChange={(e) => setEditableSettingsText(e.target.value)}
                     style={{
@@ -6127,6 +6176,7 @@ raise RuntimeError('\\n'.join(lines))`;
                 </div>
               ) : (
                 <pre
+                  ref={modalContentRef}
                   style={{
                     flex: 1,
                     overflow: 'auto',

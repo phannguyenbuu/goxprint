@@ -742,8 +742,6 @@ class ToshibaService:
 
         # --- Step 1: Detect working base URL ---
         base_urls = [
-            f"https://{printer.ip}:10443",
-            f"https://{printer.ip}",
             f"http://{printer.ip}",
         ]
         cgi_endpoints = [
@@ -767,6 +765,7 @@ class ToshibaService:
         login_success = False
         base_url = base_urls[0]
         active_cgi = "/contentwebserver"
+        login_debug = []
 
         LOGGER.info("[ToshibaService] Attempting TopAccess Login for address list on %s (user=%s, pw_count=%d)...", printer.ip, user_name, len(pws))
         for target_url in base_urls:
@@ -810,17 +809,27 @@ class ToshibaService:
                 for cgi in cgi_endpoints:
                     try:
                         r = session.post(f"{target_url}{cgi}", data=login_xml, headers=plain_headers, verify=False, timeout=8)
-                        LOGGER.info("[ToshibaService] Login POST %s%s pw='%s' => status=%d len=%d hasSuccess=%s",
-                                    target_url, cgi, pw[:3] + "***", r.status_code, len(r.text),
-                                    "<LoginResult>Success" in r.text)
-                        if r.status_code == 200 and "<LoginResult>Success</LoginResult>" in r.text:
+                        has_login_success = "<LoginResult>Success</LoginResult>" in r.text
+                        has_token = "<userTokenId>" in r.text and r.status_code == 200
+                        login_debug.append({
+                            "url": f"{target_url}{cgi}",
+                            "status_code": r.status_code,
+                            "length": len(r.text),
+                            "final_url": str(r.url),
+                            "redirected": r.url != f"{target_url}{cgi}",
+                            "snippet": r.text[:500].replace('\n', ' ').replace('\r', ''),
+                            "has_login_success": has_login_success,
+                            "has_token": has_token,
+                        })
+                        if r.status_code == 200 and (has_login_success or has_token):
                             login_success = True
                             base_url = target_url
                             active_cgi = cgi
-                            LOGGER.info("[ToshibaService] LOGIN OK via %s%s (user=%s)", target_url, cgi, user_name)
+                            LOGGER.info("[ToshibaService] LOGIN OK via %s%s (user=%s, token=%s)", target_url, cgi, user_name, has_token)
                             break
                     except Exception as e:
                         LOGGER.debug("[ToshibaService] Login attempt %s%s failed: %s", target_url, cgi, e)
+                        login_debug.append({"url": f"{target_url}{cgi}", "error": str(e)})
                 if login_success:
                     break
             if login_success:
@@ -830,6 +839,13 @@ class ToshibaService:
             LOGGER.warning("[ToshibaService] Login FAILED for %s. Trying unauthenticated template query...", printer.ip)
 
         cgi_url = f"{base_url}{active_cgi}"
+
+        # Refresh CSRF token from updated session cookies after login
+        new_session_cookie = session.cookies.get("Session") or ""
+        if new_session_cookie:
+            plain_headers["csrfpId"] = new_session_cookie
+            xml_headers["csrfpId"] = new_session_cookie
+            LOGGER.info("[ToshibaService] Refreshed csrfpId after login: %s", new_session_cookie[:20])
 
         # --- Step 3: Set LICENSE_SETTINGS (required by some Toshiba firmware) ---
         try:
@@ -842,6 +858,7 @@ class ToshibaService:
         groups = ["001", "002", "003", "000"]
         entries: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
+        debug_content: list[dict[str, Any]] = []  # collect raw XML per group for debugging
 
         for group in groups:
             get_templates_xml = f"""<DeviceInformationModel><GetValue><JobTemplates><View><TemplateList/></View></JobTemplates></GetValue><Command><GetTemplateList><commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode><Params><param name='selectedGroup'>{group}</param><param name='viewXpath'>JobTemplates/View/TemplateList</param><param name='currentPage'>1</param><param name='pageSize'>60</param><param name='definedTemplates'>false</param><param name='inputGroupPassword'></param><param name='locale'>en_GB</param></Params></GetTemplateList></Command></DeviceInformationModel>"""
@@ -857,45 +874,104 @@ class ToshibaService:
 
             for url in try_urls:
                 try:
-                    r = session.post(url, data=get_templates_xml, headers=xml_headers, verify=False, timeout=10)
+                    r = session.post(url, data=get_templates_xml, headers=plain_headers, verify=False, timeout=10)
                     has_template = "<Template" in r.text
                     has_job = "<JobTemplates" in r.text
                     has_success = "<GetTemplateListResult>Success" in r.text
-                    snippet = r.text[:200].replace('\n', ' ').replace('\r', '')
+                    snippet = r.text[:500].replace('\n', ' ').replace('\r', '')
                     LOGGER.info("[ToshibaService] GetTemplates POST %s group=%s => status=%d len=%d hasTemplate=%s hasSuccess=%s snippet=%s",
                                 url, group, r.status_code, len(r.text), has_template, has_success, snippet)
                     if r.status_code == 200 and (has_template or has_job or has_success):
                         raw_resp_text = r.text
+                        debug_content.append({
+                            "group": group,
+                            "url": url,
+                            "status_code": r.status_code,
+                            "length": len(r.text),
+                            "has_template": has_template,
+                            "has_success": has_success,
+                            "xml": r.text[:4000],
+                        })
                         break
+                    else:
+                        # Log ALL responses (including non-200 and non-matching 200)
+                        debug_content.append({
+                            "group": group,
+                            "url": url,
+                            "status_code": r.status_code,
+                            "length": len(r.text),
+                            "matched": False,
+                            "snippet": snippet,
+                            "final_url": str(r.url),
+                            "redirected": r.url != url,
+                        })
                 except Exception as e:
                     LOGGER.debug("[ToshibaService] GetTemplates %s group=%s => ERROR: %s", url, group, e)
+                    debug_content.append({
+                        "group": group,
+                        "url": url,
+                        "error": str(e),
+                    })
 
             if raw_resp_text:
                 try:
                     pattern = re.compile(r'<(?:\w+:)?Template[^>]*>(.*?)</(?:\w+:)?Template>', re.DOTALL)
                     for match in pattern.finditer(raw_resp_text):
-                        block = match.group(1)
-                        num_match = re.search(r'<(?:\w+:)?name>(\d+)</(?:\w+:)?name>', block)
+                        block = match.group(0) # group 0 includes <Template> tag!
+                        
+                        # Only process templates with valid="true" attribute
+                        if 'valid="true"' not in block:
+                            continue
+
+                        tid_match = re.search(r'tid=[\"\'](\d+)[\"\']', block)
+                        gid_match = re.search(r'gid=[\"\'](\d+)[\"\']', block)
+                        gid = gid_match.group(1) if gid_match else "001"
+                        tid = tid_match.group(1) if tid_match else "001"
+
+                        # Only keep FIRST valid template per group
+                        if gid in seen_ids:
+                            continue
+
                         cap1_match = re.search(r'<(?:\w+:)?caption1>([^<]*)</(?:\w+:)?caption1>', block)
                         cap2_match = re.search(r'<(?:\w+:)?caption2>([^<]*)</(?:\w+:)?caption2>', block)
-
-                        # Extract SMB store info if available
-                        smb_path_match = re.search(r'<(?:\w+:)?StorePath>([^<]*)</(?:\w+:)?StorePath>', block)
-                        smb_user_match = re.search(r'<(?:\w+:)?UserName>([^<]*)</(?:\w+:)?UserName>', block)
-
-                        reg_no = num_match.group(1) if num_match else "001"
-                        if reg_no in seen_ids:
-                            continue
-                        seen_ids.add(reg_no)
                         c1 = cap1_match.group(1).strip() if cap1_match else ""
                         c2 = cap2_match.group(1).strip() if cap2_match else ""
-                        disp_name = c2 or c1 or f"Template {reg_no}"
+
+                        # Bỏ qua các template rỗng
+                        if not c1 and not c2:
+                            continue
+
+                        # Filter: skip Copy-only templates (no file/SMB destination)
+                        source_agent_match = re.search(r'<(?:\w+:)?SourceAgent>([^<]*)</(?:\w+:)?SourceAgent>', block)
+                        source_agent = source_agent_match.group(1).strip() if source_agent_match else ""
+                        has_filestore = 'FileStore Enabled="true"' in block
+                        has_smbstore = 'SMBStore Enabled="true"' in block
+                        if source_agent == "Copy" and not has_filestore and not has_smbstore:
+                            continue
+
+                        # Skip templates with "Undefined" owner
+                        owner_match = re.search(r'<(?:\w+:)?ownerName>([^<]*)</(?:\w+:)?ownerName>', block)
+                        owner_name = owner_match.group(1).strip() if owner_match else ""
+                        if owner_name.lower() == "undefined":
+                            continue
+
+                        # Mark this group as processed
+                        seen_ids.add(gid)
+
+                        # Extract SMB store info
+                        smb_path_match = re.search(r'<(?:\w+:)?StorePath>([^<]*)</(?:\w+:)?StorePath>', block)
+                        smb_user_match = re.search(r'<(?:\w+:)?UserName>([^<]*)</(?:\w+:)?UserName>', block)
+                        smb_port_match = re.search(r'<(?:\w+:)?PortNumber>([^<]*)</(?:\w+:)?PortNumber>', block)
+
+                        reg_no = f"{gid}-{tid}"
+                        disp_name = c2 or c1 or f"Template {tid}"
                         smb_path = smb_path_match.group(1).strip() if smb_path_match else ""
                         smb_user = smb_user_match.group(1).strip() if smb_user_match else ""
+                        smb_port = smb_port_match.group(1).strip() if smb_port_match else ""
                         folder = smb_path or f"\\\\{printer.ip}\\scan"
 
                         entries.append({
-                            "registration_no": reg_no.zfill(3),
+                            "registration_no": reg_no,
                             "name": disp_name,
                             "key_display": disp_name,
                             "title_1": c1,
@@ -903,9 +979,10 @@ class ToshibaService:
                             "title_3": "",
                             "auth_user": smb_user,
                             "folder": folder,
+                            "folder_port_no": smb_port or "445",
                             "email": "",
                             "entry_id": reg_no,
-                            "protocol": "SMB" if smb_path else "",
+                            "protocol": "SMB",
                             "is_agent_local": True,
                         })
                 except Exception as e:
@@ -923,9 +1000,24 @@ class ToshibaService:
 
         elapsed = time.time() - start_time
         LOGGER.info("[ToshibaService] === DONE process_address_list for %s: %d entries in %.1fs ===", printer.ip, len(entries), elapsed)
+        try:
+            from agent.services.updater import DEFAULT_APP_VERSION
+        except ImportError:
+            DEFAULT_APP_VERSION = "unknown"
+
         return {
             "printer_name": printer.name,
             "ip": printer.ip,
             "address_list": entries,
             "elapsed_seconds": round(elapsed, 2),
+            "agent_version": DEFAULT_APP_VERSION,
+            "content": debug_content,
+            "debug": {
+                "login_success": login_success,
+                "base_url": base_url,
+                "active_cgi": active_cgi,
+                "groups_queried": groups,
+                "total_debug_responses": len(debug_content),
+                "login_attempts": login_debug[:8],
+            },
         }

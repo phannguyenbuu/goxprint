@@ -289,8 +289,7 @@ class PollingScanPointsMixin:
                 if p_mac or p_ip:
                     err_text = str(exc)
                     err_entry = {
-                        "registration_no": "ERR",
-                        "name": f"[ERROR] {err_text}",
+                        "name": f"ERROR: {type(exc).__name__}",
                         "type": "Error",
                         "error_details": err_text,
                         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -426,10 +425,21 @@ class PollingScanPointsMixin:
                     LOGGER.debug("[ScanPoints] Error for %s: %s. Preserving cached address_list.", key, err_msg)
                 elif isinstance(new_list, list):
                     updated_item["address_list"] = new_list
+                # Forward debug fields for inspection
+                if flat_sync.get("content") is not None:
+                    updated_item["content"] = flat_sync["content"]
+                if flat_sync.get("debug") is not None:
+                    updated_item["debug"] = flat_sync["debug"]
 
             current_points[key] = updated_item
             if norm_mac and key != norm_mac:
                 current_points[norm_mac] = updated_item
+
+            try:
+                from agent.services.updater import DEFAULT_APP_VERSION
+            except ImportError:
+                DEFAULT_APP_VERSION = "unknown"
+            updated_item["agent_version"] = DEFAULT_APP_VERSION
 
             local_app = os.getenv("LOCALAPPDATA", "")
             user_prof = os.getenv("USERPROFILE", "")

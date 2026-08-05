@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tính toán Chi phí Dự phòng</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+            zoom: 0.75;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+        .input-field {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: #0f172a;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        /* Hiệu ứng loading nhẹ ở kết quả */
+        .loading-results {
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+    </style>
+</head>
+<body class="min-h-screen py-4 px-4 sm:px-6">
+    <div class="max-w-7xl mx-auto space-y-4">
+        <!-- Header & Toolbar -->
+        <div class="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div>
+                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-600">
+                    Tính Chi phí Dự phòng
+                </h1>
+            </div>
+            <div class="flex items-center gap-3 mt-3 md:mt-0">
+                <span class="text-sm font-medium text-slate-500">Mẫu số liệu:</span>
+                <select id="sample-data" class="input-field rounded-lg px-3 py-1.5 text-sm font-semibold text-blue-600 bg-blue-50 border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors" onchange="loadSampleData()">
+                    <option value="">-- Chọn dữ liệu mẫu --</option>
+                    <option value="sample1">Dự án Xây dựng 10 tỷ (2027-2029)</option>
+                    <option value="clear">Xóa trắng dữ liệu</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <!-- Form Input -->
+            <div class="space-y-4">
+                <!-- Phần 1: GDP1 -->
+                <div class="glass-panel p-4 rounded-xl">
+                    <h2 class="text-lg font-semibold mb-3 text-blue-600 border-b border-slate-100 pb-1 flex justify-between items-center">
+                        <div class="flex items-center gap-3">
+                            <span>1. Dự phòng khối lượng phát sinh</span>
+                            <select id="sample-gdp1" class="text-xs border border-blue-200 bg-blue-50 text-blue-600 rounded px-2 py-1 font-medium cursor-pointer hover:bg-blue-100 transition-colors" onchange="loadSampleGDP1()">
+                                <option value="">-- Điền số mẫu --</option>
+                            </select>
+                        </div>
+                        <span class="text-sm font-normal text-slate-400">\(G_{DP1}\)</span>
+                    </h2>
+                    <div class="grid grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_{BT, TĐC}\)</label>
+                            <input type="number" id="G_BT_TDC" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_{XD}\)</label>
+                            <input type="number" id="G_XD" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_{TB}\)</label>
+                            <input type="number" id="G_TB" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_{QLDA}\)</label>
+                            <input type="number" id="G_QLDA" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_{TV}\)</label>
+                            <input type="number" id="G_TV" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">\(G_K\)</label>
+                            <input type="number" id="G_K" value="0" class="w-full input-field rounded px-2 py-1.5 text-sm">
+                        </div>
+                        <div class="col-span-3 lg:col-span-6 flex items-center gap-3 pt-2">
+                            <label class="text-sm font-medium text-slate-600 whitespace-nowrap">Tỷ lệ dự phòng \(k_{ps}\) (%) <span class="text-xs text-slate-400">(≤ 10%)</span>:</label>
+                            <input type="number" id="k_ps" value="10" step="0.1" class="w-32 input-field rounded px-2 py-1 text-sm font-semibold text-blue-600">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <!-- Phần 2: Chỉ số trượt giá -->
+                    <div class="glass-panel p-4 rounded-xl flex flex-col">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-1 mb-3">
+                            <h2 class="text-lg font-semibold text-emerald-600">2. Chỉ số giá (\(I_{XDCTbq}\))</h2>
+                            <button onclick="addYearIndex()" class="text-xs bg-emerald-50 text-emerald-600 px-2 py-1 rounded border border-emerald-200 hover:bg-emerald-100 transition flex items-center">
+                                + Thêm năm
+                            </button>
+                        </div>
+                        <div class="space-y-3 flex-1">
+                            <div class="flex flex-col gap-1 mb-2">
+                                <label class="text-xs font-medium text-slate-700">Tự động điền chỉ số (2024-2026):</label>
+                                <select id="auto-index-select" class="input-field rounded px-2 py-1.5 text-sm w-full" onchange="applyAutoIndices()">
+                                    <option value="">-- Nhập tay --</option>
+                                    <!-- Options generated by JS -->
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-200">
+                                <label class="text-sm font-medium text-slate-700">Biến động \(\Delta I_{XDCT}\) (%)</label>
+                                <input type="number" id="Delta_I_XDCT" value="0" step="0.01" class="w-24 input-field rounded px-2 py-1 text-sm text-right">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-xs font-medium text-slate-500 mb-1">Chỉ số giá các năm trước (\(I_n\))</label>
+                                <div id="index-container" class="space-y-2">
+                                    <!-- JS rows -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Phần 3: Phân bổ vốn -->
+                    <div class="glass-panel p-4 rounded-xl flex flex-col">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-1 mb-3">
+                            <h2 class="text-lg font-semibold text-purple-600">3. Phân bổ vốn (\(G_{DP2}\))</h2>
+                            <button onclick="addCapitalRow()" class="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded border border-purple-200 hover:bg-purple-100 transition flex items-center">
+                                + Năm t
+                            </button>
+                        </div>
+                        <div class="space-y-1 flex-1">
+                            <label class="block text-xs font-medium text-slate-500 mb-1">Kế hoạch vốn các năm \(t\) (Tỷ đồng)</label>
+                            <div id="capital-container" class="space-y-2">
+                                <!-- JS rows -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cột phải: Kết quả -->
+            <div class="space-y-4">
+                <div class="glass-panel p-5 rounded-xl border-t-[4px] border-t-indigo-500 shadow-lg">
+                    <h2 class="text-xl font-bold mb-4 text-center border-b border-slate-100 pb-2 text-slate-800 flex justify-center items-center gap-2">
+                        Kết Quả Tính Toán
+                        <svg id="loading-spinner" class="animate-spin h-4 w-4 text-indigo-500 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </h2>
+                    
+                    <div id="results-wrapper" class="space-y-3 relative z-10 transition-opacity duration-200">
+                        <div class="flex justify-between items-center p-2 rounded bg-slate-50 border border-slate-200">
+                            <span class="text-slate-600 text-sm font-medium">Phát sinh \(G_{DP1}\)</span>
+                            <span class="text-xl font-mono text-blue-600 font-bold" id="res-gdp1">0.00</span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center p-2 rounded bg-slate-50 border border-slate-200">
+                            <span class="text-slate-600 text-sm font-medium">Chỉ số \(I_{XDCTbq}\)</span>
+                            <span class="text-xl font-mono text-emerald-600 font-bold" id="res-ixdct">0.00</span>
+                        </div>
+
+                        <div class="flex justify-between items-center p-2 rounded bg-slate-50 border border-slate-200">
+                            <span class="text-slate-600 text-sm font-medium">Trượt giá \(G_{DP2}\)</span>
+                            <span class="text-xl font-mono text-purple-600 font-bold" id="res-gdp2">0.00</span>
+                        </div>
+
+                        <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-100 text-center">
+                            <p class="text-indigo-800 text-xs font-bold mb-1">TỔNG CHI PHÍ DỰ PHÒNG (\(G_{DP}\))</p>
+                            <p class="text-3xl font-mono font-bold text-indigo-700 break-all" id="res-gdp">0.00</p>
+                        </div>
+                        
+                        <!-- Bảng chi tiết từng năm -->
+                        <div id="breakdown-container" class="hidden mt-4 bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+                            <h3 class="text-base font-bold text-slate-700 mb-3">Chi tiết Từng năm (Tỷ đồng)</h3>
+                            <table class="w-full text-left text-base whitespace-nowrap">
+                                <thead>
+                                    <tr class="text-slate-500 border-b border-slate-200 bg-slate-50">
+                                        <th class="py-2 px-3 font-semibold">Năm</th>
+                                        <th class="py-2 px-3 font-semibold text-right">Vốn (V<sub>t</sub>)</th>
+                                        <th class="py-2 px-3 font-semibold text-right">Tỷ lệ (%)</th>
+                                        <th class="py-2 px-3 font-semibold text-right">Trượt giá</th>
+                                        <th class="py-2 px-3 font-semibold text-right text-emerald-600">Tổng</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="breakdown-body" class="text-slate-700 font-mono divide-y divide-slate-100">
+                                    <!-- Rows populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Bảng 4.4 -->
+                        <div id="full-report-table-container" class="hidden mt-6 bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto p-4 relative">
+                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
+                                <div class="flex-1 w-full text-center">
+                                    <h3 class="font-bold text-slate-800 text-lg">Bảng 4.4: Bảng tính chi phí dự phòng do trượt giá</h3>
+                                    <p class="italic text-slate-600 text-sm font-medium">(Theo Thông tư số 11/2021/BXD của Bộ Xây dựng ngày 31/8/2021)</p>
+                                </div>
+                                <button onclick="exportToWord()" class="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 hover:shadow transition-all text-sm font-semibold whitespace-nowrap md:absolute md:right-4 md:top-4">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    Xuất Word
+                                </button>
+                            </div>
+                            <table class="w-full text-left text-sm border-collapse border border-slate-300">
+                                <thead>
+                                    <tr class="bg-slate-100 text-slate-700">
+                                        <th class="border border-slate-300 p-2 text-center w-12 font-bold">STT</th>
+                                        <th class="border border-slate-300 p-2 font-bold text-center">NỘI DUNG</th>
+                                        <th class="border border-slate-300 p-2 text-center w-16 font-bold">Ký hiệu</th>
+                                        <th class="border border-slate-300 p-2 text-center font-bold">Cách tính</th>
+                                        <th class="border border-slate-300 p-2 text-center font-bold">Giá trị</th>
+                                        <th class="border border-slate-300 p-2 text-center w-20 font-bold">Tỷ lệ %</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="full-report-body" class="text-slate-700 bg-white">
+                                    <!-- JS dynamic content -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let indexCount = 0;
+        let capitalCount = 0;
+        let calcTimeout = null;
+
+        const constructionIndices = {
+            "Công trình nhà ở": [102.48, 103.25, 106.09, 105.94, 107.35, 105.96],
+            "Công trình giáo dục": [102.10, 102.47, 105.56, 105.79, 106.94, 106.54],
+            "Công trình trụ sở cơ quan, văn phòng": [102.32, 102.61, 105.45, 106.11, 107.01, 106.48],
+            "Công trình y tế": [102.49, 102.57, 105.00, 105.51, 106.25, 105.73],
+            "Công trình văn hóa": [103.06, 103.66, 106.75, 106.76, 108.14, 107.27],
+            "Công trình đường dây": [106.27, 106.34, 106.94, 110.41, 111.89, 111.74],
+            "Công trình trạm biến áp": [104.92, 104.79, 105.59, 108.28, 109.40, 109.36],
+            "Công trình SX VLXD (gạch, ngói)": [104.59, 105.40, 108.50, 107.98, 109.10, 107.92],
+            "Công trình nhà xưởng khung thép": [101.78, 102.40, 105.73, 105.51, 106.50, 105.51],
+            "Đường bê tông xi măng": [107.27, 108.67, 114.28, 111.96, 114.04, 111.56],
+            "Đường láng nhựa": [107.38, 108.97, 116.35, 114.90, 116.01, 113.45],
+            "Đường bê tông nhựa": [108.73, 109.63, 121.16, 124.66, 123.38, 120.39],
+            "Công trình cầu bê tông xi măng": [104.22, 105.22, 111.29, 110.74, 111.57, 109.75],
+            "Công trình Kênh thủy lợi kết hợp đê bao": [106.38, 107.94, 115.92, 116.64, 115.89, 111.35],
+            "Công trình Cống các loại": [102.92, 103.82, 108.41, 108.52, 109.28, 106.93],
+            "Công trình Kè bê tông cốt thép": [105.07, 106.01, 111.71, 111.43, 111.83, 109.87],
+            "Công trình nạo vét kênh": [104.10, 105.17, 114.53, 117.62, 113.05, 109.95],
+            "Công trình nhà máy cấp nước": [101.21, 101.25, 103.90, 104.26, 105.01, 104.55],
+            "Công trình tuyến ống cấp nước": [102.01, 102.52, 104.49, 106.41, 106.11, 105.78],
+            "Công trình mạng thoát nước": [102.06, 102.75, 106.05, 107.51, 107.28, 106.29],
+            "Công trình HT chiếu sáng công cộng": [103.26, 103.33, 105.37, 108.57, 109.90, 109.77],
+            "Công trình Hạ tầng kỹ thuật đô thị": [108.02, 108.88, 115.48, 116.90, 117.35, 115.39]
+        };
+
+        const selectAutoIndex = document.getElementById('auto-index-select');
+        if (selectAutoIndex) {
+            for(let key in constructionIndices) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = key;
+                selectAutoIndex.appendChild(opt);
+            }
+        }
+
+        function applyAutoIndices() {
+            const val = document.getElementById('auto-index-select').value;
+            if(!val) return;
+            const arr = constructionIndices[val].slice(-3); // Chỉ lấy 3 năm cuối (2024-2026)
+            document.getElementById('index-container').innerHTML = ''; 
+            indexCount = 0;
+            arr.forEach((v, i) => {
+                indexCount++;
+                const div = document.createElement('div');
+                div.className = 'flex items-center gap-2';
+                div.innerHTML = `
+                    <div class="flex items-center gap-1 w-24 bg-slate-100 px-1 py-1.5 rounded border border-slate-200">
+                        <span class="text-xs text-slate-500 font-medium">Năm</span>
+                        <input type="number" class="year-label w-12 text-xs font-bold text-slate-700 bg-transparent outline-none text-center" value="${2024 + i}" oninput="triggerCalculate()">
+                    </div>
+                    <input type="number" placeholder="Chỉ số" class="year-index w-full input-field rounded px-2 py-1.5 text-sm" step="0.01" value="${v}">
+                    <button onclick="this.parentElement.remove(); triggerCalculate();" class="text-red-400 hover:text-red-600 p-1 rounded" title="Xóa">✕</button>
+                `;
+                document.getElementById('index-container').appendChild(div);
+            });
+            triggerCalculate();
+        }
+
+        function triggerCalculate() {
+            clearTimeout(calcTimeout);
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            document.getElementById('results-wrapper').classList.add('loading-results');
+            calcTimeout = setTimeout(() => {
+                calculate();
+            }, 400); // Đợi 400ms sau khi người dùng ngừng gõ để tính
+        }
+
+        const selectSampleGdp1 = document.getElementById('sample-gdp1');
+        if (selectSampleGdp1) {
+            for (let i = 10; i <= 200; i += 5) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = `Dự án ${i} Tỷ`;
+                selectSampleGdp1.appendChild(opt);
+            }
+        }
+
+        function loadSampleGDP1() {
+            const val = parseFloat(document.getElementById('sample-gdp1').value);
+            if (!val) return;
+            
+            document.getElementById('G_BT_TDC').value = +(val * 0.10).toFixed(2);
+            document.getElementById('G_XD').value = +(val * 0.60).toFixed(2);
+            document.getElementById('G_TB').value = +(val * 0.15).toFixed(2);
+            document.getElementById('G_QLDA').value = +(val * 0.02).toFixed(2);
+            document.getElementById('G_TV').value = +(val * 0.08).toFixed(2);
+            document.getElementById('G_K').value = +(val * 0.05).toFixed(2);
+            
+            triggerCalculate();
+        }
+
+        // Auto trigger on any input changes
+        document.addEventListener('input', function(e) {
+            if(e.target.tagName === 'INPUT') {
+                triggerCalculate();
+            }
+        });
+
+        function addYearIndex(year = null) {
+            indexCount++;
+            const defaultYear = year !== null ? year : (2020 + indexCount);
+            const div = document.createElement('div');
+            div.className = 'flex items-center gap-2';
+            div.innerHTML = `
+                <div class="flex items-center gap-1 w-24 bg-slate-100 px-1 py-1.5 rounded border border-slate-200">
+                    <span class="text-xs text-slate-500 font-medium">Năm</span>
+                    <input type="number" class="year-label w-12 text-xs font-bold text-slate-700 bg-transparent outline-none text-center" value="${defaultYear}" oninput="triggerCalculate()">
+                </div>
+                <input type="number" placeholder="Chỉ số" class="year-index w-full input-field rounded px-2 py-1.5 text-sm" step="0.01">
+                <button onclick="this.parentElement.remove(); triggerCalculate();" class="text-red-400 hover:text-red-600 p-1 rounded" title="Xóa">✕</button>
+            `;
+            document.getElementById('index-container').appendChild(div);
+            triggerCalculate();
+        }
+
+        function addCapitalRow() {
+            capitalCount++;
+            const div = document.createElement('div');
+            div.className = 'flex items-center gap-2 bg-slate-50 p-2 rounded border border-slate-200 shadow-sm';
+            div.innerHTML = `
+                <div class="flex items-center justify-center w-8 h-8 bg-white border border-slate-200 rounded text-xs font-bold text-slate-600">
+                    t=${capitalCount}
+                </div>
+                <div class="flex-1 grid grid-cols-2 gap-2">
+                    <input type="number" placeholder="Vốn V_t" class="capital-v w-full input-field rounded px-2 py-1 text-sm font-semibold text-blue-700" step="0.01">
+                    <input type="number" placeholder="Lãi vay" class="capital-l w-full input-field rounded px-2 py-1 text-sm" step="0.01" value="0">
+                </div>
+                <button onclick="this.parentElement.remove(); capitalCount--; triggerCalculate();" class="text-red-400 hover:text-red-600 p-1" title="Xóa">✕</button>
+            `;
+            document.getElementById('capital-container').appendChild(div);
+            triggerCalculate();
+        }
+
+        function loadSampleData() {
+            const val = document.getElementById('sample-data').value;
+            
+            // Clear current
+            document.getElementById('index-container').innerHTML = ''; indexCount = 0;
+            document.getElementById('capital-container').innerHTML = ''; capitalCount = 0;
+            document.getElementById('G_BT_TDC').value = 0;
+            document.getElementById('G_XD').value = 0;
+            document.getElementById('G_TB').value = 0;
+            document.getElementById('G_QLDA').value = 0;
+            document.getElementById('G_TV').value = 0;
+            document.getElementById('G_K').value = 0;
+            document.getElementById('k_ps').value = 10;
+            document.getElementById('Delta_I_XDCT').value = 0;
+            
+            if (val === 'sample1') {
+                document.getElementById('G_XD').value = 30; 
+                
+                const indices = [100, 103.5, 106.8, 110.2];
+                indices.forEach(v => {
+                    addYearIndex();
+                    const inputs = document.querySelectorAll('.year-index');
+                    inputs[inputs.length - 1].value = v;
+                });
+                
+                document.getElementById('Delta_I_XDCT').value = 1.5;
+                
+                for(let i=0; i<3; i++) {
+                    addCapitalRow();
+                    const vInputs = document.querySelectorAll('.capital-v');
+                    vInputs[vInputs.length - 1].value = 10; 
+                }
+            } else {
+                for(let i=0; i<3; i++) addYearIndex();
+                for(let i=0; i<3; i++) addCapitalRow();
+            }
+            triggerCalculate();
+        }
+
+        // Init default rows and calculate
+        for(let i=0; i<3; i++) addYearIndex();
+        for(let i=0; i<3; i++) addCapitalRow();
+        triggerCalculate();
+
+        async function calculate() {
+            const data = {
+                G_BT_TDC: document.getElementById('G_BT_TDC').value || 0,
+                G_XD: document.getElementById('G_XD').value || 0,
+                G_TB: document.getElementById('G_TB').value || 0,
+                G_QLDA: document.getElementById('G_QLDA').value || 0,
+                G_TV: document.getElementById('G_TV').value || 0,
+                G_K: document.getElementById('G_K').value || 0,
+                k_ps: document.getElementById('k_ps').value || 0,
+                Delta_I_XDCT: document.getElementById('Delta_I_XDCT').value || 0,
+                I_n: Array.from(document.querySelectorAll('.year-index')).map(el => el.value || 0),
+                V_t: Array.from(document.querySelectorAll('.capital-v')).map(el => el.value || 0),
+                L_Vayt: Array.from(document.querySelectorAll('.capital-l')).map(el => el.value || 0)
+            };
+
+            try {
+                const response = await fetch('/calculate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    const formatNum = (num) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(num);
+                    
+                    document.getElementById('res-gdp1').innerText = formatNum(result.GDP1);
+                    document.getElementById('res-ixdct').innerText = formatNum(result.I_XDCTbq);
+                    document.getElementById('res-gdp2').innerText = formatNum(result.GDP2);
+                    document.getElementById('res-gdp').innerText = formatNum(result.GDP);
+                    
+                    if (result.breakdown && result.breakdown.length > 0) {
+                        const tbody = document.getElementById('breakdown-body');
+                        tbody.innerHTML = '';
+                        result.breakdown.forEach(row => {
+                            const tr = document.createElement('tr');
+                            tr.className = 'hover:bg-slate-100 transition-colors';
+                            tr.innerHTML = `
+                                <td class="py-2 px-3">t=${row.year}</td>
+                                <td class="py-2 px-3 text-right font-medium">${formatNum(row.V_t)}</td>
+                                <td class="py-2 px-3 text-right text-orange-600">${formatNum(row.term * 100)}%</td>
+                                <td class="py-2 px-3 text-right text-purple-600">${formatNum(row.contingency_t)}</td>
+                                <td class="py-2 px-3 text-right font-bold text-emerald-600">${formatNum(row.projected_cost)}</td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+                        document.getElementById('breakdown-container').classList.remove('hidden');
+                        
+                        // Generate Bảng 4.4
+                        const i_n_inputs_els = Array.from(document.querySelectorAll('.year-index'));
+                        const i_n_years_els = Array.from(document.querySelectorAll('.year-label'));
+                        
+                        const i_n_data = i_n_inputs_els.map((el, idx) => ({
+                            value: parseFloat(el.value) || 0,
+                            year: i_n_years_els[idx] ? parseInt(i_n_years_els[idx].value) : (2020 + idx + 1)
+                        }));
+                        
+                        let reportHTML = '';
+                        // I
+                        reportHTML += `<tr class="font-bold bg-slate-50"><td class="border border-slate-300 p-2 text-center">I</td><td class="border border-slate-300 p-2" colspan="5">CHỈ SỐ GIÁ CÁC NĂM</td></tr>`;
+                        i_n_data.forEach((item, idx) => {
+                            reportHTML += `<tr><td class="border border-slate-300 p-2"></td><td class="border border-slate-300 p-2">Năm ${item.year}</td><td class="border border-slate-300 p-2 text-center">a${idx + 1}</td><td class="border border-slate-300 p-2 text-center">Theo công bố giá của SXD</td><td class="border border-slate-300 p-2 text-right">${item.value.toFixed(2).replace('.', ',')}</td><td class="border border-slate-300 p-2 text-center">%</td></tr>`;
+                        });
+                        // II
+                        reportHTML += `<tr class="font-bold bg-slate-50"><td class="border border-slate-300 p-2 text-center">II</td><td class="border border-slate-300 p-2" colspan="5">CHỈ SỐ TRƯỢT GIÁ NĂM SAU/NĂM TRƯỚC</td></tr>`;
+                        if (result.I_ratios) {
+                            result.I_ratios.forEach((val, idx) => {
+                                const yearPrev = i_n_data[idx].year;
+                                const yearNext = i_n_data[idx+1].year;
+                                reportHTML += `<tr><td class="border border-slate-300 p-2"></td><td class="border border-slate-300 p-2">Năm ${yearNext}/${yearPrev}</td><td class="border border-slate-300 p-2 text-center">b${idx + 1}</td><td class="border border-slate-300 p-2 text-center">a${idx + 2}/a${idx + 1}</td><td class="border border-slate-300 p-2 text-right">${val.toFixed(4).replace('.', ',')}</td><td class="border border-slate-300 p-2 text-center"></td></tr>`;
+                            });
+                        }
+                        // III
+                        let c_calc = (result.I_ratios && result.I_ratios.length > 0) ? `(b1+...+b${result.I_ratios.length})/${result.I_ratios.length}` : '-';
+                        reportHTML += `<tr class="font-bold bg-slate-50"><td class="border border-slate-300 p-2 text-center">III</td><td class="border border-slate-300 p-2 font-bold">CHỈ SỐ TRƯỢT GIÁ BÌNH QUÂN</td><td class="border border-slate-300 p-2 text-center font-bold">c</td><td class="border border-slate-300 p-2 text-center font-bold">${c_calc}</td><td class="border border-slate-300 p-2 text-right font-bold">${result.I_XDCTbq.toFixed(4).replace('.', ',')}</td><td class="border border-slate-300 p-2 text-right font-bold">${((result.I_XDCTbq - 1) * 100).toFixed(2).replace('.', ',')}</td></tr>`;
+                        // IV
+                        reportHTML += `<tr class="font-bold bg-slate-50"><td class="border border-slate-300 p-2 text-center">IV</td><td class="border border-slate-300 p-2" colspan="5">CHỈ SỐ TRƯỢT GIÁ CÁC NĂM</td></tr>`;
+                        const lastYear = i_n_data.length > 0 ? i_n_data[i_n_data.length - 1].year : 2026;
+                        result.breakdown.forEach((row) => {
+                            reportHTML += `<tr><td class="border border-slate-300 p-2"></td><td class="border border-slate-300 p-2 font-bold">Năm ${lastYear + row.year} (t=${row.year})</td><td class="border border-slate-300 p-2 text-center font-bold">d${row.year}</td><td class="border border-slate-300 p-2 text-center font-bold">c^${row.year}</td><td class="border border-slate-300 p-2 text-right font-bold">${row.inflation_factor.toFixed(4).replace('.', ',')}</td><td class="border border-slate-300 p-2 text-right font-bold">${(row.term * 100).toFixed(2).replace('.', ',')}</td></tr>`;
+                        });
+                        
+                        document.getElementById('full-report-body').innerHTML = reportHTML;
+                        document.getElementById('full-report-table-container').classList.remove('hidden');
+                    } else {
+                        document.getElementById('breakdown-container').classList.add('hidden');
+                    }
+                } else {
+                    console.error('Lỗi tính toán: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Lỗi kết nối máy chủ!');
+            } finally {
+                document.getElementById('loading-spinner').classList.add('hidden');
+                document.getElementById('results-wrapper').classList.remove('loading-results');
+            }
+        }
+        
+        function exportToWord() {
+            const tableContainer = document.getElementById('full-report-table-container');
+            if (!tableContainer || tableContainer.classList.contains('hidden')) {
+                alert("Chưa có bảng để xuất!");
+                return;
+            }
+            
+            const formatNum = (num) => new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(num);
+            
+            const G_BT_TDC = document.getElementById('G_BT_TDC').value || 0;
+            const G_XD = document.getElementById('G_XD').value || 0;
+            const G_TB = document.getElementById('G_TB').value || 0;
+            const G_QLDA = document.getElementById('G_QLDA').value || 0;
+            const G_TV = document.getElementById('G_TV').value || 0;
+            const G_K = document.getElementById('G_K').value || 0;
+            const k_ps = document.getElementById('k_ps').value || 0;
+            const deltaI = document.getElementById('Delta_I_XDCT').value || 0;
+            
+            const i_n_inputs_els = Array.from(document.querySelectorAll('.year-index'));
+            const i_n_years_els = Array.from(document.querySelectorAll('.year-label'));
+            let indicesHTML = '<ul>';
+            i_n_inputs_els.forEach((el, idx) => {
+                const y = i_n_years_els[idx] ? i_n_years_els[idx].value : (2020 + idx + 1);
+                indicesHTML += `<li>Năm ${y}: ${el.value}</li>`;
+            });
+            indicesHTML += '</ul>';
+            
+            const vInputs = Array.from(document.querySelectorAll('.capital-v'));
+            const lInputs = Array.from(document.querySelectorAll('.capital-l'));
+            let capitalHTML = '<ul>';
+            vInputs.forEach((el, idx) => {
+                capitalHTML += `<li>Năm t=${idx+1}: Vốn = ${formatNum(el.value || 0)}, Lãi vay = ${formatNum(lInputs[idx].value || 0)}</li>`;
+            });
+            capitalHTML += '</ul>';
+            
+            const G_DP1 = document.getElementById('res-gdp1').innerText;
+            const I_XDCT = document.getElementById('res-ixdct').innerText;
+            const G_DP2 = document.getElementById('res-gdp2').innerText;
+            const G_DP = document.getElementById('res-gdp').innerText;
+            
+            const htmlHeader = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>Báo cáo tính toán chi phí dự phòng</title>
+                <style>
+                    body { font-family: 'Times New Roman', Times, serif; font-size: 13pt; line-height: 1.5; }
+                    h1 { font-size: 16pt; text-align: center; text-transform: uppercase; font-weight: bold; margin-bottom: 20px; }
+                    h2 { font-size: 14pt; font-weight: bold; margin-top: 20px; margin-bottom: 10px; }
+                    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+                    th, td { border: 1px solid windowtext; padding: 6px; text-align: left; vertical-align: middle; }
+                    .text-center { text-align: center; }
+                    .text-right { text-align: right; }
+                    .font-bold { font-weight: bold; }
+                    .italic { font-style: italic; }
+                    h3 { font-size: 14pt; font-weight: bold; margin-bottom: 5px; text-align: center; }
+                    p { margin: 5px 0; }
+                    .summary { border: 1px solid windowtext; padding: 15px; margin-top: 15px; margin-bottom: 20px; }
+                    tr.bg-slate-50, tr.bg-slate-100 { background-color: #f1f5f9; }
+                </style>
+                </head><body>
+            `;
+            const htmlFooter = `</body></html>`;
+            
+            let tableHTML = document.querySelector('#full-report-table-container table').outerHTML;
+            
+            const content = `
+                <h1>BÁO CÁO TÍNH TOÁN CHI PHÍ DỰ PHÒNG<br>DO YẾU TỐ TRƯỢT GIÁ</h1>
+                
+                <h2>1. Các thông số đầu vào</h2>
+                <p><b>1.1. Chi phí dự phòng cho yếu tố khối lượng công việc phát sinh:</b></p>
+                <ul>
+                    <li>Chi phí bồi thường, hỗ trợ và tái định cư (G_BT,TĐC): ${formatNum(G_BT_TDC)} (Tỷ đồng)</li>
+                    <li>Chi phí xây dựng (G_XD): ${formatNum(G_XD)} (Tỷ đồng)</li>
+                    <li>Chi phí thiết bị (G_TB): ${formatNum(G_TB)} (Tỷ đồng)</li>
+                    <li>Chi phí quản lý dự án (G_QLDA): ${formatNum(G_QLDA)} (Tỷ đồng)</li>
+                    <li>Chi phí tư vấn đầu tư xây dựng (G_TV): ${formatNum(G_TV)} (Tỷ đồng)</li>
+                    <li>Chi phí khác (G_K): ${formatNum(G_K)} (Tỷ đồng)</li>
+                    <li>Tỷ lệ dự phòng khối lượng phát sinh (k_ps): ${k_ps}%</li>
+                </ul>
+                
+                <p><b>1.2. Chỉ số giá các năm trước:</b></p>
+                <p>- Biến động bình quân của chỉ số giá xây dựng (ΔI_XDCT): ${deltaI}%</p>
+                ${indicesHTML}
+                
+                <p><b>1.3. Kế hoạch phân bổ vốn các năm (V_t):</b></p>
+                ${capitalHTML}
+                
+                <h2>2. Kết quả tính toán</h2>
+                <div class="summary">
+                    <p>- Chi phí dự phòng cho yếu tố khối lượng công việc phát sinh (G_DP1): <b>${G_DP1} (Tỷ đồng)</b></p>
+                    <p>- Mức độ trượt giá bình quân (I_XDCTbq): <b>${I_XDCT}</b></p>
+                    <p>- Chi phí dự phòng cho yếu tố trượt giá (G_DP2): <b>${G_DP2} (Tỷ đồng)</b></p>
+                    <p style="font-size: 14pt; margin-top: 10px;"><b>TỔNG CHI PHÍ DỰ PHÒNG (G_DP): ${G_DP} (Tỷ đồng)</b></p>
+                </div>
+                
+                <h2>3. Bảng tính chi tiết (Bảng 4.4)</h2>
+                <h3>Bảng 4.4: Bảng tính chi phí dự phòng do trượt giá</h3>
+                <p class="italic text-center">(Theo Thông tư số 11/2021/BXD của Bộ Xây dựng ngày 31/8/2021)</p>
+                ${tableHTML}
+            `;
+            
+            const fullHTML = htmlHeader + content + htmlFooter;
+            const blob = new Blob(['\ufeff', fullHTML], { type: 'application/msword' });
+            
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'Bao_Cao_Tinh_Toan_Chi_Phi_Du_Phong.doc';
+            document.body.appendChild(link);
+            link.click();
+            
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            const selectSampleGdp1 = document.getElementById('sample-gdp1');
+            if (selectSampleGdp1) {
+                selectSampleGdp1.value = '40';
+                loadSampleGDP1();
+            }
+
+            const selectAutoIndex = document.getElementById('auto-index-select');
+            if (selectAutoIndex) {
+                selectAutoIndex.value = 'Công trình trụ sở cơ quan, văn phòng';
+                applyAutoIndices();
+            }
+        });
+    </script>
+</body>
+</html>

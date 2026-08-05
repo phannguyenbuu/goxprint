@@ -12,20 +12,40 @@ if exist "printagent.update.exe" (
     rem Tắt tiến trình cũ để mở khóa file
     taskkill /F /IM printagent.exe >nul 2>&1
     taskkill /F /IM agent_loader.exe >nul 2>&1
-    timeout /T 3 /nobreak >nul
+    timeout /T 5 /nobreak >nul
     
     rem Thay thế file
     if exist "printagent.exe" (
+        del /f /q "printagent.bak.exe" >nul 2>&1
         rename "printagent.exe" "printagent.bak.exe" >nul 2>&1
+        if exist "printagent.exe" (
+            echo [Watchdog] ERROR: Could not rename old printagent.exe - file locked!
+            timeout /T 5 /nobreak >nul
+            taskkill /F /IM printagent.exe >nul 2>&1
+            timeout /T 3 /nobreak >nul
+            rename "printagent.exe" "printagent.bak.exe" >nul 2>&1
+        )
     )
     rename "printagent.update.exe" "printagent.exe"
+    
+    rem Verify rename succeeded
+    if not exist "printagent.exe" (
+        echo [Watchdog] ERROR: Rename failed! Restoring backup...
+        if exist "printagent.bak.exe" (
+            rename "printagent.bak.exe" "printagent.exe"
+        )
+    )
     
     rem Xóa file backup cũ
     del /f /q "printagent.bak.exe" >nul 2>&1
     
     rem Khởi động lại
-    start /B "" "printagent.exe"
-    echo [Watchdog] Update applied successfully.
+    if exist "printagent.exe" (
+        start /B "" "printagent.exe"
+        echo [Watchdog] Update applied successfully.
+    ) else (
+        echo [Watchdog] ERROR: printagent.exe not found after update!
+    )
 )
 
 rem --- 2. KIỂM TRA RESTART KHẨN CẤP (API) ---

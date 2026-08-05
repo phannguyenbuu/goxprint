@@ -28,11 +28,15 @@ def main():
         if match:
             current_version = match.group(1)
             
+    import datetime
+    now = datetime.datetime.now()
+    auto_version = f"2.9.{now.strftime('%m%d%H%M%S')}"
+    
     if len(sys.argv) > 1:
         new_version = sys.argv[1].strip()
     else:
-        # Keep current version as-is (no auto-increment)
-        new_version = current_version
+        # Auto-generate timestamp version: 2.9.MMDDHHMMSS
+        new_version = auto_version
             
     print(f"Updating version from {current_version} to {new_version}...")
     
@@ -74,14 +78,20 @@ def main():
     
     if exe_src.exists():
         exe_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(exe_src, exe_dest)
-        print(f"Copied printagent.exe to {exe_dest}")
+        try:
+            shutil.copy2(exe_src, exe_dest)
+            print(f"Copied printagent.exe to {exe_dest}")
+        except Exception as e:
+            print(f"Warning: could not copy exe locally: {e}")
         
     ftp_src = root / "dist" / "gox_ftp_server.exe"
     ftp_dest = root / "backend" / "static" / "releases" / "gox_ftp_server.exe"
     if ftp_src.exists():
-        shutil.copy2(ftp_src, ftp_dest)
-        print(f"Copied gox_ftp_server.exe to {ftp_dest}")
+        try:
+            shutil.copy2(ftp_src, ftp_dest)
+            print(f"Copied gox_ftp_server.exe to {ftp_dest}")
+        except Exception as e:
+            print(f"Warning: could not copy ftp exe locally: {e}")
         
         # Calculate SHA256 and Size
         import hashlib

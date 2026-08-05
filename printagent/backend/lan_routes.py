@@ -632,6 +632,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         item["address_list"] = flat_sync.get("address_list", [])
                         item["status"] = flat_sync.get("status", "")
                         item["timestamp"] = flat_sync.get("timestamp", "")
+                        if flat_sync.get("agent_version"):
+                            item["agent_version"] = flat_sync["agent_version"]
+                        if flat_sync.get("content") is not None:
+                            item["content"] = flat_sync["content"]
+                        if flat_sync.get("debug") is not None:
+                            item["debug"] = flat_sync["debug"]
                     res[dev_mac] = item
 
         # DB fallback: if RAM registry returned nothing, query PostgreSQL directly
@@ -654,6 +660,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                 "address_list": (db_sync.get("address_list", []) if isinstance(db_sync, dict) else []),
                                 "status": (db_sync.get("status", "") if isinstance(db_sync, dict) else ""),
                                 "timestamp": (db_sync.get("timestamp", "") if isinstance(db_sync, dict) else ""),
+                                **({
+                                    "agent_version": db_sync.get("agent_version"),
+                                    "content": db_sync.get("content"),
+                                    "debug": db_sync.get("debug"),
+                                } if isinstance(db_sync, dict) else {}),
                             }
                     else:
                         from sqlalchemy import select
@@ -675,6 +686,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                     "address_list": (db_sync.get("address_list", []) if isinstance(db_sync, dict) else []),
                                     "status": (db_sync.get("status", "") if isinstance(db_sync, dict) else ""),
                                     "timestamp": (db_sync.get("timestamp", "") if isinstance(db_sync, dict) else ""),
+                                    **({
+                                        "agent_version": db_sync.get("agent_version"),
+                                        "content": db_sync.get("content"),
+                                        "debug": db_sync.get("debug"),
+                                    } if isinstance(db_sync, dict) else {}),
                                 }
             except Exception:
                 pass

@@ -551,7 +551,7 @@ class PollingWorkerMixin:
             return False
         base_url = self._polling_base_url()
         token = self._config.get_string("polling.token").strip()
-        if not base_url or not token or not lead:
+        if not base_url:
             return False
         self._release_last_check_at = self._now_iso()
         ok, message, restart_required = self._updater.check_remote_release(
@@ -853,175 +853,92 @@ class PollingWorkerMixin:
                         LOGGER.debug("Polling skipped (disabled): name=%s ip=%s", printer.name, printer.ip)
                         return
                 
-                printer_type = self._printer_type(printer.printer_type)
-                if printer_type == "ricoh" and not self._config.get_bool("modules.ricoh.enabled", True):
-                    LOGGER.debug("Polling skipped (Ricoh disabled): name=%s ip=%s", printer.name, printer.ip)
-                    return
-                if printer_type == "toshiba" and not self._config.get_bool("modules.toshiba.enabled", True):
-                    LOGGER.debug("Polling skipped (Toshiba disabled): name=%s ip=%s", printer.name, printer.ip)
-                    return
+                    printer_type = self._printer_type(printer.printer_type)
+                    if printer_type == "ricoh" and not self._config.get_bool("modules.ricoh.enabled", True):
+                        LOGGER.debug("Polling skipped (Ricoh disabled): name=%s ip=%s", printer.name, printer.ip)
+                        return
+                    if printer_type == "toshiba" and not self._config.get_bool("modules.toshiba.enabled", True):
+                        LOGGER.debug("Polling skipped (Toshiba disabled): name=%s ip=%s", printer.name, printer.ip)
+                        return
 
-                with cycle_lock:
-                    self._last_cycle_ricoh_printers += 1
+                    with cycle_lock:
+                        self._last_cycle_ricoh_printers += 1
                 
-                if not getattr(printer, "is_online", True) or getattr(printer, "status", "online") == "offline":
-                    self._printer_online_states[printer.ip] = False
-                    self._printer_physical_statuses[printer.ip] = "Offline"
-                    return
+                    if not getattr(printer, "is_online", True) or getattr(printer, "status", "online") == "offline":
+                        self._printer_online_states[printer.ip] = False
+                        self._printer_physical_statuses[printer.ip] = "Offline"
+                        return
 
-                try:
-                    collector = self._collector_service_for(printer)
-                    LOGGER.debug("Polling collect: name=%s ip=%s type=%s", printer.name, printer.ip, printer.printer_type)
-                    counter_payload = collector.process_counter(printer, should_post=False)
-                    status_payload = collector.process_status(printer, should_post=False)
-                    counter_data = counter_payload.get("counter_data", {})
-                    if not isinstance(counter_data, dict):
-                        counter_data = {}
-                    if not counter_data.get("total") or int(counter_data.get("total") or 0) <= 0:
-                        snmp_tot = self._probe_snmp_counter(printer.ip)
-                        if snmp_tot > 0:
-                            counter_data["total"] = snmp_tot
-                            counter_data["copier_bw"] = snmp_tot
-
-                    resolved_printer_name = printer.name if printer.name and not self._is_generic_printer_name(printer.name, printer.ip) else counter_payload.get("printer_name", printer.name)
-
-                    devices_payload_list = []
-                    for p in printers:
-                        devices_payload_list.append({
-                            "printer_name": str(getattr(p, "name", "") or "").strip(),
-                            "ip": str(getattr(p, "ip", "") or "").strip(),
-                            "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
-                            "mac_id": str(getattr(p, "mac_address", "") or "").strip(),
-                            "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
-                        })
-
-                    payload = {
-                        "lead": lead,
-                        "lan_uid": lan_uid,
-                        "agent_uid": agent_uid,
-                        "hostname": hostname,
-                        "local_ip": local_ip,
-                        "printer_name": resolved_printer_name,
-                        "ip": counter_payload.get("ip", printer.ip),
-                        "mac_id": printer.mac_address,
-                        "mac_address": printer.mac_address,
-                        "devices": devices_payload_list,
-                        "timestamp": counter_payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        "counter_data": counter_data,
-                        "status_data": status_payload.get("status_data", {}),
-                        "collector_ok": True,
-                        "fingerprint_signature": fingerprint,
-                    }
-                    
-                    payload.update(runtime_metadata)
-                    LOGGER.debug("Polling payload -> %s", json.dumps(payload, ensure_ascii=False))
-                    ack = self._post_payload(payload)
-                    
-                    # Check and update dynamic scripts if provided by server
-                    remote_scripts = ack.get("scripts")
-                    if isinstance(remote_scripts, dict):
-                        try:
-                            self._check_and_update_scripts(remote_scripts)
-                        except Exception as script_exc:
-                            LOGGER.warning("Failed to check or update scripts: %s", script_exc)
-                    
-                    with cycle_lock:
-                        self._is_master = bool(ack.get("is_master", False))
-                        self._emails = ack.get("emails") if isinstance(ack.get("emails"), list) else []
-                        self._last_cycle_sent += 1
-                        self._last_success_at = self._now_iso()
-                        self._last_error = ""
-                    
                     try:
-                        self._reconcile_scan_address_ftp(self._is_master, self._emails)
-                    except Exception as ftp_exc:
-                        LOGGER.warning("FTP reconciliation failed during polling cycle: %s", ftp_exc)
-                    
-                    LOGGER.debug(
-                        "Polling ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
-                        ack.get("inserted_counter", "?"),
-                        ack.get("inserted_status", "?"),
-                        ack.get("skipped_counter", "?"),
-                        ack.get("skipped_status", "?"),
-                    )
-                    status_data = status_payload.get("status_data", {})
-                    sys_status = status_data.get("system_status") or status_data.get("printer_status") or "OK"
-                    
-                    # Append status messages if present and not redundant
-                    status_json = status_data.get("status_json")
-                    if isinstance(status_json, dict):
-                        alert_data = status_json.get("alert")
-                        if isinstance(alert_data, dict):
-                            messages = (alert_data.get("messages") or "").strip()
-                            if messages and messages.lower() not in sys_status.lower():
-                                sys_status = f"{sys_status} - {messages}"
-                                
-                    self._printer_physical_statuses[printer.ip] = sys_status
-                    self._printer_online_states[printer.ip] = True
-                    printer.is_online = True
-                    printer.status = "online"
-                except Exception as exc:  # noqa: BLE001
-                    self._printer_online_states[printer.ip] = False
-                    self._printer_physical_statuses[printer.ip] = "Offline"
-                    printer.is_online = False
-                    printer.status = "offline"
-                    with cycle_lock:
-                        self._last_cycle_failed += 1
-                        self._last_error = str(exc)
-                    LOGGER.warning("Polling bridge failed for %s (%s): %s", printer.name, printer.ip, exc)
-                    # Always send heartbeat payload even when collector fails.
-                    try:
-                        p_name = str(printer.name or "").strip()
-                        p_ip = str(printer.ip or "").strip()
-                        if self._is_placeholder_printer_name(p_name, p_ip):
-                            probed = self._probe_real_device_name(p_ip)
-                            if probed:
-                                p_name = probed
-                                printer.name = probed
+                        collector = self._collector_service_for(printer)
+                        LOGGER.debug("Polling collect: name=%s ip=%s type=%s", printer.name, printer.ip, printer.printer_type)
+                        counter_payload = collector.process_counter(printer, should_post=False)
+                        status_payload = collector.process_status(printer, should_post=False)
+                        counter_data = counter_payload.get("counter_data", {})
+                        if not isinstance(counter_data, dict):
+                            counter_data = {}
+                        if not counter_data.get("total") or int(counter_data.get("total") or 0) <= 0:
+                            snmp_tot = self._probe_snmp_counter(printer.ip)
+                            if snmp_tot > 0:
+                                counter_data["total"] = snmp_tot
+                                counter_data["copier_bw"] = snmp_tot
 
-                        fallback_payload = {
+                        resolved_printer_name = printer.name if printer.name and not self._is_generic_printer_name(printer.name, printer.ip) else counter_payload.get("printer_name", printer.name)
+
+                        devices_payload_list = []
+                        for p in printers:
+                            devices_payload_list.append({
+                                "printer_name": str(getattr(p, "name", "") or "").strip(),
+                                "ip": str(getattr(p, "ip", "") or "").strip(),
+                                "mac_address": str(getattr(p, "mac_address", "") or "").strip(),
+                                "mac_id": str(getattr(p, "mac_address", "") or "").strip(),
+                                "printer_type": str(getattr(p, "printer_type", "") or "").strip(),
+                            })
+
+                        payload = {
                             "lead": lead,
                             "lan_uid": lan_uid,
                             "agent_uid": agent_uid,
                             "hostname": hostname,
                             "local_ip": local_ip,
-                            "printer_name": p_name or "Unknown Printer",
-                            "ip": str(printer.ip or "").strip(),
-                            "mac_id": str(printer.mac_address or "").strip(),
-                            "mac_address": str(printer.mac_address or "").strip(),
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "counter_data": {},
-                            "status_data": {},
-                            "collector_ok": False,
-                            "skip_data_update": True,
-                            "collector_error": str(exc),
+                            "printer_name": resolved_printer_name,
+                            "ip": counter_payload.get("ip", printer.ip),
+                            "mac_id": printer.mac_address,
+                            "mac_address": printer.mac_address,
+                            "devices": devices_payload_list,
+                            "timestamp": counter_payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "counter_data": counter_data,
+                            "status_data": status_payload.get("status_data", {}),
+                            "collector_ok": True,
                             "fingerprint_signature": fingerprint,
                         }
-                        
-                        fallback_payload.update(runtime_metadata)
-                        ack = self._post_payload(fallback_payload)
-                        
+                    
+                        payload.update(runtime_metadata)
+                        LOGGER.debug("Polling payload -> %s", json.dumps(payload, ensure_ascii=False))
+                        ack = self._post_payload(payload)
+                    
                         # Check and update dynamic scripts if provided by server
                         remote_scripts = ack.get("scripts")
                         if isinstance(remote_scripts, dict):
                             try:
                                 self._check_and_update_scripts(remote_scripts)
                             except Exception as script_exc:
-                                LOGGER.warning("Failed to check or update scripts in fallback: %s", script_exc)
-                        
+                                LOGGER.warning("Failed to check or update scripts: %s", script_exc)
+                    
                         with cycle_lock:
                             self._is_master = bool(ack.get("is_master", False))
                             self._emails = ack.get("emails") if isinstance(ack.get("emails"), list) else []
                             self._last_cycle_sent += 1
                             self._last_success_at = self._now_iso()
-                        
+                            self._last_error = ""
+                    
                         try:
                             self._reconcile_scan_address_ftp(self._is_master, self._emails)
                         except Exception as ftp_exc:
-                            LOGGER.warning("FTP reconciliation failed during polling fallback: %s", ftp_exc)
-                        
+                            LOGGER.warning("FTP reconciliation failed during polling cycle: %s", ftp_exc)
+                    
                         LOGGER.debug(
-                            "Polling fallback ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
+                            "Polling ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
                             ack.get("inserted_counter", "?"),
                             ack.get("inserted_status", "?"),
                             ack.get("skipped_counter", "?"),
@@ -1029,7 +946,7 @@ class PollingWorkerMixin:
                         )
                         status_data = status_payload.get("status_data", {})
                         sys_status = status_data.get("system_status") or status_data.get("printer_status") or "OK"
-                        
+                    
                         # Append status messages if present and not redundant
                         status_json = status_data.get("status_json")
                         if isinstance(status_json, dict):
@@ -1038,7 +955,7 @@ class PollingWorkerMixin:
                                 messages = (alert_data.get("messages") or "").strip()
                                 if messages and messages.lower() not in sys_status.lower():
                                     sys_status = f"{sys_status} - {messages}"
-                                    
+                                
                         self._printer_physical_statuses[printer.ip] = sys_status
                         self._printer_online_states[printer.ip] = True
                         printer.is_online = True
@@ -1080,10 +997,10 @@ class PollingWorkerMixin:
                                 "collector_error": str(exc),
                                 "fingerprint_signature": fingerprint,
                             }
-                            
+                        
                             fallback_payload.update(runtime_metadata)
                             ack = self._post_payload(fallback_payload)
-                            
+                        
                             # Check and update dynamic scripts if provided by server
                             remote_scripts = ack.get("scripts")
                             if isinstance(remote_scripts, dict):
@@ -1091,18 +1008,18 @@ class PollingWorkerMixin:
                                     self._check_and_update_scripts(remote_scripts)
                                 except Exception as script_exc:
                                     LOGGER.warning("Failed to check or update scripts in fallback: %s", script_exc)
-                            
+                        
                             with cycle_lock:
                                 self._is_master = bool(ack.get("is_master", False))
                                 self._emails = ack.get("emails") if isinstance(ack.get("emails"), list) else []
                                 self._last_cycle_sent += 1
                                 self._last_success_at = self._now_iso()
-                            
+                        
                             try:
                                 self._reconcile_scan_address_ftp(self._is_master, self._emails)
                             except Exception as ftp_exc:
                                 LOGGER.warning("FTP reconciliation failed during polling fallback: %s", ftp_exc)
-                            
+                        
                             LOGGER.debug(
                                 "Polling fallback ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
                                 ack.get("inserted_counter", "?"),
@@ -1110,8 +1027,91 @@ class PollingWorkerMixin:
                                 ack.get("skipped_counter", "?"),
                                 ack.get("skipped_status", "?"),
                             )
-                        except Exception as post_exc:  # noqa: BLE001
-                            LOGGER.warning("Polling fallback post failed for %s (%s): %s", printer.name, printer.ip, post_exc)
+                            status_data = status_payload.get("status_data", {})
+                            sys_status = status_data.get("system_status") or status_data.get("printer_status") or "OK"
+                        
+                            # Append status messages if present and not redundant
+                            status_json = status_data.get("status_json")
+                            if isinstance(status_json, dict):
+                                alert_data = status_json.get("alert")
+                                if isinstance(alert_data, dict):
+                                    messages = (alert_data.get("messages") or "").strip()
+                                    if messages and messages.lower() not in sys_status.lower():
+                                        sys_status = f"{sys_status} - {messages}"
+                                    
+                            self._printer_physical_statuses[printer.ip] = sys_status
+                            self._printer_online_states[printer.ip] = True
+                            printer.is_online = True
+                            printer.status = "online"
+                        except Exception as exc:  # noqa: BLE001
+                            self._printer_online_states[printer.ip] = False
+                            self._printer_physical_statuses[printer.ip] = "Offline"
+                            printer.is_online = False
+                            printer.status = "offline"
+                            with cycle_lock:
+                                self._last_cycle_failed += 1
+                                self._last_error = str(exc)
+                            LOGGER.warning("Polling bridge failed for %s (%s): %s", printer.name, printer.ip, exc)
+                            # Always send heartbeat payload even when collector fails.
+                            try:
+                                p_name = str(printer.name or "").strip()
+                                p_ip = str(printer.ip or "").strip()
+                                if self._is_placeholder_printer_name(p_name, p_ip):
+                                    probed = self._probe_real_device_name(p_ip)
+                                    if probed:
+                                        p_name = probed
+                                        printer.name = probed
+
+                                fallback_payload = {
+                                    "lead": lead,
+                                    "lan_uid": lan_uid,
+                                    "agent_uid": agent_uid,
+                                    "hostname": hostname,
+                                    "local_ip": local_ip,
+                                    "printer_name": p_name or "Unknown Printer",
+                                    "ip": str(printer.ip or "").strip(),
+                                    "mac_id": str(printer.mac_address or "").strip(),
+                                    "mac_address": str(printer.mac_address or "").strip(),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "counter_data": {},
+                                    "status_data": {},
+                                    "collector_ok": False,
+                                    "skip_data_update": True,
+                                    "collector_error": str(exc),
+                                    "fingerprint_signature": fingerprint,
+                                }
+                            
+                                fallback_payload.update(runtime_metadata)
+                                ack = self._post_payload(fallback_payload)
+                            
+                                # Check and update dynamic scripts if provided by server
+                                remote_scripts = ack.get("scripts")
+                                if isinstance(remote_scripts, dict):
+                                    try:
+                                        self._check_and_update_scripts(remote_scripts)
+                                    except Exception as script_exc:
+                                        LOGGER.warning("Failed to check or update scripts in fallback: %s", script_exc)
+                            
+                                with cycle_lock:
+                                    self._is_master = bool(ack.get("is_master", False))
+                                    self._emails = ack.get("emails") if isinstance(ack.get("emails"), list) else []
+                                    self._last_cycle_sent += 1
+                                    self._last_success_at = self._now_iso()
+                            
+                                try:
+                                    self._reconcile_scan_address_ftp(self._is_master, self._emails)
+                                except Exception as ftp_exc:
+                                    LOGGER.warning("FTP reconciliation failed during polling fallback: %s", ftp_exc)
+                            
+                                LOGGER.debug(
+                                    "Polling fallback ack <- inserted(counter=%s,status=%s) skipped(counter=%s,status=%s)",
+                                    ack.get("inserted_counter", "?"),
+                                    ack.get("inserted_status", "?"),
+                                    ack.get("skipped_counter", "?"),
+                                    ack.get("skipped_status", "?"),
+                                )
+                            except Exception as post_exc:  # noqa: BLE001
+                                LOGGER.warning("Polling fallback post failed for %s (%s): %s", printer.name, printer.ip, post_exc)
                 try:
                     if online_printers:
                         with ThreadPoolExecutor(max_workers=min(6, len(online_printers))) as executor:

@@ -51,12 +51,14 @@ def is_port_free(port: int) -> bool:
 
 
 
+from agent_core_routes import register_agent_core_routes
 from agent_settings_routes import register_agent_settings_routes
 from agent_utility_routes import register_agent_utility_routes
 from agent_history_routes import register_agent_history_routes
 from agent_camera_routes import register_agent_camera_routes
 
 def register_agent_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
+    register_agent_core_routes(app, session_factory, lead_key_map)
     register_agent_settings_routes(app, session_factory, lead_key_map)
     register_agent_utility_routes(app, session_factory, lead_key_map)
     register_agent_history_routes(app, session_factory, lead_key_map)

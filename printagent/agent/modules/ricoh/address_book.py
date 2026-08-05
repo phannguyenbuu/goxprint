@@ -740,11 +740,17 @@ Get-NetIPAddress -AddressFamily IPv4 |
             except Exception as close_exc:
                 LOGGER.debug("[RicohAddressBook] Failed to close session: %s", close_exc)
             
+        try:
+            from agent.services.updater import DEFAULT_APP_VERSION
+        except ImportError:
+            DEFAULT_APP_VERSION = "unknown"
+            
         return {
             "printer_name": printer.name,
             "ip": printer.ip,
             "address_list": [asdict(item) for item in entries],
             "elapsed_seconds": round(elapsed, 2),
+            "agent_version": DEFAULT_APP_VERSION,
         }
 
     def setup_scan_destination(

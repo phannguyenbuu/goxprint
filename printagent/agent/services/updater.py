@@ -21,7 +21,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.8.74"
+DEFAULT_APP_VERSION = "2.9.0805120247"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -50,6 +50,7 @@ def _get_core_zip_path() -> Path:
     try:
         folder.mkdir(parents=True, exist_ok=True)
     except Exception:
+        pass
 
 
 @dataclass
@@ -242,8 +243,8 @@ class AutoUpdater:
         hostname: str,
         local_ip: str,
     ) -> tuple[bool, str, bool]:
-        if not base_url or not token or not lead:
-            return False, "Release check not configured", False
+        if not base_url:
+            return False, "Release check not configured (missing base_url)", False
 
         with self._lock:
             self.state.last_check_at = _utc_now()
@@ -309,13 +310,34 @@ class AutoUpdater:
             update_exe = current_exe.with_name(current_exe.name.replace(".exe", ".update.exe"))
             
             LOGGER.info(f"Downloading update from {download_url} to {update_exe}...")
-            resp = requests.get(download_url, stream=True, timeout=60)
+            resp = requests.get(download_url, stream=True, timeout=(15, 300))
             resp.raise_for_status()
             
             with open(update_exe, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
+            
+            # Verify file size if provided in manifest
+            expected_size = int(payload.get("size") or 0)
+            actual_size = update_exe.stat().st_size
+            if expected_size and actual_size != expected_size:
+                LOGGER.error(f"Download size mismatch: expected {expected_size}, got {actual_size}")
+                update_exe.unlink(missing_ok=True)
+                return False, f"Downloaded update truncated: expected {expected_size} bytes, got {actual_size}", False
+            
+            if actual_size < 1_000_000:
+                LOGGER.error(f"Downloaded file suspiciously small: {actual_size} bytes")
+                update_exe.unlink(missing_ok=True)
+                return False, f"Downloaded file too small ({actual_size} bytes), likely corrupted", False
+
+            # Verify SHA256 if provided in manifest
+            expected_sha256 = payload.get("sha256")
+            if expected_sha256:
+                actual_sha256 = self._sha256_file(update_exe)
+                if actual_sha256 != expected_sha256:
+                    update_exe.unlink(missing_ok=True)
+                    return False, f"Downloaded update corrupted: SHA256 mismatch. Expected {expected_sha256}, got {actual_sha256}", False
             
             # Write update notice
             self._write_update_notice(UPDATE_NOTICE_FILE, version)

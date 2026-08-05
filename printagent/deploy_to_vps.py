@@ -85,8 +85,8 @@ if local_exe.exists():
 files_to_copy = [
     (str(local_backend / 'storage' / 'utility_commands.json'), '/opt/printagent/storage/utility_commands.json'),
     (str(local_backend / 'storage' / 'releases' / 'agent_release.json'), '/opt/printagent/storage/releases/agent_release.json'),
-    (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
-    (str(local_backend / 'static' / 'releases' / 'gox_ftp_server.exe'), '/opt/printagent/static/releases/gox_ftp_server.exe'),
+    (str(root_dir / 'dist' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
+    (str(root_dir / 'dist' / 'gox_ftp_server.exe'), '/opt/printagent/static/releases/gox_ftp_server.exe'),
     (str(root_dir / 'dist' / 'printagentinstall.exe'), '/opt/printagent/static/releases/printagentinstall.exe'),
     (str(local_backend / 'static' / 'releases' / 'GoxDriverService.exe'), '/opt/printagent/static/releases/GoxDriverService.exe'),
     (str(local_backend / 'static' / 'releases' / 'install_gox_driver_service.ps1'), '/opt/printagent/static/releases/install_gox_driver_service.ps1'),

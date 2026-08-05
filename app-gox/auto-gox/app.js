@@ -395,11 +395,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderPrintersInModal() {
     modalPrintersList.innerHTML = '';
     
-    // Filter out unknown and hb test printers, and only include online copiers
+    // Filter out unknown and hb test printers, and only hide offline if probed
     const filteredPrinters = activePrinters.filter(p => {
       const name = (p.printer_name || '').toLowerCase();
       const isOnline = p.is_online === true || p.is_online === 'true';
-      return !name.includes('unknown') && !name.includes('hb test') && isOnline;
+      if (p.probed && !isOnline) return false;
+      return !name.includes('unknown') && !name.includes('hb test');
     });
 
     if (filteredPrinters.length === 0) {

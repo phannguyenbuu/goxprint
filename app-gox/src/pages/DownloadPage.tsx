@@ -33,6 +33,7 @@ function getCommandName(type: string, paramsStr: string): string {
       if (cmd === 'get_camera_status') return '📊 Xem trạng thái ghi hình';
       if (cmd === 'start_tunnel') return '🌐 Mở kết nối Web Proxy (SSH Tunnel)';
       if (cmd === 'stop_tunnel') return '🔌 Đóng kết nối Web Proxy';
+      if (cmd === 'force_subnet_scan') return '📡 Quét thiết bị mạng LAN';
       return cmd ? `⚙️ Lệnh tiện ích: ${cmd}` : '⚙️ Lệnh tiện ích';
     } catch {
       return '⚙️ Lệnh tiện ích';

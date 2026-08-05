@@ -17,13 +17,8 @@ def log_install(msg: str) -> None:
     except Exception:
         pass
 
-def msg_box(title, text, is_error=False):
-    log_install(f"{'[ERROR] ' if is_error else '[INFO] '}{title}: {text}")
-    style = 0x10 if is_error else 0x40
-    try:
-        ctypes.windll.user32.MessageBoxW(0, text, title, style)
-    except Exception:
-        pass
+def msg_box(title, message, is_error=False):
+    log_install(f"{'[ERROR] ' if is_error else '[INFO] '}{title}: {message}")
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -467,8 +462,26 @@ def main():
     print(" cập nhật phiên bản mới thông qua Watchdog.")
     print("==============================================\n")
     
+    # Fetch version from API
+    downloaded_version = "Mới nhất"
+    try:
+        import urllib.request, json, ssl
+        base_url = api_url.strip().rstrip("/")
+        if base_url.endswith("/api"):
+            base_url = base_url[:-4]
+        ver_url = f"{base_url}/static/releases/agent_release.json?t={int(time.time() * 1000)}"
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(ver_url, headers={"User-Agent": "GoxInstaller"})
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+            ver_data = json.loads(response.read().decode('utf-8'))
+            downloaded_version = ver_data.get("version", downloaded_version)
+    except Exception as e:
+        print(f" Không thể lấy thông tin version: {e}")
+    
     # Notify user it completed
-    msg_box("Hoàn tất", "Cài đặt Gox PrintAgent thành công!", is_error=False)
+    msg_box("Hoàn tất", f"Cài đặt Gox PrintAgent (v{downloaded_version}) thành công!", is_error=False)
     
     time.sleep(1)
 

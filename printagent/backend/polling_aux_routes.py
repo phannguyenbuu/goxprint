@@ -317,6 +317,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             "status": "success",
                             "timestamp": item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                             "address_list": enriched_list,
+                            "agent_version": item.get("agent_version", "unknown"),
                         }
 
                         # 1. Update in-memory ACTIVE_AGENTS
@@ -394,6 +395,9 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             "status": "success",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "address_list": enriched_list,
+            "agent_version": address_book_data.get("agent_version", ""),
+            "content": address_book_data.get("content"),
+            "debug": address_book_data.get("debug"),
         }
 
         # 1. Update in-memory printers_json in ACTIVE_AGENTS strictly by mac_address

@@ -21,15 +21,15 @@ Write-Host "Installing/checking dependencies..." -ForegroundColor Cyan
 & $venvPython -m pip install -r requirements.txt pyinstaller | Out-Null
 
 Write-Host "Compiling printagent.exe (Main Agent)..." -ForegroundColor Cyan
-& $venvPython -m PyInstaller --clean --noconfirm --name printagent --onefile --icon=logo1.ico agent\main.py
+& $venvPython -m PyInstaller --clean --noconfirm --name printagent --windowed --onefile --icon=logo1.ico --hidden-import=lxml agent\main.py
 
 Write-Host "Compiling GoxDriverService.exe (Driver Service)..." -ForegroundColor Cyan
 & $venvPython -m PyInstaller --clean --noconfirm --name GoxDriverService --onefile --uac-admin --icon=logo1.ico gox_driver_service\main.py
 
 Write-Host "Compiling gox_ftp_server.exe (FTP Worker)..." -ForegroundColor Cyan
-& $venvPython -m PyInstaller --clean --noconfirm --name gox_ftp_server --onefile --icon=logo1.ico ftp_main.py
+& $venvPython -m PyInstaller --clean --noconfirm --name gox_ftp_server --windowed --onefile --icon=logo1.ico ftp_main.py
 
 Write-Host "Compiling printagentinstall.exe (Installer)..." -ForegroundColor Cyan
-& $venvPython -m PyInstaller --clean --noconfirm --name printagentinstall --onefile --uac-admin --icon=logo1.ico installer.py
+& $venvPython -m PyInstaller --clean --noconfirm --name printagentinstall --windowed --onefile --uac-admin --icon=logo1.ico installer.py
 
 Write-Host "Build completed: $root\dist\printagent.exe, gox_ftp_server.exe and printagentinstall.exe, and GoxDriverService.exe" -ForegroundColor Green

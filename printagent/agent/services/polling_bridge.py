@@ -590,6 +590,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
                 text=True,
                 timeout=8,
                 check=True,
+                **no_window_subprocess_kwargs(),
             )
         except Exception:  # noqa: BLE001
             return {}

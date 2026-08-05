@@ -264,10 +264,10 @@ class PollingControlMixin:
                         pass
 
                     # 3. Try arp -a (full table or specific IP)
-                    for cmd in [f"arp -a {ip_addr}", "arp -a"]:
+                    for cmd in [["arp", "-a", ip_addr], ["arp", "-a"]]:
                         try:
                             import subprocess
-                            output = subprocess.check_output(cmd, shell=True, timeout=0.8).decode('utf-8', errors='ignore')
+                            output = subprocess.check_output(cmd, timeout=0.8, **no_window_subprocess_kwargs()).decode('utf-8', errors='ignore')
                             for line in output.splitlines():
                                 if ip_addr in line:
                                     mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', line)
@@ -553,6 +553,8 @@ class PollingControlMixin:
                     break
 
     def _apply_command(self, printer: Printer, command: dict[str, object]) -> None:
+        import socket
+        agent_uid = self._agent_uid or socket.gethostname()
         command_id = int(command.get("id", 0) or 0)
         desired_enabled = bool(command.get("desired_enabled", True))
         command_type = str(command.get("command_type", "enable_disable")).strip().lower()

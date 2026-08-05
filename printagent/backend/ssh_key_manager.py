@@ -32,7 +32,7 @@ def register_public_ssh_key(public_key: str) -> bool:
                 break
                 
         if not already_exists:
-            options = 'no-pty,no-X11-forwarding,no-agent-forwarding,command="/bin/false"'
+            options = 'no-pty,no-X11-forwarding,no-agent-forwarding,command="sleep infinity"'
             formatted_line = f"{options} {public_key}"
             
             with open(authorized_keys_path, "a", encoding="utf-8") as f:
