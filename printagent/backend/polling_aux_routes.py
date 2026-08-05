@@ -856,8 +856,8 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 printer_name = _to_text(item.get("printer_name")) or _to_text(item.get("name"))
                 ip = _to_text(item.get("ip"))
                 mac_address = _normalize_mac(_to_text(item.get("mac_address") or item.get("mac_id")))
-                if not mac_address:
-                    continue  # Skip printers without MAC
+                if not mac_address and not ip:
+                    continue  # Skip printers without both MAC and IP
                 is_online = _to_text(item.get("status")).lower() != "offline"
                 _upsert_printer_from_polling(
                     session=session,
