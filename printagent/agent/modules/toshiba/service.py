@@ -199,71 +199,110 @@ class ToshibaService:
         username: str,
         email: str = "",
     ) -> dict[str, Any]:
-        """Creates local SMB share folder and registers scan destination template on Toshiba TopAccess."""
+        """Creates local FTP site and registers scan destination template on Toshiba TopAccess."""
+        from pathlib import Path
         username_str = str(username or "").strip()
         safe_username = re.sub(r"[^A-Za-z0-9_-]", "", username_str.replace(" ", "_"))[:48] or "scan"
-        share_name = f"Scan_{safe_username}"
 
-        # 1. Resolve local path inside Temp
-        from agent.services.runtime import user_temp_root, no_window_subprocess_kwargs
-        goxprint_base = user_temp_root() / "smb"
+        # 1. Create FTP folder (same structure as Ricoh)
+        from agent.services.runtime import user_temp_root
+        goxprint_base = user_temp_root() / "ftp"
         subfolder_path = goxprint_base / safe_username
         try:
             subfolder_path.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
 
-        # 2. Configure Windows SMB users and services
-        win_user = "scanner"
-        win_pass = "Abc@123"
+        # 2. Get FTP credentials from AppConfig (same as Ricoh)
+        ftp_name = "goxprint"
+        ftp_root_path = goxprint_base
+        ftp_user = "goxprint"
+        ftp_password = "goxprint"
+        config_port = None
 
-        LOGGER.info("[ToshibaService] Initializing Windows SMB configuration for user=%s path=%s", win_user, subfolder_path)
-        try:
-            # Enable SMB2
-            subprocess.run('powershell -Command "Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force"', shell=True, **no_window_subprocess_kwargs())
-            # Start lanmanserver and lanmanworkstation services
-            subprocess.run('sc config lanmanserver start= auto', shell=True, **no_window_subprocess_kwargs())
-            subprocess.run('net start lanmanserver', shell=True, **no_window_subprocess_kwargs())
-            subprocess.run('sc config lanmanworkstation start= auto', shell=True, **no_window_subprocess_kwargs())
-            subprocess.run('net start lanmanworkstation', shell=True, **no_window_subprocess_kwargs())
-            # Open Firewall
-            subprocess.run('netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes', shell=True, **no_window_subprocess_kwargs())
+        app_config = getattr(self, "_config", None)
+        if app_config is not None:
+            try:
+                val = app_config.get_string("ftp_port")
+                if val and val.isdigit():
+                    config_port = int(val)
+            except Exception:
+                pass
+            try:
+                val_u = app_config.get_string("ftp_user")
+                if val_u:
+                    ftp_user = val_u
+                val_p = app_config.get_string("ftp_pass")
+                if val_p:
+                    ftp_password = val_p
+            except Exception:
+                pass
 
-            # Check if user 'scanner' exists, create or update password
-            check_user = subprocess.run(f'net user {win_user}', shell=True, capture_output=True, **no_window_subprocess_kwargs())
-            if check_user.returncode != 0:
-                subprocess.run(f'net user {win_user} {win_pass} /add', shell=True, **no_window_subprocess_kwargs())
-            else:
-                subprocess.run(f'net user {win_user} {win_pass}', shell=True, **no_window_subprocess_kwargs())
+        # 3. Dynamic port selection (same as Ricoh)
+        from agent.services.ftp_store import load_config, find_site_by_port, normalize_site_name
 
-            # Configure Password Never Expires and hide from welcome screen
-            subprocess.run(f'wmic UserAccount where Name="{win_user}" set PasswordExpires=False', shell=True, **no_window_subprocess_kwargs())
-            reg_cmd = f'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList" /v {win_user} /t REG_DWORD /d 0 /f'
-            subprocess.run(reg_cmd, shell=True, **no_window_subprocess_kwargs())
-        except Exception as e:
-            LOGGER.warning("[ToshibaService] Non-critical Windows user setup exception: %s", e)
+        if config_port is not None:
+            actual_port = config_port
+        else:
+            actual_port = 2130
+            while True:
+                config_data = load_config()
+                existing_by_port = find_site_by_port(config_data, actual_port)
+                is_assigned_elsewhere = False
+                if existing_by_port:
+                    if normalize_site_name(str(existing_by_port.get("name", "") or "")) != normalize_site_name(ftp_name):
+                        is_assigned_elsewhere = True
 
-        # 3. Create SMB Share using ShareManager
+                is_physically_bound = False
+                if not is_assigned_elsewhere:
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.bind(('0.0.0.0', actual_port))
+                    except Exception:
+                        is_physically_bound = True
+
+                if not is_assigned_elsewhere and not is_physically_bound:
+                    break
+                actual_port += 1
+
+            if app_config is not None:
+                try:
+                    app_config.set_value("ftp_port", actual_port)
+                except Exception:
+                    pass
+
+        # 4. Create FTP site using ShareManager (same as Ricoh)
         from agent.utils.shares import ShareManager
-        smb_manager = ShareManager()
-        share_res = smb_manager.create_smb_share(
-            share_name=share_name,
-            local_path=subfolder_path,
-            user=win_user,
-            access="Full"
+        share_manager = ShareManager()
+        ftp_res = share_manager.create_ftp_site(
+            site_name=ftp_name,
+            local_path=ftp_root_path,
+            port=actual_port,
+            ftp_user=ftp_user,
+            ftp_password=ftp_password,
         )
-        if not share_res.get("ok"):
-            return {
-                "ok": False,
-                "error": f"Failed to create local SMB share: {share_res.get('error')}"
-            }
+        if not ftp_res.get("ok"):
+            return ftp_res
 
-        # 4. Resolve local IP and PC Hostname
-        pc_name = socket.gethostname()
+        ftp_root_path = Path(str(ftp_res.get("physical_path", "") or ftp_root_path))
+        ftp_user = str(ftp_res.get("ftp_user", "") or ftp_user)
+        ftp_password = str(ftp_res.get("ftp_password", "") or ftp_password)
+        ftp_port_value = int(ftp_res.get("port") or actual_port)
+
+        # Ensure scan dir
+        scan_dir_added = False
+        scan_dirs: list[str] = []
+        if app_config is not None and hasattr(app_config, "ensure_scan_dir"):
+            try:
+                scan_dir_added, scan_dirs = app_config.ensure_scan_dir(subfolder_path)
+            except Exception:
+                pass
+
+        # 5. Resolve local IP toward printer
         local_ip = "127.0.0.1"
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect((printer.ip, 10443))
+            s.connect((printer.ip, 80))
             local_ip = s.getsockname()[0]
             s.close()
         except Exception:
@@ -275,15 +314,24 @@ class ToshibaService:
             except Exception:
                 pass
 
-        # 5. Connect and register destination template on Toshiba Copier
+        folder_name = safe_username
+        ftp_url = f"ftp://{local_ip}:{ftp_port_value}/"
+        ftp_user_url = f"ftp://{local_ip}:{ftp_port_value}/{folder_name}/"
+
+        # 6. Login to Toshiba TopAccess (HTTP only + userTokenId detection)
         session = requests.Session()
-        session.mount("https://", ToshibaSSLAdapter())
-        base_urls = [
-            f"https://{printer.ip}:10443",
-            f"https://{printer.ip}",
-            f"http://{printer.ip}",
-        ]
-        headers = {'Content-Type': 'text/plain; charset=UTF-8', 'Accept': '*/*'}
+        base_url = f"http://{printer.ip}"
+        cgi_url = f"{base_url}/contentwebserver"
+        headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "*/*"}
+
+        # Get session cookie for CSRF
+        try:
+            session.get(f"{base_url}/", verify=False, timeout=5)
+            session_cookie = session.cookies.get("Session") or ""
+            if session_cookie:
+                headers["csrfpId"] = session_cookie
+        except Exception:
+            pass
 
         # Resolve admin credentials
         pws = []
@@ -297,15 +345,9 @@ class ToshibaService:
         user_name = printer.user or getattr(printer, "auth_user", "") or "admin"
 
         login_success = False
-        active_pw = ""
-        base_url = base_urls[0]
-
-        LOGGER.info("[ToshibaService] Attempting TopAccess Login for printer %s...", printer.ip)
-        for target_url in base_urls:
-            if login_success:
-                break
-            for pw in pws:
-                login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        LOGGER.info("[ToshibaService] setup_scan: Attempting TopAccess Login for %s...", printer.ip)
+        for pw in pws:
+            login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <SetValue>
     <Authentication>
@@ -324,22 +366,35 @@ class ToshibaService:
     </Login>
 </Command>
 </DeviceInformationModel>"""
-                try:
-                    r = session.post(f"{target_url}/contentwebserver", data=login_xml, headers=headers, verify=False, timeout=6)
-                    if r.status_code == 200 and "<LoginResult>Success</LoginResult>" in r.text:
-                        login_success = True
-                        active_pw = pw
-                        base_url = target_url
-                        break
-                except Exception as e:
-                    LOGGER.debug("[ToshibaService] Login attempt failed at %s with password '%s': %s", target_url, pw, e)
+            try:
+                r = session.post(cgi_url, data=login_xml, headers=headers, verify=False, timeout=8)
+                has_success = "<LoginResult>Success</LoginResult>" in r.text
+                has_token = "<userTokenId>" in r.text and r.status_code == 200
+                if r.status_code == 200 and (has_success or has_token):
+                    login_success = True
+                    LOGGER.info("[ToshibaService] setup_scan: LOGIN OK for %s (token=%s)", printer.ip, has_token)
+                    break
+            except Exception as e:
+                LOGGER.debug("[ToshibaService] setup_scan: Login attempt failed: %s", e)
+            if login_success:
+                break
 
         if not login_success:
-            LOGGER.warning("[ToshibaService] TopAccess Login failed across all URLs for printer %s, attempting template registration without login...", printer.ip)
+            LOGGER.warning("[ToshibaService] setup_scan: Login FAILED for %s, attempting without login...", printer.ip)
 
-        LOGGER.info("[ToshibaService] TopAccess active base_url: %s (password: '%s')", base_url, active_pw)
+        # Refresh CSRF token after login
+        new_session_cookie = session.cookies.get("Session") or ""
+        if new_session_cookie:
+            headers["csrfpId"] = new_session_cookie
 
-        # Register SCAN Group (Group 002) if not exists
+        # 7. Set LICENSE_SETTINGS
+        try:
+            license_xml = """<DeviceInformationModel><SetValue overrideDelta="false"><Payload><path>TopAccess/SessionInfo/LICENSE_SETTINGS</path><value>,METASCAN:NO,PDF-A:YES,EWB:YES,IPSEC:NO,</value></Payload></SetValue></DeviceInformationModel>"""
+            session.post(cgi_url, data=license_xml, headers=headers, verify=False, timeout=5)
+        except Exception:
+            pass
+
+        # 8. Register SCAN Group (Group 002) if not exists
         group_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <SetValue>
@@ -369,11 +424,11 @@ class ToshibaService:
 </Command>
 </DeviceInformationModel>"""
         try:
-            session.post(f"{base_url}/contentwebserver", data=group_xml, headers=headers, verify=False, timeout=8)
+            session.post(cgi_url, data=group_xml, headers=headers, verify=False, timeout=8)
         except Exception as e:
             LOGGER.debug("[ToshibaService] Group 002 creation ignored (might already exist): %s", e)
 
-        # Retrieve template list in Group 002 to find occupied slots
+        # 9. Retrieve template list in Group 002 to find occupied slots
         get_templates_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <GetValue>
@@ -395,10 +450,16 @@ class ToshibaService:
 </DeviceInformationModel>"""
         occupied_slots = set()
         try:
-            r = session.post(f"{base_url}/contentwebserver", data=get_templates_xml, headers=headers, verify=False, timeout=8)
+            r = session.post(cgi_url, data=get_templates_xml, headers=headers, verify=False, timeout=8)
             if r.status_code == 200:
-                for m in re.finditer(r'<name>(\d{3})</name>', r.text):
+                # Find slots with valid templates (have caption1 with content)
+                for m in re.finditer(r'tid=["\'](\d+)["\'][^>]*valid="true"', r.text):
                     occupied_slots.add(int(m.group(1)))
+                # Also check for templates with captions
+                for m in re.finditer(r'<caption1>([^<]+)</caption1>', r.text):
+                    if m.group(1).strip():
+                        # Find the tid for this caption
+                        pass
         except Exception as e:
             LOGGER.warning("[ToshibaService] Failed to retrieve template list: %s", e)
 
@@ -412,11 +473,15 @@ class ToshibaService:
         if not free_slot:
             return {
                 "ok": False,
-                "error": "No free template slots found in Group 002 (SCAN) on the copier."
+                "error": "No free template slots found in Group 002 (SCAN) on the copier.",
+                "ftp": ftp_res,
+                "ftp_url": ftp_url,
+                "ftp_upload_url": ftp_user_url,
+                "ftp_host_ip": local_ip,
             }
 
-        # Register scan template at free slot
-        store_path = f"\\\\{pc_name}\\{share_name}"
+        # 10. Register scan template with FTP destination
+        ftp_store_path = f"{local_ip}:/{folder_name}/"
         template_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
   <SetValue>
@@ -427,7 +492,7 @@ class ToshibaService:
             <OriginalKey>Queues/Scan</OriginalKey>
             <MetaData>
               <caption1>Scan To</caption1>
-              <caption2></caption2>
+              <caption2>{safe_username}</caption2>
               <userName></userName>
               <isPasswordProtected>false</isPasswordProtected>
               <autoStart>false</autoStart>
@@ -474,20 +539,21 @@ class ToshibaService:
           <Scan>
             <Output>
               <LocalStore Enabled="false"></LocalStore>
-              <SMBStore Enabled="true">
-                <SMBStoreParameter>
+              <SMBStore Enabled="false"></SMBStore>
+              <FTPStore Enabled="true">
+                <FTPStoreParameter>
                   <FileFormatInformation>
                     <FileFormat>PDFMulti</FileFormat>
                     <SecurePDF>
                       <Enabled>false</Enabled>
                     </SecurePDF>
                   </FileFormatInformation>
-                  <StorePath>{store_path}</StorePath>
-                  <UserName>{win_user}</UserName>
-                  <Password>{win_pass}</Password>
-                </SMBStoreParameter>
-              </SMBStore>
-              <FTPStore Enabled="false"></FTPStore>
+                  <StorePath>{ftp_store_path}</StorePath>
+                  <PortNumber>{ftp_port_value}</PortNumber>
+                  <UserName>{ftp_user}</UserName>
+                  <Password>{ftp_password}</Password>
+                </FTPStoreParameter>
+              </FTPStore>
               <NetwareStore Enabled="false"></NetwareStore>
             </Output>
           </Scan>
@@ -518,38 +584,31 @@ class ToshibaService:
 </DeviceInformationModel>"""
 
         try:
-            r = session.post(f"{base_url}/contentwebserver", data=template_xml, headers=headers, verify=False, timeout=12)
-            
+            r = session.post(cgi_url, data=template_xml, headers=headers, verify=False, timeout=12)
+
             # Clean logout
-            logout_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<DeviceInformationModel>
-<Command>
-    <Logout>
-        <commandNode>Authentication/UserCredential</commandNode>
-    </Logout>
-</Command>
-</DeviceInformationModel>"""
+            logout_xml = """<?xml version="1.0" encoding="UTF-8"?><DeviceInformationModel><Command><Logout><commandNode>Authentication/UserCredential</commandNode></Logout></Command></DeviceInformationModel>"""
             try:
-                session.post(f"{base_url}/contentwebserver", data=logout_xml, headers=headers, verify=False, timeout=3)
+                session.post(cgi_url, data=logout_xml, headers=headers, verify=False, timeout=3)
             except Exception:
                 pass
 
             if r.status_code == 200 and "<RegisterTemplateResult>Success</RegisterTemplateResult>" in r.text:
-                LOGGER.info("[ToshibaService] Copier registered template Scan To at slot %s!", free_slot)
+                LOGGER.info("[ToshibaService] Copier registered FTP scan template at slot %s for user '%s'!", free_slot, safe_username)
                 return {
                     "ok": True,
                     "printer_setup_ok": True,
                     "printer": {
                         "created_registration_no": free_slot,
-                        "entry_name": f"Scan To ({free_slot})",
+                        "entry_name": f"Scan To {safe_username} ({free_slot})",
                     },
                     "ftp_host_ip": local_ip,
-                    "ftp": {
-                        "port": 445,
-                    },
-                    "ftp_url": f"smb://{local_ip}/{share_name}",
-                    "ftp_upload_url": f"smb://{local_ip}/{share_name}",
-                    "ftp_upload_path": share_name,
+                    "ftp": ftp_res,
+                    "ftp_url": ftp_url,
+                    "ftp_upload_url": ftp_user_url,
+                    "ftp_upload_path": str(subfolder_path),
+                    "scan_dir_added": scan_dir_added,
+                    "scan_dirs": scan_dirs,
                 }
             else:
                 reason = "Unknown error"
@@ -564,12 +623,12 @@ class ToshibaService:
                     "printer_setup_ok": False,
                     "printer_error": f"Failed to register template on copier: {reason}",
                     "ftp_host_ip": local_ip,
-                    "ftp": {
-                        "port": 445,
-                    },
-                    "ftp_url": f"smb://{local_ip}/{share_name}",
-                    "ftp_upload_url": f"smb://{local_ip}/{share_name}",
-                    "ftp_upload_path": share_name,
+                    "ftp": ftp_res,
+                    "ftp_url": ftp_url,
+                    "ftp_upload_url": ftp_user_url,
+                    "ftp_upload_path": str(subfolder_path),
+                    "scan_dir_added": scan_dir_added,
+                    "scan_dirs": scan_dirs,
                 }
         except Exception as e:
             return {
@@ -577,12 +636,12 @@ class ToshibaService:
                 "printer_setup_ok": False,
                 "printer_error": f"Connection/registration failed: {e}",
                 "ftp_host_ip": local_ip,
-                "ftp": {
-                    "port": 445,
-                },
-                "ftp_url": f"smb://{local_ip}/{share_name}",
-                "ftp_upload_url": f"smb://{local_ip}/{share_name}",
-                "ftp_upload_path": share_name,
+                "ftp": ftp_res,
+                "ftp_url": ftp_url,
+                "ftp_upload_url": ftp_user_url,
+                "ftp_upload_path": str(subfolder_path),
+                "scan_dir_added": scan_dir_added,
+                "scan_dirs": scan_dirs,
             }
 
     def delete_address_entries(self, printer, regs=None, entry_ids=None, **kwargs) -> bool:
