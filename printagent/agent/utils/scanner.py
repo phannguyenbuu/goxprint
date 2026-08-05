@@ -16,7 +16,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 LOGGER = logging.getLogger(__name__)
 
 class SubnetScanner:
-    PRINTER_PORTS = [80, 443, 9100, 515, 631, 162, 161, 10161, 10162]
+    # Definitive printer ports - devices with these open are almost certainly printers
+    DEFINITIVE_PRINTER_PORTS = [9100, 515, 631]
+    # Web ports - also check these, but only count as printer if web UI matches
+    WEB_PORTS = [80, 443]
+    # All ports to probe (definitive first for fast positive identification)
+    PRINTER_PORTS = DEFINITIVE_PRINTER_PORTS + WEB_PORTS + [162, 161, 10161, 10162]
     WEB_TIMEOUT_SECONDS = 1.5
 
     def __init__(self, max_workers: int = 50) -> None:
@@ -33,6 +38,13 @@ class SubnetScanner:
 
     def has_printer_ports(self, ip: str, timeout: float = 0.3) -> bool:
         for port in self.PRINTER_PORTS:
+            if self.check_port(ip, port, timeout=timeout):
+                return True
+        return False
+
+    def has_definitive_printer_port(self, ip: str, timeout: float = 0.3) -> bool:
+        """Check if a host has a port that is ONLY found on printers (9100/515/631)."""
+        for port in self.DEFINITIVE_PRINTER_PORTS:
             if self.check_port(ip, port, timeout=timeout):
                 return True
         return False
@@ -156,8 +168,13 @@ class SubnetScanner:
             return "ricoh", True
         if self.is_toshiba_web_ui(ip):
             return "toshiba", True
-        # Default to ricoh candidate for active hosts with open printer ports
-        return "ricoh", True
+        # Only classify as printer if it has a DEFINITIVE printer port (9100/515/631)
+        # Hosts with only port 80/443 are likely routers, cameras, NAS, etc.
+        if self.has_definitive_printer_port(ip, timeout=0.4):
+            return "unknown", True
+        # No definitive port and web UI didn't match → not a printer
+        LOGGER.debug("[SubnetScan] Skipping %s: no definitive printer port and no matching web UI", ip)
+        return "", False
 
     def scan_subnet(self, prefix: str | None = None) -> list[dict[str, Any]]:
         prefixes: list[str] = []
@@ -179,12 +196,15 @@ class SubnetScanner:
 
             def worker(ip: str) -> None:
                 if self.has_printer_ports(ip, timeout=0.3):
-                    printer_type, has_printer_ports = self.detect_printer_type(ip)
+                    printer_type, has_pp = self.detect_printer_type(ip)
+                    if not printer_type:
+                        return  # Not a printer (router, camera, PC, etc.)
+                    LOGGER.info("[SubnetScan] Found printer %s type=%s", ip, printer_type)
                     with lock:
                         discovered_devices.append({
                             "ip": ip,
                             "printer_type": printer_type,
-                            "has_printer_ports": has_printer_ports,
+                            "has_printer_ports": has_pp,
                             "is_ricoh": printer_type == "ricoh",
                             "is_toshiba": printer_type == "toshiba",
                         })

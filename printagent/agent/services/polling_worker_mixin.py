@@ -238,6 +238,7 @@ class PollingWorkerMixin:
                 if str(getattr(p, "name", "")).startswith("[ERROR] Web probe failed"):
                     LOGGER.info("[ScanPointSync] Excluding printer ip=%s because web probe failed.", getattr(p, "ip", ""))
                     continue
+                LOGGER.debug("[LoadPrinters] PASS web probe: ip=%s name=%s mac=%s", getattr(p, 'ip', ''), getattr(p, 'name', ''), getattr(p, 'mac_address', ''))
 
                 if not getattr(p, "updated_at", None):
                     setattr(p, "updated_at", now_time)
@@ -248,6 +249,9 @@ class PollingWorkerMixin:
             # Filter out known non-copier devices by name (virtual print servers, routers, etc.)
             _DEVICE_NAME_BLACKLIST = ("file pro", "print server", "printserver", "f6600", "f66", "h3601", "h36")
             before_filter = len(all_persistent_printers)
+            filtered_out_blacklist = [p for p in all_persistent_printers if any(kw in str(getattr(p, "name", "") or "").lower() for kw in _DEVICE_NAME_BLACKLIST)]
+            for fp in filtered_out_blacklist:
+                LOGGER.info("[LoadPrinters] BLACKLIST excluded: ip=%s name=%s mac=%s", getattr(fp, 'ip', ''), getattr(fp, 'name', ''), getattr(fp, 'mac_address', ''))
             all_persistent_printers = [
                 p for p in all_persistent_printers
                 if not any(kw in str(getattr(p, "name", "") or "").lower() for kw in _DEVICE_NAME_BLACKLIST)
@@ -257,6 +261,9 @@ class PollingWorkerMixin:
 
             # Deduplicate strictly by mac_address, filter out printers without MAC
             all_persistent_printers = self._deduplicate_printers_by_mac(all_persistent_printers)
+            no_mac_printers = [p for p in all_persistent_printers if not self._normalize_mac(str(getattr(p, "mac_address", "") or ""))]
+            for fp in no_mac_printers:
+                LOGGER.info("[LoadPrinters] NO-MAC excluded: ip=%s name=%s mac='%s'", getattr(fp, 'ip', ''), getattr(fp, 'name', ''), getattr(fp, 'mac_address', ''))
             all_persistent_printers = [p for p in all_persistent_printers if self._normalize_mac(str(getattr(p, "mac_address", "") or ""))]
 
             # Save ALL printers (online & offline) directly to local printers.json disk file

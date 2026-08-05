@@ -377,10 +377,13 @@ def main() -> int:
 
 
         log_debug("Parsing arguments...")
-        # Intercept legacy --mode "" invocation from old registry entries
-        if "--mode" in sys.argv and "" in sys.argv:
-            logging.info("Legacy --mode '' invocation detected. Exiting cleanly.")
-            return 0
+        # Sanitize legacy --mode "" / --mode '' invocations: replace with default 'web'
+        sanitized_argv = list(sys.argv)
+        for i in range(len(sanitized_argv) - 1):
+            if sanitized_argv[i] == "--mode" and sanitized_argv[i + 1].strip().strip("'\"") == "":
+                sanitized_argv[i + 1] = "web"
+                log_debug("Sanitized empty --mode to 'web'")
+                break
 
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -434,7 +437,7 @@ def main() -> int:
             type=int,
             help="Parent process ID for watchdog self-termination",
         )
-        args = parser.parse_args()
+        args = parser.parse_args(sanitized_argv[1:])
         log_debug(f"Args: mode={args.mode}, host={args.host}, port={args.port}, parent_pid={args.parent_pid}")
 
         if getattr(args, "get_video", False):

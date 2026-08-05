@@ -811,7 +811,7 @@ Get-NetNeighbor -AddressFamily IPv4 |
         if s.startswith("[ERROR]") or "error" in s.lower() or "failed" in s.lower():
             return True
         clean_ip = str(ip or "").strip()
-        if clean_ip and (s == clean_ip or s == f"Copier ({clean_ip})" or s == f"Printer ({clean_ip})"):
+        if clean_ip and (s == clean_ip or s == f"Copier ({clean_ip})" or s == f"Printer ({clean_ip})" or s == f"Toshiba Copier ({clean_ip})" or s == f"Ricoh Copier ({clean_ip})"):
             return True
         import re
         if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", s):
@@ -970,10 +970,11 @@ Get-NetNeighbor -AddressFamily IPv4 |
 
     def _ensure_printer_name_via_web_probe(self, printer: Printer) -> Printer:
         ip = str(getattr(printer, "ip", "") or "").strip()
-        # curr_name = str(getattr(printer, "name", "") or "").strip()
+        curr_name = str(getattr(printer, "name", "") or "").strip()
 
-        # if ip and not self._is_generic_printer_name(curr_name, ip):
-        #     return printer
+        # Skip probing if printer already has a valid (non-generic) name
+        if ip and curr_name and not self._is_generic_printer_name(curr_name, ip):
+            return printer
 
         if not ip:
             if not printer.name:
@@ -985,90 +986,95 @@ Get-NetNeighbor -AddressFamily IPv4 |
         p_type = self._printer_type(str(getattr(printer, "printer_type", "") or ""))
         probe_errors: list[str] = []
 
-        # Retry up to 3 consecutive attempts to resolve the printer name
-        for attempt in range(1, 4):
-            # 1. Standard collector probe
-            try:
-                probed = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=p_type)
-                if probed is not None and probed.name and not self._is_generic_printer_name(probed.name, ip):
-                    LOGGER.info("[PollingBridge] Attempt %s/3: Standard probe resolved name '%s' for ip=%s", attempt, probed.name, ip)
-                    printer.name = probed.name
-                    printer.printer_type = self._detect_printer_type(probed.name, mac)
-                    if probed.mac_address and not mac:
-                        printer.mac_address = probed.mac_address
-                    printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    return printer
-            except Exception as exc:
-                probe_errors.append(f"Attempt {attempt} Collector: {exc}")
-
-            # 2. Fast parallel Web UI frame probing (Ricoh header/topPage/mainFrame + Toshiba TopAccess)
-            probe_urls = [
-                f"http://{ip}/",
-                f"https://{ip}/",
-                f"http://{ip}/web/guest/en/websys/webArch/header.cgi",
-                f"http://{ip}/web/guest/en/websys/webArch/topPage.cgi",
-                f"http://{ip}/web/guest/en/websys/webArch/mainFrame.cgi",
-                f"http://{ip}/web/guest/en/websys/status/configuration.cgi",
-                f"https://{ip}/web/guest/en/websys/webArch/header.cgi",
-                f"http://{ip}/?MAIN=TOPACCESS",
-                f"https://{ip}/?MAIN=TOPACCESS",
-                f"http://{ip}/hp/device/this.LCDispatcher",
-                f"http://{ip}/m_index.cgi",
-                f"http://{ip}/general/status.html",
-            ]
-
-            import requests
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            def _fetch_url_model(target_url: str) -> tuple[str, str]:
-                try:
-                    resp = requests.get(target_url, timeout=2.0, verify=False)
-                    if resp.status_code in {200, 301, 302}:
-                        model = self._extract_model_from_html(resp.text)
-                        if model:
-                            return model, ""
-                        return "", f"{target_url} HTTP {resp.status_code} (no model parsed)"
-                    return "", f"{target_url} HTTP {resp.status_code}"
-                except Exception as exc:
-                    return "", f"{target_url}: {exc}"
-
-            try:
-                with ThreadPoolExecutor(max_workers=len(probe_urls)) as executor:
-                    futures = [executor.submit(_fetch_url_model, url) for url in probe_urls]
-                    for future in as_completed(futures, timeout=3.0):
-                        model_found, err_detail = future.result()
-                        if model_found and not self._is_generic_printer_name(model_found, ip):
-                            LOGGER.info("[PollingBridge] Attempt %s/3: Parallel Web UI probe resolved model '%s' for ip=%s", attempt, model_found, ip)
-                            printer.name = model_found
-                            printer.printer_type = self._detect_printer_type(model_found, mac)
-                            printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            return printer
-                        elif err_detail:
-                            probe_errors.append(err_detail)
-            except Exception as exc:
-                probe_errors.append(f"Attempt {attempt} Parallel probe error: {exc}")
-
-            # 3. SNMP sysDescr probe fallback
-            snmp_model = self._probe_snmp_model_name(ip)
-            if snmp_model and not self._is_generic_printer_name(snmp_model, ip):
-                LOGGER.info("[PollingBridge] Attempt %s/3: SNMP probe resolved model '%s' for ip=%s", attempt, snmp_model, ip)
-                printer.name = snmp_model
-                printer.printer_type = self._detect_printer_type(snmp_model, mac)
+        # Single attempt (no retry) to resolve the printer name
+        # 1. Standard collector probe
+        try:
+            probed = self._probe_discovered_printer(ip=ip, mac=mac, preferred_type=p_type)
+            if probed is not None and probed.name and not self._is_generic_printer_name(probed.name, ip):
+                LOGGER.info("[PollingBridge] Standard probe resolved name '%s' for ip=%s", probed.name, ip)
+                printer.name = probed.name
+                printer.printer_type = self._detect_printer_type(probed.name, mac)
+                if probed.mac_address and not mac:
+                    printer.mac_address = probed.mac_address
                 printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 return printer
+        except Exception as exc:
+            probe_errors.append(f"Collector: {exc}")
 
-            if attempt < 3:
-                time.sleep(0.5)
+        # 2. Type-specific Web UI probe (fewer URLs = faster)
+        if p_type == "toshiba":
+            probe_urls = [
+                f"http://{ip}/?MAIN=TOPACCESS",
+                f"https://{ip}/?MAIN=TOPACCESS",
+            ]
+        elif p_type == "ricoh":
+            probe_urls = [
+                f"http://{ip}/web/guest/en/websys/webArch/header.cgi",
+                f"http://{ip}/web/guest/en/websys/webArch/topPage.cgi",
+            ]
+        else:
+            # Unknown type: try a small set
+            probe_urls = [
+                f"http://{ip}/",
+                f"http://{ip}/web/guest/en/websys/webArch/header.cgi",
+                f"http://{ip}/?MAIN=TOPACCESS",
+                f"http://{ip}/hp/device/this.LCDispatcher",
+            ]
 
-        # 4. Probe Failed after 3 attempts: Store specific error in printer.name & write to sterror.txt via LOGGER.error
-        first_err = probe_errors[0] if probe_errors else "HTTP/HTTPS & SNMP probe timed out"
+        import requests
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_url_model(target_url: str) -> tuple[str, str]:
+            try:
+                resp = requests.get(target_url, timeout=2.0, verify=False)
+                if resp.status_code in {200, 301, 302}:
+                    model = self._extract_model_from_html(resp.text)
+                    if model:
+                        return model, ""
+                    return "", f"{target_url} HTTP {resp.status_code} (no model parsed)"
+                return "", f"{target_url} HTTP {resp.status_code}"
+            except Exception as exc:
+                return "", f"{target_url}: {exc}"
+
+        try:
+            with ThreadPoolExecutor(max_workers=len(probe_urls)) as executor:
+                futures = [executor.submit(_fetch_url_model, url) for url in probe_urls]
+                for future in as_completed(futures, timeout=3.0):
+                    model_found, err_detail = future.result()
+                    if model_found and not self._is_generic_printer_name(model_found, ip):
+                        LOGGER.info("[PollingBridge] Web UI probe resolved model '%s' for ip=%s", model_found, ip)
+                        printer.name = model_found
+                        printer.printer_type = self._detect_printer_type(model_found, mac)
+                        printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        return printer
+                    elif err_detail:
+                        probe_errors.append(err_detail)
+        except Exception as exc:
+            probe_errors.append(f"Parallel probe error: {exc}")
+
+        # 3. SNMP sysDescr probe fallback
+        snmp_model = self._probe_snmp_model_name(ip)
+        if snmp_model and not self._is_generic_printer_name(snmp_model, ip):
+            LOGGER.info("[PollingBridge] SNMP probe resolved model '%s' for ip=%s", snmp_model, ip)
+            printer.name = snmp_model
+            printer.printer_type = self._detect_printer_type(snmp_model, mac)
+            printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return printer
+
+        # 4. Probe Failed: assign fallback name
+        first_err = probe_errors[0] if probe_errors else "all probes timed out"
         if len(first_err) > 60:
             first_err = first_err[:57] + "..."
-        error_name = f"[ERROR] Web probe failed after 3 attempts for {ip}: {first_err}"
-        printer.name = error_name
-        printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        LOGGER.error("[PollingBridge] HTTP/HTTPS Probing (1) failed after 3 consecutive attempts for ip=%s: %s", ip, first_err)
+        if p_type:
+            printer.name = f"{p_type.capitalize()} Copier ({ip})"
+            LOGGER.debug("[PollingBridge] Probes failed for %s. Using fallback name '%s'.", ip, printer.name)
+        else:
+            error_name = f"[ERROR] Web probe failed for {ip}: {first_err}"
+            printer.name = error_name
+            LOGGER.debug("[PollingBridge] All probes failed for ip=%s: %s", ip, first_err)
+
+        printer.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         return printer
 

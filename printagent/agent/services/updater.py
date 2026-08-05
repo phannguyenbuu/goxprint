@@ -21,7 +21,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.9.0805134058"
+DEFAULT_APP_VERSION = "2.9.0805193631"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -350,6 +350,50 @@ class AutoUpdater:
             # self._save_state() removed
             
             LOGGER.info("Update downloaded successfully. Handing over to watchdog and restarting.")
+            
+            # Overwrite watchdog.bat with latest version (integrity check + loop delay)
+            try:
+                watchdog_path = current_exe.parent / "watchdog.bat"
+                watchdog_content = (
+                    '@echo off\n'
+                    'setlocal\n'
+                    'cd /d "%~dp0"\n'
+                    ':loop\n'
+                    'if exist "printagent.update.exe" (\n'
+                    '    for %%A in ("printagent.update.exe") do if %%~zA LSS 1000000 (\n'
+                    '        echo [Watchdog] Update file too small, deleting corrupt file.\n'
+                    '        del /f /q "printagent.update.exe" >nul 2>&1\n'
+                    '        goto skip_update\n'
+                    '    )\n'
+                    '    echo [Watchdog] Applying printagent update...\n'
+                    '    taskkill /F /IM printagent.exe >nul 2>&1\n'
+                    '    timeout /T 5 /nobreak >nul\n'
+                    '    del /f /q "printagent.bak.exe" >nul 2>&1\n'
+                    '    if exist "printagent.exe" rename "printagent.exe" "printagent.bak.exe" >nul 2>&1\n'
+                    '    move /Y "printagent.update.exe" "printagent.exe" >nul 2>&1\n'
+                    '    timeout /T 2 /nobreak >nul\n'
+                    '    start /B "" "printagent.exe"\n'
+                    ')\n'
+                    ':skip_update\n'
+                    'if exist "gox_ftp_server.update.exe" (\n'
+                    '    taskkill /F /IM gox_ftp_server.exe >nul 2>&1\n'
+                    '    timeout /T 3 /nobreak >nul\n'
+                    '    del /f /q "gox_ftp_server.bak.exe" >nul 2>&1\n'
+                    '    if exist "gox_ftp_server.exe" rename "gox_ftp_server.exe" "gox_ftp_server.bak.exe" >nul 2>&1\n'
+                    '    move /Y "gox_ftp_server.update.exe" "gox_ftp_server.exe" >nul 2>&1\n'
+                    '    start /B "" "gox_ftp_server.exe"\n'
+                    ')\n'
+                    'tasklist /FI "IMAGENAME eq printagent.exe" 2>NUL | find /I "printagent.exe">NUL\n'
+                    'if "%ERRORLEVEL%"=="1" start /B "" "printagent.exe"\n'
+                    'tasklist /FI "IMAGENAME eq gox_ftp_server.exe" 2>NUL | find /I "gox_ftp_server.exe">NUL\n'
+                    'if "%ERRORLEVEL%"=="1" start /B "" "gox_ftp_server.exe"\n'
+                    'timeout /T 30 /nobreak >nul\n'
+                    'goto loop\n'
+                )
+                watchdog_path.write_text(watchdog_content, encoding="utf-8")
+                LOGGER.info("Watchdog.bat updated with integrity checks.")
+            except Exception as wdg_err:
+                LOGGER.warning("Could not update watchdog.bat: %s", wdg_err)
             
             import subprocess
             subprocess.Popen(["wscript.exe", str(current_exe.parent / "run_watchdog.vbs")], cwd=str(current_exe.parent), creationflags=0x08000000)
