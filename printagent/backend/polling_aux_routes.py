@@ -747,7 +747,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 # trigger_utility commands are fire-and-forget: mark done on first ACK
                 # to prevent the agent from re-executing them on every poll cycle
                 if command.command_type == "trigger_utility":
-                    command.status = "done"
+                    command.status = "success"
                     command.responded_at = now_utc
                 session.commit()
 
