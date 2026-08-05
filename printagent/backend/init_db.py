@@ -32,6 +32,7 @@ def main() -> None:
         'ALTER TABLE "CameraConfig" ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT TRUE',
         'ALTER TABLE "scan_points" ADD COLUMN IF NOT EXISTS agent_uid VARCHAR(128) DEFAULT \'\'',
         'DELETE FROM "scan_points" WHERE LOWER(printer_name) LIKE \'%f671y%\' OR LOWER(printer_name) LIKE \'%router%\' OR LOWER(printer_name) LIKE \'%gateway%\' OR LOWER(printer_name) LIKE \'%modem%\'',
+        'ALTER TABLE "Printer" ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMP WITH TIME ZONE DEFAULT NULL',
     ]
 
     with bind.connect() as conn:

@@ -191,6 +191,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             p_obj.agent_uid = agent_uid
                             p_obj.lan_uid = lan_uid
                             p_obj.is_online = d_online
+                            p_obj.last_scanned_at = utc_now
                             p_obj.updated_at = utc_now
                         else:
                             p_obj = Printer(
@@ -202,6 +203,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 mac_address=d_mac,
                                 enabled=True,
                                 is_online=d_online,
+                                last_scanned_at=utc_now,
                                 updated_at=utc_now,
                                 auth_user="",
                                 auth_password="",

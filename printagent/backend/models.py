@@ -189,6 +189,7 @@ class Printer(Base):
     enabled_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     online_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     mac_address: Mapped[str] = mapped_column(String(64), default="")
     address_book_sync: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

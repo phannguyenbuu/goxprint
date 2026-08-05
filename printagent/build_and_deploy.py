@@ -58,19 +58,6 @@ def main():
         )
     
     python_exe = sys.executable
-    # 3. Package agent_core.zip from agent/ directory
-    print("\n--- Packing agent_core.zip ---")
-    try:
-        import zipfile
-        core_zip_path = root / "agent_core.zip"
-        agent_dir = root / "agent"
-        with zipfile.ZipFile(core_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for py_file in agent_dir.rglob("*.py"):
-                arcname = py_file.relative_to(root)
-                zf.write(py_file, arcname)
-        print(f"Packed agent_core.zip ({core_zip_path.stat().st_size} bytes)")
-    except Exception as zip_err:
-        print(f"Warning: Failed to pack agent_core.zip: {zip_err}")
 
     # 4. Compile loader and installer exe with PyInstaller
     print("\n--- Compiling loader and packing core with PyInstaller ---")

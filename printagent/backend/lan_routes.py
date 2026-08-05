@@ -193,62 +193,68 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 printer_stmt = printer_stmt.where(Printer.lead == lead)
             printer_rows = session.execute(printer_stmt).scalars().all()
             printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            # 1. Populate printers_by_lan directly from ACTIVE_AGENTS in-memory printers_json payload (bypassing PostgreSQL)
+            # 1. Populate printers_by_lan from DB (Printer table) — source of truth for is_online
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
             prune_offline_agents(timeout_seconds=180)
 
-            seen_printers: set[tuple[str, str]] = set()
-
-            for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                a_lead = agent_info.get("lead", "default")
-                a_lan_uid = agent_info.get("lan_uid", "default")
-                if lead and a_lead != lead:
-                    continue
-
-                printers_list = agent_info.get("printers_json") or []
-                printers_list = [p for p in printers_list if isinstance(p, dict)]
-                for dev in printers_list:
+            # Build a lookup of RAM printers for supplementary data (auth, address_book_sync)
+            ram_printers_lookup: dict[str, dict] = {}  # key = MAC or IP
+            for agent_uid_r, agent_info_r in ACTIVE_AGENTS.items():
+                for dev in (agent_info_r.get("printers_json") or []):
                     if not isinstance(dev, dict):
                         continue
-                    p_mac = _to_text(dev.get("mac_address") or dev.get("mac_id")).replace("-", ":").upper()
-                    p_ip = _to_text(dev.get("ip"))
-                    p_name = _to_text(dev.get("printer_name") or dev.get("name")) or "Photocopy"
-                    p_user = _to_text(dev.get("auth_user") or dev.get("user"))
-                    p_pass = _to_text(dev.get("auth_password") or dev.get("password"))
+                    r_mac = _to_text(dev.get("mac_address") or dev.get("mac_id")).replace("-", ":").upper()
+                    r_ip = _to_text(dev.get("ip"))
+                    key = r_mac or r_ip
+                    if key:
+                        ram_printers_lookup[key] = dev
 
-                    if not p_ip and not p_mac:
-                        continue
+            seen_printers: set[tuple[str, str]] = set()
 
-                    dedupe_key = (a_lan_uid, p_mac or p_ip)
-                    if dedupe_key in seen_printers:
-                        continue
-                    seen_printers.add(dedupe_key)
+            for p_row in printer_rows:
+                p_mac = (p_row.mac_address or "").strip().replace("-", ":").upper()
+                p_ip = (p_row.ip or "").strip()
+                p_lan = p_row.lan_uid or "default"
+                p_name = p_row.printer_name or "Photocopy"
 
-                    sync_data = dev.get("address_book_sync") or {}
-                    if not sync_data and p_mac:
-                        try:
-                            from models import ScanPoint
-                            sp_rec = session.get(ScanPoint, p_mac)
-                            if sp_rec and sp_rec.address_book_data:
-                                sync_data = sp_rec.address_book_data
-                        except Exception:
-                            pass
+                if not p_ip and not p_mac:
+                    continue
 
-                    p_is_online = bool(dev.get("is_online", True)) if _to_text(dev.get("status")).lower() != "offline" else False
-                    printers_by_lan[a_lan_uid].append({
-                        "id": f"{a_lan_uid}_{p_mac or p_ip}",
-                        "printer_name": p_name,
-                        "ip": p_ip,
-                        "mac_id": p_mac,
-                        "is_online": p_is_online,
-                        "probed": bool(dev.get("probed", False)),
-                        "enabled": True,
-                        "auth_user": p_user,
-                        "auth_password": p_pass,
-                        "address_book_sync": sync_data,
-                        "suggested_drivers": _match_printer_drivers(p_name),
-                        "agent_uid": agent_uid,
-                    })
+                dedupe_key = (p_lan, p_mac or p_ip)
+                if dedupe_key in seen_printers:
+                    continue
+                seen_printers.add(dedupe_key)
+
+                # Supplement with RAM data if available
+                ram_dev = ram_printers_lookup.get(p_mac) or ram_printers_lookup.get(p_ip) or {}
+                p_user = _to_text(ram_dev.get("auth_user") or ram_dev.get("user")) or p_row.auth_user or ""
+                p_pass = _to_text(ram_dev.get("auth_password") or ram_dev.get("password")) or p_row.auth_password or ""
+
+                sync_data = ram_dev.get("address_book_sync") or (p_row.address_book_sync if p_row.address_book_sync else {})
+                if not sync_data and p_mac:
+                    try:
+                        from models import ScanPoint
+                        sp_rec = session.get(ScanPoint, p_mac)
+                        if sp_rec and sp_rec.address_book_data:
+                            sync_data = sp_rec.address_book_data
+                    except Exception:
+                        pass
+
+                printers_by_lan[p_lan].append({
+                    "id": p_row.id,
+                    "printer_name": p_name,
+                    "ip": p_ip,
+                    "mac_id": p_mac,
+                    "is_online": bool(p_row.is_online),
+                    "last_scanned_at": p_row.last_scanned_at.isoformat() if getattr(p_row, "last_scanned_at", None) else "",
+                    "probed": bool(ram_dev.get("probed", False)),
+                    "enabled": bool(p_row.enabled),
+                    "auth_user": p_user,
+                    "auth_password": p_pass,
+                    "address_book_sync": sync_data,
+                    "suggested_drivers": _match_printer_drivers(p_name),
+                    "agent_uid": p_row.agent_uid or "",
+                })
 
             agent_stmt = select(AgentNode)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
@@ -376,12 +382,16 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if dev_ip and dev_ip in existing_ips:
                         continue
                     
+                    dev_is_online = False
+                    if isinstance(dev.status_data, dict):
+                        dev_is_online = dev.status_data.get("is_online", False)
+                    
                     lan_printers.append({
                         "id": dev.id,
                         "printer_name": name,
                         "ip": dev_ip,
                         "mac_id": dev_mac,
-                        "is_online": False,
+                        "is_online": bool(dev_is_online),
                         "probed": False,
                         "matched_by_agent": False,
                         "enabled": True,

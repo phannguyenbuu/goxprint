@@ -39,15 +39,7 @@ function getCommandName(type: string, paramsStr: string): string {
       return '⚙️ Lệnh tiện ích';
     }
   }
-  if (type === 'update_agent_core' || type === 'update_core') {
-    try {
-      const params = JSON.parse(paramsStr || '{}');
-      const ver = params.to_version || params.version || '';
-      return ver ? `🚀 Cập nhật Agent Core (.zip) -> v${ver}` : '🚀 Cập nhật Agent Core (.zip)';
-    } catch {
-      return '🚀 Cập nhật Agent Core (.zip)';
-    }
-  }
+  
   if (type === 'emergency_restart') return '🔄 Khởi động lại Agent';
   if (type === 'general_settings') return '⚙️ Cập nhật cấu hình Agent';
   if (type === 'add_scan_email_dest') return '📧 Thêm đích quét Email';

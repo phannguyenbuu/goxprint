@@ -389,21 +389,10 @@ def _apply_printer_enabled_state(session: Any, printer: Printer, enabled: bool, 
 
 
 def _refresh_stale_offline(session: Any, lead: str = "", lan_uid: str = "", agent_uid: str = "") -> None:
-    ONLINE_STALE_SECONDS = 300
-    stale_before = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_STALE_SECONDS)
-    stmt = select(Printer).where(Printer.is_online.is_(True), Printer.updated_at < stale_before)
-    if lead:
-        stmt = stmt.where(Printer.lead == lead)
-    if lan_uid:
-        stmt = stmt.where(Printer.lan_uid == lan_uid)
-    if agent_uid:
-        stmt = stmt.where(Printer.agent_uid == agent_uid)
-    rows = session.execute(stmt).scalars().all()
-    if not rows:
-        return
-    now = datetime.now(timezone.utc)
-    for item in rows:
-        _set_printer_online_state(session, item, False, now)
+    # NO-OP: Printer.is_online is now exclusively controlled by the agent's scan result.
+    # The server must not auto-reset is_online based on staleness — only the agent
+    # (which is physically on the LAN) can determine if a printer is online or offline.
+    pass
 
 
 def _refresh_stale_agent_offline(
