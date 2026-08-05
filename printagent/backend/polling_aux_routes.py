@@ -740,8 +740,15 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             if command.lead != lead:
                 return jsonify({"ok": False, "error": "Lead mismatch"}), 400
             
-            if command.status == "pending" and command.received_at is None:
-                command.received_at = datetime.now(timezone.utc)
+            if command.status == "pending":
+                now_utc = datetime.now(timezone.utc)
+                if command.received_at is None:
+                    command.received_at = now_utc
+                # trigger_utility commands are fire-and-forget: mark done on first ACK
+                # to prevent the agent from re-executing them on every poll cycle
+                if command.command_type == "trigger_utility":
+                    command.status = "done"
+                    command.responded_at = now_utc
                 session.commit()
 
             return jsonify(
