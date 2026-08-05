@@ -2462,6 +2462,18 @@ Write-Output 'INSTALLED'
 
                 lan_uid = self._resolved_lan_uid
                 if not lan_uid:
+                    # Self-resolve lan_uid instead of waiting for polling worker
+                    try:
+                        import socket
+                        hostname = socket.gethostname()
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        local_ip = s.getsockname()[0]
+                        s.close()
+                        lan_uid, _ = self._resolve_lan_info(hostname=hostname, local_ip=local_ip)
+                    except Exception:
+                        pass
+                if not lan_uid:
                     time.sleep(0.5)
                     continue
                 controls_payload = {}

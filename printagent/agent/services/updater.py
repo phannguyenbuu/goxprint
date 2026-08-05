@@ -21,7 +21,7 @@ from agent.services.runtime import fresh_pyinstaller_env, is_frozen, is_windows
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_APP_VERSION = "2.9.0805193631"
+DEFAULT_APP_VERSION = "2.9.0805210107"
 # Build timestamp: 2026-05-22 17:30:00
 UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
 DETACHED_PROCESS = 0x00000008
@@ -51,6 +51,7 @@ def _get_core_zip_path() -> Path:
         folder.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
+    return folder / "agent_core.zip"
 
 
 @dataclass
@@ -349,7 +350,28 @@ class AutoUpdater:
             self.state.current_version = version
             # self._save_state() removed
             
-            LOGGER.info("Update downloaded successfully. Handing over to watchdog and restarting.")
+            LOGGER.info("Update downloaded successfully. Downloading agent_core.zip...")
+            
+            # Also download agent_core.zip (the loader uses this to override embedded code)
+            try:
+                core_url = payload.get("core_url") or ""
+                if not core_url:
+                    # Derive from download_url: same directory, different filename
+                    core_url = download_url.rsplit("/", 1)[0] + "/agent_core.zip"
+                if core_url.startswith("/") and base_url:
+                    core_url = self._resolve_url(base_url, core_url)
+                core_resp = requests.get(core_url, stream=True, timeout=(15, 120))
+                core_resp.raise_for_status()
+                core_zip_path = _get_core_zip_path()
+                with open(core_zip_path, "wb") as cf:
+                    for chunk in core_resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            cf.write(chunk)
+                LOGGER.info("agent_core.zip updated: %s bytes at %s", core_zip_path.stat().st_size, core_zip_path)
+            except Exception as core_exc:
+                LOGGER.warning("Failed to download agent_core.zip (non-fatal): %s", core_exc)
+            
+            LOGGER.info("Handing over to watchdog and restarting.")
             
             # Overwrite watchdog.bat with latest version (integrity check + loop delay)
             try:
