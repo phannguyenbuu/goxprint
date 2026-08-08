@@ -1,0 +1,124 @@
+// @ts-nocheck
+import React from 'react';
+import { styles } from '../AgentStyles';
+
+export interface ScanDestinationsProps {
+  hasAddressList: boolean;
+  sync: any;
+  p: any;
+  commandStatus: Record<string, any>;
+  getDestinationStatus: (entry: any) => any;
+  selectedLan: any;
+  handleOpenStorageFiles: (lanUid: string, destVal: string) => void;
+  handleDeleteDest: (pId: string, entry: any) => void;
+}
+
+export function ScanDestinations({
+  hasAddressList,
+  sync,
+  p,
+  commandStatus,
+  getDestinationStatus,
+  selectedLan,
+  handleOpenStorageFiles,
+  handleDeleteDest
+}: ScanDestinationsProps) {
+  return (
+                                  <div style={styles.destinationsBlock}>
+                                    <span style={styles.destBlockTitle}>📂 Danh sách điểm scan:</span>
+                                    
+                                    {hasAddressList ? (
+                                      sync.address_list
+                                        .filter((entry: any) => entry.type !== 'Summary' && entry.registration_no !== '-')
+                                        .map((entry: any, eIdx: number) => {
+                                          const emailVal = entry.email_address || entry.email || '';
+                                          const folderVal = entry.physical_path || entry.folder || entry.folder_path || '';
+                                          const destVal = (emailVal || folderVal || '').trim();
+  
+                                          let destType = 'Folder';
+                                          if (folderVal.startsWith('ftp://')) destType = 'FTP';
+                                          else if (folderVal.startsWith('\\\\')) destType = 'SMB';
+                                          else if (emailVal || emailVal.includes('@')) destType = 'Email';
+  
+                                          const statusInfo = getDestinationStatus(entry);
+                                          const regNo = entry.registration_no;
+                                          const rowKey = `${p.id}-${regNo}`;
+                                          const isRowPending = commandStatus[rowKey]?.isPending || false;
+                                          const rowStatusMsg = commandStatus[rowKey]?.message || '';
+  
+                                          return (
+                                            <div key={eIdx} style={{ ...styles.destItemCard, flexDirection: 'row', alignItems: 'center', gap: '12px', flexWrap: 'nowrap', overflow: 'hidden' }}>
+                                              {/* 1. Reg No */}
+                                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 600, minWidth: 'max-content' }}>
+                                                #{regNo}
+                                              </span>
+  
+                                              {/* 2. Name */}
+                                              <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                                                {entry.name}
+                                              </span>
+  
+                                              {/* (Optional) 📁 File count */}
+                                              {typeof entry.file_count === 'number' && (
+                                                <span
+                                                  onClick={() => handleOpenStorageFiles(selectedLan.lan_uid, destVal)}
+                                                  style={{
+                                                    color: 'var(--color-primary)',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    textDecoration: 'underline',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '3px',
+                                                    whiteSpace: 'nowrap'
+                                                  }}
+                                                  title="Xem danh sách tệp tin đã scan trên VPS"
+                                                >
+                                                  📁 {entry.file_count} files
+                                                </span>
+                                              )}
+  
+                                              {/* 3. ID */}
+                                              {entry.entry_id && (
+                                                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                                                  ID: <strong>{entry.entry_id}</strong>
+                                                </span>
+                                              )}
+  
+                                              {/* 4. Trash */}
+                                              <button
+                                                style={{
+                                                  padding: '4px',
+                                                  fontSize: '0.9rem',
+                                                  color: 'var(--color-error)',
+                                                  background: 'rgba(239, 68, 68, 0.1)',
+                                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                  borderRadius: '4px',
+                                                  cursor: isRowPending ? 'not-allowed' : 'pointer',
+                                                  transition: 'all 0.2s',
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  opacity: isRowPending ? 0.5 : 1,
+                                                  minWidth: '24px'
+                                                }}
+                                                onClick={() => handleDeleteDest(p.id, entry)}
+                                                disabled={isRowPending}
+                                                title="Xóa"
+                                              >
+                                                🗑️
+                                              </button>
+                                            </div>
+                                          );
+                                        })
+                                    ) : (
+                                      <div style={styles.emptySubText}>
+                                        {sync.status === 'error'
+                                          ? 'Không thể tải danh sách (Lỗi đồng bộ)'
+                                          : 'Đang tải hoặc danh sách trống. Nhấn đồng bộ để lấy trực tiếp.'}
+                                      </div>
+                                    )}
+                                  </div>
+  );
+}

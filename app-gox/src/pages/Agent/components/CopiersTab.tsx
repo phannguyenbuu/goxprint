@@ -1,0 +1,224 @@
+// @ts-nocheck
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { styles } from '../AgentPageStyles';
+import { AnimatedList } from '../../../components/ui/AnimatedList';
+import { LoadingSpinner } from '../../../components/ui/LoadingSpinner';
+import { CopierItem } from './CopierItem';
+
+export function CopiersTab(props: any) {
+  const {
+    // Handlers & Logic
+    setCopierCredentials,
+    activeAgentUid,
+    activeLoadingFile,
+    activeModal,
+    activeTab,
+    addCameraLoading,
+    addressBookModal,
+    agentUid,
+    agents,
+    cameraAgentUid,
+    cameraFileFilter,
+    cameras,
+    camerasLoading,
+    canNavigateNext,
+    canNavigatePrev,
+    commandStatus,
+    copierCredentials,
+    deleteCameraLoading,
+    deleteScanPointModal,
+    destToDelete,
+    detectBrand,
+    editIpData,
+    editIpModal,
+    editIpNewIp,
+    editIpSaving,
+    expandedCopierId,
+    expandedDriverMenus,
+    expandedDrivers,
+    expandedPrinters,
+    fetchLanSitesData,
+    fetchRemotePage,
+    fileTypeFilter,
+    filteredPrinters,
+    getDestinationStatus,
+    getTargetAgentUid,
+    handleCopierClick,
+    handleDeleteDest,
+    handleEditIP,
+    handleOpenStorageFiles,
+    handleRefetchAddressBook,
+    handleRemoteInstallDriver,
+    handleSaveAuth,
+    infoDetailModal,
+    installDriverModal,
+    installDriverSaving,
+    installedCount,
+    isAllInstalled,
+    lanSites,
+    lanSitesLoading,
+    liveAddressBooks,
+    mockAgentApi,
+    newCamIp,
+    newCamName,
+    newCamPass,
+    newCamPort,
+    newCamRtsp,
+    newCamUser,
+    onlineAgents,
+    pendingScanPoints,
+    printers,
+    publicFtpData,
+    publicFtpModal,
+    publicFtpSaving,
+    record30sLoading,
+    remoteLockModal,
+    remoteLockPrinter,
+    saveAuthLoading,
+    selectedAgentUid,
+    selectedCamera,
+    selectedCameraAgentUid,
+    selectedLan,
+    selectedLanUid,
+    setActiveModal,
+    setExpandedDriverMenus,
+    setExpandedDrivers,
+    setPublicFtpData,
+    setRemoteLockPrinter,
+    showToast,
+    storageFilesModal,
+    storageFilesModalData,
+    storageFilesModalLoading,
+    storageFilterDate,
+    submittingScanPoint,
+    toshibaVncData,
+    utilityActionPending,
+    utilityCommands,
+    utilityCommandsLoading,
+    utilitySettingsLoading,
+    utilityStatusMsg,
+    viewOutputModal,
+    vncTunnelLoading,
+    webPreviewHistory,
+    webPreviewHistoryIndex,
+    webPreviewLoading,
+    webPreviewModal,
+    webPreviewTab
+  } = props;
+
+  return (
+    <>
+      <motion.div
+        key="copiers-tab"
+        initial={{ opacity: 0, x: 10 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -10 }}
+        style={styles.tabContent}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+            Quản lý danh sách máy photocopy & danh bạ scan
+          </div>
+          <div style={{
+            fontSize: '0.85rem',
+            color: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            padding: '6px 12px',
+            borderRadius: '20px',
+            border: '1px solid rgba(16, 185, 129, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span>● Tất cả máy photocopy đều được quản lý tự động qua Agent</span>
+          </div>
+        </div>
+
+        <AnimatedList className="copiers-grid" style={styles.gridContainer}>
+          {lanSitesLoading ? (
+            <div style={styles.loadingContainer}>
+              <LoadingSpinner />
+              <div style={styles.loadingText}>Đang tải dữ liệu thiết bị...</div>
+            </div>
+          ) : filteredPrinters.length === 0 ? (
+            <div style={styles.emptyStateContainer}>
+              <div style={styles.emptyIcon}>🖨️</div>
+              <div style={styles.emptyTitle}>Không tìm thấy máy photocopy nào</div>
+              <div style={styles.emptySubtitle}>
+                Vui lòng chọn mạng LAN khác hoặc nhấp "Làm mới" để quét lại thiết bị.
+              </div>
+            </div>
+          ) : (
+            filteredPrinters.map((p: any) => {
+              const isExpanded = String(expandedCopierId) === String(p.id);
+
+              const parseSyncObj = (raw: any) => {
+                if (!raw) return null;
+                let obj: any = raw;
+                if (typeof obj === 'string') {
+                  try { obj = JSON.parse(obj); } catch { return null; }
+                }
+                if (typeof obj !== 'object') return null;
+                let depth = 0;
+                while (obj && typeof obj === 'object' && !Array.isArray(obj.address_list) && obj.address_book_sync && depth < 5) {
+                  obj = obj.address_book_sync;
+                  depth++;
+                }
+                return obj;
+              };
+
+              const liveSync = parseSyncObj(liveAddressBooks?.[p.id]);
+              const dbSync = parseSyncObj(p.address_book_sync);
+
+              const liveHasList = liveSync && Array.isArray(liveSync.address_list) && liveSync.address_list.length > 0;
+              const dbHasList = dbSync && Array.isArray(dbSync.address_list) && dbSync.address_list.length > 0;
+
+              const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
+              const hasAddressList = Array.isArray(sync.address_list) && sync.address_list.length > 0;
+
+              const copierOnlineAgents = (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
+              const copierTargetAgentUid = getTargetAgentUid ? getTargetAgentUid(p.id) : (selectedAgentUid || p.agent_uid || '');
+
+              return (
+                <CopierItem
+                  key={p.id}
+                  p={p}
+                  selectedLan={selectedLan}
+                  activeAgentUid={agentUid}
+                  selectedAgentUid={copierTargetAgentUid}
+                  copierCredentials={copierCredentials || {}}
+                  setCopierCredentials={setCopierCredentials}
+                  saveAuthLoading={saveAuthLoading || {}}
+                  handleSaveAuth={handleSaveAuth}
+                  isExpanded={isExpanded}
+                  handleCopierClick={handleCopierClick}
+                  onlineAgents={copierOnlineAgents}
+                  detectBrand={detectBrand || (() => 'generic')}
+                  showToast={showToast || (() => {})}
+                  fetchRemotePage={fetchRemotePage || (() => {})}
+                  setRemoteLockPrinter={setRemoteLockPrinter}
+                  setActiveModal={setActiveModal}
+                  hasAddressList={hasAddressList}
+                  sync={sync}
+                  commandStatus={commandStatus || {}}
+                  getDestinationStatus={getDestinationStatus || (() => ({}))}
+                  handleOpenStorageFiles={handleOpenStorageFiles || (() => {})}
+                  handleEditIP={handleEditIP || (() => {})}
+                  handleDeleteDest={handleDeleteDest || (() => {})}
+                  handleRefetchAddressBook={handleRefetchAddressBook || (() => {})}
+                  expandedDrivers={expandedDrivers || {}}
+                  setExpandedDrivers={setExpandedDrivers}
+                  expandedDriverMenus={expandedDriverMenus || {}}
+                  setExpandedDriverMenus={setExpandedDriverMenus}
+                  handleRemoteInstallDriver={handleRemoteInstallDriver || (() => {})}
+                  setPublicFtpData={setPublicFtpData}
+                />
+              );
+            })
+          )}
+        </AnimatedList>
+      </motion.div>
+    </>
+  );
+}

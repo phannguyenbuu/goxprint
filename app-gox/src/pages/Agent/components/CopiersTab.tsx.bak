@@ -1,0 +1,554 @@
+import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { styles } from '../AgentStyles';
+import { AnimatedList } from '../../../components/ui/AnimatedList';
+import { GlowCard } from '../../../components/ui/GlowCard';
+import { CopierItem } from './CopierItem';
+import { AgentPage } from '../../AgentPage';
+import { LoadingSpinner } from '../../../components/ui/LoadingSpinner';
+
+export function CopiersTab(props: any) {
+  const {
+    AgentPage,
+    activeLoadingFile,
+    activeModal,
+    activeTab,
+    allocatedVncAddr,
+    cameraFiles,
+    cameraForm,
+    cameraLogs,
+    cameraStatus,
+    cameraTestLoading,
+    cameraTestResult,
+    cameras,
+    camerasLoading,
+    commandStatus,
+    confirmModal,
+    copierCredentials,
+    customRecordDuration,
+    customRunCommand,
+    deleteScanPointModal,
+    directLan,
+    editIpModalData,
+    editableSettingsText,
+    emailFileCounts,
+    executeRemoteInstallDriver,
+    expandedDriverMenus,
+    expandedDrivers,
+    expandedPrinters,
+    fetchCameraFiles,
+    fetchCameraStatus,
+    fetchRemotePage,
+    formatBytes,
+    ftpDetailData,
+    getDestinationStatus,
+    getDestinationStatusHtml,
+    getLiveQueryTimestamp,
+    handleAddPrivateFtp,
+    handleAddPublicFtp,
+    handleCloseWebPreview,
+    handleConfirmDeleteScanPoint,
+    handleCopierClick,
+    handleDeleteCamera,
+    handleDeleteCameraFile,
+    handleDeleteDest,
+    handleEditIP,
+    handleHistoryBack,
+    handleHistoryForward,
+    handleOpenStorageFiles,
+    handlePlaySegmentFile,
+    handleQueryVideo,
+    handleRecord30s,
+    handleRefetchAddressBook,
+    handleRemoteInstallDriver,
+    handleSaveAuth,
+    handleSaveCameraConfig,
+    handleSaveEditIP,
+    handleSaveSettings,
+    handleStartToshibaVnc,
+    handleTestCameraConnection,
+    handleToggleDirectLan,
+    handleViewScanPointsJson,
+    installDriverModal,
+    ipInputModal,
+    isRecording30s,
+    isSavingSettings,
+    lanSites,
+    lanSitesLoading,
+    liveAddressBooks,
+    lockAspect,
+    pollCommandStatus,
+    previewBlobUrl,
+    privateFtpData,
+    privateFtpLoading,
+    publicFtpData,
+    publicFtpLoading,
+    queriedVideoUrl,
+    queryDuration,
+    queryTimestamp,
+    queryVideoLoading,
+    recording30sCountdown,
+    remoteLockPrinter,
+    resolveRelativePath,
+    safePathToken,
+    saveAuthLoading,
+    scaleX,
+    scaleY,
+    scanAutoOpenDir,
+    scanAutoOpenFile,
+    scanPointsViewerModal,
+    selectedCamera,
+    selectedCameraAgentUid,
+    selectedLanUid,
+    selectedTargetAgents,
+    selectedUtilityAgent,
+    setActiveLoadingFile,
+    setActiveModal,
+    setActiveTab,
+    setAllocatedVncAddr,
+    setCameraFiles,
+    setCameraForm,
+    setCameraLogs,
+    setCameraStatus,
+    setCameraTestLoading,
+    setCameraTestResult,
+    setCameras,
+    setCamerasLoading,
+    setCommandStatus,
+    setConfirmModal,
+    setCopierCredentials,
+    setCustomRecordDuration,
+    setCustomRunCommand,
+    setDeleteScanPointModal,
+    setDirectLan,
+    setEditIpModalData,
+    setEditableSettingsText,
+    setEmailFileCounts,
+    setExpandedDriverMenus,
+    setExpandedDrivers,
+    setExpandedPrinters,
+    setFtpDetailData,
+    setInstallDriverModal,
+    setIpInputModal,
+    setIsRecording30s,
+    setIsSavingSettings,
+    setLanSites,
+    setLanSitesLoading,
+    setLiveAddressBooks,
+    setLockAspect,
+    setPreviewBlobUrl,
+    setPrivateFtpData,
+    setPrivateFtpLoading,
+    setPublicFtpData,
+    setPublicFtpLoading,
+    setQueriedVideoUrl,
+    setQueryDuration,
+    setQueryTimestamp,
+    setQueryVideoLoading,
+    setRecording30sCountdown,
+    setRemoteLockPrinter,
+    setSaveAuthLoading,
+    setScaleX,
+    setScaleY,
+    setScanAutoOpenDir,
+    setScanAutoOpenFile,
+    setScanPointsViewerModal,
+    setSelectedCamera,
+    setSelectedCameraAgentUid,
+    setSelectedLanUid,
+    setSelectedTargetAgents,
+    setSelectedUtilityAgent,
+    setSettingsSaveStatus,
+    setShowPreviewDetails,
+    setShowSettings,
+    setStorageFiles,
+    setStorageLoading,
+    setStorageModalData,
+    setToasts,
+    setToshibaVncData,
+    setUtilityActionPending,
+    setUtilityCommands,
+    setUtilityCommandsLoading,
+    setUtilitySettingsLoading,
+    setUtilityStatusMsg,
+    setViewOutputModal,
+    setVncTunnelLoading,
+    setWebPreviewHistory,
+    setWebPreviewHistoryIndex,
+    setWebPreviewLoading,
+    setWebPreviewModal,
+    setWebPreviewTab,
+    settingsSaveStatus,
+    showPreviewDetails,
+    showSettings,
+    storageFiles,
+    storageLoading,
+    storageModalData,
+    styles,
+    toasts,
+    toshibaVncData,
+    utilityActionPending,
+    utilityCommands,
+    utilityCommandsLoading,
+    utilitySettingsLoading,
+    utilityStatusMsg,
+    viewOutputModal,
+    vncTunnelLoading,
+    webPreviewHistory,
+    webPreviewHistoryIndex,
+    webPreviewLoading,
+    webPreviewModal,
+    webPreviewTab,
+    filteredPrinters,
+    selectedLan,
+    getTargetAgentUid,
+    activeAgentUid,
+    showToast,
+    detectBrand
+
+  } = props;
+
+  return (
+    <>
+              <motion.div
+                key="copiers-tab"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                style={styles.tabContent}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+                    Quản lý danh sách máy photocopy & danh bạ scan
+                  </div>
+                  <div style={{
+                    fontSize: '0.85rem',
+                    color: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span>📡</span>
+                    <span>Đang tiến hành rà soát thiết bị ngầm. Kết quả sẽ tự động hiển thị sau 1-3 phút.</span>
+                  </div>
+                </div>
+
+                <AnimatedList>
+                  {filteredPrinters.length === 0 ? (
+                    <div style={styles.emptyText}>Không tìm thấy máy photocopy nào hoạt động trong dải LAN này.</div>
+                  ) : (
+                    filteredPrinters.map((p) => {
+                      const isExpanded = expandedPrinters[p.id] !== false;
+                      const driversExpanded = expandedDrivers[p.id] || false;
+                      const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
+                      
+                      const parseSyncObj = (raw: any): any => {
+                        if (!raw) return null;
+                        let obj: any = raw;
+                        if (typeof obj === 'string') {
+                          try { obj = JSON.parse(obj); } catch { return null; }
+                        }
+                        if (typeof obj !== 'object') return null;
+                        // Unwrap nested address_book_sync until we find address_list
+                        let depth = 0;
+                        while (obj && typeof obj === 'object' && !Array.isArray(obj.address_list) && obj.address_book_sync && depth < 5) {
+                          obj = obj.address_book_sync;
+                          depth++;
+                        }
+                        return obj;
+                      };
+
+                      const liveSync = parseSyncObj(liveAddressBooks[p.id]);
+                      const dbSync = parseSyncObj(p.address_book_sync);
+
+                      const liveHasList = liveSync && Array.isArray(liveSync.address_list) && liveSync.address_list.length > 0;
+                      const dbHasList = dbSync && Array.isArray(dbSync.address_list) && dbSync.address_list.length > 0;
+
+                      const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
+                      const hasAddressList = Array.isArray(sync.address_list) && sync.address_list.length > 0;
+                      const syncCount = sync.address_list ? sync.address_list.length : 0;
+                      const syncTime = sync.timestamp ? new Date(sync.timestamp).toLocaleTimeString('vi-VN') : '';
+                      
+                      const isPending = commandStatus[p.id]?.isPending || false;
+                      const statusMsg = commandStatus[p.id]?.message || '';
+
+                      // Filter online agents for relays
+                      const onlineAgents = (selectedLan.agents || []).filter((a) => a.is_agent_active);
+                      const selectedAgentUid = getTargetAgentUid(p.id);
+
+                      return (
+                        <div
+                          key={p.id}
+                          id={`copier-card-${p.id}`}
+                          onClick={() => handleCopierClick(String(p.id))}
+                          style={{ width: '100%' }}
+                        >
+                          <GlowCard>
+                          {/* Header details */}
+                          <div style={styles.cardHeader}>
+                            <div>
+                              <span style={styles.copierTitle}>
+                                🖨️ {(() => {
+                                  if (p.printer_name && p.printer_name.trim()) return p.printer_name.trim();
+                                  const cleanMac = (p.mac_id || "").replace(/-/g, ":").toUpperCase();
+                                  if (cleanMac.startsWith("58:38:79") || cleanMac.startsWith("00:26:73")) return "Thiết bị Ricoh (Đang thám dò...)";
+                                  if (cleanMac.startsWith("00:80:91")) return "Thiết bị Toshiba (Đang thám dò...)";
+                                  if (cleanMac.startsWith("00:11:22")) return "Thiết bị HP (Đang thám dò...)";
+                                  return "Thiết bị Photocopy (Đang thám dò...)";
+                                })()}
+                              </span>
+                              <div style={styles.copierSubtitle}>IP: {p.ip} · MAC: {p.mac_id || '—'}</div>
+                            </div>
+                            <span
+                              style={{
+                                ...styles.statusBadge,
+                                color: !p.probed ? '#ffa502' : (p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)'),
+                                borderColor: !p.probed ? '#ffa502' : (p.is_online ? 'var(--color-status-online)' : 'var(--color-status-offline)'),
+                                background: !p.probed ? 'rgba(255, 165, 2, 0.08)' : (p.is_online ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 68, 102, 0.08)'),
+                              }}
+                            >
+                              {!p.probed ? '⏳ ĐANG XÁC ĐỊNH...' : (p.is_online ? 'ONLINE' : 'OFFLINE')}
+                            </span>
+                          </div>
+
+                          {/* Connection Credentials Form */}
+                          <div style={styles.sectionBlock}>
+                            <span style={styles.sectionBlockTitle}>🔐 Tài khoản Web máy in:</span>
+                            <div style={styles.credsInputRow}>
+                              <input
+                                type="text"
+                                style={styles.credsInput}
+                                placeholder="admin"
+                                autoComplete="new-password"
+                                name={`printer_user_${p.id}`}
+                                value={copierCredentials[p.id]?.user || ''}
+                                onChange={(e) =>
+                                  setCopierCredentials((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], user: e.target.value },
+                                  }))
+                                }
+                              />
+                              <input
+                                type="password"
+                                style={styles.credsInput}
+                                placeholder="mật khẩu"
+                                autoComplete="new-password"
+                                name={`printer_pass_${p.id}`}
+                                value={copierCredentials[p.id]?.pass || ''}
+                                onChange={(e) =>
+                                  setCopierCredentials((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], pass: e.target.value },
+                                  }))
+                                }
+                              />
+                              <button
+                                style={{ ...styles.smallBtn, padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                                onClick={() => handleSaveAuth(p)}
+                                disabled={saveAuthLoading[p.id]}
+                              >
+                                {saveAuthLoading[p.id] ? 'Lưu...' : 'Lưu Auth'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Relay Target Agent selector - Temporarily hidden per user request */}
+                          {/*
+                          <div style={styles.detailRow}>
+                            <span style={styles.detailLabel}>Target Agent:</span>
+                            <select
+                              style={styles.relaySelect}
+                              value={selectedAgentUid}
+                              onChange={(e) =>
+                                setSelectedTargetAgents((prev) => ({ ...prev, [p.id]: e.target.value }))
+                              }
+                            >
+                              {onlineAgents.length === 0 ? (
+                                <option value="">(Không có Agent online)</option>
+                              ) : (
+                                onlineAgents.map((a) => (
+                                  <option key={a.agent_uid} value={a.agent_uid}>
+                                    {a.hostname} ({a.local_ip})
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+                          */}
+
+                          {/* Sync Status Box */}
+                          <div
+                            style={{
+                              ...styles.syncStatusBox,
+                              background:
+                                sync.status === 'success'
+                                  ? 'rgba(0, 255, 136, 0.05)'
+                                  : sync.status === 'error'
+                                  ? 'rgba(255, 68, 102, 0.05)'
+                                  : 'var(--color-inset-bg)',
+                              borderColor:
+                                sync.status === 'success'
+                                  ? 'rgba(0, 255, 136, 0.15)'
+                                  : sync.status === 'error'
+                                  ? 'rgba(255, 68, 102, 0.15)'
+                                  : 'var(--color-surface-light)',
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={styles.syncStatusTitle}>Trạng thái đồng bộ danh bạ:</span>
+                              <div style={styles.syncStatusText}>
+                                {isPending ? (
+                                  <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>{statusMsg}</span>
+                                ) : hasAddressList ? (
+                                  <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
+                                    ✔ Đồng bộ OK ({syncCount} mục) {syncTime ? `· ${syncTime}` : ''}
+                                  </span>
+                                ) : sync.status === 'error' ? (
+                                  <span style={{ color: 'var(--color-error)' }}>
+                                    ❌ Lỗi: {sync.error} {syncTime ? `(${syncTime})` : ''}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-secondary)' }}>Chưa có thông tin danh bạ</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px' }}>
+
+                              <button
+                                style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
+                                onClick={() => handleRefetchAddressBook(p.id)}
+                                disabled={isPending || onlineAgents.length === 0}
+                              >
+                                🔄 {sync.status === 'success' ? 'Cập nhật' : 'Đồng bộ'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Suggested Drivers Block */}
+                          {hasDrivers && (
+                            <div style={{ marginTop: '8px' }}>
+                              <button
+                                style={styles.expandSubBtn}
+                                onClick={() =>
+                                  setExpandedDrivers((prev) => ({ ...prev, [p.id]: !driversExpanded }))
+                                }
+                              >
+                                {driversExpanded ? '▲ Ẩn driver đề xuất' : '▼ Xem driver đề xuất từ catalog'}
+                              </button>
+
+                              <AnimatePresence>
+                                {driversExpanded && (
+                                  <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    style={{ overflow: 'hidden', marginTop: '6px' }}
+                                  >
+                                    <div style={styles.suggestedDriverBlock}>
+                                      {p.suggested_drivers.map((sd: any, idx: number) => {
+                                        const brandColor =
+                                          sd.brand === 'ricoh'
+                                            ? 'var(--color-primary)'
+                                            : sd.brand === 'toshiba'
+                                            ? 'var(--color-error)'
+                                            : 'var(--color-success)';
+                                        const sdMenuKey = `${p.id}-${idx}`;
+                                        const isMenuOpen = expandedDriverMenus[sdMenuKey] || false;
+
+                                        return (
+                                          <div key={idx} style={styles.driverSuggestionItem}>
+                                            <div
+                                              style={styles.driverModelHeader}
+                                              onClick={() =>
+                                                setExpandedDriverMenus((prev) => ({
+                                                  ...prev,
+                                                  [sdMenuKey]: !isMenuOpen,
+                                                }))
+                                              }
+                                            >
+                                              <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                                                <span
+                                                  style={{
+                                                    display: 'inline-block',
+                                                    width: '6px',
+                                                    height: '6px',
+                                                    borderRadius: '50%',
+                                                    backgroundColor: brandColor,
+                                                    marginRight: '6px',
+                                                  }}
+                                                />
+                                                {sd.brand.toUpperCase()} - {sd.model}
+                                              </span>
+                                              <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>
+                                                {isMenuOpen ? '▲' : '▼'}
+                                              </span>
+                                            </div>
+
+                                            {isMenuOpen && (
+                                              <div style={styles.driverOptionsList}>
+                                                {sd.drivers && sd.drivers.length > 0 ? (
+                                                  sd.drivers.map((drv: any, dIdx: number) => (
+                                                    <div key={dIdx} style={styles.driverFileRow}>
+                                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={styles.driverFileName}>{drv.name}</div>
+                                                        <div style={styles.driverFileUrl} title={drv.url}>
+                                                          {drv.url.split('/').pop()}
+                                                        </div>
+                                                      </div>
+                                                      <div style={{ display: 'flex', gap: '4px' }}>
+                                                        <a
+                                                          href={drv.url}
+                                                          target="_blank"
+                                                          rel="noreferrer"
+                                                          style={styles.driverDownloadBtn}
+                                                        >
+                                                          Tải về
+                                                        </a>
+                                                        <button
+                                                          style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
+                                                          onClick={() =>
+                                                            handleRemoteInstallDriver(
+                                                              p.id,
+                                                              sd.brand,
+                                                              sd.model,
+                                                              drv.name,
+                                                              drv.url
+                                                            )
+                                                          }
+                                                          disabled={onlineAgents.length === 0}
+                                                        >
+                                                          Cài đặt
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  ))
+                                                ) : (
+                    <div style={styles.emptySubText}>Không tìm thấy driver nào.</div>
+                  )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+  </div>
+)}
+</GlowCard>
+</div>
+);
+})
+)}
+</AnimatedList>
+</motion.div>
+</>
+);
+}

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { CopiersTab } from './Agent/components/CopiersTab';
 import { AgentsTab } from './Agent/components/AgentsTab';
 import { CamerasTab } from './Agent/components/CamerasTab';
@@ -239,5 +238,3 @@ function safePathToken(value: string): string {
   );
 }
 
-
-export default AgentPage;

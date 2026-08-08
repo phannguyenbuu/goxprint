@@ -323,3 +323,7 @@ export async function triggerEmergencyRestart(agentUid: string): Promise<any> {
   });
 }
 
+
+
+// Alias for deleteEmailDestination
+export const deleteScanPoint = deleteEmailDestination;

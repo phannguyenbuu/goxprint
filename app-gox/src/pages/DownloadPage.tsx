@@ -12,7 +12,7 @@ interface JobItem {
   ip: string;
   command_type: string;
   command_params: string;
-  status: 'pending' | 'success' | 'failed';
+  status: 'pending' | 'processing' | 'success' | 'failed' | 'superseded' | string;
   error_message: string;
   requested_at: string;
   responded_at: string;
@@ -214,15 +214,22 @@ export default function DownloadPage() {
                         borderRadius: 20,
                         background:
                           job.status === 'success' ? 'rgba(34,197,94,0.15)' :
-                          job.status === 'failed' ? 'rgba(239,68,68,0.15)' :
-                          'rgba(234,179,8,0.15)',
+                          (job.status === 'pending' || job.status === 'processing') ? 'rgba(234,179,8,0.15)' :
+                          (job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? 'rgba(148,163,184,0.15)' :
+                          'rgba(239,68,68,0.15)',
                         color:
                           job.status === 'success' ? '#4ade80' :
-                          job.status === 'failed' ? '#f87171' :
-                          'var(--color-warning)',
+                          (job.status === 'pending' || job.status === 'processing') ? 'var(--color-warning)' :
+                          (job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? '#94a3b8' :
+                          '#f87171',
                       }}
                     >
-                      {job.status === 'pending' ? 'Chờ Agent' : job.status === 'success' ? 'Thành công' : 'Thất bại'}
+                      {
+                        (job.status === 'pending' || job.status === 'processing') ? 'Chờ Agent' :
+                        job.status === 'success' ? 'Thành công' :
+                        (job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? 'Thay thế' :
+                        'Thất bại'
+                      }
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                       {isExpanded ? '▲' : '▼'}
@@ -259,18 +266,29 @@ export default function DownloadPage() {
                         </div>
 
                         {/* Terminal Response Details */}
-                        {(job.status !== 'pending' || job.error_message) && (
+                        {(job.status === 'pending' || job.status === 'processing') ? (
+                          <div>
+                            <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>Trạng thái thực thi:</div>
+                            <div style={{
+                              padding: 8, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)',
+                              borderRadius: 6, color: '#fde047', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6
+                            }}>
+                              <span>⏳</span>
+                              <span>Lệnh đã được gửi đến hàng đợi. Đang chờ Agent tại máy trạm tiếp nhận và thực thi trên máy photocopy...</span>
+                            </div>
+                          </div>
+                        ) : (
                           <div>
                             <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>Kết quả phản hồi từ máy trạm:</div>
                             <pre style={{
                               margin: 0, padding: 8,
-                              background: job.status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
-                              border: `1px solid ${job.status === 'failed' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)'}`,
+                              background: (job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? 'rgba(148,163,184,0.06)' : job.status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
+                              border: `1px solid ${(job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? 'rgba(148,163,184,0.2)' : job.status === 'failed' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)'}`,
                               borderRadius: 6,
-                              color: job.status === 'failed' ? '#fca5a5' : '#86efac',
+                              color: (job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')))) ? '#cbd5e1' : job.status === 'failed' ? '#fca5a5' : '#86efac',
                               fontFamily: 'monospace', overflowX: 'auto', fontSize: 11, whiteSpace: 'pre-wrap'
                             }}>
-                              {job.error_message || 'Thực hiện thành công không có thông báo.'}
+                              {job.error_message || (job.status === 'success' ? 'Thực hiện thành công không có thông báo.' : job.status === 'superseded' ? 'Lệnh đã được thay thế bởi lệnh mới hơn.' : 'Lệnh thất bại từ máy trạm hoặc không nhận được phản hồi từ Agent.')}
                             </pre>
                           </div>
                         )}
