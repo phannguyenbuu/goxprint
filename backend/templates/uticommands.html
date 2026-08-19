@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel" style="height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px;">
+  <div class="panel-header-row">
+    <h3>Utility Commands & Code Helpers</h3>
+    <div>
+      <button id="refresh-btn" class="filter-btn">Reload</button>
+    </div>
+  </div>
+
+  <div class="commands-layout">
+    <!-- Left column: list of commands -->
+    <div class="commands-list-panel">
+      <div style="margin-bottom: 10px;">
+        <input type="text" id="command-search" placeholder="Filter commands..." style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px;">
+      </div>
+      <div id="commands-container" style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1;">
+        <!-- Filled dynamically -->
+      </div>
+    </div>
+
+    <!-- Right column: code editor -->
+    <div class="command-editor-panel">
+      <div class="editor-header-bar" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h4 id="selected-command-label" style="margin: 0; font-size: 16px; font-weight: 600; color: #333;">Select a command from the left</h4>
+          <span id="selected-command-name" style="font-family: monospace; font-size: 12px; color: #666; margin-top: 2px; display: inline-block;"></span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button id="copy-btn" class="action-btn-copy" style="display: none; padding: 8px 16px; font-size: 13px;">Copy Content</button>
+          <button id="save-btn" class="action-btn-save" style="display: none; padding: 8px 16px; font-size: 13px;">Save Command Content</button>
+        </div>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+        <textarea id="code-textarea" class="code-editor" readonly placeholder="# Select a command to view and edit its python content..."></textarea>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+.commands-layout {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 200px);
+    min-height: 500px;
+}
+.commands-list-panel {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    background: #fbfbfb;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #e9e9e9;
+}
+.command-editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    background: #fff;
+    border: 1px solid #e9e9e9;
+    padding: 15px;
+    border-radius: 6px;
+}
+.category-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #0056b3;
+    background: #eef5fc;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-top: 15px;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+    border-left: 3px solid #007bff;
+    user-select: none;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.15s ease-in-out;
+}
+.category-header:hover {
+    background: #dbeafe;
+}
+.category-header:first-of-type {
+    margin-top: 0;
+}
+.command-item {
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #fff;
+    transition: all 0.2s ease-in-out;
+}
+.command-item:hover {
+    border-color: #007bff;
+    background: #f8f9fa;
+}
+.command-item.active {
+    border-color: #007bff;
+    background: #e7f1ff;
+    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+}
+.command-item-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.command-item-desc {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+textarea.code-editor {
+    width: 100%;
+    flex: 1;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 15px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: none;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    box-sizing: border-box;
+    outline: none;
+}
+textarea.code-editor:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 5px rgba(0,123,255,0.2);
+}
+.action-btn-save {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+.action-btn-save:hover {
+    background-color: #218838;
+}
+.action-btn-save:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+.action-btn-copy {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+.action-btn-copy:hover {
+    background-color: #0056b3;
+}
+.action-btn-copy:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+.toast-msg {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #333;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    z-index: 9999;
+    font-size: 14px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+    display: none;
+}
+</style>
+
+<div id="custom-toast" class="toast-msg"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let allCommands = [];
+    let selectedCommand = null;
+
+    const toast = document.getElementById('custom-toast');
+    const showToast = (msg, success = true) => {
+        toast.textContent = msg;
+        toast.style.background = success ? '#28a745' : '#dc3545';
+        toast.style.display = 'block';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 3000);
+    };
+
+    const loadCommands = async () => {
+        try {
+            const res = await fetch('/api/uticommands');
+            const data = await res.json();
+            if (data.ok) {
+                allCommands = data.commands;
+                renderCommandsList();
+            } else {
+                showToast("Failed to load commands: " + data.error, false);
+            }
+        } catch (err) {
+            showToast("Error loading commands", false);
+        }
+    };
+
+    let collapsedGroups = {
+        'toshiba-scan': false,
+        'ricoh-scan': false,
+        'others': false
+    };
+
+    const renderCommandsList = () => {
+        const container = document.getElementById('commands-container');
+        const filterVal = document.getElementById('command-search').value.toLowerCase().trim();
+        
+        container.innerHTML = '';
+        
+        const filtered = allCommands.filter(c => {
+            return c.command.toLowerCase().includes(filterVal) ||
+                   c.label.toLowerCase().includes(filterVal) ||
+                   (c.description || '').toLowerCase().includes(filterVal);
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666; font-size: 13px;">No commands match search</div>';
+            return;
+        }
+
+        const groups = {
+            'toshiba-scan': [],
+            'ricoh-scan': [],
+            'others': []
+        };
+
+        filtered.forEach(c => {
+            const name = c.command.toLowerCase();
+            if (name.startsWith('toshiba')) {
+                groups['toshiba-scan'].push(c);
+            } else if (name.startsWith('ricoh')) {
+                groups['ricoh-scan'].push(c);
+            } else {
+                groups['others'].push(c);
+            }
+        });
+
+        const groupLabels = {
+            'toshiba-scan': 'Toshiba Scan',
+            'ricoh-scan': 'Ricoh Scan',
+            'others': 'Others'
+        };
+
+        ['toshiba-scan', 'ricoh-scan', 'others'].forEach(groupKey => {
+            const items = groups[groupKey];
+            if (items.length > 0) {
+                const isCollapsed = collapsedGroups[groupKey];
+
+                // Sort items: Helper first, then Execution, then alphabetically by label
+                items.sort((a, b) => {
+                    const aIsHelper = a.command.endsWith('_helper');
+                    const bIsHelper = b.command.endsWith('_helper');
+                    if (aIsHelper && !bIsHelper) return -1;
+                    if (!aIsHelper && bIsHelper) return 1;
+                    return a.label.localeCompare(b.label);
+                });
+
+                // Render Category Header
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'category-header';
+                headerDiv.innerHTML = `
+                    <span>${groupLabels[groupKey]} (${items.length})</span>
+                    <span style="font-size: 10px; color: #007bff;">${isCollapsed ? '▶' : '▼'}</span>
+                `;
+                headerDiv.addEventListener('click', () => {
+                    collapsedGroups[groupKey] = !collapsedGroups[groupKey];
+                    renderCommandsList();
+                });
+                container.appendChild(headerDiv);
+
+                // Render Items if not collapsed
+                if (!isCollapsed) {
+                    items.forEach(c => {
+                        const div = document.createElement('div');
+                        div.className = 'command-item';
+                        if (selectedCommand && selectedCommand.command === c.command) {
+                            div.className += ' active';
+                        }
+                        
+                        const isHelper = c.command.endsWith('_helper');
+                        const icon = isHelper ? '🛠️' : '⚡';
+                        div.innerHTML = `
+                            <div class="command-item-title">
+                                <span>${icon}</span>
+                                <span>${c.label}</span>
+                            </div>
+                            <div class="command-item-desc">${c.description || 'No description available'}</div>
+                        `;
+                        
+                        div.addEventListener('click', () => selectCommand(c));
+                        container.appendChild(div);
+                    });
+                }
+            }
+        });
+    };
+
+    const selectCommand = (command) => {
+        selectedCommand = command;
+        
+        // Highlight active item
+        document.querySelectorAll('.command-item').forEach(el => el.classList.remove('active'));
+        renderCommandsList(); // Re-render to show active styling
+
+        const isHelper = command.command.endsWith('_helper');
+        const icon = isHelper ? '🛠️' : '⚡';
+        document.getElementById('selected-command-label').textContent = `${icon} ${command.label}`;
+        document.getElementById('selected-command-name').textContent = `command identifier: ${command.command}`;
+        
+        const textarea = document.getElementById('code-textarea');
+        textarea.value = command.command_content;
+        textarea.readOnly = false;
+        
+        document.getElementById('save-btn').style.display = 'block';
+        document.getElementById('copy-btn').style.display = 'block';
+    };
+
+    document.getElementById('save-btn').addEventListener('click', async () => {
+        if (!selectedCommand) return;
+        const saveBtn = document.getElementById('save-btn');
+        const textarea = document.getElementById('code-textarea');
+        
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        
+        try {
+            const res = await fetch(`/api/uticommands/${selectedCommand.command}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command_content: textarea.value })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                showToast("Command saved successfully!");
+                // Update local memory
+                const match = allCommands.find(c => c.command === selectedCommand.command);
+                if (match) {
+                    match.command_content = textarea.value;
+                }
+            } else {
+                showToast("Save failed: " + data.error, false);
+            }
+        } catch (err) {
+            showToast("Network error saving command", false);
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Command Content';
+        }
+    });
+
+    document.getElementById('copy-btn').addEventListener('click', () => {
+        const textarea = document.getElementById('code-textarea');
+        textarea.select();
+        try {
+            navigator.clipboard.writeText(textarea.value);
+            showToast("Copied to clipboard!");
+        } catch (err) {
+            document.execCommand('copy');
+            showToast("Copied to clipboard!");
+        }
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+        loadCommands();
+        showToast("Reloaded commands list.");
+    });
+    
+    document.getElementById('command-search').addEventListener('input', renderCommandsList);
+
+    loadCommands();
+});
+</script>
+{% endblock %}

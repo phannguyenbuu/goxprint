@@ -157,7 +157,14 @@ export function CopiersTab(props: any) {
                 if (!raw) return null;
                 let obj: any = raw;
                 if (typeof obj === 'string') {
-                  try { obj = JSON.parse(obj); } catch { return null; }
+                  let cleanRaw = obj.trim();
+                  if (cleanRaw.includes('__ADDRESS_BOOK_JSON_START__')) {
+                    try {
+                      cleanRaw = cleanRaw.split('__ADDRESS_BOOK_JSON_START__')[1].split('__ADDRESS_BOOK_JSON_END__')[0].trim();
+                      cleanRaw = cleanRaw.replace(/^(\n|\r|\\n|\\r)+|(\n|\r|\\n|\\r)+$/g, '').trim();
+                    } catch {}
+                  }
+                  try { obj = JSON.parse(cleanRaw); } catch { return null; }
                 }
                 if (typeof obj !== 'object') return null;
                 let depth = 0;
@@ -168,14 +175,24 @@ export function CopiersTab(props: any) {
                 return obj;
               };
 
-              const liveSync = parseSyncObj(liveAddressBooks?.[p.id]);
+              const pMac = (p.mac_id || p.mac_address || '').toUpperCase().replace(/-/g, ':');
+              const liveSync = parseSyncObj(pMac ? liveAddressBooks?.[pMac] : null);
               const dbSync = parseSyncObj(p.address_book_sync);
 
-              const liveHasList = liveSync && Array.isArray(liveSync.address_list) && liveSync.address_list.length > 0;
+              const liveHasList = liveSync && Array.isArray(liveSync.address_list);
               const dbHasList = dbSync && Array.isArray(dbSync.address_list) && dbSync.address_list.length > 0;
 
               const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
-              const hasAddressList = Array.isArray(sync.address_list) && sync.address_list.length > 0;
+              const realAddressList = Array.isArray(sync.address_list)
+                ? sync.address_list.filter((entry: any) => {
+                    if (!entry || typeof entry !== 'object') return false;
+                    if (entry.type === 'Summary') return false;
+                    const name = (entry.name || '').trim();
+                    if (name === 'Summary' || name === 'Total' || name.startsWith('Users:')) return false;
+                    return Boolean(name || entry.entry_id || (entry.registration_no && entry.registration_no !== '-') || entry.email_address || entry.email || entry.folder || entry.physical_path);
+                  })
+                : [];
+              const hasAddressList = realAddressList.length > 0;
 
               const copierOnlineAgents = (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
               const copierTargetAgentUid = getTargetAgentUid ? getTargetAgentUid(p.id) : (selectedAgentUid || p.agent_uid || '');

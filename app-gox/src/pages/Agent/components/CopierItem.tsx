@@ -4,9 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { styles } from '../AgentStyles';
 import { GlowCard } from '../../../components/ui/GlowCard';
 import { ScanDestinations } from './ScanDestinations';
+import { fetchApi, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 
 export interface CopierItemProps {
-  handleRefetchAddressBook: (pId: string) => void;
+  handleRefetchAddressBook: (pTarget: any) => void;
   expandedDrivers: Record<string, boolean>;
   setExpandedDrivers: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   expandedDriverMenus: Record<string, boolean>;
@@ -72,12 +73,164 @@ export function CopierItem({
   handleRemoteInstallDriver,
   setPublicFtpData,
 }: CopierItemProps) {
-  const hasDrivers = p.drivers && Object.keys(p.drivers).length > 0;
-  const driversExpanded = expandedDrivers[p.id];
-  const syncCount = sync.address_list ? sync.address_list.length : 0;
-  const syncTime = sync.timestamp ? new Date(sync.timestamp).toLocaleTimeString('vi-VN') : '';
+  const [localSync, setLocalSync] = React.useState<any>(null);
+  const wasPendingRef = React.useRef(false);
+
+  const fetchFreshSync = React.useCallback(async () => {
+    try {
+      const res = await fetchApi(`/api/lan-sites?t=${Date.now()}`);
+      if (res && res.ok && Array.isArray(res.rows)) {
+        const pMac = (p.mac_id || p.mac_address || '').toUpperCase().replace(/-/g, ':');
+        for (const site of res.rows) {
+          for (const item of (site.printers || [])) {
+            const itemMac = (item.mac_id || item.mac_address || '').toUpperCase().replace(/-/g, ':');
+            if (pMac && itemMac && pMac === itemMac) {
+              if (item.address_book_sync && (item.address_book_sync.address_list || item.address_book_sync.result)) {
+                setLocalSync(item.address_book_sync);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore sync error
+    }
+  }, [p.mac_id, p.mac_address]);
+
   const isPending = commandStatus[p.id]?.isPending || false;
   const statusMsg = commandStatus[p.id]?.message || '';
+
+  React.useEffect(() => {
+    if (isPending) {
+      setLocalSync(null);
+    }
+    if (wasPendingRef.current && !isPending) {
+      fetchFreshSync();
+      const t1 = setTimeout(fetchFreshSync, 1500);
+      const t2 = setTimeout(fetchFreshSync, 3500);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+    wasPendingRef.current = isPending;
+  }, [isPending, fetchFreshSync]);
+
+  const activeSyncObj = localSync || sync;
+  const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
+  const driversExpanded = expandedDrivers[p.id];
+  const rawAddressList = (() => {
+    if (Array.isArray(activeSyncObj?.address_list) && activeSyncObj.address_list.length > 0) return activeSyncObj.address_list;
+    if (activeSyncObj?.address_book_data && Array.isArray(activeSyncObj.address_book_data.address_list)) return activeSyncObj.address_book_data.address_list;
+
+    const candidates = [
+      activeSyncObj,
+      activeSyncObj?.result,
+      activeSyncObj?.result_payload,
+      activeSyncObj?.raw,
+      commandStatus?.[p.id]?.result,
+      commandStatus?.[p.id]?.result_payload,
+      commandStatus?.[p.id]?.address_list,
+      commandStatus?.[p.id]?.address_book_sync?.address_list,
+    ];
+
+    for (const cand of candidates) {
+      if (!cand) continue;
+      if (Array.isArray(cand)) return cand;
+      if (typeof cand === 'object' && Array.isArray(cand.address_list)) return cand.address_list;
+      if (typeof cand === 'string') {
+        let cleanCand = cand.trim();
+        if (cleanCand.includes('__ADDRESS_BOOK_JSON_START__')) {
+          try {
+            cleanCand = cleanCand.split('__ADDRESS_BOOK_JSON_START__')[1].split('__ADDRESS_BOOK_JSON_END__')[0].trim();
+            cleanCand = cleanCand.replace(/^(\n|\r|\\n|\\r)+|(\n|\r|\\n|\\r)+$/g, '').trim();
+          } catch {}
+        }
+        try {
+          const parsed = JSON.parse(cleanCand);
+          if (parsed && Array.isArray(parsed.address_list)) return parsed.address_list;
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+      }
+    }
+    return Array.isArray(activeSyncObj?.address_list) ? activeSyncObj.address_list : [];
+  })();
+
+  const realAddressList = rawAddressList.filter((entry: any) => {
+    if (!entry || typeof entry !== 'object') return false;
+    if (entry.type === 'Summary') return false;
+    const name = (entry.name || '').trim();
+    if (name === 'Summary' || name === 'Total' || name.startsWith('Users:')) return false;
+    return Boolean(name || entry.entry_id || (entry.registration_no && entry.registration_no !== '-') || entry.email_address || entry.email || entry.folder || entry.physical_path);
+  });
+
+  const effectiveSync = {
+    ...activeSyncObj,
+    address_list: rawAddressList,
+    status: rawAddressList.length > 0 ? 'success' : (activeSyncObj?.status || 'none'),
+    timestamp: commandStatus?.[p.id]?.timestamp || activeSyncObj?.timestamp || new Date().toISOString(),
+  };
+
+  const effectiveHasAddressList = realAddressList.length > 0 || hasAddressList;
+  const syncCount = realAddressList.length;
+  const syncTime = effectiveSync.timestamp ? new Date(effectiveSync.timestamp).toLocaleTimeString('vi-VN') : '';
+  const handleChangeFtp = React.useCallback(async (printer: any, entry: any) => {
+    const brand = detectBrand(printer.printer_name || printer.name || "");
+    if (brand !== 'ricoh' && brand !== 'toshiba') {
+      showToast('Thiết bị không hỗ trợ thay đổi FTP', 'error');
+      return;
+    }
+
+    const cmdName = brand === 'ricoh' ? 'ricoh_change_ftp' : 'toshiba_change_ftp';
+    const agent = selectedLan?.agents?.find((a: any) => a.is_agent_active) || selectedLan?.agents?.[0];
+    const currentIp = agent?.local_ip || agent?.ip || "";
+    if (!currentIp) {
+      showToast('Không tìm thấy IP của Agent để cập nhật', 'error');
+      return;
+    }
+
+    const currentFolder = entry.folder || entry.physical_path || entry.folder_path || '';
+    const ftpMatch = currentFolder.match(/ftp:\/\/([^:/]+)/);
+    const smbMatch = currentFolder.match(/^\\\\([^\\]+)/);
+    const ricohMatch = currentFolder.match(/^([^:/]+):/);
+    let prevIp = '';
+    if (ftpMatch) {
+      prevIp = ftpMatch[1];
+    } else if (smbMatch) {
+      prevIp = smbMatch[1];
+    } else if (ricohMatch) {
+      prevIp = ricohMatch[1];
+    }
+
+    if (!prevIp) {
+      prevIp = currentIp;
+    }
+
+    const targetId = entry.registration_no || entry.id || "";
+    const targetName = entry.name || entry.username || entry.display_name || "";
+    const printerIp = printer.ip || printer.printer_ip || "";
+    const authUser = printer.auth_user || printer.username || "admin";
+    const authPass = printer.auth_password || printer.password || "";
+
+    showToast(`Đang gửi lệnh cập nhật FTP cho ${entry.name}...`, 'info');
+
+    try {
+      const res = await triggerAgentUtilityExec(selectedAgentUid, cmdName, "", {
+        printer_ip: printerIp,
+        auth_user: authUser,
+        auth_password: authPass,
+        target_id: targetId,
+        target_name: targetName,
+        old_ip: prevIp,
+        new_ip: currentIp
+      });
+
+      if (res && res.ok) {
+        showToast(`Cập nhật FTP cho ${entry.name} thành công!`, 'success');
+      } else {
+        showToast(`Lỗi: ${res?.error || 'Không thể chạy lệnh'}`, 'error');
+      }
+    } catch (err: any) {
+      showToast(`Lỗi gửi lệnh: ${err?.message || err}`, 'error');
+    }
+  }, [selectedAgentUid, selectedLan, detectBrand, showToast]);
 
   return (
                           <div
@@ -100,7 +253,14 @@ export function CopierItem({
                                     return "Thiết bị Photocopy (Đang thám dò...)";
                                   })()}
                                 </span>
-                                <div style={styles.copierSubtitle}>IP: {p.ip} · MAC: {p.mac_id || '—'}</div>
+                                <div style={styles.copierSubtitle}>
+                                  IP: {p.ip} · MAC: {p.mac_id || '—'}
+                                  {p.agent_uid && (
+                                    <span style={{ marginLeft: '12px', color: '#38bdf8', fontSize: '0.78rem', fontWeight: 600 }}>
+                                      📡 Agent: <strong>{p.agent_uid}</strong>
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <span
                                 style={{
@@ -205,40 +365,42 @@ export function CopierItem({
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <span style={styles.syncStatusTitle}>Trạng thái đồng bộ danh bạ:</span>
-                                  <div style={styles.syncStatusText}>
-                                    {isPending ? (
-                                      <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>{statusMsg}</span>
-                                    ) : hasAddressList ? (
-                                      <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
-                                        ✔ Đồng bộ OK ({syncCount} mục) {syncTime ? ` • ${syncTime}` : ''}
-                                      </span>
-                                    ) : sync.status === 'error' ? (
-                                      <span style={{ color: 'var(--color-error)' }}>
-                                        ❌ Lỗi: {sync.error} {syncTime ? `(${syncTime})` : ''}
-                                      </span>
-                                    ) : (
-                                      <span style={{ color: 'var(--color-text-secondary)' }}>Chưa có thông tin danh bạ</span>
-                                    )}
-                                  </div>
-                                </div>
+                                     {isPending ? (
+                                       <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>{statusMsg}</span>
+                                     ) : effectiveHasAddressList ? (
+                                       <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
+                                         ✔ Đồng bộ OK ({syncCount} mục) {syncTime ? ` • ${syncTime}` : ''}
+                                       </span>
+                                     ) : sync.status === 'error' ? (
+                                       <span style={{ color: 'var(--color-error)' }}>
+                                         ❌ Lỗi: {sync.error} {syncTime ? `(${syncTime})` : ''}
+                                       </span>
+                                     ) : (
+                                       <span style={{ color: 'var(--color-text-secondary)' }}>Chưa có thông tin danh bạ</span>
+                                     )}
+                                   </div>
 
                                 <div style={{ display: 'flex', gap: '6px' }}>
                                   <button
                                     style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
-                                    onClick={() => handleRefetchAddressBook(p.id)}
+                                    onClick={async () => {
+                                      handleRefetchAddressBook(p);
+                                      setTimeout(fetchFreshSync, 2000);
+                                      setTimeout(fetchFreshSync, 4500);
+                                    }}
                                     disabled={isPending || onlineAgents.length === 0}
                                   >
-                                    🔄 {sync.status === 'success' ? 'Cập nhật' : 'Đồng bộ'}
+                                    🔄 {effectiveSync.status === 'success' ? 'Cập nhật' : 'Đồng bộ'}
                                   </button>
                                 </div>
                               </div>
 
                               {/* Embedded Scan Destinations list */}
-                              {hasAddressList && (
+                              {effectiveHasAddressList && (
                                 <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '10px' }}>
                                   <ScanDestinations
-                                    hasAddressList={hasAddressList}
-                                    sync={sync}
+                                    hasAddressList={effectiveHasAddressList}
+                                    sync={effectiveSync}
                                     p={p}
                                     commandStatus={commandStatus}
                                     getDestinationStatus={getDestinationStatus}
@@ -246,6 +408,7 @@ export function CopierItem({
                                     handleOpenStorageFiles={handleOpenStorageFiles}
                                     handleEditIP={handleEditIP}
                                     handleDeleteDest={handleDeleteDest}
+                                    handleChangeFtp={handleChangeFtp}
                                   />
                                 </div>
                               )}
@@ -322,19 +485,12 @@ export function CopierItem({
                                                           </div>
                                                         </div>
                                                         <div style={{ display: 'flex', gap: '4px' }}>
-                                                          <a
-                                                            href={drv.url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            style={styles.driverDownloadBtn}
-                                                          >
-                                                            Tải về
-                                                          </a>
+
                                                           <button
                                                             style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
                                                             onClick={() =>
                                                               handleRemoteInstallDriver(
-                                                                p.id,
+                                                                p.mac_id || p.mac_address || p.ip || p.id,
                                                                 sd.brand,
                                                                 sd.model,
                                                                 drv.name,

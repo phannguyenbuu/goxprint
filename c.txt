@@ -1,0 +1,63 @@
+import sys
+
+if sys.platform != 'win32':
+    raise RuntimeError('Chỉ hỗ trợ Windows')
+
+def check_matching_copiers():
+    if 'bridge' not in globals():
+        raise RuntimeError('Không tìm thấy đối tượng bridge trên Agent.')
+        
+    bridge = globals()['bridge']
+    target_ip = '__TARGET_IP__'
+        
+    printers = bridge._load_printers()
+    if not printers:
+        raise RuntimeError('Không tìm thấy máy in/copier nào trong mạng.')
+        
+    matching_copiers = []
+    
+    for printer in printers:
+        if bridge._printer_type(printer.printer_type) != 'ricoh':
+            continue
+            
+        session = None
+        try:
+            try:
+                session = bridge._ricoh_service.create_http_client(printer, authenticated=True)
+            except Exception:
+                session = bridge._ricoh_service.create_http_client(printer, authenticated=False)
+
+            payload = bridge._ricoh_service.process_address_list(printer, session=session)
+            entries = payload.get('address_list', [])
+            
+            has_match = False
+            match_details = []
+            for entry in entries:
+                folder = str(entry.get('folder', '') or entry.get('folder_path', '') or '').strip()
+                if folder and ('ftp://' in folder or folder.startswith('ftp:')) and target_ip in folder:
+                    has_match = True
+                    match_details.append(f"{entry.get('name')} ({entry.get('registration_no')})")
+            
+            if has_match:
+                matching_copiers.append(f"{printer.name} ({printer.ip}): {', '.join(match_details)}")
+        except Exception:
+            pass
+        finally:
+            if session:
+                try:
+                    bridge._ricoh_service._reset_web_session(session, printer)
+                    session.close()
+                except Exception:
+                    pass
+                    
+    if not matching_copiers:
+        msg = f'Hoàn thành! Không có copier nào có scan entry khớp với IP {target_ip}.'
+    else:
+        msg = f'Tìm thấy {len(matching_copiers)} copier khớp IP {target_ip}:\n' + '\n'.join([f'- {item}' for item in matching_copiers])
+
+    if globals().get('context'):
+        globals()['context']['result_payload'] = msg
+    else:
+        print(msg)
+
+check_matching_copiers()

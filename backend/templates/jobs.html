@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header-row">
+    <h3>Job Manager</h3>
+    <div>
+      <button id="refresh-btn" class="filter-btn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="filter-board">
+    <div class="filter-group" style="flex: 1;">
+      <label>Search Command, Agent ID...</label>
+      <input type="text" id="filter-search" placeholder="Type here to search..." style="width: 100%;">
+    </div>
+    <div class="filter-group">
+      <label>Status</label>
+      <select id="filter-status">
+        <option value="all">All</option>
+        <option value="pending">Pending</option>
+        <option value="success">Success</option>
+        <option value="failed">Failed</option>
+      </select>
+    </div>
+    <button id="apply-filters" class="filter-btn" style="align-self: flex-end; margin-bottom: 0;">Search</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="generic-table">
+      <thead>
+        <tr>
+          <th style="padding-left: 20px; width: 60px;">ID</th>
+          <th>Command Type</th>
+          <th style="width: 180px;">Agent UID</th>
+          <th style="width: 140px;">Printer</th>
+          <th style="width: 120px;">Status</th>
+          <th style="width: 160px;">Requested At</th>
+          <th style="width: 160px;">Responded At</th>
+          <th>Error / Details</th>
+        </tr>
+      </thead>
+      <tbody id="jobs-tbody">
+        <tr><td colspan="8" class="loading">Loading Jobs...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  
+  <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
+    <button id="prev-page" class="filter-btn" style="margin: 0; padding: 4px 12px; background-color: #fff; color: #333; border: 1px solid #ccc; font-weight: bold;">&lt;</button>
+    <div id="current-page-display" style="background-color: #ff5722; color: #fff; font-weight: bold; padding: 4px 12px; border-radius: 4px;">1</div>
+    <button id="next-page" class="filter-btn" style="margin: 0; padding: 4px 12px; background-color: #fff; color: #333; border: 1px solid #ccc; font-weight: bold;">&gt;</button>
+    
+    <select id="page-size-select" style="margin: 0 0 0 10px; padding: 6px 10px; background-color: #1a1a24; color: #fff; border: 1px solid #333; border-radius: 4px; font-size: 13px;">
+      <option value="20">20 / page</option>
+      <option value="50" selected>50 / page</option>
+      <option value="100">100 / page</option>
+      <option value="200">200 / page</option>
+    </select>
+  </div>
+</section>
+
+<style>
+.generic-table input[type="text"] {
+    width: 90%;
+    padding: 6px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.toast-msg {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #333;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    z-index: 9999;
+    font-size: 14px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+    display: none;
+}
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.status-pending { background-color: #fff3cd; color: #856404; }
+.status-success { background-color: #d4edda; color: #155724; }
+.status-failed { background-color: #f8d7da; color: #721c24; }
+</style>
+
+<div id="custom-toast" class="toast-msg"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let jobsData = [];
+
+    const escapeHtml = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
+    const getCommandName = (type, params) => {
+        if (type === 'install_driver') {
+            try {
+                const p = JSON.parse(params);
+                return `Install Driver ${p.driver_brand || ''} ${p.driver_model || ''} ${p.driver_name || ''}`;
+            } catch (e) {
+                return 'Install Driver';
+            }
+        }
+        if (type === 'trigger_utility') {
+            try {
+                const p = JSON.parse(params);
+                return p.child_command_ids ? 'Multi Agent Utility' : `Utility: ${p.code || ''}`;
+            } catch (e) {
+                return 'Utility Command';
+            }
+        }
+        return type || 'Unknown';
+    };
+
+    let currentPage = 1;
+    let pageSize = 50;
+    let totalJobs = 0;
+
+    const renderTable = () => {
+        const tbody = document.getElementById('jobs-tbody');
+        tbody.innerHTML = '';
+
+        if (!jobsData || jobsData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">No matching jobs found.</td></tr>';
+            return;
+        }
+
+        jobsData.forEach(row => {
+            const tr = document.createElement('tr');
+            const cmdName = getCommandName(row.command_type, row.command_params);
+            
+            let statusClass = 'status-failed';
+            let statusText = row.status || 'Failed';
+            if (row.status === 'pending') { statusClass = 'status-pending'; statusText = 'Pending'; }
+            if (row.status === 'success') { statusClass = 'status-success'; statusText = 'Success'; }
+            
+            tr.innerHTML = `
+                <td style="padding-left: 20px;">${row.id}</td>
+                <td><strong>${escapeHtml(cmdName)}</strong></td>
+                <td><code class="font-mono">${escapeHtml(row.agent_uid || 'N/A')}</code></td>
+                <td>
+                    <div style="font-size: 13px; font-weight: 500;">${escapeHtml(row.printer_name || '')}</div>
+                    <div style="font-size: 11px; color: #666;">${escapeHtml(row.ip || '')}</div>
+                </td>
+                <td><span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></td>
+                <td><div style="font-size: 12px; color: #666;">${escapeHtml(row.requested_at || '')}</div></td>
+                <td><div style="font-size: 12px; color: #666;">${escapeHtml(row.responded_at || '')}</div></td>
+                <td>
+                    <div style="font-size: 12px; color: #444; max-height: 60px; overflow-y: auto; white-space: pre-wrap;">${escapeHtml(row.error_message || '')}</div>
+                </td>
+            `;
+
+            tbody.appendChild(tr);
+        });
+    };
+
+    const loadJobs = (silent = false) => {
+        const tbody = document.getElementById('jobs-tbody');
+        if (!silent) {
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading Jobs...</td></tr>';
+        }
+
+        const searchVal = document.getElementById('filter-search').value.trim();
+        const statusVal = document.getElementById('filter-status').value;
+        
+        const params = new URLSearchParams({
+            limit: pageSize,
+            page: currentPage,
+            status: statusVal,
+            q: searchVal
+        });
+
+        fetch(`/api/jobs?${params.toString()}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.jobs) {
+                    jobsData = data.jobs;
+                    totalJobs = data.total || 0;
+                    renderTable();
+                    updatePaginationUI();
+                } else if (!silent) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Failed to load jobs.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading jobs:', err);
+                if (!silent) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Error loading jobs from server.</td></tr>';
+                }
+            });
+    };
+
+    const updatePaginationUI = () => {
+        document.getElementById('current-page-display').textContent = currentPage;
+        document.getElementById('prev-page').disabled = currentPage <= 1;
+        
+        const totalPages = Math.ceil(totalJobs / pageSize);
+        document.getElementById('next-page').disabled = currentPage >= totalPages || totalPages === 0;
+    };
+
+    document.getElementById('prev-page').addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            loadJobs();
+        }
+    });
+
+    document.getElementById('next-page').addEventListener('click', () => {
+        const totalPages = Math.ceil(totalJobs / pageSize);
+        if (currentPage < totalPages) {
+            currentPage++;
+            loadJobs();
+        }
+    });
+
+    document.getElementById('page-size-select').addEventListener('change', (e) => {
+        pageSize = parseInt(e.target.value, 10);
+        currentPage = 1; // reset to first page
+        loadJobs();
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', () => loadJobs(false));
+    document.getElementById('apply-filters').addEventListener('click', () => {
+        currentPage = 1;
+        loadJobs();
+    });
+    document.getElementById('filter-status').addEventListener('change', () => {
+        currentPage = 1;
+        loadJobs();
+    });
+    document.getElementById('filter-search').addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') {
+            currentPage = 1;
+            loadJobs();
+        }
+    });
+
+    loadJobs();
+    setInterval(() => loadJobs(true), 3000);
+});
+</script>
+{% endblock %}

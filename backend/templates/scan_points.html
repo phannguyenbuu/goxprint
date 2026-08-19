@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header-row">
+    <h3>Scan Points Address Book</h3>
+    <div>
+      <button id="refresh-btn" class="filter-btn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="filter-board">
+    <div class="filter-group" style="flex: 1;">
+      <label>Search Copier, Destination, Path, or User Code</label>
+      <input type="text" id="filter-search" placeholder="Type here to search..." style="width: 100%;">
+    </div>
+    <button id="apply-filters" class="filter-btn" style="align-self: flex-end; margin-bottom: 0;">Search</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="generic-table">
+      <thead>
+        <tr>
+          <th style="padding-left: 20px; width: 100px;">ID</th>
+          <th>Destination Name</th>
+          <th style="width: 100px;">Type</th>
+          <th>Email / Folder Path</th>
+          <th style="width: 120px;">User Code</th>
+          <th style="width: 200px;">Updated At</th>
+        </tr>
+      </thead>
+      <tbody id="scan-points-tbody">
+        <tr><td colspan="6" class="loading">Loading Scan Points...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Escape helper
+    const escapeHtml = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
+    const loadScanPoints = () => {
+        const searchVal = document.getElementById('filter-search').value.toLowerCase().trim();
+        const tbody = document.getElementById('scan-points-tbody');
+        tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading Scan Points...</td></tr>';
+
+        fetch(`/api/scan-points`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.ok && data.rows) {
+                    const copierGroups = [];
+
+                    data.rows.forEach(row => {
+                        const abData = row.address_book_data || {};
+                        
+                        // Parse address book data into array
+                        let list = [];
+                        if (abData.address_list && Array.isArray(abData.address_list)) {
+                            list = abData.address_list;
+                        } else if (Array.isArray(abData)) {
+                            list = abData;
+                        } else if (typeof abData === 'object') {
+                            const keys = Object.keys(abData);
+                            const temp = [];
+                            for (const k of keys) {
+                                const entry = abData[k];
+                                if (entry && typeof entry === 'object') {
+                                    if (k === 'address_list' && Array.isArray(entry)) {
+                                        list = entry;
+                                        break;
+                                    }
+                                    temp.push(entry);
+                                }
+                            }
+                            if (list.length === 0) {
+                                list = temp;
+                            }
+                        }
+
+                        // Filter out metadata / summary entries
+                        const realEntries = list.filter(entry => {
+                            if (!entry) return false;
+                            const entryType = String(entry.type || '').toLowerCase();
+                            const entryName = String(entry.name || '').toLowerCase();
+                            return entryType !== 'summary' && !entryName.includes('users:');
+                        });
+
+                        // If copier has no real entries, skip it
+                        if (realEntries.length === 0) {
+                            return;
+                        }
+
+                        // Format updated_at string
+                        let updatedStr = '';
+                        if (row.updated_at) {
+                            try {
+                                const dt = new Date(row.updated_at);
+                                updatedStr = dt.toLocaleString();
+                            } catch(e) {
+                                updatedStr = row.updated_at;
+                            }
+                        }
+
+                        // Sort by entry number
+                        realEntries.sort((a, b) => {
+                            const regA = parseInt(a.registration_no || a.entry_id || a.id || 0);
+                            const regB = parseInt(b.registration_no || b.entry_id || b.id || 0);
+                            return regA - regB;
+                        });
+
+                        const parsedEntries = realEntries.map(entry => {
+                            const regNo = entry.registration_no || entry.entry_id || entry.id || '-';
+                            const name = entry.name || '-';
+                            
+                            // Determine destination type & target value
+                            let type = 'Folder';
+                            let destination = entry.physical_path || entry.folder || entry.folder_path || '';
+                            const email = entry.email_address || entry.email || '';
+                            
+                            const isFolder = destination.startsWith('ftp://') || 
+                                             destination.startsWith('\\\\') || 
+                                             String(entry.protocol || '').toUpperCase() === 'FTP' || 
+                                             String(entry.protocol || '').toUpperCase() === 'SMB';
+
+                            if (isFolder) {
+                                type = 'Folder';
+                            } else if (email && email !== '-') {
+                                type = 'Email';
+                                destination = email;
+                            } else if (name.includes('@')) {
+                                type = 'Email';
+                                destination = name;
+                            }
+
+                            if (!destination) {
+                                destination = '-';
+                            }
+
+                            const userCode = entry.user_code || '-';
+                            const warning = entry.warning || entry.error || '';
+
+                            return {
+                                regNo: regNo,
+                                name: name,
+                                type: type,
+                                destination: destination,
+                                userCode: userCode,
+                                warning: warning
+                            };
+                        });
+
+                        copierGroups.push({
+                            mac_id: row.mac_id,
+                            printer_name: row.printer_name || 'Generic Copier',
+                            ip: row.ip || 'N/A',
+                            updated_at: updatedStr,
+                            entries: parsedEntries
+                        });
+                    });
+
+                    // Generate table content based on searchVal
+                    let html = '';
+                    let totalCopiersCount = 0;
+
+                    copierGroups.forEach(group => {
+                        // Filter entries of this group
+                        const matchingEntries = group.entries.filter(entry => {
+                            if (!searchVal) return true;
+                            return (
+                                group.printer_name.toLowerCase().includes(searchVal) ||
+                                group.mac_id.toLowerCase().includes(searchVal) ||
+                                group.ip.toLowerCase().includes(searchVal) ||
+                                entry.regNo.toString().toLowerCase().includes(searchVal) ||
+                                entry.name.toLowerCase().includes(searchVal) ||
+                                entry.type.toLowerCase().includes(searchVal) ||
+                                entry.destination.toLowerCase().includes(searchVal) ||
+                                entry.userCode.toString().toLowerCase().includes(searchVal)
+                            );
+                        });
+
+                        if (matchingEntries.length === 0) {
+                            return; // No match for this copier, skip rendering this group
+                        }
+
+                        totalCopiersCount++;
+
+                        // Render group header
+                        html += `
+                            <tr class="copier-group-header">
+                                <td colspan="6">
+                                    <div class="copier-info-bar">
+                                        <span class="copier-title">🖨️ ${escapeHtml(group.printer_name)}</span>
+                                        <span class="copier-meta-item">IP: <strong class="font-mono">${escapeHtml(group.ip)}</strong></span>
+                                        <span class="copier-meta-item">MAC: <strong class="font-mono">${escapeHtml(group.mac_id)}</strong></span>
+                                        <span class="copier-meta-item">Last Synced: <strong>${escapeHtml(group.updated_at)}</strong></span>
+                                        <span class="copier-badge">${matchingEntries.length} destinations</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+
+                        // Render entry rows
+                        matchingEntries.forEach(entry => {
+                            const isInvalid = !!entry.warning;
+                            const typeClass = isInvalid ? 'badge-danger' : (entry.type === 'Email' ? 'badge-success' : (entry.type === 'Folder' ? 'badge-primary' : ''));
+                            const warningMark = isInvalid ? `<span style="color: #eab308; margin-left: 6px; cursor: help;" title="${escapeHtml(entry.warning)}">⚠️</span>` : '';
+                            const displayType = isInvalid ? 'Invalid' : entry.type;
+                            html += `
+                                <tr class="destination-row">
+                                    <td class="font-mono" style="padding-left: 20px;"><strong>#${escapeHtml(entry.regNo)}</strong></td>
+                                    <td><strong>${escapeHtml(entry.name)}</strong>${warningMark}</td>
+                                    <td><span class="badge ${typeClass}">${displayType}</span></td>
+                                    <td class="font-mono" style="font-size: 0.82rem; word-break: break-all; color: #475569;">${escapeHtml(entry.destination)}</td>
+                                    <td class="font-mono">${escapeHtml(entry.userCode)}</td>
+                                    <td style="color: #64748b; font-size: 0.8rem;">${escapeHtml(group.updated_at)}</td>
+                                </tr>
+                            `;
+                        });
+                    });
+
+                    if (totalCopiersCount === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #64748b;">No scan points found</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = html;
+
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="6" class="error-msg">Error: ${escapeHtml(data.error || 'Failed to load')}</td></tr>`;
+                }
+            })
+            .catch(err => {
+                tbody.innerHTML = `<tr><td colspan="6" class="error-msg">Error loading data: ${escapeHtml(err.message)}</td></tr>`;
+            });
+    };
+
+    // Bind event listeners
+    document.getElementById('apply-filters').addEventListener('click', loadScanPoints);
+    document.getElementById('refresh-btn').addEventListener('click', loadScanPoints);
+    
+    document.getElementById('filter-search').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadScanPoints();
+        }
+    });
+
+    // Initial load
+    loadScanPoints();
+});
+</script>
+
+<style>
+.copier-group-header td {
+    background: #f8fafc !important;
+    padding: 12px 16px !important;
+    border-top: 2px solid #e2e8f0 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+}
+.copier-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+.copier-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+.copier-meta-item {
+    font-size: 0.82rem;
+    color: #475569;
+}
+.copier-meta-item code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #0f172a;
+}
+.copier-badge {
+    background: rgba(99, 102, 241, 0.15);
+    color: #6366f1;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-left: auto;
+}
+.destination-row td {
+    border-bottom: 1px solid #f1f5f9 !important;
+}
+.destination-row:hover td {
+    background: #fafafa;
+}
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 4px;
+}
+.badge-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+.badge-primary {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+.badge-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+</style>
+{% endblock %}

@@ -6,6 +6,7 @@ import { GlowCard } from '../../../components/ui/GlowCard';
 import { AnimatedList } from '../../../components/ui/AnimatedList';
 import { safePathToken } from '../utils/agentUtils';
 import { CopierItem } from './CopierItem';
+import { triggerAgentUtilityExec, getCommandStatus } from '../../../api/mockAgentApi';
 
 export function AgentsTab(props: any) {
   const {
@@ -65,6 +66,7 @@ export function AgentsTab(props: any) {
     handleSaveAuth,
     handleSaveCameraConfig,
     handleSaveEditIP,
+    handleTriggerUtilityExec,
     handleSaveSettings,
     handleStartToshibaVnc,
     handleTestCameraConnection,
@@ -242,7 +244,76 @@ export function AgentsTab(props: any) {
                             </div>
                             <div style={styles.detailRow}>
                               <span style={styles.detailLabel}>IP cục bộ:</span>
-                              <span style={styles.detailValue}>{agent.local_ip}</span>
+                              <span style={{ ...styles.detailValue, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {agent.local_ip}
+                                <button
+                                  title="Làm mới IP cục bộ"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const res = await triggerAgentUtilityExec(agent.agent_uid, 'get_agent_ip', '');
+                                      if (res.ok && res.command_id) {
+                                        if (props.showToast) {
+                                          props.showToast('Đang yêu cầu lấy lại IP cục bộ...', 'info');
+                                        }
+                                        const commandId = res.command_id;
+                                        const startTime = Date.now();
+                                        const timer = setInterval(async () => {
+                                          try {
+                                            if (Date.now() - startTime > 12000) {
+                                              clearInterval(timer);
+                                              return;
+                                            }
+                                            const statusRes = await getCommandStatus(commandId);
+                                            if (statusRes.status === 'success') {
+                                              clearInterval(timer);
+                                              if (props.fetchLanSitesData) {
+                                                await props.fetchLanSitesData(true);
+                                              }
+                                              if (props.showToast) {
+                                                props.showToast('Đã cập nhật IP cục bộ mới nhất!', 'success');
+                                              }
+                                            } else if (statusRes.status === 'failed') {
+                                              clearInterval(timer);
+                                              if (props.showToast) {
+                                                props.showToast('Không thể lấy lại IP cục bộ: ' + (statusRes.error || 'Thất bại'), 'error');
+                                              }
+                                            }
+                                          } catch (pollErr) {
+                                            console.error(pollErr);
+                                            clearInterval(timer);
+                                          }
+                                        }, 1000);
+                                      } else {
+                                        if (props.showToast) {
+                                          props.showToast('Gửi yêu cầu thất bại: ' + (res.error || 'Lỗi kết nối'), 'error');
+                                        }
+                                      }
+                                    } catch (err: any) {
+                                      if (props.showToast) {
+                                        props.showToast('Lỗi: ' + err.message, 'error');
+                                      }
+                                    }
+                                  }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem',
+                                    padding: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'var(--color-primary)',
+                                    opacity: 0.8,
+                                    transition: 'opacity 0.2s',
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                  onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+                                >
+                                  🔄
+                                </button>
+                              </span>
                             </div>
                             <div style={styles.detailRow}>
                               <span style={styles.detailLabel}>Địa chỉ MAC:</span>

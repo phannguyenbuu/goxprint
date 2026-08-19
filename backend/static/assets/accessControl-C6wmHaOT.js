@@ -1,0 +1,1 @@
+const a=["create_request","view_requests","track_status","view_history","cancel_request"],c=["create_request","accept_request","update_progress","complete_request","add_materials","view_requests","view_history"];Array.from(new Set([...a,...c]));function o(e,t){const s=new Set(e.locationIds);return t.filter(r=>s.has(r.id))}export{o as g};

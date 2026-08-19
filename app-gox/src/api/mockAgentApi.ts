@@ -4,7 +4,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com
 
 const pendingRequests = new Map<string, Promise<any>>();
 
-async function fetchApi(path: string, options: RequestInit = {}) {
+export async function fetchApi(path: string, options: RequestInit = {}) {
   const cacheKey = `${options.method || 'GET'}:${path}:${options.body || ''}`;
   if (pendingRequests.has(cacheKey)) {
     return pendingRequests.get(cacheKey)!;
@@ -216,16 +216,19 @@ export async function mockDeleteAgent(agentId: string): Promise<AgentActionResul
 
 // ── REAL API CALLS TO VPS BACKEND ──
 
-export async function saveCopierCredentials(printerRef: string, user: string, pass: string, macId?: string): Promise<any> {
+export async function saveCopierCredentials(printerRef: string, user: string, pass: string, macId?: string, printerType?: string): Promise<any> {
   return fetchApi(`/api/devices/${encodeURIComponent(printerRef)}/credentials`, {
     method: 'PATCH',
-    body: JSON.stringify({ auth_user: user, auth_password: pass, mac_id: macId || printerRef })
+    body: JSON.stringify({ auth_user: user, auth_password: pass, mac_id: macId || printerRef, printer_type: printerType })
   });
 }
 
-export async function triggerFetchAddressBook(printerId: string, agentUid?: string): Promise<any> {
+export async function triggerFetchAddressBook(printerId: string, agentUid?: string, extraData?: any): Promise<any> {
   const path = agentUid ? `/api/devices/${printerId}/fetch-address-book?agent_uid=${agentUid}` : `/api/devices/${printerId}/fetch-address-book`;
-  return fetchApi(path, { method: 'POST' });
+  return fetchApi(path, {
+    method: 'POST',
+    body: JSON.stringify(extraData || {})
+  });
 }
 
 export async function getCommandStatus(commandId: number): Promise<any> {
@@ -282,11 +285,15 @@ export async function getAgentSettings(agentUid: string): Promise<any> {
   return fetchApi(`/api/agents/${agentUid}/settings?lead=default`);
 }
 
-export async function getJobs(lead?: string, lanUid?: string, agentUid?: string): Promise<any> {
+export async function getJobs(lead?: string, lanUid?: string, agentUid?: string, page: number = 1, limit: number = 50, status?: string, q?: string): Promise<any> {
   const params = new URLSearchParams();
   if (lead) params.append('lead', lead);
   if (lanUid) params.append('lan_uid', lanUid);
   if (agentUid) params.append('agent_uid', agentUid);
+  if (page) params.append('page', page.toString());
+  if (limit) params.append('limit', limit.toString());
+  if (status && status !== 'all') params.append('status', status);
+  if (q) params.append('q', q);
   params.append('t', Date.now().toString());
   return fetchApi(`/api/jobs?${params.toString()}`);
 }
@@ -309,10 +316,19 @@ export async function getAgentUtilityCommands(agentUid: string): Promise<any> {
   return fetchApi(`/api/agents/${agentUid}/utility-commands?lead=default&t=${Date.now()}`);
 }
 
-export async function triggerAgentUtilityExec(agentUid: string, command: string, commandContent: string): Promise<any> {
+export async function triggerAgentUtilityExec(
+  agentUid: string,
+  command: string,
+  commandContent: string,
+  extraParams?: Record<string, any>
+): Promise<any> {
   return fetchApi(`/api/agents/${agentUid}/utility/exec?lead=default`, {
     method: 'POST',
-    body: JSON.stringify({ command, command_content: commandContent }),
+    body: JSON.stringify({
+      command,
+      command_content: commandContent,
+      ...(extraParams || {})
+    }),
   });
 }
 

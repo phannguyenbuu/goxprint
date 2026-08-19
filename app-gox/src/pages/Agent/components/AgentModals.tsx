@@ -687,9 +687,14 @@ export function AgentModals(props: any) {
                         ) : (
                           <>
                             {utilityCommands.length > 0 ? (
-                              utilityCommands
-                                .filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.command !== 'open_web_setting')
-                                .map((cmd: any) => {
+                              (() => {
+                                const filtered = utilityCommands.filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.command !== 'open_web_setting');
+                                const syncIdx = filtered.findIndex((cmd: any) => cmd.command === 'sync_all_scanpoints');
+                                if (syncIdx > -1) {
+                                  const [syncCmd] = filtered.splice(syncIdx, 1);
+                                  filtered.unshift(syncCmd);
+                                }
+                                return filtered.map((cmd: any) => {
                                   const isEmergency = cmd.command === 'emergency_restart';
                                   return (
                                     <button
@@ -739,7 +744,7 @@ export function AgentModals(props: any) {
                                       </div>
                                     </button>
                                   );
-                                })
+                                })})()
                             ) : (
                               // Fallback: nếu chưa có JSON, dùng 2 lệnh mặc định
                               <>
@@ -1110,26 +1115,114 @@ raise RuntimeError('\\n'.join(lines))`;
               {activeModal === 'edit_ip' && editIpModalData && (
                 <>
                   <div style={styles.modalHeader}>
-                    <h3 style={styles.modalTitle}>✏️ Thay đổi IP điểm scan</h3>
+                    <h3 style={styles.modalTitle}> Thay đổi IP / Cấu hình FTP</h3>
                     <button style={styles.modalCloseBtn} onClick={() => setActiveModal(null)}>
                       &times;
                     </button>
                   </div>
                   <div style={styles.modalBody}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '12px' }}>
-                      Nhập địa chỉ IP mới cho điểm scan <strong>{editIpModalData.entry.name}</strong>:
+                    {/* Row with Agent select and Port input */}
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
+                          Chọn nhanh IP từ danh sách Agent:
+                        </label>
+                        <select
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            background: 'var(--color-surface)',
+                            color: 'var(--color-text)',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: '6px',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer'
+                          }}
+                          value=""
+                          onChange={(e) => {
+                            const selectedVal = e.target.value;
+                            if (!selectedVal) return;
+                            setEditIpModalData((prev: any) => {
+                              if (!prev) return null;
+                              const port = prev.newPort || '2130';
+                              return {
+                                ...prev,
+                                newIp: `${selectedVal}:${port}`,
+                                newPort: port
+                              };
+                            });
+                          }}
+                        >
+                          <option value="">-- Chọn Agent --</option>
+                          {(selectedLan?.agents || []).map((agent: any, idx: number) => {
+                            const ip = agent.local_ip || agent.ip || '';
+                            const name = agent.hostname || agent.uid || `Agent ${idx + 1}`;
+                            return (
+                              <option key={idx} value={ip}>
+                                {name} ({ip})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                      <div style={{ width: '100px' }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
+                          Cổng FTP:
+                        </label>
+                        <input
+                          type="text"
+                          value={editIpModalData.newPort || ''}
+                          onChange={(e) => {
+                            const portVal = e.target.value;
+                            setEditIpModalData((prev: any) => {
+                              if (!prev) return null;
+                              let host = prev.newIp || '';
+                              if (host.includes(':')) {
+                                host = host.split(':')[0];
+                              }
+                              return {
+                                ...prev,
+                                newPort: portVal,
+                                newIp: portVal ? `${host}:${portVal}` : host
+                              };
+                            });
+                          }}
+                          placeholder="2130"
+                          style={styles.modalInput}
+                        />
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      value={editIpModalData.newIp}
-                      onChange={(e) =>
-                        setEditIpModalData((prev: any) => prev ? { ...prev, newIp: e.target.value } : null)
-                      }
-                      placeholder="Ví dụ: 192.168.1.100"
-                      style={styles.modalInput}
-                    />
+
+                    {/* FTP IP Input */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
+                        Địa chỉ FTP (IP:PORT):
+                      </label>
+                      <input
+                        type="text"
+                        value={editIpModalData.newIp}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditIpModalData((prev: any) => {
+                            if (!prev) return null;
+                            let port = prev.newPort || '2130';
+                            if (val.includes(':')) {
+                              port = val.split(':')[1].trim() || port;
+                            }
+                            return {
+                              ...prev,
+                              newIp: val,
+                              newPort: port
+                            };
+                          });
+                        }}
+                        placeholder="Ví dụ: 192.168.1.100:2130"
+                        style={styles.modalInput}
+                      />
+                    </div>
+
                     <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', marginTop: '8px', fontStyle: 'italic' }}>
-                      Đường dẫn hiện tại: {editIpModalData.entry.folder || editIpModalData.entry.physical_path || editIpModalData.entry.folder_path}
+                      Đường dẫn hiện tại trên máy in: {editIpModalData.entry.folder || editIpModalData.entry.physical_path || editIpModalData.entry.folder_path}
                     </div>
                   </div>
                   <div style={styles.modalFooter}>
@@ -1141,7 +1234,14 @@ raise RuntimeError('\\n'.join(lines))`;
                     </button>
                     <button
                       style={{ ...styles.smallBtn, background: 'var(--color-primary)', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold' }}
-                      onClick={handleSaveEditIP}
+                      onClick={() => {
+                        const finalIp = (editIpModalData.newIp || '').trim();
+                        if (!finalIp.includes(':')) {
+                          showToast('Yêu cầu nhập thủ công phải đi kèm cổng FTP (Ví dụ: 192.168.1.100:2130)', 'error');
+                          return;
+                        }
+                        handleSaveEditIP();
+                      }}
                       disabled={!editIpModalData.newIp.trim()}
                     >
                       Lưu lại
@@ -1608,33 +1708,39 @@ raise RuntimeError('\\n'.join(lines))`;
                   <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
                     Chọn Máy đại diện (Agent) để thực hiện cài đặt:
                   </label>
-                  <select
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '6px',
-                      background: 'var(--color-input-bg)',
-                      border: '1px solid var(--color-border)',
-                      color: 'var(--color-text)',
-                      fontSize: '0.82rem',
-                    }}
-                    value={installDriverModal.selectedAgentUid}
-                    onChange={(e) =>
-                      setInstallDriverModal((prev) => ({ ...prev, selectedAgentUid: e.target.value }))
-                    }
-                  >
-                    {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0) ? (
-                      <option value="">(Không có Agent online trong LAN này)</option>
-                    ) : (
-                      selectedLan.agents
+                  {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0) ? (
+                    <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                      Không có Agent online trong LAN này
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+                      {selectedLan.agents
                         .filter((a: any) => a.is_agent_active)
-                        .map((a: any) => (
-                          <option key={a.agent_uid} value={a.agent_uid}>
-                            {a.hostname} ({a.local_ip})
-                          </option>
-                        ))
-                    )}
-                  </select>
+                        .map((a: any) => {
+                          const isChecked = installDriverModal.selectedAgentUids.includes(a.agent_uid);
+                          return (
+                            <label key={a.agent_uid} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--color-text)' }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  setInstallDriverModal((prev) => {
+                                    const uids = prev.selectedAgentUids;
+                                    if (e.target.checked) {
+                                      return { ...prev, selectedAgentUids: [...uids, a.agent_uid] };
+                                    } else {
+                                      return { ...prev, selectedAgentUids: uids.filter((id: string) => id !== a.agent_uid) };
+                                    }
+                                  });
+                                }}
+                                style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }}
+                              />
+                              <span>{a.hostname} ({a.local_ip})</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1648,17 +1754,19 @@ raise RuntimeError('\\n'.join(lines))`;
                     borderColor: 'var(--color-primary)',
                     color: 'white',
                   }}
-                  disabled={!installDriverModal.selectedAgentUid}
+                  disabled={installDriverModal.selectedAgentUids.length === 0}
                   onClick={() => {
                     setInstallDriverModal((prev) => ({ ...prev, isOpen: false }));
-                    executeRemoteInstallDriver(
-                      installDriverModal.printerId,
-                      installDriverModal.brand,
-                      installDriverModal.model,
-                      installDriverModal.driverName,
-                      installDriverModal.driverUrl,
-                      installDriverModal.selectedAgentUid
-                    );
+                    installDriverModal.selectedAgentUids.forEach((agentUid: string) => {
+                      executeRemoteInstallDriver(
+                        installDriverModal.printerId,
+                        installDriverModal.brand,
+                        installDriverModal.model,
+                        installDriverModal.driverName,
+                        installDriverModal.driverUrl,
+                        agentUid
+                      );
+                    });
                   }}
                 >
                   Bắt đầu cài đặt
@@ -1721,9 +1829,14 @@ raise RuntimeError('\\n'.join(lines))`;
                         setIpInputModal((prev) => ({ ...prev, error: 'IP không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x' }));
                         return;
                       }
+                      const changeAllVal = (ipInputModal.changeAllTo || '').trim();
+                      if (changeAllVal && !ipPattern.test(changeAllVal)) {
+                        setIpInputModal((prev) => ({ ...prev, error: 'IP mới không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x hoặc để trống.' }));
+                        return;
+                      }
                       const cb = ipInputModal.onConfirm;
                       setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
-                      cb(ipInputModal.value.trim());
+                      cb(ipInputModal.value.trim(), changeAllVal);
                     }
                     if (e.key === 'Escape') {
                       setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
@@ -1752,6 +1865,40 @@ raise RuntimeError('\\n'.join(lines))`;
                     if (!ipInputModal.error) e.target.style.borderColor = 'var(--color-surface-light)';
                   }}
                 />
+
+                {ipInputModal.title.includes('Kiểm tra') && (
+                  <div style={{ marginTop: '12px' }}>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', margin: '0 0 6px 0', lineHeight: 1.5 }}>
+                      Thay đổi tất cả FTP Scan trùng IP trên thành IP mới (Tùy chọn):
+                    </p>
+                    <input
+                      type="text"
+                      value={ipInputModal.changeAllTo || ''}
+                      onChange={(e) => setIpInputModal((prev) => ({ ...prev, changeAllTo: e.target.value, error: '' }))}
+                      placeholder="Ví dụ: 192.168.1.43"
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid var(--color-surface-light)',
+                        background: 'var(--color-background)',
+                        color: 'var(--color-text)',
+                        fontSize: '0.9rem',
+                        fontFamily: 'monospace',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        transition: 'border-color 0.2s',
+                      }}
+                      onFocus={(e) => {
+                        e.target.style.borderColor = 'var(--color-primary)';
+                      }}
+                      onBlur={(e) => {
+                        e.target.style.borderColor = 'var(--color-surface-light)';
+                      }}
+                    />
+                  </div>
+                )}
+
                 {ipInputModal.error && (
                   <p style={{ margin: '6px 0 0 0', fontSize: '0.72rem', color: 'var(--color-error)' }}>
                     ⚠️ {ipInputModal.error}
@@ -1791,9 +1938,14 @@ raise RuntimeError('\\n'.join(lines))`;
                       setIpInputModal((prev) => ({ ...prev, error: 'IP không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x' }));
                       return;
                     }
+                    const changeAllVal = (ipInputModal.changeAllTo || '').trim();
+                    if (changeAllVal && !ipPattern.test(changeAllVal)) {
+                      setIpInputModal((prev) => ({ ...prev, error: 'IP mới không hợp lệ! Vui lòng nhập đúng dạng x.x.x.x hoặc để trống.' }));
+                      return;
+                    }
                     const cb = ipInputModal.onConfirm;
                     setIpInputModal((prev) => ({ ...prev, isOpen: false, error: '' }));
-                    cb(ipInputModal.value.trim());
+                    cb(ipInputModal.value.trim(), changeAllVal);
                   }}
                 >
                   ✅ Xác nhận

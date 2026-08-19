@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { CopiersTab } from './Agent/components/CopiersTab';
 import { AgentsTab } from './Agent/components/AgentsTab';
-import { CamerasTab } from './Agent/components/CamerasTab';
+
 import { styles } from './Agent/AgentPageStyles';
 import { AgentModals } from './Agent/components/AgentModals';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -204,16 +204,6 @@ function safePathToken(value: string): string {
           >
             🖨️ Photocopy ({filteredPrinters.length})
           </button>
-          <button
-            style={{
-              ...styles.tabBtn,
-              color: activeTab === 'cameras' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              borderBottom: activeTab === 'cameras' ? '2px solid var(--color-primary)' : '2px solid transparent',
-            }}
-            onClick={() => setActiveTab('cameras')}
-          >
-            📷 Camera ({cameras.length})
-          </button>
         </div>
       </div>
 
@@ -229,7 +219,6 @@ function safePathToken(value: string): string {
             <AnimatePresence mode="wait">
               {activeTab === 'agents' && <AgentsTab {...propsToPass} />}
               {activeTab === 'copiers' && <CopiersTab {...propsToPass} />}
-              {activeTab === 'cameras' && <CamerasTab {...propsToPass} />}
             </AnimatePresence>
           )}
         </div>

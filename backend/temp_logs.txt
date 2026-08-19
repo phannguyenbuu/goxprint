@@ -1,0 +1,201 @@
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,053 [INFO] __main__: api access method=POST path=/api/polling/command-ack status=200 ms=7 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,054 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "POST /api/polling/command-ack HTTP/1.1" 200 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,094 [INFO] polling_aux_routes: [polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,094 [INFO] polling_aux_routes: [polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,098 [INFO] __main__: api access method=POST path=/api/polling/control-result status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,098 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "POST /api/polling/control-result HTTP/1.1" 200 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,110 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=4 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,111 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,188 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,188 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,689 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=12 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,690 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,735 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=12 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,736 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,972 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:09 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:09,973 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:09] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,063 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,064 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=17 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,065 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,065 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,141 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,141 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,207 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,207 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,233 [INFO] __main__: api access method=GET path=/api/agent-ips status=200 ms=4 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,233 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/agent-ips HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,316 [INFO] __main__: api access method=POST path=/api/agents/administrator/utility/exec status=200 ms=27 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,317 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "POST /api/agents/administrator/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,319 [INFO] __main__: api access method=POST path=/api/agents/desktop-k239t15/utility/exec status=200 ms=27 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,322 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "POST /api/agents/desktop-k239t15/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,325 [INFO] __main__: api access method=POST path=/api/agents/kythuat02/utility/exec status=200 ms=25 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,325 [INFO] __main__: api access method=POST path=/api/agents/tony/utility/exec status=200 ms=30 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,327 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "POST /api/agents/kythuat02/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,327 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "POST /api/agents/tony/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,447 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=15 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,447 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,501 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=14 ip=127.0.0.1
+Aug 19 10:27:10 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:10,502 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:10] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,074 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,075 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,118 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=19 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,119 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,164 [INFO] __main__: api access method=POST path=/api/polling/command-ack status=200 ms=9 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,165 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "POST /api/polling/command-ack HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,205 [INFO] polling_aux_routes: [polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,206 [INFO] polling_aux_routes: [polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,209 [INFO] __main__: api access method=POST path=/api/polling/control-result status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,209 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "POST /api/polling/control-result HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,233 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=7 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,235 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,279 [INFO] __main__: api access method=GET path=/api/lan-sites status=200 ms=47 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,280 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/lan-sites?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,286 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=17 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,287 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,316 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,317 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,324 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=15 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,325 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,340 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,342 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,343 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=sang@gmail.com HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,344 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=test HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,345 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,347 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=invinh95@gmail.com HTTP/1.1" 200 -
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,382 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:11 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:11,383 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:11] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,040 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=14 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,040 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,084 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,085 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,142 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,143 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,168 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=16 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,169 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,221 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,221 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,233 [INFO] __main__: api access method=GET path=/api/agent-ips status=200 ms=4 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,233 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/agent-ips HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,308 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=8 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,311 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,320 [INFO] __main__: api access method=POST path=/api/agents/administrator/utility/exec status=200 ms=31 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,320 [INFO] __main__: api access method=POST path=/api/agents/desktop-k239t15/utility/exec status=200 ms=30 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,321 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "POST /api/agents/administrator/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,322 [INFO] __main__: api access method=POST path=/api/agents/kythuat02/utility/exec status=200 ms=26 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,323 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "POST /api/agents/desktop-k239t15/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,323 [INFO] __main__: api access method=POST path=/api/agents/tony/utility/exec status=200 ms=30 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,325 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "POST /api/agents/kythuat02/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,326 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "POST /api/agents/tony/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,393 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=4 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,394 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,809 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,810 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,859 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:12 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:12,859 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:12] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,092 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,093 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,162 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=4 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,163 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,219 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=17 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,219 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,231 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,232 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,259 [INFO] __main__: api access method=POST path=/api/polling/command-ack status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,260 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "POST /api/polling/command-ack HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,299 [INFO] polling_aux_routes: [polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,299 [INFO] polling_aux_routes: [polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,303 [INFO] __main__: api access method=POST path=/api/polling/control-result status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,303 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "POST /api/polling/control-result HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,308 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,309 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,621 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,622 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,713 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:13 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:13,713 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:13] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,090 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,091 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,166 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,167 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,234 [INFO] __main__: api access method=GET path=/api/agent-ips status=200 ms=5 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,235 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/agent-ips HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,236 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=4 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,236 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,269 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=17 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,270 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,315 [INFO] __main__: api access method=POST path=/api/agents/kythuat02/utility/exec status=200 ms=20 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,317 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "POST /api/agents/kythuat02/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,318 [INFO] __main__: api access method=POST path=/api/agents/administrator/utility/exec status=200 ms=29 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,321 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=11 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,321 [INFO] __main__: api access method=POST path=/api/agents/tony/utility/exec status=200 ms=28 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,322 [INFO] __main__: api access method=POST path=/api/agents/desktop-k239t15/utility/exec status=200 ms=30 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,323 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "POST /api/agents/administrator/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,323 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,324 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "POST /api/agents/tony/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,324 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "POST /api/agents/desktop-k239t15/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,407 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,407 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,485 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:14 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:14,485 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:14] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,152 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,153 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,169 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,170 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,242 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,243 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,310 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,311 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,320 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=17 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,320 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,327 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,328 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,365 [INFO] __main__: api access method=POST path=/api/polling/command-ack status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,366 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "POST /api/polling/command-ack HTTP/1.1" 200 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,385 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=3 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,385 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,405 [INFO] polling_aux_routes: [polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,406 [INFO] polling_aux_routes: [polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,410 [INFO] __main__: api access method=POST path=/api/polling/control-result status=200 ms=9 ip=127.0.0.1
+Aug 19 10:27:15 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:15,410 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:15] "POST /api/polling/control-result HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,045 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=12 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,046 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,179 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=12 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,180 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,204 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,205 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/public/device/by-mac?mac_id=58:38:79:79:A3:EB HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,228 [INFO] __main__: api access method=GET path=/api/agent-ips status=200 ms=4 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,229 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/agent-ips HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,263 [INFO] __main__: api access method=GET path=/api/lan-sites status=200 ms=40 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,264 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/lan-sites?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,313 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=12 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,314 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/public/device/by-mac?mac_id=58:38:79:80:D6:74 HTTP/1.1" 404 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,317 [INFO] __main__: api access method=POST path=/api/agents/administrator/utility/exec status=200 ms=28 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,318 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/agents/administrator/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,320 [INFO] __main__: api access method=POST path=/api/agents/desktop-k239t15/utility/exec status=200 ms=28 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,320 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/agents/desktop-k239t15/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,322 [INFO] __main__: api access method=POST path=/api/agents/tony/utility/exec status=200 ms=29 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,323 [INFO] __main__: api access method=POST path=/api/agents/kythuat02/utility/exec status=200 ms=28 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,324 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/agents/tony/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,325 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/agents/kythuat02/utility/exec?lead=default HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,343 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,345 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,345 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=sang@gmail.com HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,347 [INFO] __main__: api access method=GET path=/api/scans/files status=200 ms=0 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,347 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=test HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,348 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/scans/files?lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&email=invinh95@gmail.com HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,372 [INFO] __main__: api access method=GET path=/api/polling/controls status=200 ms=15 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,372 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/polling/controls?lead=default&lan_uid=default_84_93_B2_7C_EE_78_192_168_1_1&agent_uid=kythuat02 HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,393 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,394 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/public/device/by-mac?mac_id=00:26:73:7D:78:F9 HTTP/1.1" 404 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,412 [INFO] __main__: api access method=POST path=/api/polling/command-ack status=200 ms=7 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,413 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/polling/command-ack HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,461 [INFO] __main__: api access method=GET path=/api/public/device/by-mac status=404 ms=2 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,461 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/public/device/by-mac?mac_id=58:38:79:23:C5:ED HTTP/1.1" 404 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,479 [INFO] polling_aux_routes: [polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,479 [INFO] polling_aux_routes: [polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: 192.168.1.43
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,482 [INFO] __main__: api access method=POST path=/api/polling/control-result status=200 ms=8 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,483 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "POST /api/polling/control-result HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,831 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=11 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,832 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,978 [INFO] __main__: api access method=GET path=/api/agent/watchdog-check status=200 ms=13 ip=127.0.0.1
+Aug 19 10:27:16 Megahost.1763776822 python3[4159529]: 2026-08-19 10:27:16,979 [INFO] werkzeug: 127.0.0.1 - - [19/Aug/2026 10:27:16] "GET /api/agent/watchdog-check?hostname=ADMINISTRATOR HTTP/1.1" 200 -
+

@@ -1,0 +1,76 @@
+{
+  "received_at": "2026-05-22T01:17:12.653059+00:00",
+  "remote_addr": "127.0.0.1",
+  "path": "/api/polling",
+  "payload": {
+    "lead": "default",
+    "lan_uid": "default_B0_8B_92_4B_99_DD_192_168_1_1",
+    "agent_uid": "administrator",
+    "hostname": "Administrator",
+    "local_ip": "192.168.1.6",
+    "printer_name": "TOSHIBA e-STUDIO3505AC",
+    "ip": "192.168.1.155",
+    "mac_id": "00:80:91:B6:18:FF",
+    "mac_address": "00:80:91:B6:18:FF",
+    "timestamp": "2026-05-22T01:16:44.491255+00:00",
+    "counter_data": {},
+    "status_data": {},
+    "collector_ok": false,
+    "skip_data_update": true,
+    "collector_error": "HTTPConnectionPool(host='192.168.1.155', port=80): Max retries exceeded with url: /?MAIN=TOPACCESS (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.155', port=80) at 0x2bb09caef10>, 'Connection to 192.168.1.155 timed out. (connect timeout=20)'))",
+    "fingerprint_signature": "lead=default|subnet=192.168.1.0/24|gateway_ip=192.168.1.1|gateway_mac=B0:8B:92:4B:99:DD",
+    "app_version": "1.3.62",
+    "run_mode": "web",
+    "web_port": 9173,
+    "gateway_ip": "192.168.1.1",
+    "gateway_mac": "B0:8B:92:4B:99:DD",
+    "subnet_cidr": "192.168.1.0/24",
+    "ftp_ports": "2130,2131,2132,2133",
+    "ftp_sites": [
+      {
+        "name": "gox_scan_phannguyenbuugmailcom",
+        "path": "C:\\Scangox\\phannguyenbuu@gmail.com",
+        "port": 2130,
+        "ftp_url": "",
+        "ftp_user": "ftp_gox_scan_phannguyenbuugmailcom",
+        "ftp_password": "",
+        "running": false,
+        "state": "configured",
+        "error": ""
+      },
+      {
+        "name": "gox_scan_phanbaolam0511gmailcom",
+        "path": "C:\\Scangox\\phanbaolam0511@gmail.com",
+        "port": 2131,
+        "ftp_url": "",
+        "ftp_user": "ftp_gox_scan_phanbaolam0511gmailcom",
+        "ftp_password": "",
+        "running": false,
+        "state": "configured",
+        "error": ""
+      },
+      {
+        "name": "gox_scan_bilingo1991gmailcom",
+        "path": "C:\\Scangox\\bilingo.1991@gmail.com",
+        "port": 2132,
+        "ftp_url": "",
+        "ftp_user": "ftp_gox_scan_bilingo1991gmailcom",
+        "ftp_password": "",
+        "running": false,
+        "state": "configured",
+        "error": ""
+      },
+      {
+        "name": "gox_scan_phan1986gmailcom",
+        "path": "C:\\Scangox\\phan1986@gmail.com",
+        "port": 2133,
+        "ftp_url": "",
+        "ftp_user": "ftp_gox_scan_phan1986gmailcom",
+        "ftp_password": "",
+        "running": false,
+        "state": "configured",
+        "error": ""
+      }
+    ]
+  }
+}

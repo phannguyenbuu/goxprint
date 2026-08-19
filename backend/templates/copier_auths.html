@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header-row">
+    <h3>Copier Authentication Credentials</h3>
+    <div>
+      <button id="refresh-btn" class="filter-btn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="filter-board">
+    <div class="filter-group" style="flex: 1;">
+      <label>Search Copier Name, IP Address, MAC Address, or Agent</label>
+      <input type="text" id="filter-search" placeholder="Type here to search..." style="width: 100%;">
+    </div>
+    <button id="apply-filters" class="filter-btn" style="align-self: flex-end; margin-bottom: 0;">Search</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="generic-table">
+      <thead>
+        <tr>
+          <th style="padding-left: 20px; width: 80px;">ID</th>
+          <th>Copier Name</th>
+          <th style="width: 140px;">IP Address</th>
+          <th style="width: 160px;">MAC Address</th>
+          <th style="width: 180px;">LAN Site / Agent</th>
+          <th style="width: 180px;">Web Username</th>
+          <th style="width: 180px;">Web Password</th>
+          <th style="width: 100px; text-align: center;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="copiers-tbody">
+        <tr><td colspan="8" class="loading">Loading Copiers...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Custom Styling to fit input fields nicely in the table -->
+<style>
+.generic-table input[type="text"] {
+    width: 90%;
+    padding: 6px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.generic-table input[type="text"]:focus {
+    border-color: #007bff;
+    outline: none;
+    box-shadow: 0 0 4px rgba(0, 123, 255, 0.25);
+}
+.action-btn-save {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+.action-btn-save:hover {
+    background-color: #218838;
+}
+.action-btn-save:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+.toast-msg {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #333;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    z-index: 9999;
+    font-size: 14px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+    display: none;
+}
+</style>
+
+<div id="custom-toast" class="toast-msg"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let copiersData = [];
+
+    const escapeHtml = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
+    const showToastMsg = (msg, isError = false) => {
+        const toast = document.getElementById('custom-toast');
+        toast.innerText = msg;
+        toast.style.background = isError ? '#dc3545' : '#28a745';
+        toast.style.display = 'block';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 3000);
+    };
+
+    const renderTable = () => {
+        const searchVal = document.getElementById('filter-search').value.toLowerCase().trim();
+        const tbody = document.getElementById('copiers-tbody');
+        tbody.innerHTML = '';
+
+        const filtered = copiersData.filter(row => {
+            if (!searchVal) return true;
+            return (
+                String(row.id).toLowerCase().includes(searchVal) ||
+                String(row.printer_name || '').toLowerCase().includes(searchVal) ||
+                String(row.ip || '').toLowerCase().includes(searchVal) ||
+                String(row.mac_id || '').toLowerCase().includes(searchVal) ||
+                String(row.lan_uid || '').toLowerCase().includes(searchVal) ||
+                String(row.agent_uid || '').toLowerCase().includes(searchVal)
+            );
+        });
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">No matching copiers found.</td></tr>';
+            return;
+        }
+
+        filtered.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            tr.innerHTML = `
+                <td style="padding-left: 20px;">${row.id}</td>
+                <td><strong>${escapeHtml(row.printer_name || 'Generic Copier')}</strong></td>
+                <td><code class="font-mono">${escapeHtml(row.ip || 'N/A')}</code></td>
+                <td><code class="font-mono">${escapeHtml(row.mac_id || 'N/A')}</code></td>
+                <td>
+                    <div style="font-size: 12px; color: #666;">Site: ${escapeHtml(row.lan_uid || 'N/A')}</div>
+                    <div style="font-size: 11px; color: #999;">Agent: ${escapeHtml(row.agent_uid || 'N/A')}</div>
+                </td>
+                <td>
+                    <input type="text" id="user-${row.id}" value="${escapeHtml(row.user || '')}" placeholder="admin">
+                </td>
+                <td>
+                    <input type="text" id="pass-${row.id}" value="${escapeHtml(row.password || '')}" placeholder="Password">
+                </td>
+                <td style="text-align: center;">
+                    <button class="action-btn-save" data-id="${row.id}" data-ref="${escapeHtml(row.mac_id || row.ip || String(row.id))}">Save</button>
+                </td>
+            `;
+
+            tbody.appendChild(tr);
+        });
+
+        // Bind save buttons
+        document.querySelectorAll('.action-btn-save').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.target.getAttribute('data-id');
+                const ref = e.target.getAttribute('data-ref');
+                const userVal = document.getElementById(`user-${id}`).value.trim();
+                const passVal = document.getElementById(`pass-${id}`).value.trim();
+
+                e.target.disabled = true;
+                e.target.innerText = 'Saving...';
+
+                fetch(`/api/devices/${encodeURIComponent(ref)}/credentials`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        auth_user: userVal,
+                        auth_password: passVal,
+                        mac_address: ref
+                    })
+                })
+                .then(res => res.json())
+                .then(resData => {
+                    if (resData.ok) {
+                        showToastMsg('Saved credentials successfully!');
+                        // Update local data array
+                        const localRow = copiersData.find(item => String(item.id) === String(id));
+                        if (localRow) {
+                            localRow.user = userVal;
+                            localRow.password = passVal;
+                        }
+                    } else {
+                        showToastMsg(resData.error || 'Failed to save credentials.', true);
+                    }
+                })
+                .catch(err => {
+                    console.error('Error saving credentials:', err);
+                    showToastMsg('Error saving credentials.', true);
+                })
+                .finally(() => {
+                    e.target.disabled = false;
+                    e.target.innerText = 'Save';
+                });
+            });
+        });
+    };
+
+    const loadCopiers = () => {
+        const tbody = document.getElementById('copiers-tbody');
+        tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading Copiers...</td></tr>';
+
+        fetch('/api/copier-auths')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.rows) {
+                    copiersData = data.rows;
+                    renderTable();
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Failed to parse copiers data.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading copiers:', err);
+                tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Error loading copiers from server.</td></tr>';
+            });
+    };
+
+    // Bind triggers
+    document.getElementById('refresh-btn').addEventListener('click', loadCopiers);
+    document.getElementById('apply-filters').addEventListener('click', renderTable);
+    document.getElementById('filter-search').addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') {
+            renderTable();
+        }
+    });
+
+    // Initial load
+    loadCopiers();
+});
+</script>
+{% endblock %}

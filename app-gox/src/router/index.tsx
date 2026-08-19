@@ -55,7 +55,6 @@ const RepairHistoryPage = React.lazy(() =>
 const AccountPage = React.lazy(() =>
   import('../pages/AccountPage').then((m) => ({ default: m.AccountPage }))
 );
-const DownloadPage = React.lazy(() => import('../pages/DownloadPage'));
 const DriversPage = React.lazy(() => import('../pages/DriversPage'));
 const AgentPage = React.lazy(() =>
   import('../pages/AgentPage').then((m) => ({ default: m.AgentPage }))
@@ -150,8 +149,7 @@ export function AppRouter() {
               <Route path="/history" element={<RepairHistoryPage />} />
               <Route path="/agents" element={<AgentPage />} />
               <Route path="/tech" element={<AgentPage />} />
-              <Route path="/downloads" element={<Navigate to="/jobs" replace />} />
-              <Route path="/jobs" element={<DownloadPage />} />
+
               <Route path="/drivers" element={<DriversPage />} />
               <Route path="/account" element={<AccountPage />} />
             </Route>
