@@ -1,0 +1,456 @@
+from __future__ import annotations
+
+import ctypes
+import json
+import logging
+import sys
+import threading
+import webbrowser
+from dataclasses import dataclass
+from pathlib import Path
+from ctypes import wintypes
+from typing import Callable
+
+
+LOGGER = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        WPARAM_T = ctypes.c_uint64
+        LPARAM_T = ctypes.c_int64
+        LRESULT_T = ctypes.c_ssize_t
+    else:  # pragma: no cover - 32-bit Windows
+        WPARAM_T = ctypes.c_uint32
+        LPARAM_T = ctypes.c_int32
+        LRESULT_T = ctypes.c_long
+
+    user32 = ctypes.windll.user32
+    shell32 = ctypes.windll.shell32
+    gdi32 = ctypes.windll.gdi32
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM_T, LPARAM_T]
+    user32.DefWindowProcW.restype = LRESULT_T
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM_T, LPARAM_T]
+    user32.PostMessageW.restype = wintypes.BOOL
+    user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+    user32.GetMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.restype = LRESULT_T
+else:  # pragma: no cover - tray is Windows-only
+    user32 = None
+    shell32 = None
+    gdi32 = None
+
+
+WM_DESTROY = 0x0002
+WM_CLOSE = 0x0010
+WM_COMMAND = 0x0111
+WM_USER = 0x0400
+WM_RBUTTONUP = 0x0205
+WM_LBUTTONDBLCLK = 0x0203
+WM_LBUTTONUP = 0x0202
+NIM_ADD = 0x00000000
+NIM_MODIFY = 0x00000001
+NIM_DELETE = 0x00000002
+NIF_MESSAGE = 0x00000001
+NIF_ICON = 0x00000002
+NIF_TIP = 0x00000004
+NIF_INFO = 0x00000010
+MF_STRING = 0x00000000
+MF_SEPARATOR = 0x00000800
+MF_CHECKED = 0x00000008
+MF_UNCHECKED = 0x00000000
+TPM_RIGHTBUTTON = 0x0002
+IDI_APPLICATION = 32512
+LR_DEFAULTSIZE = 0x0040
+LR_SHARED = 0x8000
+IMAGE_ICON = 1
+SW_HIDE = 0
+SW_SHOWNORMAL = 1
+NIIF_INFO = 0x00000001
+MB_OK = 0x00000000
+MB_ICONINFORMATION = 0x00000040
+ID_SHOW = 1001
+ID_VERSION = 1002
+ID_CLOSE = 1003
+ID_FORCE_UPDATE = 1004
+DEFAULT_TRAY_TIP = "GoPrinxAgent"
+UPDATE_NOTICE_FILE = Path("storage/data/update_notice.json")
+
+
+class NOTIFYICONDATAW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_ulong),
+        ("hWnd", ctypes.c_void_p),
+        ("uID", ctypes.c_uint),
+        ("uFlags", ctypes.c_uint),
+        ("uCallbackMessage", ctypes.c_uint),
+        ("hIcon", ctypes.c_void_p),
+        ("szTip", ctypes.c_wchar * 128),
+        ("dwState", ctypes.c_uint),
+        ("dwStateMask", ctypes.c_uint),
+        ("szInfo", ctypes.c_wchar * 256),
+        ("uTimeoutOrVersion", ctypes.c_uint),
+        ("szInfoTitle", ctypes.c_wchar * 64),
+        ("dwInfoFlags", ctypes.c_uint),
+        ("guidItem", ctypes.c_byte * 16),
+        ("hBalloonIcon", ctypes.c_void_p),
+    ]
+
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+_active_tray: TrayController | None = None
+
+
+@dataclass
+class TrayController:
+    url: str
+    stop_event: threading.Event | None = None
+    app_version: str = ""
+    force_update_callback: Callable[[], None] | None = None
+
+    def __post_init__(self) -> None:
+        global _active_tray
+        _active_tray = self
+        self._closed = False
+        self._hwnd: int | None = None
+        self._hicon: int | None = None
+        self._class_atom: int | None = None
+        self._wndproc = None
+        self._pending_update_version = self._read_update_notice()
+        self._tip_text = self._build_tip_text(self._pending_update_version)
+        self._taskbar_created = user32.RegisterWindowMessageW("TaskbarCreated") if user32 else 0
+
+    @staticmethod
+    def _clip_text(value: str, limit: int) -> str:
+        return str(value or "").strip()[:limit]
+
+    def _build_tip_text(self, version: str = "") -> str:
+        base_text = f"{DEFAULT_TRAY_TIP} v{self.app_version}" if self.app_version else DEFAULT_TRAY_TIP
+        version_text = str(version or "").strip()
+        if version_text:
+            return self._clip_text(f"{base_text} - Updated version {version_text}", 127)
+        return self._clip_text(base_text, 127)
+
+    @staticmethod
+    def _read_update_notice() -> str:
+        try:
+            if not UPDATE_NOTICE_FILE.exists():
+                return ""
+            payload = json.loads(UPDATE_NOTICE_FILE.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return str(payload.get("version") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to read update notice: %s", exc)
+        return ""
+
+    @staticmethod
+    def _clear_update_notice() -> None:
+        try:
+            if UPDATE_NOTICE_FILE.exists():
+                UPDATE_NOTICE_FILE.unlink()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to clear update notice: %s", exc)
+
+    def _show(self) -> None:
+        LOGGER.info("Tray show requested (opening Web UI in browser)")
+        target = self.url.strip()
+        if target:
+            try:
+                webbrowser.open_new_tab(target)
+            except Exception as exc:
+                LOGGER.exception("Failed to open Web UI in browser: %s", exc)
+
+    def _close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        LOGGER.info("Tray close requested")
+        if self.stop_event is not None:
+            self.stop_event.set()
+        if self._hwnd and user32:
+            user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
+
+    def _show_version_dialog(self) -> None:
+        if not user32:
+            return
+        version = str(self.app_version or "").strip() or "unknown"
+        title = DEFAULT_TRAY_TIP
+        message = f"Version: {version}"
+        hwnd = self._hwnd or 0
+        user32.SetForegroundWindow(hwnd)
+        user32.MessageBoxW(hwnd, message, title, MB_OK | MB_ICONINFORMATION)
+
+    def _run_updater(self) -> None:
+        if self._closed:
+            return
+        if self.force_update_callback is not None:
+            try:
+                self.force_update_callback()
+            except Exception as exc:
+                LOGGER.exception("Failed to run force update callback: %s", exc)
+        else:
+            try:
+                import requests
+                resp = requests.post(f"{self.url}/api/update/force-check", timeout=5)
+                LOGGER.info("Tray force update HTTP response: %s", resp.text)
+            except Exception as e:
+                LOGGER.warning("Tray force update HTTP request failed: %s", e)
+
+    def _load_icon(self) -> int:
+        if not user32:
+            return 0
+        try:
+            icon_candidates = [
+                Path("agent/icon.ico"),
+                Path("icon.ico"),
+                Path(sys.executable).parent / "agent" / "icon.ico",
+                Path(sys.executable).parent / "icon.ico",
+            ]
+            for icon_path in icon_candidates:
+                if icon_path.exists():
+                    h_icon = user32.LoadImageW(
+                        0, str(icon_path.resolve()), IMAGE_ICON, 0, 0, 0x0010 | LR_DEFAULTSIZE | LR_SHARED
+                    )
+                    if h_icon:
+                        return h_icon
+        except Exception as e:
+            LOGGER.debug("LoadImageW failed: %s", e)
+
+        try:
+            exe_path = str(Path(sys.executable).resolve())
+            icon = shell32.ExtractIconW(0, exe_path, 0)
+            if icon and int(icon) > 1:
+                return icon
+        except Exception as e:
+            LOGGER.debug("ExtractIconW failed: %s", e)
+
+        try:
+            return user32.LoadIconW(0, IDI_APPLICATION)
+        except Exception:
+            return 0
+
+    def _add_tray_icon(self) -> None:
+        if not user32 or not self._hwnd:
+            return
+        self._hicon = self._load_icon()
+        if not self._hicon and user32:
+            self._hicon = user32.LoadIconW(0, IDI_APPLICATION)
+        data = NOTIFYICONDATAW()
+        data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        data.hWnd = self._hwnd
+        data.uID = 1
+        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        data.uCallbackMessage = WM_USER + 20
+        data.hIcon = self._hicon or user32.LoadIconW(0, IDI_APPLICATION)
+        data.szTip = self._tip_text
+        shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data))
+        shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+
+    def _update_tray_tip(self) -> None:
+        if not user32 or not self._hwnd:
+            return
+        data = NOTIFYICONDATAW()
+        data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        data.hWnd = self._hwnd
+        data.uID = 1
+        data.uFlags = NIF_TIP
+        data.szTip = self._tip_text
+        shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+
+    def _show_balloon(self, title: str, message: str) -> None:
+        if not user32 or not self._hwnd:
+            return
+        data = NOTIFYICONDATAW()
+        data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        data.hWnd = self._hwnd
+        data.uID = 1
+        data.uFlags = NIF_INFO | NIF_TIP | NIF_ICON
+        data.hIcon = self._hicon or 0
+        data.szTip = self._tip_text
+        data.szInfoTitle = self._clip_text(title, 63)
+        data.szInfo = self._clip_text(message, 255)
+        data.dwInfoFlags = NIIF_INFO
+        data.uTimeoutOrVersion = 10000
+        shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+
+    def _show_startup_notice(self) -> None:
+        version = str(self._pending_update_version or "").strip()
+        if not version:
+            return
+        self._clear_update_notice()
+        self._pending_update_version = ""
+
+    def _remove_tray_icon(self) -> None:
+        if not user32 or not self._hwnd:
+            return
+        data = NOTIFYICONDATAW()
+        data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        data.hWnd = self._hwnd
+        data.uID = 1
+        shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(data))
+
+    def _show_menu(self) -> None:
+        if not user32 or not self._hwnd:
+            return
+        menu = user32.CreatePopupMenu()
+        if not menu:
+            return
+        try:
+            user32.AppendMenuW(menu, MF_STRING, ID_CLOSE, "Quit (Thoát)")
+            
+            user32.SetForegroundWindow(self._hwnd)
+            pt = wintypes.POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            user32.TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, self._hwnd, None)
+            user32.PostMessageW(self._hwnd, WM_USER + 21, 0, 0)
+        finally:
+            user32.DestroyMenu(menu)
+
+    def _create_window(self) -> int:
+        if not user32:
+            return 0
+
+        hinstance = ctypes.windll.kernel32.GetModuleHandleW(None)
+        class_name = "GoPrinxAgentTray"
+
+        WNDPROCTYPE = ctypes.WINFUNCTYPE(LRESULT_T, wintypes.HWND, wintypes.UINT, WPARAM_T, LPARAM_T)
+
+        def wndproc(hwnd, msg, wparam, lparam):
+            if msg == self._taskbar_created:
+                from agent.config import AppConfig
+                if AppConfig.load().get_bool("show_tray_icon", True):
+                    self._add_tray_icon()
+                return 0
+            if msg == WM_COMMAND:
+                command = int(wparam) & 0xFFFF
+                if command == ID_SHOW:
+                    self._show()
+                elif command == ID_VERSION:
+                    self._show_version_dialog()
+                elif command == ID_FORCE_UPDATE:
+                    self._force_update()
+                elif command == ID_CLOSE:
+                    self._close()
+                elif command in (2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009):
+                    from agent.config import AppConfig
+                    config = AppConfig.load()
+                    settings_map = {
+                        2001: "polling.enabled",
+                        2002: "polling.device_enabled",
+                        2003: "polling.control_enabled",
+                        2004: "polling.scan_enabled",
+                        2005: "modules.ricoh.enabled",
+                        2006: "modules.toshiba.enabled",
+                        2007: "modules.ftp.enabled",
+                        2008: "modules.updater.enabled",
+                        2009: "modules.web.enabled",
+                    }
+                    key = settings_map[command]
+                    current_val = config.get_bool(key, True)
+                    config.set_value(key, not current_val)
+                return 0
+            if msg == WM_USER + 20:
+                if lparam == WM_RBUTTONUP:
+                    self._show_menu()
+                return 0
+            if msg == WM_CLOSE:
+                self._remove_tray_icon()
+                user32.DestroyWindow(hwnd)
+                return 0
+            if msg == WM_DESTROY:
+                self._remove_tray_icon()
+                user32.PostQuitMessage(0)
+                return 0
+            return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        self._wndproc = WNDPROCTYPE(wndproc)
+
+        class WNDCLASS(ctypes.Structure):
+            _fields_ = [
+                ("style", ctypes.c_uint),
+                ("lpfnWndProc", WNDPROCTYPE),
+                ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int),
+                ("hInstance", ctypes.c_void_p),
+                ("hIcon", ctypes.c_void_p),
+                ("hCursor", ctypes.c_void_p),
+                ("hbrBackground", ctypes.c_void_p),
+                ("lpszMenuName", ctypes.c_wchar_p),
+                ("lpszClassName", ctypes.c_wchar_p),
+            ]
+
+        wc = WNDCLASS()
+        wc.style = 0
+        wc.lpfnWndProc = self._wndproc
+        wc.cbClsExtra = 0
+        wc.cbWndExtra = 0
+        wc.hInstance = hinstance
+        wc.hIcon = self._load_icon()
+        wc.hCursor = 0
+        wc.hbrBackground = 0
+        wc.lpszMenuName = None
+        wc.lpszClassName = class_name
+
+        self._class_atom = user32.RegisterClassW(ctypes.byref(wc))
+        hwnd = user32.CreateWindowExW(
+            0,
+            class_name,
+            "GoPrinxAgentTray",
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            hinstance,
+            None,
+        )
+        self._hwnd = hwnd
+        return hwnd
+
+    def run(self) -> None:
+        if sys.platform != "win32":
+            LOGGER.info("Tray icon is Windows-only; skipping tray")
+            return
+        LOGGER.info("Tray icon starting")
+        hwnd = self._create_window()
+        if not hwnd:
+            LOGGER.warning("Failed to create tray window")
+            return
+
+        from agent.config import AppConfig
+        config = AppConfig.load()
+        if config.get_bool("show_tray_icon", True):
+            self._add_tray_icon()
+            self._update_tray_tip()
+            self._show_startup_notice()
+        else:
+            LOGGER.info("Tray icon is disabled by configuration (show_tray_icon=false)")
+
+        user32.ShowWindow(hwnd, SW_HIDE)
+        user32.UpdateWindow(hwnd)
+
+        msg = wintypes.MSG()
+        while not self._closed:
+            ret = user32.GetMessageW(ctypes.byref(msg), 0, 0, 0)
+            if ret == 0:
+                break
+            if ret == -1:
+                LOGGER.warning("Tray message loop error")
+                break
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+
+        self._remove_tray_icon()
+        try:
+            if self._hwnd:
+                user32.DestroyWindow(self._hwnd)
+        except Exception:
+            pass
+        LOGGER.info("Tray icon stopped")

@@ -172,9 +172,9 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
             lan_uid=lan_uid
         )
 
-    @app.get("/standalone")
-    def standalone_page() -> Any:
-        return render_template("lan_sites.html", active_tab="standalone", page_title="Standalone")
+    @app.get("/printers")
+    def printers_page() -> Any:
+        return render_template("lan_sites.html", active_tab="printers", page_title="Printers")
 
     @app.get("/counter")
     def counter_page() -> Any:

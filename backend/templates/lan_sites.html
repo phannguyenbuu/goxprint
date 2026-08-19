@@ -149,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fetchLanSites = async () => {
         try {
             const params = new URLSearchParams();
-            if (document.body.dataset.page === 'standalone') {
+            if (document.body.dataset.page === 'printers') {
                 params.append('standalone', 'true');
             }
             const resp = await fetch(`/api/lan-sites?${params.toString()}`);
@@ -378,7 +378,7 @@ force_scan()`,
     document.getElementById('refresh-btn').addEventListener('click', fetchLanSites);
 
     function renderLanDetails(row) {
-        const isStandalone = document.body.dataset.page === 'standalone';
+        const isStandalone = document.body.dataset.page === 'printers';
         
         document.getElementById('detail-lan-uid').textContent = row.lan_uid;
         document.getElementById('detail-lead').textContent = row.lead;

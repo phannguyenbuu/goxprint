@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h3>System Utilities</h3>
+    <span>Trigger local Windows tools and system diagnostics</span>
+  </div>
+  
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 14px;">
+    
+    <!-- Devices and Printers -->
+    <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 12px; height: 100%;">
+      <div>
+        <div style="font-size: 24px;">🖨️</div>
+        <h4 style="margin: 8px 0 4px; font-family: 'Sora', sans-serif;">Devices & Printers</h4>
+        <p style="margin: 0; font-size: 12px; color: var(--muted);">Open the Windows Devices and Printers control panel page.</p>
+      </div>
+      <button onclick="triggerUtility('printers')" class="btn action" style="width: 100%; font-size: 13px; padding: 8px 12px;">Open Printers</button>
+    </div>
+
+    <!-- Scan Folder -->
+    <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 12px; height: 100%;">
+      <div>
+        <div style="font-size: 24px;">📂</div>
+        <h4 style="margin: 8px 0 4px; font-family: 'Sora', sans-serif;">Scanned Documents</h4>
+        <p style="margin: 0; font-size: 12px; color: var(--muted);">Open the local folder containing scanned documents on this PC.</p>
+      </div>
+      <button onclick="triggerUtility('scan')" class="btn action" style="width: 100%; font-size: 13px; padding: 8px 12px;">Open Scan Folder</button>
+    </div>
+
+    <!-- DxDiag -->
+    <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 12px; height: 100%;">
+      <div>
+        <div style="font-size: 24px;">💻</div>
+        <h4 style="margin: 8px 0 4px; font-family: 'Sora', sans-serif;">DirectX Diagnostic</h4>
+        <p style="margin: 0; font-size: 12px; color: var(--muted);">Open dxdiag.exe to check hardware details and system specifications.</p>
+      </div>
+      <button onclick="triggerUtility('dxdiag')" class="btn action" style="width: 100%; font-size: 13px; padding: 8px 12px;">Run DxDiag</button>
+    </div>
+
+    <!-- Public IP -->
+    <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 12px; height: 100%;">
+      <div>
+        <div style="font-size: 24px;">🌐</div>
+        <h4 style="margin: 8px 0 4px; font-family: 'Sora', sans-serif;">Public IP Address</h4>
+        <p style="margin: 0; font-size: 12px; color: var(--muted);">Fetch and display the current public IP address of this network.</p>
+        <div id="ip-display" style="margin-top: 8px; font-family: monospace; font-weight: bold; color: var(--accent-cyan); font-size: 13px;">Not checked</div>
+      </div>
+      <button onclick="checkPublicIP()" class="btn action alt" style="width: 100%; font-size: 13px; padding: 8px 12px;">Check Public IP</button>
+    </div>
+
+  </div>
+
+  <div id="utility-status" style="margin-top: 20px; padding: 10px; border-radius: 8px; font-size: 13px; display: none;"></div>
+</section>
+
+<script>
+function showStatus(message, isError = false) {
+  const el = document.getElementById('utility-status');
+  el.style.display = 'block';
+  el.style.background = isError ? '#ffe3e3' : '#e3f2fd';
+  el.style.color = isError ? '#c62828' : '#0d47a1';
+  el.textContent = message;
+  setTimeout(() => {
+    el.style.display = 'none';
+  }, 4000);
+}
+
+async function triggerUtility(action) {
+  try {
+    const res = await fetch(`/api/utilities/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      showStatus(data.message);
+    } else {
+      showStatus(data.error || 'Failed to trigger utility', true);
+    }
+  } catch (err) {
+    showStatus('Network error: ' + err.message, true);
+  }
+}
+
+async function checkPublicIP() {
+  const ipDisplay = document.getElementById('ip-display');
+  ipDisplay.textContent = 'Checking...';
+  try {
+    const res = await fetch('/api/utilities/ip');
+    const data = await res.json();
+    if (data.ok) {
+      ipDisplay.textContent = data.ip;
+      showStatus('Fetched public IP successfully!');
+    } else {
+      ipDisplay.textContent = 'Failed';
+      showStatus(data.error || 'Failed to fetch public IP', true);
+    }
+  } catch (err) {
+    ipDisplay.textContent = 'Error';
+    showStatus('Network error: ' + err.message, true);
+  }
+}
+</script>
+{% endblock %}

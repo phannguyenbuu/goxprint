@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toolx Render Agent Dashboard</title>
+    <!-- Tailwind CSS Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Inter Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+</head>
+<body class="bg-[#0f172a] text-slate-100 min-h-screen flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- Header / Navbar -->
+    <header class="border-b border-slate-800 bg-[#0f172a]/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-brand-500/20">
+                    <span class="font-bold text-xl text-white">X</span>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">Toolx Render</h1>
+                    <p class="text-xs text-slate-400">128GB RAM Vector Render System</p>
+                </div>
+            </div>
+            
+            {% if session.get('username') %}
+            <div class="flex items-center space-x-6">
+                <nav class="flex space-x-4">
+                    <a href="/" class="text-sm font-medium text-slate-300 hover:text-white transition">Dashboard</a>
+                    <a href="/diagnose" class="text-sm font-medium text-slate-300 hover:text-white transition">Chẩn đoán từ xa</a>
+                    <a href="/downloads" class="text-sm font-medium text-slate-300 hover:text-white transition">Tải phần mềm</a>
+                </nav>
+                <div class="flex items-center space-x-4 border-l border-slate-800 pl-6">
+                    <div class="text-right">
+                        <p class="text-sm font-semibold text-slate-200">{{ session.get('username') }}</p>
+                        <p class="text-xs text-emerald-400 flex items-center justify-end">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block mr-1 animate-pulse"></span>
+                            Đã đăng nhập
+                        </p>
+                    </div>
+                    <a href="{{ url_for('logout') }}" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg border border-slate-700 transition duration-150">
+                        Đăng xuất
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow max-w-7xl w-full mx-auto p-6 md:p-8">
+        
+        <!-- LOGIN PAGE -->
+        {% if page == 'login' %}
+        <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-brand-500/10 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl"></div>
+            
+            <h2 class="text-2xl font-bold text-center text-white mb-2">Đăng nhập hệ thống</h2>
+            <p class="text-sm text-slate-400 text-center mb-8">Vui lòng nhập tài khoản Toolx của bạn</p>
+            
+            <form action="{{ url_for('login') }}" method="POST" class="space-y-5">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tên đăng nhập</label>
+                    <input type="text" name="username" required class="w-full bg-slate-950 border border-slate-850 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition" placeholder="Tên tài khoản...">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Mật khẩu</label>
+                    <input type="password" name="password" required class="w-full bg-slate-950 border border-slate-850 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition" placeholder="••••••••">
+                </div>
+                <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold rounded-xl shadow-lg shadow-brand-500/20 hover:shadow-brand-500/30 transition transform active:scale-95 duration-150">
+                    Đăng nhập
+                </button>
+            </form>
+            <div class="mt-6 text-center text-sm text-slate-400">
+                Chưa có tài khoản? <a href="{{ url_for('register') }}" class="text-brand-400 hover:underline">Đăng ký ngay</a>
+            </div>
+        </div>
+
+        <!-- REGISTER PAGE -->
+        {% elif page == 'register' %}
+        <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-brand-500/10 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl"></div>
+            
+            <h2 class="text-2xl font-bold text-center text-white mb-2">Đăng ký tài khoản</h2>
+            <p class="text-sm text-slate-400 text-center mb-8">Tạo tài khoản mới cho dịch vụ Toolx Render</p>
+            
+            <form action="{{ url_for('register') }}" method="POST" class="space-y-5">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tên đăng nhập</label>
+                    <input type="text" name="username" required class="w-full bg-slate-950 border border-slate-850 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition" placeholder="Tên tài khoản mong muốn...">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Mật khẩu</label>
+                    <input type="password" name="password" required class="w-full bg-slate-950 border border-slate-850 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition" placeholder="Mật khẩu bảo mật...">
+                </div>
+                <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition transform active:scale-95 duration-150">
+                    Đăng ký tài khoản
+                </button>
+            </form>
+            <div class="mt-6 text-center text-sm text-slate-400">
+                Đã có tài khoản? <a href="{{ url_for('login') }}" class="text-brand-400 hover:underline">Đăng nhập</a>
+            </div>
+        </div>
+
+        <!-- DASHBOARD PAGE (LOGGED IN) -->
+        {% else %}
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Left Side: Upload Panel -->
+            <div class="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl h-fit">
+                <h3 class="text-xl font-bold text-white mb-6 flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-line-cap="round" stroke-line-join="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    Tải lên file Vector (PDF, DXF, DWG)
+                </h3>
+                
+                <form action="{{ url_for('upload_file') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
+                    <!-- Custom Drag & Drop Area -->
+                    <div class="border-2 border-dashed border-slate-700 hover:border-brand-500 rounded-xl p-6 text-center cursor-pointer bg-slate-950/50 hover:bg-slate-950 transition duration-150 relative">
+                        <input type="file" name="file" accept=".pdf,.dxf,.dwg" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" id="pdfFileInput" onchange="updateFileLabel()">
+                        <div class="space-y-2">
+                            <svg class="w-8 h-8 text-slate-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-line-cap="round" stroke-line-join="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                            <p class="text-sm font-semibold text-slate-300" id="fileInputLabel">Chọn tệp vector hoặc bản vẽ CAD của bạn</p>
+                            <p class="text-xs text-slate-500" id="fileInputSubtext">Chấp nhận tệp .pdf, .dxf, .dwg tối đa 500MB</p>
+                            <p class="text-xs font-semibold text-brand-400 mt-1 hidden" id="fileInfoLabel"></p>
+                        </div>
+                    </div>
+
+                    <!-- Client-side PDF Preview Canvas -->
+                    <div id="pdfClientPreviewContainer" class="hidden mt-4 p-3 bg-slate-950/80 border border-slate-850 rounded-xl flex flex-col items-center justify-center">
+                        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Xem trước tệp tải lên (Trang 1)</p>
+                        <canvas id="pdfClientPreviewCanvas" class="max-h-48 rounded shadow border border-slate-800 object-contain"></canvas>
+                    </div>
+
+                    <!-- DPI selector -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Độ phân giải (DPI)</label>
+                        <select name="dpi" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-brand-500 transition">
+                            <option value="72">72 DPI</option>
+                            <option value="150">150 DPI</option>
+                            <option value="300" selected>300 DPI</option>
+                            <option value="450">450 DPI</option>
+                            <option value="600">600 DPI</option>
+                            <option value="1200">1200 DPI</option>
+                        </select>
+                    </div>
+
+                    <!-- Apply ICC Profile Checkbox -->
+                    <div class="flex items-center space-x-2 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/80">
+                        <input type="checkbox" name="use_icc" id="useIccCheckbox" class="w-4 h-4 text-brand-600 bg-slate-900 border-slate-700 rounded focus:ring-brand-500 focus:ring-2 focus:ring-offset-slate-900 focus:outline-none transition cursor-pointer" onchange="toggleIccOptions()">
+                        <label for="useIccCheckbox" class="text-sm font-semibold text-slate-300 cursor-pointer select-none">Áp dụng ICC Profile</label>
+                    </div>
+
+                    <!-- Colorspace and Profile selectors wrapper -->
+                    <div id="iccOptionsContainer" class="hidden space-y-5">
+                        <!-- Colorspace selector -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Hệ màu (Colorspace)</label>
+                            <select name="colorspace" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-brand-500 transition">
+                                <option value="rgb" selected>RGB (Mặc định)</option>
+                                <option value="cmyk">CMYK</option>
+                            </select>
+                        </div>
+
+                        <!-- Profile selector -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Cấu hình màu (ICC Profile)</label>
+                            <select name="profile" id="profileSelect" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-brand-500 transition">
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Compression selector (Toggle button) -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nén ảnh TIFF</label>
+                        <div class="relative flex p-1 bg-slate-950 border border-slate-800 rounded-xl">
+                            <!-- Hidden input to store the value -->
+                            <input type="hidden" name="compression" id="compressionInput" value="lzw">
+                            
+                            <button type="button" id="btnLzw" onclick="setCompression('lzw')" class="flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 bg-brand-600 text-white shadow focus:outline-none">
+                                LZW
+                            </button>
+                            <button type="button" id="btnDeflate" onclick="setCompression('deflate')" class="flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 text-slate-400 hover:text-slate-200 focus:outline-none">
+                                Deflate
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Convert to PDF Checkbox -->
+                    <div class="flex items-center space-x-2 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/80">
+                        <input type="checkbox" name="convert_to_pdf" id="convertToPdfCheckbox" class="w-4 h-4 text-brand-600 bg-slate-900 border-slate-700 rounded focus:ring-brand-500 focus:ring-2 focus:ring-offset-slate-900 focus:outline-none transition cursor-pointer">
+                        <label for="convertToPdfCheckbox" class="text-sm font-semibold text-slate-300 cursor-pointer select-none">Đóng gói sang PDF (Convert to PDF)</label>
+                    </div>
+
+                    <button type="submit" class="w-full py-3.5 px-4 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-brand-500/25 hover:shadow-brand-500/35 transition transform active:scale-95 duration-150 flex items-center justify-center space-x-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-line-cap="round" stroke-line-join="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        <span>Thêm vào hàng đợi Render</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right Side: Jobs / Queue Panel -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl overflow-hidden">
+                    <h3 class="text-xl font-bold text-white mb-6 flex items-center justify-between w-full">
+                        <span class="flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                            Hàng đợi tác vụ & Lịch sử
+                        </span>
+                        <div class="flex items-center space-x-2">
+                            <!-- Reload Button -->
+                            <button onclick="window.location.reload()" type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 transition duration-150 flex items-center space-x-1 focus:outline-none" title="Tải lại danh sách">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12"></path></svg>
+                                <span>Tải lại</span>
+                            </button>
+
+                            <!-- Diagnostics Dropdown -->
+                            <div class="relative inline-block text-left" id="diagDropdownContainer">
+                                <button onclick="toggleDiagDropdown()" type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 transition duration-150 flex items-center space-x-1 focus:outline-none">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                                    <span>Chẩn đoán</span>
+                                    <svg class="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </button>
+                                
+                                <div id="diagDropdownMenu" class="hidden absolute right-0 mt-2 w-48 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl z-30 overflow-hidden py-1">
+                                    <button onclick="viewAgentLog('setting.json')" class="w-full text-left px-4 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-850 transition flex items-center space-x-2">
+                                        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                        <span>Xem setting.json</span>
+                                    </button>
+                                    <button onclick="viewAgentLog('stdout.txt')" class="w-full text-left px-4 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-850 transition flex items-center space-x-2">
+                                        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                        <span>Xem stdout.txt</span>
+                                    </button>
+                                    <button onclick="viewAgentLog('sterror.txt')" class="w-full text-left px-4 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-850 transition flex items-center space-x-2">
+                                        <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                        <span>Xem sterror.txt</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {% if documents %}
+                            <form action="/clear_all" method="POST" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tất cả các tác vụ trong lịch sử? Việc này sẽ xóa toàn bộ file thành phẩm trên máy chủ.');">
+                                <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-xl text-xs font-semibold border border-rose-500/20 transition duration-150 flex items-center space-x-1 focus:outline-none">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    <span>Xóa tất cả</span>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </h3>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider font-semibold">
+                                    <th class="py-4 px-4">Tên file</th>
+                                    <th class="py-4 px-4 text-center">Thông số</th>
+                                    <th class="py-4 px-4">Ngày tạo</th>
+                                    <th class="py-4 px-4 text-center">Thời gian</th>
+                                    <th class="py-4 px-4 text-center">Trạng thái</th>
+                                    <th class="py-4 px-4 text-right">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/50 text-sm">
+                                {% for doc in documents %}
+                                <tr class="hover:bg-slate-950/20 transition duration-100">
+                                    <td class="py-4 px-4 font-medium text-slate-200 flex items-center space-x-3">
+                                        {% if doc.status == 'completed' and doc.preview_path %}
+                                        <img src="/storage/previews/{{ doc.id }}.jpg" class="w-14 h-10 object-cover rounded-lg border border-slate-800 hover:border-brand-500 transition cursor-pointer shadow-md" onclick="showPreview('/storage/previews/{{ doc.id }}.jpg')" alt="Preview">
+                                        {% else %}
+                                        <div class="w-14 h-10 bg-slate-950 rounded-lg border border-slate-850 flex items-center justify-center text-[10px] text-slate-600 font-semibold uppercase tracking-wider select-none">
+                                            -
+                                        </div>
+                                        {% endif %}
+                                        <span class="truncate max-w-[150px]" title="{{ doc.filename }}">{{ doc.filename }}</span>
+                                    </td>
+                                    <td class="py-4 px-4 text-center">
+                                        <div class="inline-flex flex-col items-center">
+                                            <span class="text-xs text-brand-400 font-semibold bg-brand-500/10 px-2 py-0.5 rounded-full">{{ doc.dpi }} DPI</span>
+                                            <span class="text-[10px] text-slate-400 mt-1 uppercase">{{ doc.colorspace }} | {{ doc.compression }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="py-4 px-4 text-slate-400 text-xs">
+                                        {{ doc.created_at.strftime('%H:%M:%S %d-%m-%Y') }}
+                                    </td>
+                                    <td class="py-4 px-4 text-center text-xs text-slate-300 font-medium">
+                                        {% if doc.completed_at %}
+                                            {% set duration = (doc.completed_at - doc.created_at).total_seconds() | int %}
+                                            {% if duration < 60 %}
+                                                {{ duration }}s
+                                            {% else %}
+                                                {{ duration // 60 }}p {{ duration % 60 }}s
+                                            {% endif %}
+                                        {% elif doc.status == 'rendering' %}
+                                            <span class="text-blue-400 animate-pulse">Đang chạy...</span>
+                                        {% elif doc.status == 'pending' %}
+                                            <span class="text-slate-500">-</span>
+                                        {% else %}
+                                            <span class="text-rose-400">Lỗi</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-4 px-4 text-center">
+                                        {% if doc.status == 'pending' %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                            <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                            Chờ xử lý
+                                        </span>
+                                        {% elif doc.status == 'rendering' %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                            <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-blue-400 animate-ping"></span>
+                                            Đang render
+                                        </span>
+                                        {% elif doc.status == 'completed' %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                            <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-emerald-400"></span>
+                                            Hoàn thành
+                                        </span>
+                                        {% else %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20" title="{{ doc.error_message }}">
+                                            <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-rose-400"></span>
+                                            Thất bại
+                                        </span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-4 px-4 text-right">
+                                        <div class="flex items-center justify-end space-x-2">
+                                            {% if doc.status == 'completed' %}
+                                                {% if doc.preview_path %}
+                                                <button onclick="showPreview('/storage/previews/{{ doc.id }}.jpg')" class="p-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition" title="Xem trước">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                </button>
+                                                {% endif %}
+                                                {% if doc.convert_to_pdf %}
+                                                <a href="/storage/downloads/{{ doc.id }}.pdf" target="_blank" class="inline-flex p-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition" title="Tải xuống PDF">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                                </a>
+                                                {% else %}
+                                                <a href="/storage/downloads/{{ doc.id }}.tif" target="_blank" class="inline-flex p-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition" title="Tải xuống TIFF">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                                </a>
+                                                {% endif %}
+                                            {% elif doc.status == 'failed' %}
+                                                <button onclick="alert('Lỗi Render:\n{{ doc.error_message|escape }}')" class="p-2 bg-slate-800 text-rose-400 hover:bg-slate-700 rounded-lg transition" title="Xem chi tiết lỗi">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                                </button>
+                                            {% endif %}
+                                            <form action="/delete/{{ doc.id }}" method="POST" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tác vụ này?');">
+                                                <button type="submit" class="p-2 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg transition" title="Xóa tác vụ">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="py-12 text-center text-slate-500">
+                                        Không có tác vụ nào trong hàng đợi. Vui lòng tải lên file vector để bắt đầu.
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        
+                        <!-- Pagination Control -->
+                        <div class="p-4 border-t border-slate-800/80 bg-slate-900/10 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <!-- Left: Select per_page -->
+                            <div class="flex items-center space-x-2 text-xs text-slate-400">
+                                <span>Hiển thị</span>
+                                <select onchange="changePerPage(this.value)" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-brand-500 transition cursor-pointer">
+                                    <option value="5" {% if per_page == 5 %}selected{% endif %}>5</option>
+                                    <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+                                    <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+                                    <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                                    <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                                </select>
+                                <span>dòng mỗi trang. Tổng số: <strong class="text-slate-200">{{ total_count }}</strong> tác vụ.</span>
+                            </div>
+                            
+                            <!-- Right: Pagination links -->
+                            {% if total_pages > 1 %}
+                            <div class="flex items-center space-x-1">
+                                <!-- Prev Page -->
+                                {% if page > 1 %}
+                                <a href="?page={{ page - 1 }}&per_page={{ per_page }}" class="px-3 py-1.5 bg-slate-850 hover:bg-slate-850/80 text-slate-300 rounded-lg text-xs font-semibold transition">Trước</a>
+                                {% else %}
+                                <span class="px-3 py-1.5 bg-slate-900/50 text-slate-600 rounded-lg text-xs font-semibold cursor-not-allowed">Trước</span>
+                                {% endif %}
+                                
+                                <!-- Page numbers -->
+                                {% for p in range(1, total_pages + 1) %}
+                                    {% if p == page %}
+                                    <span class="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-xs font-bold shadow shadow-brand-500/25">{{ p }}</span>
+                                    {% else %}
+                                    <a href="?page={{ p }}&per_page={{ per_page }}" class="px-3 py-1.5 bg-slate-850 hover:bg-slate-850/80 text-slate-300 rounded-lg text-xs font-semibold transition">{{ p }}</a>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                <!-- Next Page -->
+                                {% if page < total_pages %}
+                                <a href="?page={{ page + 1 }}&per_page={{ per_page }}" class="px-3 py-1.5 bg-slate-850 hover:bg-slate-850/80 text-slate-300 rounded-lg text-xs font-semibold transition">Sau</a>
+                                {% else %}
+                                <span class="px-3 py-1.5 bg-slate-900/50 text-slate-600 rounded-lg text-xs font-semibold cursor-not-allowed">Sau</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        {% endif %}
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-6 px-6 text-center text-xs text-slate-500 mt-auto">
+        <p>© 2026 Toolx Render Agent. Thiết kế tối ưu hóa cho máy chủ 128GB RAM.</p>
+    </footer>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center hidden p-4">
+        <div class="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="flex justify-between items-center p-4 border-b border-slate-850">
+                <h4 class="font-bold text-slate-200">Xem trước ảnh TIFF Render</h4>
+                <button onclick="closePreview()" class="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-line-cap="round" stroke-line-join="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-4 flex-grow overflow-auto flex justify-center bg-slate-950">
+                <img id="previewImage" src="" alt="Preview" class="max-h-[60vh] object-contain rounded">
+            </div>
+            <div class="p-4 border-t border-slate-850 bg-slate-900/50 flex justify-end">
+                <button onclick="closePreview()" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl transition">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Viewer Modal -->
+    <div id="logModal" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center hidden p-4">
+        <div class="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="flex justify-between items-center p-4 border-b border-slate-850">
+                <h4 id="logModalTitle" class="font-bold text-slate-200 flex items-center"></h4>
+                <button onclick="closeLogModal()" class="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-4 flex-grow overflow-auto bg-slate-950 text-slate-300 font-mono text-xs select-text leading-relaxed whitespace-pre-wrap break-all" style="max-height: 60vh;">
+                <pre id="logModalContent"></pre>
+            </div>
+            <div class="p-4 border-t border-slate-850 bg-slate-900/50 flex justify-end space-x-2">
+                <button onclick="copyLogContent()" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl transition flex items-center space-x-1 focus:outline-none">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                    <span id="copyBtnText">Sao chép</span>
+                </button>
+                <button onclick="closeLogModal()" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-xl transition">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleDiagDropdown() {
+            const menu = document.getElementById('diagDropdownMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        function closeLogModal() {
+            document.getElementById('logModal').classList.add('hidden');
+        }
+
+        let currentLogContent = "";
+        function copyLogContent() {
+            navigator.clipboard.writeText(currentLogContent).then(() => {
+                const btnText = document.getElementById('copyBtnText');
+                btnText.textContent = "Đã chép!";
+                setTimeout(() => {
+                    btnText.textContent = "Sao chép";
+                }, 2000);
+            });
+        }
+
+        function viewAgentLog(filename) {
+            document.getElementById('diagDropdownMenu').classList.add('hidden');
+            
+            const titleEl = document.getElementById('logModalTitle');
+            const contentEl = document.getElementById('logModalContent');
+            
+            titleEl.textContent = `Đang tải ${filename}...`;
+            contentEl.textContent = "Đang tải dữ liệu từ máy chủ...";
+            document.getElementById('logModal').classList.remove('hidden');
+            
+            fetch('/api/agent/logs')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.ok) {
+                        titleEl.textContent = `Lỗi tải ${filename}`;
+                        contentEl.textContent = `Lỗi: ${data.error}`;
+                        return;
+                    }
+                    
+                    let title = "";
+                    let content = "";
+                    
+                    if (filename === 'setting.json') {
+                        title = "Cấu hình setting.json";
+                        try {
+                            const parsed = JSON.parse(data.settings_json);
+                            content = JSON.stringify(parsed, null, 4);
+                        } catch (e) {
+                            content = data.settings_json || "{}";
+                        }
+                    } else if (filename === 'stdout.txt') {
+                        title = "Nhật ký hoạt động (stdout.txt)";
+                        content = data.stout_logs;
+                    } else if (filename === 'sterror.txt') {
+                        title = "Nhật ký lỗi (sterror.txt)";
+                        content = data.sterror_logs;
+                    }
+                    
+                    titleEl.textContent = title;
+                    contentEl.textContent = content;
+                    currentLogContent = content;
+                })
+                .catch(err => {
+                    titleEl.textContent = `Lỗi tải ${filename}`;
+                    contentEl.textContent = `Không thể kết nối tới máy chủ: ${err}`;
+                });
+        }
+
+        // Close dropdown when clicking outside
+        window.addEventListener('click', function(e) {
+            const container = document.getElementById('diagDropdownContainer');
+            const menu = document.getElementById('diagDropdownMenu');
+            if (container && menu && !container.contains(e.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+        const baseDpiOptions = [
+            { value: 72, label: "72 DPI" },
+            { value: 150, label: "150 DPI" },
+            { value: 300, label: "300 DPI" },
+            { value: 450, label: "450 DPI" },
+            { value: 600, label: "600 DPI" },
+            { value: 1200, label: "1200 DPI" }
+        ];
+
+        function resetDpiSelect() {
+            const dpiSelect = document.querySelector('select[name="dpi"]');
+            if (!dpiSelect) return;
+            dpiSelect.innerHTML = '';
+            baseDpiOptions.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.label;
+                if (opt.value == 300) o.selected = true;
+                dpiSelect.appendChild(o);
+            });
+        }
+
+        function updateFileLabel() {
+            const fileInput = document.getElementById('pdfFileInput');
+            const fileLabel = document.getElementById('fileInputLabel');
+            const infoLabel = document.getElementById('fileInfoLabel');
+            
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                fileLabel.textContent = file.name;
+                fileLabel.className = "text-sm font-semibold text-emerald-400";
+                
+                // Parse PDF size
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const arrayBuffer = e.target.result;
+                    const decoder = new TextDecoder("utf-8");
+                    const view = new Uint8Array(arrayBuffer.slice(0, 2 * 1024 * 1024)); // first 2MB
+                    const text = decoder.decode(view);
+                    
+                    let match = text.match(/\/MediaBox\s*\[\s*([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s*\]/);
+                    if (!match) {
+                        match = text.match(/\/CropBox\s*\[\s*([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s*\]/);
+                    }
+                    
+                    if (match) {
+                        const x1 = parseFloat(match[1]);
+                        const y1 = parseFloat(match[2]);
+                        const x2 = parseFloat(match[3]);
+                        const y2 = parseFloat(match[4]);
+                        
+                        const w_pts = Math.abs(x2 - x1);
+                        const h_pts = Math.abs(y2 - y1);
+                        const w_in = w_pts / 72;
+                        const h_in = h_pts / 72;
+                        const w_mm = Math.round(w_in * 25.4);
+                        const h_mm = Math.round(h_in * 25.4);
+                        
+                        infoLabel.textContent = `Kích thước trang: ${w_mm} x ${h_mm} mm`;
+                        infoLabel.classList.remove('hidden');
+                        
+                        // Giới hạn max điểm ảnh an toàn cho MuPDF C-Core (tránh Overly large image)
+                        const MAX_DIMENSION = 65535;
+                        const max_dpi_w = Math.floor(MAX_DIMENSION / w_in);
+                        const max_dpi_h = Math.floor(MAX_DIMENSION / h_in);
+                        const max_dpi = Math.min(max_dpi_w, max_dpi_h);
+                        
+                        const dpiSelect = document.querySelector('select[name="dpi"]');
+                        if (dpiSelect) {
+                            dpiSelect.innerHTML = '';
+                            
+                            // Get standard options strictly less than max_dpi
+                            const allowedOptions = baseDpiOptions.filter(opt => opt.value < max_dpi).map(opt => ({...opt}));
+                            
+                            if (max_dpi < 1200) {
+                                // Dynamically append the exact calculated max_dpi
+                                allowedOptions.push({ value: max_dpi, label: `${max_dpi} DPI (maximum)` });
+                            } else {
+                                // Cap at 1200 DPI as the standard maximum
+                                allowedOptions.push({ value: 1200, label: "1200 DPI (maximum)" });
+                            }
+                            
+                            if (allowedOptions.length === 0) {
+                                allowedOptions.push({ value: 72, label: "72 DPI (maximum)" });
+                            }
+                            
+                            const maxAllowedValue = allowedOptions[allowedOptions.length - 1].value;
+                            allowedOptions.forEach(opt => {
+                                const o = document.createElement('option');
+                                o.value = opt.value;
+                                o.textContent = opt.label;
+                                
+                                // Keep default 300 DPI if allowed, otherwise select the max allowed
+                                if (opt.value === 300 && maxAllowedValue >= 300) {
+                                    o.selected = true;
+                                } else if (opt.value === maxAllowedValue && maxAllowedValue < 300) {
+                                    o.selected = true;
+                                }
+                                dpiSelect.appendChild(o);
+                            });
+                        }
+                    } else {
+                        infoLabel.textContent = "Kích thước trang: Không xác định (PDF vector)";
+                        infoLabel.classList.remove('hidden');
+                        resetDpiSelect();
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+                
+                // Lazy render PDF preview
+                setTimeout(() => {
+                    renderPdfPreviewLazy(file);
+                }, 100);
+            } else {
+                fileLabel.textContent = "Chọn tệp PDF vector của bạn";
+                fileLabel.className = "text-sm font-semibold text-slate-300";
+                infoLabel.classList.add('hidden');
+                const container = document.getElementById('pdfClientPreviewContainer');
+                if (container) container.classList.add('hidden');
+                resetDpiSelect();
+            }
+        }
+
+        function renderPdfPreviewLazy(file) {
+            const canvas = document.getElementById('pdfClientPreviewCanvas');
+            const container = document.getElementById('pdfClientPreviewContainer');
+            if (!canvas || !container) return;
+            
+            // Lazy load worker config
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+            } else {
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                pdfjsLib.getDocument({ data: arrayBuffer }).promise.then(function(pdf) {
+                    return pdf.getPage(1);
+                }).then(function(page) {
+                    const viewport = page.getViewport({ scale: 1.0 });
+                    const scale = 180 / viewport.height;
+                    const scaledViewport = page.getViewport({ scale: scale });
+                    
+                    const context = canvas.getContext('2d');
+                    canvas.height = scaledViewport.height;
+                    canvas.width = scaledViewport.width;
+                    
+                    const renderContext = {
+                        canvasContext: context,
+                        viewport: scaledViewport
+                    };
+                    return page.render(renderContext).promise;
+                }).then(function() {
+                    container.classList.remove('hidden');
+                }).catch(function(error) {
+                    console.warn("Lazy PDF preview failed (non-blocking):", error);
+                    container.classList.add('hidden');
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function toggleIccOptions() {
+            const checkbox = document.getElementById('useIccCheckbox');
+            const container = document.getElementById('iccOptionsContainer');
+            if (checkbox && container) {
+                if (checkbox.checked) {
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            }
+        }
+
+        function showPreview(url) {
+            document.getElementById('previewImage').src = url;
+            document.getElementById('previewModal').classList.remove('hidden');
+        }
+
+        function closePreview() {
+            document.getElementById('previewModal').classList.add('hidden');
+            document.getElementById('previewImage').src = '';
+        }
+
+        const profiles = {
+            cmyk: [
+                { value: "JapanColor2001Coated.icc", text: "Japan Color 2001 Coated (Mặc định)" },
+                { value: "JapanColor2001Uncoated.icc", text: "Japan Color 2001 Uncoated" },
+                { value: "USWebCoatedSWOP.icc", text: "U.S. Web Coated (SWOP) v2" },
+                { value: "USWebUncoated.icc", text: "U.S. Web Uncoated v2" },
+                { value: "CoatedFOGRA39.icc", text: "Coated FOGRA39 (ISO 12647-2:2004)" },
+                { value: "UncoatedFOGRA29.icc", text: "Uncoated FOGRA29 (ISO 12647-2:2004)" },
+                { value: "WebCoatedFOGRA28.icc", text: "Web Coated FOGRA28" },
+                { value: "ISOcoV2.icc", text: "ISO Coated v2 (ECI)" }
+            ],
+            rgb: [
+                { value: "sRGB Color Space Profile.icm", text: "sRGB Color Space Profile (Mặc định)" },
+                { value: "AdobeRGB1998.icc", text: "Adobe RGB (1998)" },
+                { value: "AppleRGB.icc", text: "Apple RGB" },
+                { value: "ColorMatchRGB.icc", text: "ColorMatch RGB" },
+                { value: "ProPhoto.icc", text: "ProPhoto RGB" }
+            ]
+        };
+
+        function updateProfileOptions() {
+            const colorspace = document.querySelector('select[name="colorspace"]').value;
+            const profileSelect = document.getElementById('profileSelect');
+            profileSelect.innerHTML = '';
+            
+            const options = profiles[colorspace] || [];
+            options.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.text;
+                profileSelect.appendChild(o);
+            });
+        }
+
+        function setCompression(type) {
+            const input = document.getElementById('compressionInput');
+            const btnLzw = document.getElementById('btnLzw');
+            const btnDeflate = document.getElementById('btnDeflate');
+            
+            input.value = type;
+            
+            if (type === 'lzw') {
+                btnLzw.className = "flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 bg-brand-600 text-white shadow focus:outline-none";
+                btnDeflate.className = "flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 text-slate-400 hover:text-slate-200 focus:outline-none";
+            } else {
+                btnLzw.className = "flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 text-slate-400 hover:text-slate-200 focus:outline-none";
+                btnDeflate.className = "flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 bg-brand-600 text-white shadow focus:outline-none";
+            }
+        }
+
+        function changePerPage(val) {
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('per_page', val);
+            urlParams.set('page', 1);
+            window.location.search = urlParams.toString();
+        }
+
+        document.querySelector('select[name="colorspace"]').addEventListener('change', updateProfileOptions);
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', updateProfileOptions);
+
+        // Auto reload page every 5 seconds if there are pending or rendering tasks
+        const hasActiveJobs = {{ 'true' if documents|selectattr('status', 'in', ['pending', 'rendering'])|list|length > 0 else 'false' }};
+        if (hasActiveJobs) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

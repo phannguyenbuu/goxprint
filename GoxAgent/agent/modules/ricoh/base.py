@@ -1,0 +1,629 @@
+from __future__ import annotations
+
+import logging
+import re
+import threading
+import time
+from dataclasses import dataclass
+from html import unescape
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin
+
+import requests
+
+from agent.services.api_client import APIClient, Printer
+
+LOGGER = logging.getLogger(__name__)
+ADDRESS_DEBUG_LOG_FILE = Path("storage/data/address_list_debug.log")
+
+# Patched requests.Session.request to write Ricoh printer HTML to unique files in the /html directory under the logs folder.
+_original_request = requests.Session.request
+
+def _get_html_log_dir() -> Path:
+    from agent.services.runtime import default_log_path
+    import sys
+    
+    preferred = default_log_path("stout.txt")
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        log_dir = preferred.parent
+    except Exception:
+        if getattr(sys, "frozen", False):
+            log_dir = Path(sys.executable).resolve().parent
+        else:
+            log_dir = Path.cwd()
+            
+    html_dir = log_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    return html_dir
+
+
+def _safe_html_filename(url: str) -> str:
+    clean = url
+    if "://" in clean:
+        clean = clean.split("://", 1)[1]
+    # Replace characters that are invalid in filenames on Windows
+    for ch in ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '=', '&']:
+        clean = clean.replace(ch, '_')
+    if len(clean) > 150:
+        clean = clean[:150]
+    return clean
+
+
+def _write_ricoh_html(url: str, text: str, step_name: str = "") -> None:
+    try:
+        if text:
+            import datetime
+            html_dir = _get_html_log_dir()
+            clean_name = _safe_html_filename(url)
+            timestamp = datetime.datetime.now()
+            suffix = timestamp.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # millisecond precision
+            
+            if step_name:
+                filename = f"{clean_name}_step_{step_name}_{suffix}.html"
+            else:
+                filename = f"{clean_name}_{suffix}.html"
+                
+            file_path = html_dir / filename
+            
+            header = f"<!--\nDate/Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}\nURL: {url}\n-->\n"
+            
+            with open(file_path, "w", encoding="utf-8", errors="ignore") as f:
+                f.write(header + text)
+    except Exception as e:
+        LOGGER.debug("Failed to write HTML log for %s: %s", url, e)
+
+
+def _patched_request(self, method, url, *args, **kwargs):
+    response = _original_request(self, method, url, *args, **kwargs)
+    try:
+        url_lower = response.url.lower()
+        if any(p in url_lower for p in ["/web/entry/", "/web/guest/", "/guest/", "/entry/", ".cgi"]):
+            # Do not save automated cycles like counter and status
+            is_automated = any(
+                term in url_lower 
+                for term in [
+                    "getunificationcounter", 
+                    "getstatus", 
+                    "configuration", 
+                    "getinterface", 
+                    "readnetworkinterface"
+                ]
+            )
+            if not is_automated:
+                content_type = response.headers.get("Content-Type", "").lower()
+                is_binary = any(b in content_type for b in ["image/", "application/octet-stream", "pdf", "zip"])
+                if not is_binary and response.text:
+                    # Extract step parameter if available in POST payload
+                    step_name = ""
+                    req_body = getattr(response.request, "body", None)
+                    if req_body:
+                        try:
+                            if isinstance(req_body, bytes):
+                                body_str = req_body.decode("utf-8", errors="ignore")
+                            else:
+                                body_str = str(req_body)
+                            
+                            # Try URL-encoded format first: step=BASE
+                            m = re.search(r'\bstep=([^&;\s]+)', body_str, re.I)
+                            if m:
+                                step_name = m.group(1).strip()
+                            else:
+                                # Try multipart format
+                                m = re.search(r'name=["\']step["\']\s*\r?\n\r?\n([A-Za-z0-9_-]+)', body_str, re.I)
+                                if m:
+                                    step_name = m.group(1).strip()
+                        except Exception:
+                            pass
+                    
+                    _write_ricoh_html(response.url, response.text, step_name=step_name)
+    except Exception:
+        pass
+    return response
+
+requests.Session.request = _patched_request
+
+
+@dataclass
+class AddressEntry:
+    type: str
+    registration_no: str
+    name: str
+    user_code: str
+    date_last_used: str
+    email_address: str
+    folder: str
+    entry_id: str = ""
+    physical_path: str = ""
+
+class RicohServiceBase:
+    def __init__(self, api_client: APIClient, interval_seconds: int = 60) -> None:
+        self.api_client = api_client
+        self.interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        # Keep a monotonic local hint so address registration_no generated by app always increases.
+        self._address_index_hint_by_ip: dict[str, int] = {}
+
+    def _timestamp(self) -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _append_address_debug(self, message: str) -> None:
+        try:
+            ADDRESS_DEBUG_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with ADDRESS_DEBUG_LOG_FILE.open("a", encoding="utf-8") as f:
+                f.write(f"{self._timestamp()} {message}\n")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to write address debug log: %s", exc)
+
+    def _is_login_page(self, html: str) -> bool:
+        """
+        Detects if the given HTML content represents the Ricoh Web Image Monitor login page.
+        Avoids false positives on successful wizard pages that happen to mention 'Login User Name' or 'Login Password'.
+        """
+        if not html:
+            return False
+        # If we see authForm.cgi or login.cgi in the HTML, it is a login page
+        if "authForm.cgi" in html or "login.cgi" in html:
+            return True
+        # Fallback check for other models/firmware versions
+        if "Login User Name" in html or "Login Password" in html:
+            # Check if this is actually a user wizard/configuration page
+            is_wizard = any(w in html for w in ["entryNameIn", "folderProtocolIn", "folderServerNameIn", "folderPathNameIn"])
+            if not is_wizard:
+                return True
+        return False
+
+    def _is_session_full(self, html: str) -> bool:
+        """
+        Detects if the copier returned a 'SESSIONFULL' page indicating session limit exceeded.
+        """
+        if not html:
+            return False
+        return "SESSIONFULL" in html or "exceeds the maximum allowable limit" in html
+
+    def _is_copier_busy(self, html: str) -> bool:
+        """
+        Detects if the copier returned a 'device in use' page.
+        """
+        if not html:
+            return False
+        return "currently in use by other functions" in html
+
+
+    @staticmethod
+    def _http_get(url: str, timeout: int = 10, session: requests.Session | None = None) -> str:
+        if session:
+            resp = session.get(url, timeout=timeout)
+        else:
+            resp = requests.get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp.text
+
+    def _logout_after_collect(self, printer: Printer, source: str = "") -> None:
+        logout_url = f"http://{printer.ip}/web/entry/en/websys/webArch/logout.cgi"
+        try:
+            # We don't bother checking response, typically we just hit it and move on.
+            requests.get(logout_url, timeout=5)
+            LOGGER.info("Logged out from %s (%s)", printer.name, source)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("Logout failed (expected for some models): ip=%s error=%s", printer.ip, exc)
+
+    def _verify_session_state(self, session: requests.Session, printer: Printer, username: str) -> bool:
+        """
+        Loads protected administrator-only pages to confirm whether we are fully logged in as ADMIN.
+        We check multiple endpoints to ensure maximum compatibility across firmware versions.
+        Uses POSITIVE string matching to avoid false positives from weird printer error pages.
+        """
+        base_url = f"http://{printer.ip}"
+        debug_trace = []
+        
+        # Endpoint A: Address List (Works on almost all firmware)
+        try:
+            url_a = urljoin(base_url, "/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL")
+            resp_a = session.get(url_a, timeout=5)
+            debug_trace.append(f"adrsList.cgi -> {resp_a.status_code}")
+            if resp_a.status_code == 200:
+                html = resp_a.text
+                if not self._is_login_page(html) and any(c in html for c in ["adrsSetUser", "adrsDeleteEntries", "adrsGetUser"]):
+                    LOGGER.info("[RicohLogin] Admin session verified via adrsList.cgi")
+                    return True
+        except Exception as exc:
+            debug_trace.append(f"adrsList.cgi -> Error: {exc}")
+            LOGGER.debug("[RicohLogin] adrsList verification check failed: %s", exc)
+
+        # Endpoint B: Address user wizard GET (Requires write/admin privileges)
+        try:
+            url_b = urljoin(base_url, "/web/entry/en/address/adrsGetUserWizard.cgi")
+            resp_b = session.get(url_b, timeout=5)
+            debug_trace.append(f"adrsGetUserWizard.cgi -> {resp_b.status_code}")
+            if resp_b.status_code == 200:
+                html = resp_b.text
+                if not self._is_login_page(html) and any(c in html for c in ["entryNameIn", "folderProtocolIn", "folderServerNameIn"]):
+                    LOGGER.info("[RicohLogin] Admin session verified via adrsGetUserWizard")
+                    return True
+        except Exception as exc:
+            debug_trace.append(f"adrsGetUserWizard.cgi -> Error: {exc}")
+            LOGGER.debug("[RicohLogin] adrsGetUserWizard verification check failed: %s", exc)
+            
+        # Endpoint C: Easy Security config (Strictly administrator-only)
+        try:
+            url_c = urljoin(base_url, "/web/entry/en/websys/easySecurity/getEasySecurity.cgi")
+            resp_c = session.get(url_c, timeout=5)
+            debug_trace.append(f"getEasySecurity.cgi -> {resp_c.status_code}")
+            if resp_c.status_code == 200:
+                # EasySecurity returns XML/JSON on success.
+                text = resp_c.text.strip()
+                if not self._is_login_page(text) and ("<?xml" in text or "{" in text) and not any(err in text.lower() for err in ["error", "denied", "invalid", "fail"]):
+                    LOGGER.info("[RicohLogin] Admin session verified via EasySecurity")
+                    return True
+        except Exception as exc:
+            debug_trace.append(f"getEasySecurity.cgi -> Error: {exc}")
+            LOGGER.debug("[RicohLogin] EasySecurity verification check failed: %s", exc)
+
+        error_detail = " | ".join(debug_trace)
+        LOGGER.warning("[RicohLogin] Admin session verification failed for %s. Trace: %s", printer.ip, error_detail)
+        # We must return False instead of raising so fallback loop continues. 
+        # But we can store the trace on the session or printer for logging later if needed.
+        setattr(printer, "_last_verify_trace", error_detail)
+        return False
+
+    def _logout(self, session: requests.Session, printer: Printer):
+        base_url = f"http://{printer.ip}"
+        for logout_path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
+            try:
+                session.get(urljoin(base_url, logout_path), timeout=3)
+            except Exception:
+                pass
+
+    def _login(self, session: requests.Session, printer: Printer, credential_candidates: list[tuple[str, str]] | None = None) -> tuple[str, str]:
+        """
+        Form-based login to Ricoh copier.
+        Returns successfully used (user, password) tuple.
+        """
+        if not hasattr(session, "cookies") or session.cookies is None:
+            class DummyCookies:
+                def get(self, *args, **kwargs): return ""
+                def set(self, *args, **kwargs): pass
+                def clear(self, *args, **kwargs): pass
+            session.cookies = DummyCookies()
+
+        base_url = f"http://{printer.ip}"
+        LOGGER.info("[RicohLogin] Starting login for copier %s (IP: %s)", printer.name, printer.ip)
+        
+        # Build candidate list
+        candidates = []
+        if credential_candidates:
+            candidates.extend(credential_candidates)
+        else:
+            candidates.append((printer.user or "", printer.password or ""))
+
+        seen: set[tuple[str, str]] = set()
+        final_candidates: list[tuple[str, str]] = []
+        for u, p in candidates:
+            if (u, p) not in seen:
+                seen.add((u, p))
+                final_candidates.append((u, p))
+
+        LOGGER.info("[RicohLogin] Credentials to attempt: %s", [(u, "***" if p else "") for u, p in final_candidates])
+
+        last_exception = None
+        for attempt, (user, password) in enumerate(final_candidates):
+            LOGGER.info("[RicohLogin] Attempt %d/%d: user=%s", attempt + 1, len(final_candidates), user)
+
+            try:
+                session.cookies.clear()
+                session.auth = None
+                session.cookies.set("cookieOnOffChecker", "on")
+
+                # On first attempt only, release any stale session on the copier
+                # Must logout from BOTH /entry/ and /guest/ paths, then clear cookies
+                # (matches proven logic in test_add_user.py login_ricoh)
+                if attempt == 0:
+                    for logout_path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
+                        try:
+                            session.get(urljoin(base_url, logout_path), timeout=3)
+                        except Exception:
+                            pass
+                    session.cookies.clear()
+                    session.cookies.set("cookieOnOffChecker", "on")
+
+                # GET login form to obtain wimToken (single pass)
+                form_urls = [
+                    "/web/entry/en/websys/webArch/authForm.cgi",
+                    "/web/guest/en/websys/webArch/authForm.cgi",
+                ]
+                wim_token = ""
+                referer_url = ""
+
+                for form_path in form_urls:
+                    try:
+                        url = urljoin(base_url, form_path)
+                        LOGGER.info("[RicohLogin] GET %s", form_path)
+                        resp = session.get(url, timeout=60)
+                        if resp.status_code == 200:
+                            html_content = resp.text
+                            # Handle JS intermediate redirect if present (same as test_login_226.py)
+                            if "document.form1.submit()" in html_content or "name='form1'" in html_content or 'name="form1"' in html_content:
+                                LOGGER.info("[RicohLogin] Intermediate redirect form detected. Following POST redirect...")
+                                hidden = self._extract_hidden_inputs(html_content)
+                                action_match = re.search(r'action\s*=\s*["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+                                if action_match:
+                                    redirect_url = urljoin(resp.url, action_match.group(1))
+                                    LOGGER.info("[RicohLogin] POST Redirect %s", action_match.group(1))
+                                    resp = session.post(redirect_url, data=hidden, timeout=60)
+                                    html_content = resp.text
+
+                            if self._is_session_full(html_content):
+                                LOGGER.warning("[RicohLogin] Session limit exceeded during form fetch for %s", printer.ip)
+                                raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+
+                            wim_token = self._extract_wim_token(html_content)
+                            if not wim_token:
+                                wim_token = self._extract_hidden_inputs(html_content).get("wimToken", "")
+                            referer_url = resp.url
+                            LOGGER.info("[RicohLogin] Form OK, wimToken=%s", bool(wim_token))
+                            break
+                    except Exception as e:
+                        LOGGER.debug("[RicohLogin] GET %s failed: %s", form_path, e)
+                        continue
+
+                if not referer_url:
+                    LOGGER.info("[RicohLogin] Retrying authForm fetch with 1.5s delay for %s...", printer.ip)
+                    time.sleep(1.5)
+                    for form_path in form_urls:
+                        try:
+                            url = urljoin(base_url, form_path)
+                            resp = session.get(url, timeout=60)
+                            if resp.status_code == 200:
+                                html_content = resp.text
+                                wim_token = self._extract_wim_token(html_content) or self._extract_hidden_inputs(html_content).get("wimToken", "")
+                                referer_url = resp.url
+                                LOGGER.info("[RicohLogin] Retry form OK for %s", printer.ip)
+                                break
+                        except Exception:
+                            continue
+
+                if not referer_url:
+                    LOGGER.warning("[RicohLogin] Could not load login form for %s", printer.ip)
+                    continue
+
+                # POST login (Sequential strategies including Base64 support for new Ricoh models)
+                import base64
+                encoded_user = base64.b64encode(user.encode()).decode()
+                encoded_pass = base64.b64encode(password.encode()).decode()
+
+                strategies = [
+                    # Strategy A: Base64 to guest cgi (priority - works on most models)
+                    {
+                        "name": "Base64 (guest)",
+                        "path": "/web/guest/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": encoded_user,
+                            "username": encoded_user,
+                            "password": encoded_pass,
+                            "open": "websys/webArch/authForm.cgi"
+                        }
+                    },
+                    # Strategy B: Plain Text to entry cgi
+                    {
+                        "name": "Plain (entry)",
+                        "path": "/web/entry/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": user,
+                            "username": user,
+                            "password": password,
+                        }
+                    },
+                    # Strategy C: Plain Text to guest cgi
+                    {
+                        "name": "Plain (guest)",
+                        "path": "/web/guest/en/websys/webArch/login.cgi",
+                        "data": {
+                            "userid": user,
+                            "username": user,
+                            "password": password,
+                        }
+                    },
+                ]
+
+                for strategy in strategies:
+                    post_url = urljoin(base_url, strategy["path"])
+                    data = dict(strategy["data"])
+                    if wim_token:
+                        data["wimToken"] = wim_token
+
+                    LOGGER.info("[RicohLogin] POST %s using %s Strategy", strategy["path"], strategy["name"])
+                    try:
+                        resp = session.post(post_url, data=data, headers={"Referer": referer_url}, timeout=60)
+                    except Exception as post_exc:
+                        LOGGER.debug("[RicohLogin] POST %s failed: %s", strategy["path"], post_exc)
+                        continue
+
+                    if self._is_session_full(resp.text):
+                        LOGGER.warning("[RicohLogin] Session limit exceeded during login for %s", printer.ip)
+                        raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+
+                    wim_session = session.cookies.get("wimsesid", "")
+                    real_session = bool(wim_session) and wim_session != "--"
+                    LOGGER.info("[RicohLogin] POST result using %s: status=%d wimsesid=%s", strategy["name"], resp.status_code, "valid" if real_session else wim_session or "NONE")
+
+                    is_failed_auth = "Authentication has failed" in resp.text or "not correct" in resp.text or ("authForm.cgi" in resp.text and "location" in resp.text)
+
+                    if resp.status_code == 200 and not is_failed_auth and real_session:
+                        # Thực hiện kiểm tra chắc chắn bằng _verify_session_state (độc lập ngôn ngữ)
+                        if self._verify_session_state(session, printer, user):
+                            LOGGER.info("[RicohLogin] Success! Verified Admin login as '%s' via %s (%s)", user, strategy["path"], strategy["name"])
+                            printer.user = user
+                            printer.password = password
+                            return (user, password)
+                        else:
+                            LOGGER.debug("[RicohLogin] POST returned 200 OK but _verify_session_state failed. Probably invalid credentials (redirected to login) or not an Admin.")
+
+            except Exception as exc:
+                LOGGER.warning("[RicohLogin] Exception: %s", exc)
+                last_exception = exc
+
+            if attempt < len(final_candidates) - 1:
+                time.sleep(0.5)
+
+        if last_exception:
+            raise last_exception
+        raise RuntimeError(f"All login attempts failed for {printer.ip}")
+
+    def _login_auth_form_only(self, session: requests.Session, printer: Printer) -> None:
+        """Deprecated/Legacy: Use unified _login instead if possible."""
+        self._login(session, printer)
+
+    def _reset_web_session(self, session: requests.Session, printer: Printer) -> None:
+        if not hasattr(session, "cookies") or session.cookies is None:
+            class DummyCookies:
+                def get(self, *args, **kwargs): return ""
+                def set(self, *args, **kwargs): pass
+                def clear(self, *args, **kwargs): pass
+            session.cookies = DummyCookies()
+
+        base_url = f"http://{printer.ip}"
+        # Quick logout - fire and forget
+        for path in ["/web/entry/en/websys/webArch/logout.cgi", "/web/guest/en/websys/webArch/logout.cgi"]:
+            try:
+                session.get(urljoin(base_url, path), timeout=3)
+            except Exception:
+                continue
+        try:
+            session.cookies.clear()
+        except Exception:
+            pass
+            return
+
+    def reset_web_session(self, printer: Printer) -> None:
+        """
+        Public helper used by UI/polling flow to force-clear web session cookies
+        on device side without requiring authentication.
+        """
+        session = requests.Session()
+        try:
+            self._reset_web_session(session, printer)
+        finally:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def create_http_client(self, printer: Printer, credential_candidates: list[tuple[str, str]] | None = None, authenticated: bool = True) -> requests.Session:
+        """
+        Creates a session. If authenticated=True, performs login.
+        """
+        LOGGER.info("[RicohClient] Creating requests session: IP=%s, authenticated=%s", printer.ip, authenticated)
+        session = requests.Session()
+        session.headers.update({"User-Agent": "printer-agent/0.1"})
+        
+        if authenticated:
+            try:
+                self._login(session, printer, credential_candidates=credential_candidates)
+            except Exception as login_err:
+                LOGGER.warning("[RicohClient] Login failed for %s: %s. Continuing with unauthenticated session for guest endpoints...", printer.ip, login_err)
+        return session
+
+    def create_http_client_auth_form_only(self, printer: Printer) -> requests.Session:
+        """Deprecated: Use create_http_client instead."""
+        return self.create_http_client(printer, authenticated=True)
+
+    def authenticate_and_get(self, session: requests.Session, printer: Printer, target_url: str) -> str:
+        """
+        Compatibility layer: Ensures we are logged in and fetches the target.
+        """
+        url = urljoin(f"http://{printer.ip}", target_url)
+        LOGGER.info("[RicohHTTP] GET %s (timeout=15s)", target_url)
+        start_time = time.time()
+        response = session.get(url, timeout=15)
+        elapsed = time.time() - start_time
+        LOGGER.info("[RicohHTTP] GET %s -> Status %d (%.2fs, length=%d)", target_url, response.status_code, elapsed, len(response.text))
+        response.raise_for_status()
+        html = response.text
+
+        if self._is_session_full(html):
+            raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+
+        if self._is_copier_busy(html):
+            raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+
+        # Check if we hit a login page or if our session expired/redirected to guest view
+        is_login_page = self._is_login_page(html)
+        is_admin_page = "/web/entry/" in url
+        
+        # AJAX/JSON responses (starting with '[' or '{') do not contain HTML admin body markers
+        cleaned_html = html.strip()
+        is_json_js = cleaned_html.startswith("[") or cleaned_html.startswith("{")
+        
+        if is_json_js:
+            has_admin_content = True
+        else:
+            has_admin_content = any(c in html for c in ["ReportListArea", "adrsList", "adrsGetUser", "adrsSetUser", "adrsDeleteEntries", "folderProtocolIn", "entryNameIn", "folderServerNameIn"])
+        
+        if is_login_page or (is_admin_page and not has_admin_content):
+            LOGGER.info("[RicohHTTP] Session expired, guest view, or auth screen encountered for admin URL %s, re-authenticating IP %s...", url, printer.ip)
+            self._login(session, printer)
+            LOGGER.info("[RicohHTTP] Re-auth complete. Retrying GET %s...", target_url)
+            start_time = time.time()
+            response = session.get(url, timeout=15)
+            elapsed = time.time() - start_time
+            LOGGER.info("[RicohHTTP] Retry GET %s -> Status %d (%.2fs, length=%d)", target_url, response.status_code, elapsed, len(response.text))
+            response.raise_for_status()
+            html = response.text
+            if self._is_session_full(html):
+                raise RuntimeError("The copier session limit has been exceeded. Please try again later. (SESSIONFULL)")
+            if self._is_copier_busy(html):
+                raise RuntimeError("The copier is currently busy or in use by other functions. Please try again later.")
+
+        return html
+
+    def _extract_wim_token(self, html: str) -> str:
+        # Matches: wimToken="value", wimToken='value', wimToken = value, wimToken: "value", wimToken: 'value'
+        match = re.search(r'wimToken\s*[:=]\s*["\']?([^"\'\s;>]+)["\']?', html, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # Matches: name="wimToken" value="value", name='wimToken' value='value', name=wimToken value=value
+        match = re.search(r'name\s*=\s*["\']?wimToken["\']?\s+value\s*=\s*["\']?([^"\'\s>]+)["\']?', html, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # Matches: value="value" name="wimToken", value='value' name='wimToken', value=value name=wimToken
+        match = re.search(r'value\s*=\s*["\']?([^"\'\s>]+)["\']?\s+name\s*=\s*["\']?wimToken["\']?', html, re.IGNORECASE)
+        return match.group(1) if match else ""
+
+    def _extract_hidden_inputs(self, html: str) -> dict[str, str]:
+        """Simple regex extraction of hidden input fields."""
+        fields: dict[str, str] = {}
+        for match in re.finditer(
+            r'<input\s+[^>]*?type\s*=\s*["\']?hidden["\']?[^>]*?>', html, re.IGNORECASE | re.DOTALL
+        ):
+            tag = match.group(0)
+            name_m = re.search(r'name\s*=\s*["\']?([^"\'\s>]+)["\']?', tag, re.IGNORECASE)
+            value_m = re.search(r'value\s*=\s*["\']?([^"\'\s>]*)["\']?', tag, re.IGNORECASE)
+            if name_m:
+                fields[name_m.group(1)] = unescape(value_m.group(1)) if value_m else ""
+        
+        # Also check for wimToken variable in script or document
+        if "wimToken" not in fields or not fields["wimToken"]:
+            token = self._extract_wim_token(html)
+            if token:
+                fields["wimToken"] = token
+        return fields
+
+    @staticmethod
+    def _strip_html(input_value: str) -> str:
+        text = re.sub(r"<[^>]*>", "", input_value)
+        text = re.sub(r"\s+", " ", text)
+        return unescape(text.strip())
+
+    @staticmethod
+    def _pick_field_key(keys: list[str], candidates: list[str]) -> str | None:
+        for c in candidates:
+            if c in keys:
+                return c
+            # Case insensitive check
+            for k in keys:
+                if k.lower() == c.lower():
+                    return k
+        return None

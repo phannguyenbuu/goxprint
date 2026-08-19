@@ -1,0 +1,43 @@
+{
+  "api_url": "https://agentapi.quanlymay.com/api",
+  "path": "/",
+  "show_tray_icon": true,
+  "ftp_port": 2130,
+  "ftp_user": "goxprint",
+  "ftp_pass": "goxprint",
+  "polling": {
+    "enabled": true,
+    "device_enabled": true,
+    "device_interval_seconds": 60,
+    "control_enabled": true,
+    "control_interval_seconds": 1,
+    "scan_enabled": true,
+    "scan_interval_seconds": 1,
+    "scan_dirs": "",
+    "scan_recursive": true,
+    "scan_auto_open_file": true,
+    "scan_auto_open_dir": true,
+    "driver_preference": "pcl 6;pcl6;pcl;easysetup;universal;postscript;ps",
+    "agent_uid": "administrator"
+  },
+  "modules": {
+    "ricoh": {
+      "enabled": true
+    },
+    "toshiba": {
+      "enabled": true
+    },
+    "ftp": {
+      "enabled": true
+    },
+    "updater": {
+      "enabled": true,
+      "check_interval_seconds": 60
+    },
+    "web": {
+      "enabled": true
+    }
+  },
+  "pc_name": "Administrator",
+  "pc_ip": "192.168.1.3"
+}
