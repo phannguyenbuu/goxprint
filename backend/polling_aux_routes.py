@@ -489,7 +489,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         with session_factory() as session:
             command = session.get(PrinterControlCommand, int(command_id))
             if command is None:
-                return jsonify({"ok": False, "error": "Command not found"}), 404
+                return jsonify({"ok": True, "error": "Command not found (assumed already processed)"}), 200
             if command.lead != lead:
                 return jsonify({"ok": False, "error": "Lead mismatch"}), 400
             if command.status not in ("pending", "processing"):
@@ -961,6 +961,13 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                     LOGGER.info("[polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: %s", new_ip)
                 except Exception as refresh_err:
                     LOGGER.error("[polling_control_result] Failed to update AgentNode/memory local_ip on get_agent_ip refresh: %s", refresh_err)
+            else:
+                if ok_value:
+                    command.status = "success"
+                else:
+                    command.status = "failed"
+                command.error_message = error_message
+                command.responded_at = responded_at
             
             # Delete check_scan_ip_match and automatic utility commands to prevent DB bloating
             if command.command_type == "trigger_utility" and command.command_params:
@@ -1001,7 +1008,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         with session_factory() as session:
             command = session.get(PrinterControlCommand, int(command_id))
             if command is None:
-                return jsonify({"ok": False, "error": "Command not found"}), 404
+                return jsonify({"ok": True, "error": "Command not found (assumed already processed)"}), 200
             if command.lead != lead:
                 return jsonify({"ok": False, "error": "Lead mismatch"}), 400
             
@@ -1046,7 +1053,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
         with session_factory() as session:
             command = session.get(PrinterControlCommand, int(command_id))
             if command is None:
-                return jsonify({"ok": False, "error": "Command not found"}), 404
+                return jsonify({"ok": True, "error": "Command not found (assumed already processed)"}), 200
             if command.lead != lead:
                 return jsonify({"ok": False, "error": "Lead mismatch"}), 400
 
