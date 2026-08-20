@@ -817,17 +817,23 @@ force_scan()`,
             }
         }
 
-        const ricohPrinters = (printers || []).filter(p => {
-            if (!p.enabled) return false;
-            if (!p.is_online) return false;
-            if (!p.ip || p.ip === '127.0.0.1' || p.ip === 'localhost') return false;
-            if (subnetPrefix && !p.ip.startsWith(subnetPrefix)) return false;
-            const lower = (p.printer_name || '').toLowerCase();
-            if (lower.includes('pdf') || lower.includes('fax') || lower.includes('brother') || lower.includes('canon lbp') || lower.includes('rustdesk')) return false;
-            return lower.includes('ricoh') || lower.includes('toshiba') || lower.includes('savin') || lower.includes('aficio') || lower.includes('mp ') || lower.includes('im ') || lower.includes('pro ') || lower.includes('e-studio') || lower.includes('c6502') || lower.includes('c4503') || lower.includes('6055') || lower.includes('7503');
+        const filteredPrinters = (printers || []).filter(p => {
+            // 1. Không show Unknown Printer
+            const lower = (p.printer_name || '').toLowerCase().trim();
+            if (lower.includes('unknown') || lower === 'unknown printer') return false;
+
+            // 2. Lọc generic printer như pdf, fax, brother, v.v.
+            if (lower.includes('pdf') || lower.includes('fax') || lower.includes('brother') || lower.includes('canon lbp') || lower.includes('rustdesk')) {
+                return false;
+            }
+
+            // 3. Ẩn copier offline (chỉ ẩn sau khi đã probe xong)
+            if (p.probed && !p.is_online) return false;
+
+            return true;
         });
 
-        if (!ricohPrinters.length) {
+        if (!filteredPrinters.length) {
             container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; font-style: italic;">No online copiers found in this subnet.</div>';
             return;
         }
@@ -836,7 +842,7 @@ force_scan()`,
         table.className = 'glass-table';
         
         let rowsHtml = '';
-        ricohPrinters.forEach(p => {
+        filteredPrinters.forEach(p => {
             const sync = p.address_book_sync || {};
             let fetchStatusTextHtml = 'No sync data';
             let viewBookCellHtml = '';
