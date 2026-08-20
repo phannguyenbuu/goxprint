@@ -88,12 +88,33 @@ def update_agent_in_memory(
                 agent_entry["printers_json"] = cached
 
     agent_entry = ACTIVE_AGENTS[key]
+    devices_dict = agent_entry.setdefault("devices", {})
+
+    # If the agent sends a full devices_list (e.g. from polling), clear and rebuild
+    # the RAM registry so that offline/removed printers are actually cleared out.
     if isinstance(devices_list, list) and len(devices_list) > 0:
         agent_entry["printers_json"] = devices_list
         _save_cached_printers_for_agent(key, devices_list)
+        
+        devices_dict.clear()
+        
+        for d in devices_list:
+            if not isinstance(d, dict):
+                continue
+            d_mac = str(d.get("mac_address") or d.get("mac_id") or "").strip().upper().replace("-", ":")
+            if not d_mac:
+                continue
+            
+            p_name = d.get("printer_name") or d.get("model") or "Unknown Printer"
+            devices_dict[d_mac] = {
+                "printer_name": str(p_name),
+                "ip": str(d.get("ip", "")).strip(),
+                "is_online": bool(d.get("is_online", True)),
+                "probed": bool(d.get("probed", False)),
+                "updated_at": now.isoformat(),
+            }
 
-    devices_dict = agent_entry.setdefault("devices", {})
-
+    # If there is a specific single-device update (e.g. counter/status ping)
     if mac_id:
         norm_mac = mac_id.upper().replace("-", ":")
         dev = devices_dict.setdefault(norm_mac, {})
@@ -101,29 +122,16 @@ def update_agent_in_memory(
             dev["printer_name"] = printer_name
         elif "printer_name" not in dev or "unknown" in str(dev.get("printer_name", "")).lower():
             dev["printer_name"] = printer_name or "Unknown Printer"
+        
         if ip:
             dev["ip"] = ip
         if isinstance(counter_data, dict) and counter_data:
             dev["counter"] = counter_data
         if isinstance(status_data, dict) and status_data:
             dev["status"] = status_data
-            # Derive is_online from status
             s = str(status_data.get("status", "")).lower()
             dev["is_online"] = (s != "offline") if s else dev.get("is_online", True)
         dev["updated_at"] = now.isoformat()
-
-    # Also sync is_online and probed from printers_json devices_list into devices dict
-    if isinstance(devices_list, list):
-        for d in devices_list:
-            if not isinstance(d, dict):
-                continue
-            d_mac = str(d.get("mac_address") or d.get("mac_id") or "").strip().upper().replace("-", ":")
-            if d_mac and d_mac in devices_dict:
-                devices_dict[d_mac]["is_online"] = bool(d.get("is_online", True))
-                devices_dict[d_mac]["probed"] = bool(d.get("probed", False))
-                if d.get("ip"):
-                    devices_dict[d_mac]["ip"] = str(d["ip"]).strip()
-
 
 def prune_offline_agents(timeout_seconds: int = 120) -> None:
     """Purge agents from in-memory registry that haven't sent a heartbeat/poll within timeout_seconds."""
