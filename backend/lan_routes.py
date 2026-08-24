@@ -215,13 +215,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
             ram_printers_lookup: dict[str, dict] = {}
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                devices = agent_info.get("devices", {})
+                devices = agent_info["devices"] if (isinstance(agent_info, dict) and "devices" in agent_info) else {}
                 for mac_id, dev in devices.items():
                     norm_mac = mac_id.upper().replace("-", ":")
                     if norm_mac:
                         ram_printers_lookup[norm_mac] = dev
                         ram_printers_lookup[norm_mac]["_agent_uid"] = agent_uid
-                        ram_printers_lookup[norm_mac]["_lan_uid"] = agent_info.get("lan_uid", "default")
+                        ram_printers_lookup[norm_mac]["_lan_uid"] = agent_info["lan_uid"] if "lan_uid" in agent_info else "default"
 
 
             # Build the printers_by_lan dictionary strictly from RAM data
@@ -399,7 +399,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
                 from active_agents_registry import ACTIVE_AGENTS
                 for ag_info in active_agents_by_lan.get(r.lan_uid, []):
-                    ag_devs = ag_info.get("devices", {}) if isinstance(ag_info, dict) else {}
+                    ag_devs = ag_info["devices"] if (isinstance(ag_info, dict) and "devices" in ag_info) else {}
                     for dev_mac, dev_data in ag_devs.items():
                         d_ip = str(dev_data.get("ip") or "").strip()
                         d_mac = str(dev_mac or "").strip().replace("-", ":").upper()
