@@ -170,7 +170,24 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
                 fingerprint_signature=fingerprint,
             )
             is_master, emails = _is_agent_master_and_get_emails(session, lead, lan_uid, agent_uid)
-            session.commit()
+            devices_payload = body.get("devices") or body.get("printers") or body.get("devices_list") or body.get("printers_json")
+            if not isinstance(devices_payload, list) and isinstance(devices_payload, dict):
+                devices_payload = list(devices_payload.values())
+
+            from active_agents_registry import update_agent_in_memory
+            update_agent_in_memory(
+                lead=lead,
+                lan_uid=lan_uid,
+                agent_uid=agent_uid,
+                hostname=hostname,
+                local_ip=local_ip,
+                local_mac=local_mac,
+                app_version=app_version,
+                run_mode=run_mode,
+                web_port=web_port,
+                devices_list=devices_payload if isinstance(devices_payload, list) else None,
+            )
+
         LOGGER.info("register: lead=%s lan_uid=%s agent_uid=%s hostname=%s master=%s", lead, lan_uid, agent_uid, hostname, is_master)
 
         return jsonify(

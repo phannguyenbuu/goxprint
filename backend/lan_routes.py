@@ -193,6 +193,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 printer_stmt = printer_stmt.where(Printer.lead == lead)
             printer_rows = session.execute(printer_stmt).scalars().all()
             printers_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            seen_printers = set()
             # 1. Populate printers_by_lan from DB (Printer table) — source of truth for is_online
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
             prune_offline_agents(timeout_seconds=180)
@@ -245,12 +246,18 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     except Exception:
                         pass
 
+                is_on = bool(dev.get("is_online", True))
+                from active_agents_registry import LAST_LIVE_PING_IPS
+                live_set = LAST_LIVE_PING_IPS.get(p_lan) or LAST_LIVE_PING_IPS.get("default")
+                if live_set and p_ip and p_ip not in live_set:
+                    is_on = False
+
                 printers_by_lan[p_lan].append({
                     "id": 0,
                     "printer_name": p_name,
                     "ip": p_ip,
                     "mac_id": p_mac,
-                    "is_online": bool(dev.get("is_online", True)),
+                    "is_online": is_on,
                     "last_scanned_at": dev.get("updated_at", ""),
                     "probed": bool(dev.get("probed", False)),
                     "enabled": True,
@@ -388,36 +395,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 active_count = len(active_agents_by_lan.get(r.lan_uid, []))
                 has_online_agent = (active_count > 0) or (total_active_agents > 0)
                 
-                for dev in devices_by_lan.get(r.lan_uid, []):
-                    dev_ip = str(dev.ip or "").strip()
-                    dev_mac = str(dev.mac_id or "").strip().replace("-", ":").upper()
-                    name = str(dev.printer_name or "").strip()
-                    if not name:
-                        continue
-                    if dev_ip and dev_ip in existing_ips:
-                        continue
-                    
-                    dev_is_online = False
-                    if isinstance(dev.status_data, dict):
-                        dev_is_online = dev.status_data.get("is_online", False)
-                    
-                    lan_printers.append({
-                        "id": dev.id,
-                        "printer_name": name,
-                        "ip": dev_ip,
-                        "mac_id": dev_mac,
-                        "is_online": bool(dev_is_online),
-                        "probed": False,
-                        "matched_by_agent": False,
-                        "enabled": True,
-                        "auth_user": "",
-                        "auth_password": "",
-                        "address_book_sync": {},
-                        "suggested_drivers": _match_printer_drivers(name),
-                        "agent_uid": dev.agent_uid or "",
-                    })
-                    if dev_ip:
-                        existing_ips.add(dev_ip)
+                # Do not append stale DeviceInfor DB records; strictly serve live RAM printers
 
                 from active_agents_registry import ACTIVE_AGENTS
                 for ag_info in active_agents_by_lan.get(r.lan_uid, []):

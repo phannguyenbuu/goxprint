@@ -107,7 +107,8 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
     try:
         from active_agents_registry import ACTIVE_AGENTS
         for a_uid, agent_info in ACTIVE_AGENTS.items():
-            printers_list = agent_info.get("printers_json") or []
+            devices_map = agent_info.get("devices", {})
+            printers_list = list(devices_map.values()) if isinstance(devices_map, dict) and devices_map else (agent_info.get("printers_json") or [])
             if not isinstance(printers_list, list):
                 continue
             for p_dict in printers_list:

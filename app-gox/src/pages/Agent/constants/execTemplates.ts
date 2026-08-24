@@ -378,11 +378,11 @@ print(f"  - Base URL    : {BASE_URL}")
 
 def extract_wim_token(html: str) -> str:
     if not html: return ""
-    m = re.search(r'wimToken\\s*[:=]\\s*["\\']?([^"\\'\\s;>]+)["\\']?', html, re.IGNORECASE)
+    m = re.search(r'wimToken\s*[:=]\s*["\']?([^"\'\s;>]+)["\']?', html, re.IGNORECASE)
     if m and m.group(1): return m.group(1)
-    m = re.search(r'name\\s*=\\s*["\\']?wimToken["\\']?[^>]*?value\\s*=\\s*["\\']?([^"\\'\\s>]+)["\\']?', html, re.IGNORECASE)
+    m = re.search(r'name\s*=\s*["\']?wimToken["\']?[^>]*?value\s*=\s*["\']?([^"\'\s>]+)["\']?', html, re.IGNORECASE)
     if m and m.group(1): return m.group(1)
-    m = re.search(r'value\\s*=\\s*["\\']?([^"\\'\\s>]+)["\\']?[^>]*?name\\s*=\\s*["\\']?wimToken["\\']?', html, re.IGNORECASE)
+    m = re.search(r'value\s*=\s*["\']?([^"\'\s>]+)["\']?[^>]*?name\s*=\s*["\']?wimToken["\']?', html, re.IGNORECASE)
     if m and m.group(1): return m.group(1)
     return ""
 
@@ -432,6 +432,18 @@ def login() -> requests.Session:
         print("  [✓] Đăng nhập thành công vào máy in Ricoh!")
         
     return session
+                folder = c
+            elif c and c != "-" and not p_name and c not in ("User", "Group", "Summary"):
+                p_name = c
+        if p_name or reg_no:
+            entries.append({
+                "entry_id": entry_id,
+                "registration_no": reg_no or "001",
+                "name": p_name or "ScanUser",
+                "email_address": email,
+                "folder": folder
+            })
+    return entries
 
 def delete_scan_by_id_or_name(session: requests.Session, target_id: str, target_name: str):
     print("")
@@ -457,20 +469,20 @@ def delete_scan_by_id_or_name(session: requests.Session, target_id: str, target_
     print(f"[4/5] Tìm kiếm điểm scan khớp (ID: '{target_id}', Tên: '{target_name}')...")
     reg_to_delete = None
     entry_id_to_delete = None
-    raw_entries = re.findall(r"\\[([^\\]]+)\\]", ajax_resp.text)
+    raw_entries = parse_ajax_address_list(ajax_resp.text)
+    if not raw_entries:
+        raw_entries = parse_html_address_list(resp.text)
     print(f"  -> Tổng số điểm scan tìm thấy trên máy in: {len(raw_entries)}")
     
-    for idx, raw in enumerate(raw_entries, 1):
-        fields = [f.strip().strip("'").strip('"') for f in raw.split(',')]
-        if len(fields) >= 4:
-            eid = fields[0].lstrip("[")
-            reg = fields[2]
-            name = fields[3]
-            if reg == target_id or reg.lstrip('0') == target_id.lstrip('0') or (target_name and name.lower() == target_name.lower()):
-                reg_to_delete = reg
-                entry_id_to_delete = eid
-                print(f"  [✓] MATCH! Tìm thấy mục trùng khớp tại dòng #{idx}: Entry ID={eid}, Mã ĐK={reg}, Tên='{name}'")
-                break
+    for idx, item in enumerate(raw_entries, 1):
+        eid = item["entry_id"]
+        reg = item["registration_no"]
+        name = item["name"]
+        if eid == target_id or reg == target_id or reg.lstrip('0') == target_id.lstrip('0') or (target_name and name.lower() == target_name.lower()):
+            reg_to_delete = reg
+            entry_id_to_delete = eid
+            print(f"  [✓] MATCH! Tìm thấy mục trùng khớp tại dòng #{idx}: Entry ID={eid}, Mã ĐK={reg}, Tên='{name}'")
+            break
 
     if not reg_to_delete and target_id and target_id != "null":
         reg_to_delete = target_id.zfill(5)
@@ -480,36 +492,51 @@ def delete_scan_by_id_or_name(session: requests.Session, target_id: str, target_
     if not reg_to_delete:
         raise RuntimeError(f"KHÔNG tìm thấy điểm scan nào phù hợp (ID: '{target_id}', Tên: '{target_name}') trên máy in để xóa!")
 
-    # RE-FETCH list_url to get a FRESH wimToken (the AJAX call consumed the old one)
-    print("  -> Lấy wimToken MỚI từ adrsList.cgi (vì AJAX call đã tiêu thụ token cũ)...")
+    print("  -> Lấy wimToken MỚI từ adrsList.cgi...")
     fresh_resp = session.get(list_url, timeout=10)
     fresh_token = extract_wim_token(fresh_resp.text)
     if fresh_token:
         wim_token = fresh_token
-        print(f"  -> Fresh wimToken: '{wim_token}'")
 
     print("")
     print(f"[5/5] Đang gửi POST xóa Mã ĐK '{reg_to_delete}' (Entry ID: {entry_id_to_delete})...")
-    delete_url = f"{BASE_URL}/web/entry/en/address/adrsDeleteEntries.cgi"
+    conf_url = f"{BASE_URL}/web/entry/en/address/adrsConfDeleteEntry.cgi"
+    del_url = f"{BASE_URL}/web/entry/en/address/adrsDeleteEntry.cgi"
     
     del_val = str(entry_id_to_delete or reg_to_delete)
     reg_val = str(reg_to_delete)
     
-    form = {
+    # Step 1: POST to adrsConfDeleteEntry.cgi
+    form1 = {
         "wimToken": wim_token,
         "entryIndex": del_val,
         "entryIndexIn": del_val,
         "regiNoListIn": del_val,
         "selectedRegiNoIn": del_val,
         "deleteListIn": del_val,
-        "modeIn": "LIST_ALL",
+        "wayFrom": "adrsList.cgi?modeIn=LIST_ALL",
+        "wayTo": "adrsDeleteEntry.cgi",
         "deleteRegNo": reg_val
     }
+    r_conf = session.post(conf_url, files={k: (None, str(v)) for k, v in form1.items()}, headers={"Referer": list_url}, timeout=10)
+    confirm_token = extract_wim_token(r_conf.text) or wim_token
+    print(f"  -> Trích xuất confirm wimToken từ bước 1: '{confirm_token}'")
+
+    # Step 2: POST to adrsDeleteEntry.cgi
+    form2 = {
+        "wimToken": confirm_token,
+        "entryIndex": del_val,
+        "entryIndexIn": del_val,
+        "regiNoListIn": del_val,
+        "selectedRegiNoIn": del_val,
+        "deleteListIn": del_val,
+        "wayFrom": "adrsConfDeleteEntry.cgi",
+        "wayTo": "adrsList.cgi?modeIn=LIST_ALL",
+        "deleteRegNo": reg_val
+    }
+    session.post(del_url, files={k: (None, str(v)) for k, v in form2.items()}, headers={"Referer": conf_url}, timeout=10)
     
-    multipart_form = {k: (None, str(v)) for k, v in form.items()}
-    session.post(delete_url, files=multipart_form, headers={"Referer": list_url}, timeout=10)
-    
-    time.sleep(1.5)
+    time.sleep(2.0)
     
     # Verification Step
     print("  -> Đang xác minh lại danh bạ máy in sau khi xóa...")
@@ -519,50 +546,17 @@ def delete_scan_by_id_or_name(session: requests.Session, target_id: str, target_
     v_ajax = session.get(v_ajax_url, timeout=10)
     
     still_exists = False
-    v_raw_entries = re.findall(r"\\[([^\\]]+)\\]", v_ajax.text)
-    for raw in v_raw_entries:
-        fields = [f.strip().strip("'").strip('"') for f in raw.split(',')]
-        if len(fields) >= 4:
-            v_reg = fields[2]
-            v_name = fields[3]
-            if v_reg == reg_to_delete or v_reg.lstrip('0') == reg_to_delete.lstrip('0') or (target_name and v_name.lower() == target_name.lower()):
-                still_exists = True
-                break
+    v_raw_entries = parse_ajax_address_list(v_ajax.text) or parse_html_address_list(v_list_resp.text)
+    for item in v_raw_entries:
+        v_eid = item["entry_id"]
+        v_reg = item["registration_no"]
+        v_name = item["name"]
+        if v_eid == entry_id_to_delete or v_reg == reg_to_delete or v_reg.lstrip('0') == reg_to_delete.lstrip('0') or (target_name and v_name.lower() == target_name.lower()):
+            still_exists = True
+            break
 
     if still_exists:
-        print("  [!] Lần 1 (theo Entry ID) chưa xóa thành công, thử xóa theo Mã ĐK chuẩn (zfill)...")
-        reg_zfill = reg_to_delete.zfill(5)
-        fresh_resp2 = session.get(list_url, timeout=10)
-        fresh_token2 = extract_wim_token(fresh_resp2.text) or v_token
-        
-        form2 = {
-            "wimToken": fresh_token2,
-            "entryIndex": reg_zfill,
-            "entryIndexIn": reg_zfill,
-            "regiNoListIn": reg_zfill,
-            "selectedRegiNoIn": reg_zfill,
-            "deleteListIn": reg_zfill,
-            "modeIn": "LIST_ALL",
-            "deleteRegNo": reg_zfill
-        }
-        multipart_form2 = {k: (None, str(v)) for k, v in form2.items()}
-        session.post(delete_url, files=multipart_form2, headers={"Referer": list_url}, timeout=10)
-        time.sleep(1.5)
-        
-        v_list_resp3 = session.get(list_url, timeout=10)
-        v_token3 = extract_wim_token(v_list_resp3.text) or fresh_token2
-        v_ajax3 = session.get(f"{BASE_URL}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={v_token3}", timeout=10)
-        
-        still_exists2 = False
-        for raw in re.findall(r"\\[([^\\]]+)\\]", v_ajax3.text):
-            fields = [f.strip().strip("'").strip('"') for f in raw.split(',')]
-            if len(fields) >= 4:
-                if fields[2] == reg_to_delete or fields[2].lstrip('0') == reg_to_delete.lstrip('0') or (target_name and fields[3].lower() == target_name.lower()):
-                    still_exists2 = True
-                    break
-        
-        if still_exists2:
-            raise RuntimeError(f"KHÔNG THỂ XÓA: Đã gửi 2 lần POST xóa nhưng Mã ĐK '{reg_to_delete}' (Tên: '{target_name}') vẫn còn trên máy in Ricoh!")
+        raise RuntimeError(f"KHÔNG THỂ XÓA: Đã gửi yêu cầu xóa nhưng Mã ĐK '{reg_to_delete}' (Tên: '{target_name}') vẫn còn trên máy in Ricoh!")
 
     print(f"  [✓] XÁC MINH THÀNH CÔNG: Đã xóa hoàn toàn điểm scan Mã ĐK '{reg_to_delete}' khỏi máy in Ricoh {IP}!")
 

@@ -137,6 +137,11 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     )
                 session.commit()
 
+            req_body = request.get_json(silent=True) or {}
+            devices_payload = req_body.get("devices") or req_body.get("printers") or req_body.get("devices_list") or req_body.get("printers_json")
+            if not isinstance(devices_payload, list) and isinstance(devices_payload, dict):
+                devices_payload = list(devices_payload.values())
+
             from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
             update_agent_in_memory(
                 lead=lead_valid,
@@ -148,11 +153,12 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 app_version=agent.app_version if agent else "",
                 run_mode=agent.run_mode if agent else "web",
                 web_port=int(agent.web_port or 9173) if agent else 9173,
+                devices_list=devices_payload if isinstance(devices_payload, list) else None,
             )
 
             agent_ram = ACTIVE_AGENTS.get(agent_uid)
             req_push = False
-            if agent_ram and len(agent_ram.get("printers_json", [])) == 0:
+            if agent_ram and len(agent_ram.get("devices", {})) == 0 and len(agent_ram.get("printers_json", [])) == 0:
                 req_push = True
 
             from sqlalchemy import or_
@@ -583,6 +589,15 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
 
                     if not command.error_message:
                         command.error_message = _to_text(body.get("result_payload") or body.get("output") or error_message or "")
+
+                    # Extract live IPs from force_subnet_scan output to update LAST_LIVE_PING_IPS
+                    raw_out = _to_text(body.get("result_payload") or body.get("output") or "")
+                    if "thiết bị đang phản hồi Ping" in raw_out or "IP ADDRESS" in raw_out:
+                        import re
+                        live_ips = re.findall(r"\b192\.168\.\d{1,3}\.\d{1,3}\b", raw_out)
+                        if live_ips:
+                            from active_agents_registry import update_live_ping_ips
+                            update_live_ping_ips(command.lan_uid or "default", live_ips)
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
                     if command.command_type == "add_scan_email_dest" and wizard_short_name:
