@@ -22,6 +22,13 @@ def update_new_lan_site_devices(lan_uid: str, devices_list: list[dict[str, Any]]
     if not lan_uid:
         lan_uid = "default"
     NEW_LAN_SITES[lan_uid] = devices_list
+
+    # Also bind printers to real lan_uid of active agents
+    for a_uid, a_info in ACTIVE_AGENTS.items():
+        if isinstance(a_info, dict) and a_info.get("lan_uid"):
+            real_lan = a_info.get("lan_uid")
+            NEW_LAN_SITES[real_lan] = devices_list
+
     LOGGER.info("[NEW_LAN_SITES] Updated NEW_LAN_SITES for lan '%s': %d printers", lan_uid, len(devices_list))
 
 

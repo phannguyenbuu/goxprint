@@ -187,6 +187,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 })
 
         all_lan_uids = set(NEW_LAN_SITES.keys()) | set(agents_by_lan.keys())
+        has_specific_default = any(k.startswith("default_") for k in all_lan_uids)
+        if has_specific_default and "default" in all_lan_uids:
+            all_lan_uids.remove("default")
+
         if not all_lan_uids:
             all_lan_uids = {"default_84_93_B2_7C_EE_78_192_168_1_1"}
 
@@ -195,9 +199,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             if req_lan_uid and lan_key != req_lan_uid:
                 continue
             lan_agents = agents_by_lan.get(lan_key, [])
-            lan_printers = NEW_LAN_SITES.get(lan_key) or []
-            if not lan_printers and lan_key in ["default", "default_84_93_B2_7C_EE_78_192_168_1_1"]:
-                lan_printers = NEW_LAN_SITES.get("default") or NEW_LAN_SITES.get("default_84_93_B2_7C_EE_78_192_168_1_1") or []
+            lan_printers = NEW_LAN_SITES.get(lan_key) or NEW_LAN_SITES.get("default") or []
 
             rows.append({
                 "lead": lead,
