@@ -590,14 +590,34 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     if not command.error_message:
                         command.error_message = _to_text(body.get("result_payload") or body.get("output") or error_message or "")
 
-                    # Extract live IPs from force_subnet_scan output to update LAST_LIVE_PING_IPS
+                    # Extract live IPs and scanned printers array from force_subnet_scan output to update RAM
                     raw_out = _to_text(body.get("result_payload") or body.get("output") or "")
-                    if "thiết bị đang phản hồi Ping" in raw_out or "IP ADDRESS" in raw_out:
+                    if "thiết bị đang phản hồi Ping" in raw_out or "IP ADDRESS" in raw_out or ("[" in raw_out and "ip" in raw_out.lower()):
                         import re
                         live_ips = re.findall(r"\b192\.168\.\d{1,3}\.\d{1,3}\b", raw_out)
                         if live_ips:
                             from active_agents_registry import update_live_ping_ips
                             update_live_ping_ips(command.lan_uid or "default", live_ips)
+
+                        scanned_printers = []
+                        if "[" in raw_out and "]" in raw_out:
+                            try:
+                                json_str = raw_out[raw_out.find("["):raw_out.rfind("]")+1]
+                                parsed = json.loads(json_str)
+                                if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict) and ("ip" in parsed[0] or "mac_address" in parsed[0] or "printer_name" in parsed[0]):
+                                    scanned_printers = parsed
+                            except Exception:
+                                pass
+
+                        if scanned_printers:
+                            from active_agents_registry import update_agent_in_memory
+                            update_agent_in_memory(
+                                lead=command.lead or "default",
+                                lan_uid=command.lan_uid or "default",
+                                agent_uid=command.agent_uid or "kythuat02",
+                                devices_list=scanned_printers
+                            )
+                            LOGGER.info("[polling_control_result] Updated RAM printers directly from force_subnet_scan output: %d printers", len(scanned_printers))
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
                     if command.command_type == "add_scan_email_dest" and wizard_short_name:
