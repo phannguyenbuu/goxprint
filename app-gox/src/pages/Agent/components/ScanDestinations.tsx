@@ -144,7 +144,7 @@ export function ScanDestinations({
                                                   opacity: isRowPending ? 0.5 : 1,
                                                   minWidth: '24px'
                                                 }}
-                                                onClick={() => handleDeleteDest(p.id, entry)}
+                                                onClick={() => handleDeleteDest(p.id || p.mac_id || p.mac_address || p.ip || '0', entry)}
                                                 disabled={isRowPending}
                                                 title="Xóa"
                                               >

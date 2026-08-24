@@ -206,7 +206,18 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             if req_lan_uid and lan_key != req_lan_uid:
                 continue
             lan_agents = agents_by_lan.get(lan_key, [])
-            lan_printers = NEW_LAN_SITES.get(lan_key) or []
+            raw_printers = NEW_LAN_SITES.get(lan_key) or []
+            clean_lan_printers = []
+            for idx, p in enumerate(raw_printers):
+                if not isinstance(p, dict):
+                    continue
+                p_copy = dict(p)
+                p_copy["id"] = p.get("id") or p.get("mac_address") or p.get("mac_id") or p.get("ip") or (idx + 1)
+                p_copy["printer_name"] = p.get("printer_name") or p.get("name") or "Photocopy"
+                p_copy["ip"] = p.get("ip", "")
+                p_copy["mac_id"] = p.get("mac_id") or p.get("mac_address") or ""
+                p_copy["agent_uid"] = p.get("agent_uid") or (lan_agents[0]["agent_uid"] if lan_agents else "kythuat02")
+                clean_lan_printers.append(p_copy)
 
             agent_hosts = ", ".join([a["hostname"] for a in lan_agents if a.get("hostname")])
             if not agent_hosts and lan_agents:
@@ -222,7 +233,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 "active_agents": len(lan_agents),
                 "agents": lan_agents,
                 "emails": [],
-                "printers": lan_printers
+                "printers": clean_lan_printers
             })
 
         return jsonify({"rows": rows})
