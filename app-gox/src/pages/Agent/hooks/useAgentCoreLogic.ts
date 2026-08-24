@@ -1575,6 +1575,15 @@ except Exception as err:
                           
                           if (freshPrinters.length > 0) {
                               showToast(`✓ Quét mạng LAN hoàn tất, tìm thấy ${freshPrinters.length} máy in!`, 'success', 4000);
+                              try {
+                                  fetchApi('/api/new-devices', {
+                                      method: 'POST',
+                                      body: JSON.stringify({
+                                          lan_uid: selectedLanUid || 'default',
+                                          devices: freshPrinters
+                                      })
+                                  }).catch(() => {});
+                              } catch (err) {}
                               setLanSites((prevSites: any[]) => {
                                   return prevSites.map((site: any) => {
                                       if (site.lan_uid === selectedLanUid) {
