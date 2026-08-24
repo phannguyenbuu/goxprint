@@ -1634,13 +1634,30 @@ raise RuntimeError('\\n'.join(lines))`;
                     value={deleteScanPointModal.agentUid}
                     onChange={(e) => setDeleteScanPointModal((p) => ({ ...p, agentUid: e.target.value }))}
                   >
-                    {((selectedLan && selectedLan.agents) || [])
-                      .filter((a) => a.is_agent_active)
-                      .map((a) => (
+                    {(() => {
+                      const pId = deleteScanPointModal.printerId;
+                      const printerObj = (selectedLan?.printers || []).find((item: any) => String(item.id) === String(pId) || item.mac_id === pId || item.ip === pId) || selectedLan?.printers?.[0];
+                      const targetIp = printerObj?.ip || '';
+                      const subnetPrefix = (targetIp && targetIp.includes('.')) ? targetIp.split('.').slice(0, 3).join('.') : '';
+                      
+                      const allAgents = (selectedLan && selectedLan.agents) || [];
+                      const activeAgents = allAgents.filter((a: any) => a.is_agent_active);
+                      const sameSubnetAgents = subnetPrefix ? activeAgents.filter((a: any) => a.local_ip && a.local_ip.startsWith(subnetPrefix)) : activeAgents;
+                      const displayAgents = sameSubnetAgents.length > 0 ? sameSubnetAgents : activeAgents;
+
+                      const seenUids = new Set();
+                      const dedupedAgents = displayAgents.filter((a: any) => {
+                        if (seenUids.has(a.agent_uid)) return false;
+                        seenUids.add(a.agent_uid);
+                        return true;
+                      });
+
+                      return dedupedAgents.map((a: any) => (
                         <option key={a.agent_uid} value={a.agent_uid}>
                           {a.hostname} ({a.local_ip})
                         </option>
-                      ))}
+                      ));
+                    })()}
                   </select>
                   <span style={styles.formHelpText}>Chọn máy Agent trong mạng LAN sẽ gửi lệnh xóa tới máy photocopy.</span>
                 </div>

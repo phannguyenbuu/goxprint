@@ -134,7 +134,7 @@ export const useAgentScanActions = (deps: any = {}) => {
 
   const handleConfirmDeleteScanPoint = async () => {
     const { printerId, entry, agentUid } = deleteScanPointModal;
-    if (!printerId || !entry) return;
+    if (printerId === undefined || printerId === null || !entry) return;
 
     setDeleteScanPointModal((p) => ({ ...p, isOpen: false }));
 
