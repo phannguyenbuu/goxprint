@@ -83,11 +83,19 @@ def update_agent_in_memory(
             if not d_mac:
                 continue
             
+            d_online = bool(d.get("is_online", True))
+            if d.get("status") == "offline" or d.get("is_online") is False:
+                d_online = False
+            
+            # Strictly skip offline devices so they do not pollute RAM registry
+            if not d_online:
+                continue
+
             p_name = d.get("printer_name") or d.get("model") or "Unknown Printer"
             devices_dict[d_mac] = {
                 "printer_name": str(p_name),
                 "ip": str(d.get("ip", "")).strip(),
-                "is_online": bool(d.get("is_online", True)),
+                "is_online": True,
                 "probed": bool(d.get("probed", False)),
                 "updated_at": now.isoformat(),
             }

@@ -246,6 +246,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     except Exception:
                         pass
 
+                p_name_str = str(p_name or "").lower()
+                if any(kw in p_name_str for kw in ["[unk", "unk dom", "[error]"]):
+                    continue
+
                 is_on = bool(dev.get("is_online", True))
                 from active_agents_registry import LAST_LIVE_PING_IPS
                 live_set = LAST_LIVE_PING_IPS.get(p_lan) or LAST_LIVE_PING_IPS.get("default")
@@ -426,8 +430,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     
                     if mac_clean and not mac_clean.startswith("IP:"):
                         key = f"MAC:{mac_clean}"
+                    elif ip_clean:
+                        key = f"IP:{ip_clean}"
                     else:
-                        key = f"ID:{p.get('id')}"
+                        key = f"NAME:{p.get('printer_name')}"
 
                     if key in seen_keys:
                         continue
