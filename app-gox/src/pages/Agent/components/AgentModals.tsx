@@ -1636,14 +1636,18 @@ raise RuntimeError('\\n'.join(lines))`;
                   >
                     {(() => {
                       const pId = deleteScanPointModal.printerId;
-                      const printerObj = (selectedLan?.printers || []).find((item: any) => String(item.id) === String(pId) || item.mac_id === pId || item.ip === pId) || selectedLan?.printers?.[0];
-                      const targetIp = printerObj?.ip || '';
-                      const subnetPrefix = (targetIp && targetIp.includes('.')) ? targetIp.split('.').slice(0, 3).join('.') : '';
+                      const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
+                      const printerObj = allPrinters.find((item: any) => String(item.id) === String(pId) || item.mac_id === pId || item.ip === pId) || selectedLan?.printers?.[0];
+                      const boundAgentUid = printerObj?.agent_uid || printerObj?._agent_uid;
                       
                       const allAgents = (selectedLan && selectedLan.agents) || [];
                       const activeAgents = allAgents.filter((a: any) => a.is_agent_active);
-                      const sameSubnetAgents = subnetPrefix ? activeAgents.filter((a: any) => a.local_ip && a.local_ip.startsWith(subnetPrefix)) : activeAgents;
-                      const displayAgents = sameSubnetAgents.length > 0 ? sameSubnetAgents : activeAgents;
+
+                      let displayAgents = activeAgents;
+                      if (boundAgentUid) {
+                        const matched = activeAgents.filter((a: any) => a.agent_uid === boundAgentUid);
+                        if (matched.length > 0) displayAgents = matched;
+                      }
 
                       const seenUids = new Set();
                       const dedupedAgents = displayAgents.filter((a: any) => {

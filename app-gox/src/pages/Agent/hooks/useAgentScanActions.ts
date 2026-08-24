@@ -188,12 +188,8 @@ export const useAgentScanActions = (deps: any = {}) => {
         const macAddr = printerObj?.mac_address || printerObj?.mac_id || '';
         const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
         const creds = copierCredentials[normMac] || copierCredentials[printerId] || {};
-        const authUser = creds.user || printerObj?.auth_user;
+        const authUser = creds.user || printerObj?.auth_user || 'admin';
         const authPass = creds.pass || printerObj?.auth_password || '';
-        if (!authUser) {
-          showToast(`Chưa cấu hình tài khoản Web cho máy in ${printerObj?.printer_name || printerObj?.name || 'Photocopy'}!`, 'error');
-          return;
-        }
         const realTargetId = String(entry?.entry_id || entry?.id || regNo || '').trim() || 'null';
 
         let scriptContent = activeCmdObj?.command_content || DEFAULT_EXEC_TEMPLATES[cmdName] || '';
