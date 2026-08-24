@@ -123,7 +123,9 @@ export const useAgentScanActions = (deps: any = {}) => {
 
   // ── DELETE DESTINATION ──
   const handleDeleteDest = (printerId: string, entry: any) => {
-    const targetAgent = getTargetAgentUid(printerId) || (selectedLan?.agents?.find((a) => a.is_agent_active)?.agent_uid || '');
+    const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
+    const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
+    const targetAgent = printerObj?.agent_uid || getTargetAgentUid(printerId) || selectedLan?.agents?.find((a: any) => a.is_agent_active)?.agent_uid || selectedLan?.agents?.[0]?.agent_uid || 'kythuat02';
     setDeleteScanPointModal({
       isOpen: true,
       printerId,
@@ -173,7 +175,7 @@ export const useAgentScanActions = (deps: any = {}) => {
       const isToshiba = (printerObj?.printer_type || printerObj?.printer_name || '').toLowerCase().includes('toshiba');
       const cmdName = isToshiba ? 'toshiba_delete_scan' : 'ricoh_delete_scan';
       const cmdObj = (utilityCommands || []).find((c: any) => c.command === cmdName);
-      const targetAgent = agentUid || getTargetAgentUid(printerId);
+      const targetAgent = agentUid || printerObj?.agent_uid || selectedLan?.agents?.find((a: any) => a.is_agent_active)?.agent_uid || selectedLan?.agents?.[0]?.agent_uid || 'kythuat02';
 
       let res;
       if (targetAgent) {
