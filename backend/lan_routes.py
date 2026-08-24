@@ -194,17 +194,31 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         if not all_lan_uids:
             all_lan_uids = {"default_84_93_B2_7C_EE_78_192_168_1_1"}
 
+        # Sort LAN sites so sites with active printers appear first
+        sorted_lan_keys = sorted(
+            all_lan_uids,
+            key=lambda k: (len(NEW_LAN_SITES.get(k, [])), len(agents_by_lan.get(k, []))),
+            reverse=True
+        )
+
         rows = []
-        for lan_key in sorted(all_lan_uids):
+        for lan_key in sorted_lan_keys:
             if req_lan_uid and lan_key != req_lan_uid:
                 continue
             lan_agents = agents_by_lan.get(lan_key, [])
-            lan_printers = NEW_LAN_SITES.get(lan_key) or NEW_LAN_SITES.get("default") or []
+            lan_printers = NEW_LAN_SITES.get(lan_key) or []
+
+            agent_hosts = ", ".join([a["hostname"] for a in lan_agents if a.get("hostname")])
+            if not agent_hosts and lan_agents:
+                agent_hosts = lan_agents[0].get("agent_uid", "")
+
+            site_label = agent_hosts if agent_hosts else lead
+            display_name = f"Standalone LAN Site ({site_label})" if lan_key.startswith("default") else f"LAN Site ({site_label})"
 
             rows.append({
                 "lead": lead,
                 "lan_uid": lan_key,
-                "lan_name": f"Standalone LAN Site ({lead})" if lan_key.startswith("default") else f"LAN Site ({lan_key[:8]})",
+                "lan_name": display_name,
                 "active_agents": len(lan_agents),
                 "agents": lan_agents,
                 "emails": [],
