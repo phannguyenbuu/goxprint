@@ -1559,15 +1559,18 @@ except Exception as err:
                       async (pollData: any) => {
                           console.log('[DEBUG_LAN_SCAN] pollData received from LAN scan:', pollData);
                           let freshPrinters: any[] = [];
-                          const rawRes = pollData?.result || pollData?.result_payload || pollData?.raw;
+                          const rawRes = pollData?.result || pollData?.result_payload || pollData?.output || pollData?.error_message || pollData?.raw || '';
                           
                           if (Array.isArray(rawRes)) {
                               freshPrinters = rawRes;
                           } else if (typeof rawRes === 'string') {
-                              try {
-                                  const parsed = JSON.parse(rawRes);
-                                  if (Array.isArray(parsed)) freshPrinters = parsed;
-                              } catch (e) {}
+                              if (rawRes.includes('[') && rawRes.includes(']')) {
+                                  try {
+                                      const jsonSubstr = rawRes.substring(rawRes.indexOf('['), rawRes.lastIndexOf(']') + 1);
+                                      const parsed = JSON.parse(jsonSubstr);
+                                      if (Array.isArray(parsed)) freshPrinters = parsed;
+                                  } catch (e) {}
+                              }
                           }
                           
                           if (freshPrinters.length > 0) {
@@ -1587,27 +1590,23 @@ except Exception as err:
                                   });
                               });
                           } else {
-                              showToast('✓ Quét mạng LAN hoàn tất, đang cập nhật danh sách máy photocopy...', 'success', 4000);
-                              await fetchLanSitesData(true);
+                              showToast('✓ Quét mạng LAN hoàn tất', 'success', 4000);
                           }
                       },
                       async (_err) => {
-                          await fetchLanSitesData(true);
+                          showToast('[-] Quét mạng LAN có lỗi', 'error', 4000);
                       },
                       '⏳ Đang chờ Agent hoàn tất quét ngầm mạng LAN...'
                   );
-              } else {
-                  setTimeout(() => fetchLanSitesData(true), 5000);
               }
           })
           .catch(e => {
               console.error(e);
-              setTimeout(() => fetchLanSitesData(true), 5000);
           });
         }
       }
     }
-  }, [showToast, pollCommandStatus, fetchLanSitesData]);
+  }, [showToast, pollCommandStatus]);
 
   const getTargetAgentUid = useCallback((printerId: string | number) => {
     const pId = Number(printerId);

@@ -250,7 +250,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 from active_agents_registry import LAST_LIVE_PING_IPS
                 live_set = LAST_LIVE_PING_IPS.get(p_lan) or LAST_LIVE_PING_IPS.get("default")
                 if live_set and p_ip and p_ip not in live_set:
-                    is_on = False
+                    continue
 
                 printers_by_lan[p_lan].append({
                     "id": 0,
@@ -397,59 +397,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 
                 # Do not append stale DeviceInfor DB records; strictly serve live RAM printers
 
-                from active_agents_registry import ACTIVE_AGENTS
-                for ag_info in active_agents_by_lan.get(r.lan_uid, []):
-                    ag_devs = ag_info["devices"] if (isinstance(ag_info, dict) and "devices" in ag_info) else {}
-                    for dev_mac, dev_data in ag_devs.items():
-                        d_ip = str(dev_data.get("ip") or "").strip()
-                        d_mac = str(dev_mac or "").strip().replace("-", ":").upper()
-                        d_name = str(dev_data.get("printer_name") or "").strip()
-                        if not d_name:
-                            continue
-
-                        matched_existing = False
-                        
-                        # First pass: try to match by MAC exactly
-                        for p_item in lan_printers:
-                            p_item_mac = str(p_item.get("mac_id") or "").strip().replace("-", ":").upper()
-                            if d_mac and p_item_mac == d_mac:
-                                matched_existing = True
-                                cur_p_name = str(p_item.get("printer_name") or "").strip().lower()
-                                if not cur_p_name or any(kw in cur_p_name for kw in ("unknown", "copier", "thiết bị photocopy")):
-                                    p_item["printer_name"] = d_name
-                                p_item["suggested_drivers"] = _match_printer_drivers(d_name)
-                                p_item["is_online"] = p_item.get("is_online") or bool(dev_data.get("is_online", True))
-                                p_item["probed"] = p_item.get("probed") or bool(dev_data.get("probed", False))
-                                p_item["matched_by_agent"] = True
-                                p_item["agent_uid"] = ag_info.get("agent_uid") or ""
-                                break
-
-                        if matched_existing:
-                            continue
-
-                        lan_printers.append({
-                            "id": 99000 + len(lan_printers),
-                            "printer_name": d_name,
-                            "ip": d_ip,
-                            "mac_id": d_mac,
-                            "is_online": bool(dev_data.get("is_online", True)),
-                            "probed": bool(dev_data.get("probed", False)),
-                            "matched_by_agent": True,
-                            "enabled": True,
-                            "auth_user": "",
-                            "auth_password": "",
-                            "address_book_sync": {},
-                            "suggested_drivers": _match_printer_drivers(d_name),
-                            "agent_uid": ag_info.get("agent_uid") or "",
-                        })
-                        if d_ip:
-                            existing_ips.add(d_ip)
-                        if d_mac:
-                            existing_macs.add(d_mac)
-
-                    for p_item in lan_printers:
-                        if not p_item.get("matched_by_agent"):
-                            p_item["probed"] = True
+                # Clean printers list based on network device exclusions
                             
                 lan_printers = [
                     p for p in lan_printers 
