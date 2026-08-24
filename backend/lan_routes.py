@@ -164,15 +164,15 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
     @app.get("/api/new-lan-sites")
     def get_new_lan_sites() -> Any:
         lead = _to_text(request.args.get("lead")) or "default"
-        lan_uid = _to_text(request.args.get("lan_uid")) or "default"
+        req_lan_uid = _to_text(request.args.get("lan_uid"))
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
-        agents_list = []
+        agents_by_lan = defaultdict(list)
         for a_uid, a_info in ACTIVE_AGENTS.items():
             if isinstance(a_info, dict):
-                a_lan = a_info.get("lan_uid", "")
-                agents_list.append({
+                a_lan = a_info.get("lan_uid", "default")
+                agents_by_lan[a_lan].append({
                     "agent_uid": a_uid,
                     "hostname": a_info.get("hostname", ""),
                     "local_ip": a_info.get("local_ip", ""),
@@ -186,17 +186,28 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "is_online": True,
                 })
 
-        printers_list = NEW_LAN_SITES.get(lan_uid) or NEW_LAN_SITES.get("default") or []
+        all_lan_uids = set(NEW_LAN_SITES.keys()) | set(agents_by_lan.keys())
+        if not all_lan_uids:
+            all_lan_uids = {"default_84_93_B2_7C_EE_78_192_168_1_1"}
 
-        rows = [{
-            "lead": lead,
-            "lan_uid": lan_uid or "default_84_93_B2_7C_EE_78_192_168_1_1",
-            "lan_name": f"Standalone LAN Site ({lead})",
-            "active_agents": len(agents_list),
-            "agents": agents_list,
-            "emails": [],
-            "printers": printers_list
-        }]
+        rows = []
+        for lan_key in sorted(all_lan_uids):
+            if req_lan_uid and lan_key != req_lan_uid:
+                continue
+            lan_agents = agents_by_lan.get(lan_key, [])
+            lan_printers = NEW_LAN_SITES.get(lan_key) or []
+            if not lan_printers and lan_key in ["default", "default_84_93_B2_7C_EE_78_192_168_1_1"]:
+                lan_printers = NEW_LAN_SITES.get("default") or NEW_LAN_SITES.get("default_84_93_B2_7C_EE_78_192_168_1_1") or []
+
+            rows.append({
+                "lead": lead,
+                "lan_uid": lan_key,
+                "lan_name": f"Standalone LAN Site ({lead})" if lan_key.startswith("default") else f"LAN Site ({lan_key[:8]})",
+                "active_agents": len(lan_agents),
+                "agents": lan_agents,
+                "emails": [],
+                "printers": lan_printers
+            })
 
         return jsonify({"rows": rows})
 

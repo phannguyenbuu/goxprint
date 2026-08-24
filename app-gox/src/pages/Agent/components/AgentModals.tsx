@@ -1634,40 +1634,13 @@ raise RuntimeError('\\n'.join(lines))`;
                     value={deleteScanPointModal.agentUid}
                     onChange={(e) => setDeleteScanPointModal((p) => ({ ...p, agentUid: e.target.value }))}
                   >
-                    {(() => {
-                      const pId = deleteScanPointModal.printerId;
-                      const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
-                      const printerObj = allPrinters.find((item: any) => String(item.id) === String(pId) || item.mac_id === pId || item.ip === pId) || selectedLan?.printers?.[0];
-                      const boundAgentUid = printerObj?.agent_uid || printerObj?._agent_uid;
-                      const targetLanUid = selectedLan?.lan_uid || printerObj?.lan_uid || printerObj?._lan_uid;
-
-                      const allAgents = (selectedLan && selectedLan.agents) || [];
-                      const activeAgents = allAgents.filter((a: any) => a.is_agent_active);
-
-                      let displayAgents = activeAgents;
-                      if (targetLanUid) {
-                        const sameLanAgents = activeAgents.filter((a: any) => !a.lan_uid || a.lan_uid === targetLanUid);
-                        if (sameLanAgents.length > 0) displayAgents = sameLanAgents;
-                      }
-
-                      if (boundAgentUid) {
-                        const matched = displayAgents.filter((a: any) => a.agent_uid === boundAgentUid);
-                        if (matched.length > 0) displayAgents = matched;
-                      }
-
-                      const seenUids = new Set();
-                      const dedupedAgents = displayAgents.filter((a: any) => {
-                        if (seenUids.has(a.agent_uid)) return false;
-                        seenUids.add(a.agent_uid);
-                        return true;
-                      });
-
-                      return dedupedAgents.map((a: any) => (
+                    {((selectedLan && selectedLan.agents) || [])
+                      .filter((a) => a.is_agent_active)
+                      .map((a) => (
                         <option key={a.agent_uid} value={a.agent_uid}>
                           {a.hostname} ({a.local_ip})
                         </option>
-                      ));
-                    })()}
+                      ))}
                   </select>
                   <span style={styles.formHelpText}>Chọn máy Agent trong mạng LAN sẽ gửi lệnh xóa tới máy photocopy.</span>
                 </div>
