@@ -10,12 +10,19 @@ LOGGER = logging.getLogger(__name__)
 # Zero PostgreSQL database writes for device/agent_node entries.
 ACTIVE_AGENTS: Dict[str, Dict[str, Any]] = {}
 LAST_LIVE_PING_IPS: Dict[str, set[str]] = {}
+NEW_LAN_SITES: Dict[str, list[dict[str, Any]]] = {}
 
 def update_live_ping_ips(lan_uid: str, live_ips: list[str]) -> None:
     if not lan_uid:
         lan_uid = "default"
     LAST_LIVE_PING_IPS[lan_uid] = {ip.strip() for ip in live_ips if ip and ip.strip()}
     LOGGER.info("[RAM_REGISTRY] Updated LAST_LIVE_PING_IPS for lan '%s': %s", lan_uid, LAST_LIVE_PING_IPS[lan_uid])
+
+def update_new_lan_site_devices(lan_uid: str, devices_list: list[dict[str, Any]]) -> None:
+    if not lan_uid:
+        lan_uid = "default"
+    NEW_LAN_SITES[lan_uid] = devices_list
+    LOGGER.info("[NEW_LAN_SITES] Updated NEW_LAN_SITES for lan '%s': %d printers", lan_uid, len(devices_list))
 
 
 import json

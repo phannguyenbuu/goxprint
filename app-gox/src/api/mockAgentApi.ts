@@ -142,7 +142,7 @@ export interface LanSiteInfo {
 
 export async function getLanSites(): Promise<LanSiteInfo[]> {
   try {
-    const res = await fetchApi('/api/lan-sites?lead=default');
+    const res = await fetchApi('/api/new-lan-sites?lead=default');
     return res.rows || [];
   } catch (err) {
     console.error('Failed to fetch LAN sites:', err);
@@ -152,7 +152,7 @@ export async function getLanSites(): Promise<LanSiteInfo[]> {
 
 export async function mockGetCopiers(lanUid?: string): Promise<Copier[]> {
   try {
-    const res = await fetchApi('/api/lan-sites?lead=default');
+    const res = await fetchApi('/api/new-lan-sites?lead=default');
     const rows = res.rows || [];
     const uniqueCopiers = new Map<string, Copier>();
 

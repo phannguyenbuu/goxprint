@@ -161,6 +161,56 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
 
 def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
+    @app.get("/api/new-lan-sites")
+    def get_new_lan_sites() -> Any:
+        lead = _to_text(request.args.get("lead")) or "default"
+        lan_uid = _to_text(request.args.get("lan_uid")) or "default"
+
+        from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
+
+        agents_list = []
+        for a_uid, a_info in ACTIVE_AGENTS.items():
+            if isinstance(a_info, dict):
+                agents_list.append({
+                    "agent_uid": a_uid,
+                    "hostname": a_info.get("hostname", ""),
+                    "local_ip": a_info.get("local_ip", ""),
+                    "local_mac": a_info.get("local_mac", ""),
+                    "app_version": a_info.get("app_version", ""),
+                    "run_mode": a_info.get("run_mode", "web"),
+                    "web_port": a_info.get("web_port", 9173),
+                    "is_master": True,
+                    "is_agent_active": True,
+                    "is_online": True,
+                })
+
+        printers_list = NEW_LAN_SITES.get(lan_uid) or NEW_LAN_SITES.get("default") or []
+
+        rows = [{
+            "lead": lead,
+            "lan_uid": lan_uid or "default_84_93_B2_7C_EE_78_192_168_1_1",
+            "lan_name": f"Standalone LAN Site ({lead})",
+            "active_agents": len(agents_list),
+            "agents": agents_list,
+            "emails": [],
+            "printers": printers_list
+        }]
+
+        return jsonify({"rows": rows})
+
+    @app.post("/api/new-devices")
+    def post_new_devices() -> Any:
+        body = request.get_json(silent=True) or {}
+        lan_uid = _to_text(body.get("lan_uid")) or "default"
+        devices = body.get("devices") or body.get("printers") or []
+        if not isinstance(devices, list) and isinstance(devices, dict):
+            devices = list(devices.values())
+
+        from active_agents_registry import update_new_lan_site_devices
+        update_new_lan_site_devices(lan_uid, devices if isinstance(devices, list) else [])
+
+        return jsonify({"ok": True, "lan_uid": lan_uid, "total_devices": len(devices) if isinstance(devices, list) else 0})
+
     @app.get("/api/lan-sites")
     def list_lan_sites() -> Any:
         lead = _to_text(request.args.get("lead"))

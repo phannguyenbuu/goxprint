@@ -610,14 +610,16 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 pass
 
                         if scanned_printers:
-                            from active_agents_registry import update_agent_in_memory
+                            from active_agents_registry import update_new_lan_site_devices, update_agent_in_memory
+                            update_new_lan_site_devices(command.lan_uid or "default", scanned_printers)
+                            update_new_lan_site_devices("default", scanned_printers)
                             update_agent_in_memory(
                                 lead=command.lead or "default",
                                 lan_uid=command.lan_uid or "default",
                                 agent_uid=command.agent_uid or "kythuat02",
                                 devices_list=scanned_printers
                             )
-                            LOGGER.info("[polling_control_result] Updated RAM printers directly from force_subnet_scan output: %d printers", len(scanned_printers))
+                            LOGGER.info("[polling_control_result] Updated NEW_LAN_SITES RAM printers directly from force_subnet_scan output: %d printers", len(scanned_printers))
 
                     # Upsert ScanEmailAlias for add_scan_email_dest
                     if command.command_type == "add_scan_email_dest" and wizard_short_name:
