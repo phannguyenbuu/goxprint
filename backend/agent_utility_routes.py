@@ -123,6 +123,8 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
 
         requested_at = datetime.now(timezone.utc)
         with session_factory() as session:
+            from active_agents_registry import ACTIVE_AGENTS
+            agent_in_ram = ACTIVE_AGENTS.get(agent_uid)
             agent = session.execute(
                 select(AgentNode).where(
                     AgentNode.lead == lead_valid,
@@ -130,7 +132,18 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                 ).order_by(AgentNode.updated_at.desc())
             ).scalars().first()
             if agent is None:
-                return jsonify({"ok": False, "error": "Agent not found"}), 404
+                if agent_in_ram:
+                    lan_u = agent_in_ram.get("lan_uid", "default")
+                    agent = AgentNode(
+                        lead=lead_valid,
+                        lan_uid=lan_u,
+                        agent_uid=agent_uid,
+                        hostname=agent_in_ram.get("hostname", agent_uid),
+                        is_master=True,
+                        is_online=True
+                    )
+                else:
+                    return jsonify({"ok": False, "error": "Agent not found"}), 404
 
             if command == "sync_all_scanpoints":
                 from models import PrinterAuthCredential, UtiCommand
