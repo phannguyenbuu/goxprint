@@ -171,11 +171,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         agents_list = []
         for a_uid, a_info in ACTIVE_AGENTS.items():
             if isinstance(a_info, dict):
+                a_lan = a_info.get("lan_uid", "")
                 agents_list.append({
                     "agent_uid": a_uid,
                     "hostname": a_info.get("hostname", ""),
                     "local_ip": a_info.get("local_ip", ""),
                     "local_mac": a_info.get("local_mac", ""),
+                    "lan_uid": a_lan,
                     "app_version": a_info.get("app_version", ""),
                     "run_mode": a_info.get("run_mode", "web"),
                     "web_port": a_info.get("web_port", 9173),

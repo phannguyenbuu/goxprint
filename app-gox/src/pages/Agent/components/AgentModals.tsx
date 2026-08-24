@@ -1639,13 +1639,19 @@ raise RuntimeError('\\n'.join(lines))`;
                       const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
                       const printerObj = allPrinters.find((item: any) => String(item.id) === String(pId) || item.mac_id === pId || item.ip === pId) || selectedLan?.printers?.[0];
                       const boundAgentUid = printerObj?.agent_uid || printerObj?._agent_uid;
-                      
+                      const targetLanUid = selectedLan?.lan_uid || printerObj?.lan_uid || printerObj?._lan_uid;
+
                       const allAgents = (selectedLan && selectedLan.agents) || [];
                       const activeAgents = allAgents.filter((a: any) => a.is_agent_active);
 
                       let displayAgents = activeAgents;
+                      if (targetLanUid) {
+                        const sameLanAgents = activeAgents.filter((a: any) => !a.lan_uid || a.lan_uid === targetLanUid);
+                        if (sameLanAgents.length > 0) displayAgents = sameLanAgents;
+                      }
+
                       if (boundAgentUid) {
-                        const matched = activeAgents.filter((a: any) => a.agent_uid === boundAgentUid);
+                        const matched = displayAgents.filter((a: any) => a.agent_uid === boundAgentUid);
                         if (matched.length > 0) displayAgents = matched;
                       }
 
