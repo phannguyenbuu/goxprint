@@ -314,70 +314,26 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         ram_printers_lookup[norm_mac]["_lan_uid"] = agent_info["lan_uid"] if "lan_uid" in agent_info else "default"
 
 
-            # 1. Build printers_by_lan directly from ScanPoint VPS Database table
+            # Build printers_by_lan from real discovered printers, matching mac_id against ScanPoint VPS DB
             from models import ScanPoint
-            sp_records = session.execute(select(ScanPoint)).scalars().all()
 
-            for sp in sp_records:
-                p_mac = str(sp.mac_id or "").strip().upper().replace("-", ":")
-                p_ip = str(sp.ip or "").strip()
-                p_lan = sp.lan_uid or sp.lead or "default"
-                p_name = sp.printer_name or "Photocopy"
-                if not p_mac:
-                    continue
-
-                dedupe_key = (p_lan, p_mac)
-                if dedupe_key in seen_printers:
-                    continue
-                seen_printers.add(dedupe_key)
-
-                cred = creds_map.get(p_mac) or creds_map.get(p_ip) or {}
-
-                sync_data = {}
-                if sp.address_book_data:
-                    if sp.updated_at:
-                        now_utc = datetime.now(timezone.utc)
-                        updated_at_utc = sp.updated_at
-                        if updated_at_utc.tzinfo is None:
-                            updated_at_utc = updated_at_utc.replace(tzinfo=timezone.utc)
-                        age_seconds = (now_utc - updated_at_utc).total_seconds()
-                        if age_seconds < (3 * 86400):  # Less than 3 days (72h)
-                            sync_data = sp.address_book_data
-                        else:
-                            # Over 3 days: clear address_book_data in ScanPoint DB without auto-syncing
-                            sp.address_book_data = None
-                            session.commit()
-                    else:
-                        sync_data = sp.address_book_data
-
-                printers_by_lan[p_lan].append({
-                    "id": 0,
-                    "printer_name": p_name,
-                    "ip": p_ip,
-                    "mac_id": p_mac,
-                    "is_online": True,
-                    "last_scanned_at": sp.updated_at.isoformat() if sp.updated_at else "",
-                    "probed": True,
-                    "enabled": True,
-                    "auth_user": cred.get("user", ""),
-                    "auth_password": cred.get("password", ""),
-                    "address_book_sync": sync_data,
-                    "suggested_drivers": _match_printer_drivers(p_name),
-                    "agent_uid": sp.agent_uid or "",
-                })
-
-            # 2. Merge additional devices discovered in RAM lookup
             for p_mac, dev in ram_printers_lookup.items():
                 p_ip = str(dev.get("ip", "")).strip()
                 p_lan = dev.get("_lan_uid", "default")
                 p_name = dev.get("printer_name", "Photocopy")
+
+                p_name_str = str(p_name or "").lower()
+                if any(kw in p_name_str for kw in ["[unk", "unk dom", "[error]"]):
+                    continue
+
                 dedupe_key = (p_lan, p_mac or p_ip)
                 if dedupe_key in seen_printers:
                     continue
                 seen_printers.add(dedupe_key)
 
                 cred = creds_map.get(p_mac) or creds_map.get(p_ip) or {}
-                
+
+                # Look up address_book_data in ScanPoint DB table by mac_id
                 sync_data = {}
                 if p_mac:
                     try:
@@ -389,19 +345,16 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                 if updated_at_utc.tzinfo is None:
                                     updated_at_utc = updated_at_utc.replace(tzinfo=timezone.utc)
                                 age_seconds = (now_utc - updated_at_utc).total_seconds()
-                                if age_seconds < (3 * 86400):  # Less than 3 days
+                                if age_seconds < (3 * 86400):  # Less than 3 days (< 72h)
                                     sync_data = sp_rec.address_book_data
                                 else:
+                                    # 3 days or older: clear address_book_data in DB
                                     sp_rec.address_book_data = None
                                     session.commit()
                             else:
                                 sync_data = sp_rec.address_book_data
-                    except Exception:
-                        pass
-
-                p_name_str = str(p_name or "").lower()
-                if any(kw in p_name_str for kw in ["[unk", "unk dom", "[error]"]):
-                    continue
+                    except Exception as db_err:
+                        LOGGER.warning("Error looking up ScanPoint for mac %s: %s", p_mac, db_err)
 
                 is_on = bool(dev.get("is_online", True))
 
