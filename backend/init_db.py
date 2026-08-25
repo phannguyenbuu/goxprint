@@ -27,9 +27,21 @@ def main() -> None:
                 ]
                 session.add_all(defaults)
                 session.commit()
-                print("[OK] Seeded default PrinterRecognizePort records into DB")
-    except Exception as seed_exc:
-        print(f"[!] Seed PrinterRecognizePort error: {seed_exc}")
+    # Seed default AllowedPublicIp rule (* for all LANs)
+    try:
+        from models import AllowedPublicIp
+        with session_factory() as session:
+            if not session.query(AllowedPublicIp).first():
+                default_rule = AllowedPublicIp(
+                    ip_address="*",
+                    description="Allow all Public IPs access to all LANs by default",
+                    enabled=True
+                )
+                session.add(default_rule)
+                session.commit()
+                print("[OK] Seeded default AllowedPublicIp wildcard rule into DB")
+    except Exception as ip_exc:
+        print(f"[!] Seed AllowedPublicIp error: {ip_exc}")
 
     # Base.metadata.create_all creates all new tables including ScanEmailAlias (added v1.4.48)
     

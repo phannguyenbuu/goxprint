@@ -126,12 +126,34 @@ def _request_api_token() -> str:
     return _to_text(request.headers.get("X-API-Token")) or _to_text(request.headers.get("X-Lead-Token"))
 
 
-def _validate_polling_auth(body: dict[str, Any], lead_key_map: dict[str, str], sent_token: str) -> tuple[bool, str, Any]:
+def _is_ip_whitelisted(session_factory: Any = None) -> bool:
+    try:
+        from flask import current_app, request
+        sf = session_factory or (current_app and current_app.config.get("SESSION_FACTORY"))
+        if not sf:
+            return False
+        from admin_public_ip_routes import is_public_ip_allowed
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        if client_ip and is_public_ip_allowed(client_ip, sf):
+            return True
+    except Exception as exc:
+        LOGGER.warning("Public IP check error: %s", exc)
+    return False
+
+
+def _validate_polling_auth(
+    body: dict[str, Any],
+    lead_key_map: dict[str, str],
+    sent_token: str,
+    session_factory: Any = None,
+) -> tuple[bool, str, Any]:
     lead = _to_text(body.get("lead"))
     if not lead:
-        return _resolve_lead_from_token(lead_key_map, sent_token)
+        return _resolve_lead_from_token(lead_key_map, sent_token, session_factory=session_factory)
     expected_token = lead_key_map.get(lead)
     if not expected_token or sent_token != expected_token:
+        if _is_ip_whitelisted(session_factory):
+            return True, lead, None
         return False, "", (jsonify({"ok": False, "error": "Unauthorized API token"}), 401)
     return True, lead, None
 
@@ -185,12 +207,20 @@ def _default_lead_name(lead_key_map: dict[str, str]) -> str:
     return "default"
 
 
-def _resolve_lead_from_token(lead_key_map: dict[str, str], sent_token: str) -> tuple[bool, str, Any]:
+def _resolve_lead_from_token(
+    lead_key_map: dict[str, str],
+    sent_token: str,
+    session_factory: Any = None,
+) -> tuple[bool, str, Any]:
     token = _to_text(sent_token)
     if not token:
+        if _is_ip_whitelisted(session_factory):
+            return True, _default_lead_name(lead_key_map), None
         return False, "", (jsonify({"ok": False, "error": "Missing X-API-Token"}), 401)
     matches = [lead for lead, expected_token in lead_key_map.items() if expected_token and expected_token == token]
     if not matches:
+        if _is_ip_whitelisted(session_factory):
+            return True, _default_lead_name(lead_key_map), None
         return False, "", (jsonify({"ok": False, "error": "Unauthorized API token"}), 401)
     if len(matches) > 1:
         return False, "", (jsonify({"ok": False, "error": "Ambiguous API token"}), 401)
@@ -202,11 +232,12 @@ def _resolve_request_lead(
     lead_key_map: dict[str, str],
     sent_token: str,
     query_lead: object = None,
+    session_factory: Any = None,
 ) -> tuple[bool, str, Any]:
     requested_lead = _to_text((body or {}).get("lead")) or _to_text(query_lead)
     if requested_lead:
-        return _validate_polling_auth({"lead": requested_lead}, lead_key_map, sent_token)
-    return _resolve_lead_from_token(lead_key_map, sent_token)
+        return _validate_polling_auth({"lead": requested_lead}, lead_key_map, sent_token, session_factory=session_factory)
+    return _resolve_lead_from_token(lead_key_map, sent_token, session_factory=session_factory)
 
 
 def _coalesce_request_lead(value: Any, lead_key_map: dict[str, str]) -> str:
