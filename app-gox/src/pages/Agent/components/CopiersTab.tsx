@@ -42,7 +42,7 @@ export function CopiersTab(props: any) {
     fetchRemotePage,
     fileTypeFilter,
     filteredPrinters,
-    getDestinationStatus,
+    getDestinationStatus = () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
     getTargetAgentUid,
     handleCopierClick,
     handleDeleteDest,

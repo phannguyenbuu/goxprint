@@ -137,8 +137,8 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     setPrivateFtpData,
     privateFtpLoading,
     setPrivateFtpLoading,
-    ftpDetailData,
-    setFtpDetailData,
+    getDestinationStatus: () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
+    getDestinationStatusHtml: () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
 
     ...lanPrinters,
 
