@@ -16,6 +16,32 @@ export const useAgentCoreLogic = (deps: any = {}) => {
   }, []);
 
   const [commandStatus, setCommandStatus] = useState<Record<string, { message: string; isPending: boolean }>>({});
+
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: ''
+  });
+
+  const [deleteScanPointModal, setDeleteScanPointModal] = useState<{
+    isOpen: boolean;
+    printerId: string;
+    entry: any;
+    agentUid: string;
+  }>({
+    isOpen: false,
+    printerId: '',
+    entry: null,
+    agentUid: ''
+  });
+
   const [viewOutputModal, setViewOutputModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -47,6 +73,23 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     error: ''
   });
 
+  const [publicFtpData, setPublicFtpData] = useState<any>({
+    printerId: '',
+    name: '',
+    email: '',
+    agentUid: ''
+  });
+  const [publicFtpLoading, setPublicFtpLoading] = useState(false);
+
+  const [privateFtpData, setPrivateFtpData] = useState<any>({
+    lanUid: '',
+    agentUid: '',
+    email: ''
+  });
+  const [privateFtpLoading, setPrivateFtpLoading] = useState(false);
+
+  const [ftpDetailData, setFtpDetailData] = useState<any>(null);
+
   const utility = useAgentUtilityCommands({
     showToast,
     setViewOutputModal,
@@ -76,10 +119,26 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     showToast,
     commandStatus,
     setCommandStatus,
+    activeModal,
+    setActiveModal,
+    confirmModal,
+    setConfirmModal,
+    deleteScanPointModal,
+    setDeleteScanPointModal,
     viewOutputModal,
     setViewOutputModal,
     ipInputModal,
     setIpInputModal,
+    publicFtpData,
+    setPublicFtpData,
+    publicFtpLoading,
+    setPublicFtpLoading,
+    privateFtpData,
+    setPrivateFtpData,
+    privateFtpLoading,
+    setPrivateFtpLoading,
+    ftpDetailData,
+    setFtpDetailData,
 
     ...lanPrinters,
 
