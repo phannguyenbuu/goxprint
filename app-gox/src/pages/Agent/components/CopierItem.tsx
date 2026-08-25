@@ -117,12 +117,14 @@ export function CopierItem({
   const ipKey = p.ip || '';
   const idKey = String(p.id !== undefined && p.id !== null ? p.id : '');
 
-  const cmdStatusObj = 
-    (macKey && commandStatus?.[macKey]) ||
-    (ipKey && commandStatus?.[ipKey]) ||
-    (idKey && commandStatus?.[idKey]);
+  const hasItems = (obj: any) => obj && ((Array.isArray(obj.address_list) && obj.address_list.length > 0) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list) && obj.address_book_data.address_list.length > 0));
 
-  const activeSyncObj = localSync || sync || cmdStatusObj?.address_book_sync || cmdStatusObj;
+  const activeSyncObj = 
+    (hasItems(localSync) ? localSync : null) ||
+    (hasItems(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
+    (hasItems(cmdStatusObj) ? cmdStatusObj : null) ||
+    (hasItems(sync) ? sync : null) ||
+    localSync || cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
   const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
   const driversExpanded = expandedDrivers[p.id];
   const rawAddressList = (() => {

@@ -332,7 +332,20 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         from models import ScanPoint
                         sp_rec = session.get(ScanPoint, p_mac)
                         if sp_rec and sp_rec.address_book_data:
-                            sync_data = sp_rec.address_book_data
+                            if sp_rec.updated_at:
+                                now_utc = datetime.now(timezone.utc)
+                                updated_at_utc = sp_rec.updated_at
+                                if updated_at_utc.tzinfo is None:
+                                    updated_at_utc = updated_at_utc.replace(tzinfo=timezone.utc)
+                                age_seconds = (now_utc - updated_at_utc).total_seconds()
+                                if age_seconds < (3 * 86400):  # Less than 3 days (72h)
+                                    sync_data = sp_rec.address_book_data
+                                else:
+                                    # Older than 3 days: clear cached address_book_data in ScanPoint DB without auto-syncing
+                                    sp_rec.address_book_data = None
+                                    session.commit()
+                            else:
+                                sync_data = sp_rec.address_book_data
                     except Exception:
                         pass
 
