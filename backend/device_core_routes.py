@@ -779,21 +779,31 @@ verify_auth()
 
     @app.get("/api/devices/credentials-map")
     def device_credentials_map() -> Any:
-        """Returns a map of all saved copier login credentials keyed by MAC address."""
+        """Returns a map of all saved copier login credentials keyed by MAC address and IP address."""
         from models import PrinterAuthCredential
         with session_factory() as session:
             creds = session.query(PrinterAuthCredential).all()
             res_map = {}
             for c in creds:
-                mac = str(c.mac_address or "").strip().upper()
+                mac = str(c.mac_address or "").strip().upper().replace("-", ":")
+                ip = str(c.ip or "").strip()
+                user = c.auth_user or ""
+                pwd = c.auth_password or ""
+                item = {
+                    "user": user,
+                    "password": pwd,
+                    "auth_user": user,
+                    "auth_password": pwd,
+                    "ip": ip,
+                    "mac_address": mac,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else ""
+                }
                 if mac:
-                    res_map[mac] = {
-                        "auth_user": c.auth_user or "",
-                        "auth_password": c.auth_password or "",
-                        "ip": c.ip or "",
-                        "mac_address": mac,
-                        "updated_at": c.updated_at.isoformat() if c.updated_at else ""
-                    }
+                    res_map[mac] = item
+                    res_map[mac.replace(":", "")] = item
+                    res_map[mac.replace(":", "-")] = item
+                if ip:
+                    res_map[ip] = item
             return jsonify({"ok": True, "credentials": res_map})
 
     @app.post("/api/devices/<device_ref>/fetch-address-book")

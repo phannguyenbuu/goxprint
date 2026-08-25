@@ -215,10 +215,30 @@ export function CopierItem({
     const targetId = entry.registration_no || entry.id || "";
     const targetName = entry.name || entry.username || entry.display_name || "";
     const printerIp = printer.ip || printer.printer_ip || "";
-    const authUser = printer.auth_user || printer.username || "admin";
-    const authPass = printer.auth_password || printer.password || "";
 
-    showToast(`Đang gửi lệnh cập nhật FTP cho ${entry.name}...`, 'info');
+    showToast(`Đang truy vấn tài khoản VPS cho ${entry.name}...`, 'info');
+
+    let authUser = printer.auth_user || printer.username || "";
+    let authPass = printer.auth_password || printer.password || "";
+
+    try {
+      const resCreds = await fetchApi(`/api/devices/credentials-map?t=${Date.now()}`);
+      if (resCreds && resCreds.ok && resCreds.credentials) {
+        const macKey = (printer.mac_id || printer.mac_address || '').toUpperCase().replace(/[^0-9A-F:]/g, '');
+        const normMacKey = macKey.replace(/[:-]/g, '');
+        const ipKey = printerIp;
+        const matched = (macKey && resCreds.credentials[macKey]) || (normMacKey && resCreds.credentials[normMacKey]) || (ipKey && resCreds.credentials[ipKey]);
+        if (matched) {
+          authUser = matched.user || matched.auth_user || authUser;
+          authPass = matched.password || matched.auth_password || authPass;
+        }
+      }
+    } catch (e) {}
+
+    if (!authUser) {
+      showToast(`⚠️ Chưa có Tài khoản Web máy in (admin) trong bảng PrinterAuthCredential trên VPS!`, 'error');
+      return;
+    }
 
     try {
       const res = await triggerAgentUtilityExec(selectedAgentUid, cmdName, "", {

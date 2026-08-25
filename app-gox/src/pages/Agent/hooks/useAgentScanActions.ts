@@ -64,24 +64,29 @@ export const useAgentScanActions = (deps: any = {}) => {
   const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [], detectBrand } = deps;
 
   const resolveCopierCredentials = async (printerObj: any): Promise<{ user: string; pass: string; mac: string }> => {
-    const mac = String(printerObj?.mac_address || printerObj?.mac_id || printerObj?.mac || '').toUpperCase().replace(/[^0-9A-F:]/g, '');
-    const normMac = mac.replace(/[:-]/g, '');
+    const rawMac = String(printerObj?.mac_address || printerObj?.mac_id || printerObj?.mac || '').trim();
+    const rawIp = String(printerObj?.ip || printerObj?.printer_ip || (typeof printerObj === 'string' ? printerObj : '') || printerObj?.id || '').trim();
 
-    if (!mac && !normMac) {
-      throw new Error('⚠️ Không xác định được địa chỉ MAC của thiết bị để tra cứu tài khoản trên VPS!');
-    }
+    const mac = rawMac.toUpperCase().replace(/[^0-9A-F:]/g, '');
+    const normMac = mac.replace(/[:-]/g, '');
 
     let user = '';
     let pass = '';
 
-    // Truy vấn trực tiếp bảng PrinterAuthCredential trên VPS theo mac_id
+    // Truy vấn trực tiếp từ bảng PrinterAuthCredential trên VPS theo MAC hoặc IP
     try {
       const res = await fetchApi(`/api/devices/credentials-map?t=${Date.now()}`);
       if (res && res.ok && res.credentials) {
-        const matched = res.credentials[mac] || res.credentials[normMac] || res.credentials[mac.replace(/:/g, '-')];
-        if (matched && matched.user) {
-          user = (matched.user || '').trim();
-          pass = (matched.password || matched.pass || '').trim();
+        const creds = res.credentials;
+        const matched = 
+          (mac && creds[mac]) ||
+          (normMac && creds[normMac]) ||
+          (mac && creds[mac.replace(/:/g, '-')]) ||
+          (rawIp && creds[rawIp]);
+
+        if (matched) {
+          user = String(matched.user || matched.auth_user || '').trim();
+          pass = String(matched.password || matched.auth_password || matched.pass || '').trim();
         }
       }
     } catch (e: any) {
@@ -90,10 +95,11 @@ export const useAgentScanActions = (deps: any = {}) => {
 
     // Nếu không tìm thấy trong bảng PrinterAuthCredential trên VPS, văng lỗi để user xử lý
     if (!user) {
-      throw new Error(`⚠️ Chưa có Tài khoản Web máy in (admin) trong bảng PrinterAuthCredential trên VPS cho thiết bị (MAC: ${mac}). Vui lòng nhập Tài khoản/Mật khẩu và bấm "Lưu Auth" trước!`);
+      const displayTarget = mac || rawIp || 'chưa xác định';
+      throw new Error(`⚠️ Chưa có Tài khoản Web máy in (admin) trong bảng PrinterAuthCredential trên VPS cho thiết bị (MAC/IP: ${displayTarget}). Vui lòng nhập User/Pass và bấm "Lưu Auth" trước!`);
     }
 
-    return { user, pass, mac };
+    return { user, pass, mac: mac || rawIp };
   };
   const handleQueryVideo = async (agentUid: string, cameraId: number, customTimestamp?: string, customDuration?: number) => {
     const ts = customTimestamp || queryTimestamp;
