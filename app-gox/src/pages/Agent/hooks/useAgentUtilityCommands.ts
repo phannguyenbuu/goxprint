@@ -1,0 +1,439 @@
+// @ts-nocheck
+import { useState, useCallback, useEffect } from 'react';
+import { getAgentUtilityCommands, getCommandStatus, getJobs, triggerAgentUtility, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
+
+const VIEW_COMMANDS = new Set([
+  'get_agent_ip',
+  'get_public_ip',
+  'view_settings_json',
+  'view_printers_json',
+  'view_scan_points_json',
+  'view_agent_loader_debug',
+  'view_stout',
+  'view_sterror',
+  'dxdiag',
+  'printers',
+  'clean_temp',
+  'scan',
+  'ricoh_list_scan',
+  'toshiba_list_scan'
+]);
+
+const VIEW_COMMAND_TITLES: Record<string, string> = {
+  get_agent_ip: 'Địa chỉ IP Local của Agent',
+  get_public_ip: 'Địa chỉ IP Public (Internet)',
+  view_settings_json: 'Nội dung tệp settings.json',
+  view_printers_json: 'Nội dung tệp printers.json',
+  view_scan_points_json: 'Nội dung tệp scan_points.json',
+  view_agent_loader_debug: 'Nội dung tệp agent_loader_debug.txt',
+  view_stout: 'Nội dung tệp stout.txt (1000 dòng cuối)',
+  view_sterror: 'Nội dung tệp sterror.txt (1000 dòng cuối)',
+  dxdiag: 'Kết quả kiểm tra cấu hình hệ thống (DxDiag)',
+  printers: 'Danh sách máy in hệ thống',
+  clean_temp: 'Kết quả dọn dẹp thư mục tạm & Driver',
+  scan: 'Nội dung thư mục Scan gốc (%TEMP%/GoPrinxAgent/ftp)',
+  ricoh_list_scan: 'Danh bạ Scan trên máy photo Ricoh',
+  toshiba_list_scan: 'Danh bạ Scan trên máy photo Toshiba'
+};
+
+export const useAgentUtilityCommands = (deps: any = {}) => {
+  const { showToast, setViewOutputModal, setIpInputModal } = deps;
+
+  const [utilityCommands, setUtilityCommands] = useState<any[]>([]);
+  const [utilityCommandsLoading, setUtilityCommandsLoading] = useState(false);
+  const [utilitySettingsLoading, setUtilitySettingsLoading] = useState(false);
+  const [utilityStatusMsg, setUtilityStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [utilityActionPending, setUtilityActionPending] = useState<string | null>(null);
+
+  const [editableSettingsText, setEditableSettingsText] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState('');
+  const [customRunCommand, setCustomRunCommand] = useState('ping 8.8.8.8');
+
+  const pollCommandStatus = useCallback(
+    (
+      commandId: number,
+      key: string,
+      onSuccess: (data: any) => void,
+      onFailed?: (errorMsg: string) => void,
+      initialPendingMsg?: string
+    ) => {
+      deps.setCommandStatus?.((prev: any) => ({
+        ...prev,
+        [key]: { message: initialPendingMsg || 'Đang thực thi lệnh...', isPending: true },
+      }));
+
+      const pollInterval = 1500;
+      const timeoutMs = 60000;
+      const startTime = Date.now();
+
+      const timer = setInterval(async () => {
+        const elapsed = Date.now() - startTime;
+        if (elapsed > timeoutMs) {
+          clearInterval(timer);
+          deps.setCommandStatus?.((prev: any) => ({
+            ...prev,
+            [key]: { message: 'Lỗi: Quá thời gian chờ (Timeout 60s)', isPending: false },
+          }));
+          if (onFailed) onFailed('Quá thời gian chờ (Timeout 60s)');
+          return;
+        }
+
+        try {
+          const res = await getCommandStatus(commandId);
+
+          if (res.ok && res.status === 'success') {
+            clearInterval(timer);
+            const extraMsg = res.result ? ` (${res.result})` : '';
+            deps.setCommandStatus?.((prev: any) => ({
+              ...prev,
+              [key]: { message: `Đã hoàn tất thành công!${extraMsg}`, isPending: false },
+            }));
+            onSuccess(res);
+          } else if (res.ok && res.status === 'failed') {
+            clearInterval(timer);
+            const errDetail = res.error || res.error_message || res.result || 'Thực thi thất bại';
+            deps.setCommandStatus?.((prev: any) => ({
+              ...prev,
+              [key]: { message: `Lỗi: ${errDetail}`, isPending: false },
+            }));
+            if (onFailed) onFailed(errDetail);
+          } else {
+            const runningMsg = res.received_at
+              ? `Agent đã nhận lệnh (${Math.round(elapsed / 1000)}s)...`
+              : `Đang gửi lệnh tới Agent (${Math.round(elapsed / 1000)}s)...`;
+            deps.setCommandStatus?.((prev: any) => ({
+              ...prev,
+              [key]: { message: runningMsg, isPending: true },
+            }));
+          }
+        } catch (err: any) {
+          clearInterval(timer);
+          deps.setCommandStatus?.((prev: any) => ({
+            ...prev,
+            [key]: { message: `Lỗi kết nối: ${err.message || 'Lỗi polling'}`, isPending: false },
+          }));
+          if (onFailed) onFailed(err.message || 'Lệnh thực hiện thất bại từ Agent');
+        }
+      }, pollInterval);
+    },
+    [deps]
+  );
+
+  const isDuplicatePending = async (agentUid: string, commandType: string, paramsMatch?: Record<string, any>): Promise<boolean> => {
+    try {
+      const data = await getJobs(agentUid, 10);
+      const jobs = data.jobs || data.commands || [];
+      const pendingJobs = jobs.filter((j: any) => j.status === 'pending' && j.command_type === commandType);
+
+      if (!paramsMatch) return pendingJobs.length > 0;
+
+      return pendingJobs.some((j: any) => {
+        const p = j.command_params || {};
+        return Object.keys(paramsMatch).every(k => String(p[k]) === String(paramsMatch[k]));
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  const loadUtilitySettings = useCallback(async (agentUid: string) => {
+    setUtilitySettingsLoading(true);
+    setSettingsSaveStatus('');
+    try {
+      const res = await triggerAgentUtilityExec(agentUid, 'view_settings_json', '');
+      if (!res.ok || !res.command_id) throw new Error(res.error || 'Không thể gửi lệnh xem settings.json');
+
+      pollCommandStatus(
+        res.command_id,
+        'view_settings',
+        (statusRes: any) => {
+          const rawText = (typeof statusRes.result_payload === 'object' && statusRes.result_payload)
+            ? JSON.stringify(statusRes.result_payload, null, 2)
+            : (statusRes.result_payload || statusRes.result || '');
+          setEditableSettingsText(rawText);
+          setUtilitySettingsLoading(false);
+        },
+        (errMs: any) => {
+          setSettingsSaveStatus(`❌ Không thể nạp settings.json: ${errMs}`);
+          setUtilitySettingsLoading(false);
+        },
+        '⌛ Đang nạp settings.json từ Agent...'
+      );
+    } catch (e: any) {
+      setSettingsSaveStatus(`❌ Lỗi nạp cấu hình: ${e.message}`);
+      setUtilitySettingsLoading(false);
+    }
+  }, [pollCommandStatus]);
+
+  const handleSaveSettings = async (selectedAgentUid: string) => {
+    if (!selectedAgentUid || !editableSettingsText) return;
+    try {
+      JSON.parse(editableSettingsText);
+    } catch (e: any) {
+      setSettingsSaveStatus(`❌ Lỗi định dạng JSON: ${e.message}`);
+      return;
+    }
+    setIsSavingSettings(true);
+    setSettingsSaveStatus('⌛ Đang gửi cấu hình mới tới Agent...');
+    const base64Content = btoa(unescape(encodeURIComponent(editableSettingsText)));
+    try {
+      const saveCmdObj = (utilityCommands || []).find((c: any) => c.command === 'save_settings_json');
+      const scriptContent = saveCmdObj?.command_content || '';
+      const res = await triggerAgentUtilityExec(selectedAgentUid, 'save_settings_json', scriptContent, {
+        base64_content: base64Content
+      });
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+      const commandId = res.command_id;
+      pollCommandStatus(
+        commandId,
+        'save_settings',
+        () => {
+          setSettingsSaveStatus('✅ Đã lưu và nạp lại cấu hình settings.json thành công!');
+          setIsSavingSettings(false);
+          if (showToast) showToast('Đã lưu cấu hình Agent thành công', 'success');
+        },
+        (errMs: any) => {
+          setSettingsSaveStatus(`❌ Lỗi lưu cấu hình: ${errMs}`);
+          setIsSavingSettings(false);
+        },
+        '⌛ Agent đang ghi đè tệp settings.json...'
+      );
+    } catch (e: any) {
+      setSettingsSaveStatus(`❌ Lỗi gửi lệnh: ${e.message}`);
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleTriggerUtility = useCallback(async (selectedUtilityAgent: any, action: string, backendAction: string, payload: any = {}) => {
+    if (!selectedUtilityAgent) return;
+    setUtilityActionPending(action);
+    setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
+
+    try {
+      const res = await triggerAgentUtility(selectedUtilityAgent.agent_uid, backendAction, payload);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const pollInterval = 1000;
+      const startTime = Date.now();
+
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+            setUtilityActionPending(null);
+            return;
+          }
+
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh tiện ích thành công!', isError: false });
+            setUtilityActionPending(null);
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            setUtilityActionPending(null);
+          } else {
+            const elapsedSec = Math.round(elapsed / 1000);
+            if (statusRes.received_at) {
+              setUtilityStatusMsg({ text: `⚡ Agent đã nhận lệnh - đang mở tiện ích... (${elapsedSec}s)`, isError: false });
+            } else {
+              setUtilityStatusMsg({ text: `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, isError: false });
+            }
+          }
+        } catch (pollErr: any) {
+          console.error('Error polling utility status:', pollErr);
+        }
+      }, pollInterval);
+
+    } catch (err: any) {
+      console.error(`Failed to trigger ${action}:`, err);
+      setUtilityStatusMsg({
+        text: `Lỗi kết nối hoặc gửi lệnh: ${err.message}`,
+        isError: true
+      });
+      setUtilityActionPending(null);
+    }
+  }, []);
+
+  const handleTriggerUtilityExec = useCallback(async (selectedUtilityAgent: any, command: string, commandContent: string) => {
+    if (!selectedUtilityAgent) return;
+
+    const isDup = await isDuplicatePending(selectedUtilityAgent.agent_uid, 'trigger_utility', {
+      action: 'exec_utility',
+      command: command
+    });
+    if (isDup) {
+      if (showToast) showToast('Yêu cầu chạy script/lệnh này đang chờ phản hồi từ Agent!', 'info');
+      return;
+    }
+
+    const cmdObj = utilityCommands.find((c: any) => c.command === command);
+    const isOutputModal = cmdObj?.output_modal || VIEW_COMMANDS.has(command);
+    const displayTitle = cmdObj?.label || VIEW_COMMAND_TITLES[command] || command;
+
+    if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
+      const isChangeIp = command === 'change_agent_ip';
+      const currentIp = selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '';
+
+      if (setIpInputModal) {
+        setIpInputModal({
+          isOpen: true,
+          title: isChangeIp ? '🌐 Đổi địa chỉ IP tĩnh' : '🔍 Kiểm tra IP khớp Copier',
+          hint: isChangeIp
+            ? 'Nhập địa chỉ IPv4 tĩnh muốn gán cho máy Agent.'
+            : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
+          value: currentIp,
+          changeAllTo: '',
+          scanStatus: isChangeIp ? '⏳ Loading... Đang quét điểm scan FTP trên máy photo...' : '',
+          error: '',
+          onConfirm: (targetIp: string, changeAllTo?: string) => {
+            const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
+            setUtilityActionPending(command);
+            setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
+            triggerAgentUtilityExec(selectedUtilityAgent!.agent_uid, command, finalContent, {
+              target_ip: targetIp,
+              ip: targetIp,
+              printer_ip: targetIp,
+              change_all_to: changeAllTo || ''
+            })
+              .then((res: any) => {
+                if (!res.ok || !res.command_id) throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+                const commandId = res.command_id;
+                const maxPollMs = 60000;
+                const startTime = Date.now();
+                const timer = setInterval(async () => {
+                  try {
+                    const elapsed = Date.now() - startTime;
+                    if (elapsed > maxPollMs) {
+                      clearInterval(timer);
+                      setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+                      setUtilityActionPending(null);
+                      return;
+                    }
+                    const statusRes = await getCommandStatus(commandId);
+                    if (statusRes.status === 'success') {
+                      clearInterval(timer);
+                      if (isOutputModal && setViewOutputModal) {
+                        setViewOutputModal({
+                          isOpen: true,
+                          title: displayTitle,
+                          content: (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.error || statusRes.result || '(không có nội dung)'),
+                          rawPayload: statusRes.result_payload || statusRes.result || ''
+                        });
+                      } else {
+                        setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+                      }
+                      setUtilityActionPending(null);
+                    } else if (statusRes.status === 'failed' || !statusRes.ok) {
+                      clearInterval(timer);
+                      setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                      setUtilityActionPending(null);
+                    } else {
+                      const elapsedSec = Math.round(elapsed / 1000);
+                      setUtilityStatusMsg({ text: `⌛ Agent đang thực hiện lệnh... (${elapsedSec}s)`, isError: false });
+                    }
+                  } catch (err: any) {
+                    console.error('Error polling status:', err);
+                  }
+                }, 1000);
+              })
+              .catch((err: any) => {
+                setUtilityStatusMsg({ text: `Lỗi gửi lệnh: ${err.message}`, isError: true });
+                setUtilityActionPending(null);
+              });
+          }
+        });
+      }
+      return;
+    }
+
+    setUtilityActionPending(command);
+    setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh thực thi tới Agent...', isError: false });
+
+    try {
+      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, command, commandContent);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
+      }
+
+      const commandId = res.command_id;
+      const maxPollMs = 60000;
+      const pollInterval = 1000;
+      const startTime = Date.now();
+
+      const timer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > maxPollMs) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: 'Yêu cầu quá thời gian chờ (60s)', isError: true });
+            setUtilityActionPending(null);
+            return;
+          }
+
+          const statusRes = await getCommandStatus(commandId);
+          if (statusRes.status === 'success') {
+            clearInterval(timer);
+            if (isOutputModal && setViewOutputModal) {
+              setViewOutputModal({
+                isOpen: true,
+                title: displayTitle,
+                content: (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.error || statusRes.result || '(không có nội dung)'),
+                rawPayload: statusRes.result_payload || statusRes.result || ''
+              });
+            } else {
+              setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
+            }
+            setUtilityActionPending(null);
+          } else if (statusRes.status === 'failed' || !statusRes.ok) {
+            clearInterval(timer);
+            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            setUtilityActionPending(null);
+          } else {
+            const elapsedSec = Math.round(elapsed / 1000);
+            if (statusRes.received_at) {
+              setUtilityStatusMsg({ text: `⚡ Agent đã nhận lệnh - đang thực thi... (${elapsedSec}s)`, isError: false });
+            } else {
+              setUtilityStatusMsg({ text: `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, isError: false });
+            }
+          }
+        } catch (pollErr: any) {
+          console.error('Error polling utility status:', pollErr);
+        }
+      }, pollInterval);
+
+    } catch (err: any) {
+      console.error(`Failed to trigger exec ${command}:`, err);
+      setUtilityStatusMsg({
+        text: `Lỗi kết nối hoặc gửi lệnh: ${err.message}`,
+        isError: true
+      });
+      setUtilityActionPending(null);
+    }
+  }, [utilityCommands, showToast, setIpInputModal, setViewOutputModal]);
+
+  return {
+    VIEW_COMMANDS, VIEW_COMMAND_TITLES,
+    utilityCommands, setUtilityCommands,
+    utilityCommandsLoading, setUtilityCommandsLoading,
+    utilitySettingsLoading, setUtilitySettingsLoading,
+    utilityStatusMsg, setUtilityStatusMsg,
+    utilityActionPending, setUtilityActionPending,
+    editableSettingsText, setEditableSettingsText,
+    isSavingSettings, setIsSavingSettings,
+    settingsSaveStatus, setSettingsSaveStatus,
+    customRunCommand, setCustomRunCommand,
+    pollCommandStatus, loadUtilitySettings, handleSaveSettings,
+    handleTriggerUtility, handleTriggerUtilityExec
+  };
+};

@@ -1,0 +1,429 @@
+// @ts-nocheck
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { fetchApi, getLanSites, saveCopierCredentials, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
+
+export const useAgentLanPrinters = (deps: any = {}) => {
+  const { showToast, pollCommandStatus, utilityCommands } = deps;
+
+  const [lanSites, setLanSites] = useState<any[]>([]);
+  const [selectedLanUid, setSelectedLanUid] = useState<string>(() => {
+    return localStorage.getItem('goxprint_selected_lan_uid') || '';
+  });
+  const [lanSitesLoading, setLanSitesLoading] = useState(false);
+
+  const [expandedPrinters, setExpandedPrinters] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('goxprint_expanded_printers');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [copierCredentials, setCopierCredentials] = useState<Record<string, { user: string; pass: string }>>({});
+  const [saveAuthLoading, setSaveAuthLoading] = useState<Record<string, boolean>>({});
+  const [selectedTargetAgents, setSelectedTargetAgents] = useState<Record<string, string>>({});
+
+  const [editIpModalData, setEditIpModalData] = useState<{
+    isOpen: boolean;
+    copier: any;
+    oldIp: string;
+    newIp: string;
+    targetAgentUid: string;
+    status: string;
+    error: string;
+  }>({
+    isOpen: false,
+    copier: null,
+    oldIp: '',
+    newIp: '',
+    targetAgentUid: '',
+    status: '',
+    error: ''
+  });
+
+  const autoScanTriggers = useRef<Record<string, number>>({});
+
+  const initialLastViewedId = useMemo(() => {
+    return localStorage.getItem('goxprint_last_viewed_copier_id');
+  }, []);
+
+  const fetchLanSitesData = useCallback(async (isUserRefresh = false) => {
+    if (isUserRefresh) setLanSitesLoading(true);
+    try {
+      const data = await getLanSites();
+      const rows = data?.rows || (Array.isArray(data) ? data : []);
+      setLanSites(rows);
+
+      if (rows.length > 0) {
+        setSelectedLanUid((prev) => {
+          if (prev && rows.some((s: any) => s.lan_uid === prev)) return prev;
+          const firstUid = rows[0].lan_uid;
+          localStorage.setItem('goxprint_selected_lan_uid', firstUid);
+          return firstUid;
+        });
+      }
+      if (isUserRefresh) showToast('Đã cập nhật danh sách mạng LAN', 'success');
+    } catch (err: any) {
+      console.error('Failed to fetch LAN sites:', err);
+      if (isUserRefresh) showToast(`Không thể tải dữ liệu LAN: ${err.message}`, 'error');
+    } finally {
+      setLanSitesLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    fetchLanSitesData();
+  }, [fetchLanSitesData]);
+
+  const selectedLan = useMemo(() => {
+    if (!lanSites || lanSites.length === 0) return null;
+    return lanSites.find((site) => site.lan_uid === selectedLanUid) || lanSites[0];
+  }, [lanSites, selectedLanUid]);
+
+  const triggerLanScan = useCallback((lanData: any) => {
+    if (!lanData) return;
+    const currentLanUid = lanData.lan_uid;
+    const now = Date.now();
+
+    if (!autoScanTriggers.current[currentLanUid] || now - autoScanTriggers.current[currentLanUid] > 3 * 60 * 1000) {
+      autoScanTriggers.current[currentLanUid] = now;
+      
+      const activeAgentsList = (lanData.agents || []).filter((a: any) => a.is_agent_active);
+      if (activeAgentsList.length > 0) {
+        activeAgentsList.sort((a: any, b: any) => {
+          const tA = new Date(a.last_seen || a.updated_at || a.last_ping || 0).getTime();
+          const tB = new Date(b.last_seen || b.updated_at || b.last_ping || 0).getTime();
+          return tB - tA;
+        });
+
+        const targetAgent = activeAgentsList[0];
+        if (targetAgent && pollCommandStatus) {
+          showToast(`⏳ Agent (${targetAgent.agent_uid}) đang thực hiện quét ngầm mạng LAN...`, 'info', 6000);
+          const a = targetAgent;
+
+          const cmdObj = (utilityCommands || []).find((c: any) => c.command === 'force_subnet_scan');
+          const scriptContent = cmdObj?.command_content || '';
+
+          const payload = {
+            command: 'force_subnet_scan',
+            command_content: scriptContent,
+            lead: lanData.lead
+          };
+          fetchApi(`/ui/agents/${a.agent_uid}/utility/exec`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          })
+          .then(data => {
+            const cmdId = data?.command_id || data?.id;
+            if (cmdId) {
+              pollCommandStatus(
+                Number(cmdId),
+                `scan_lan_${currentLanUid}`,
+                async (pollData: any) => {
+                  let freshPrinters: any[] = [];
+                  const rawRes = pollData?.result || pollData?.result_payload || pollData?.output || pollData?.error_message || pollData?.raw || '';
+                  
+                  if (Array.isArray(rawRes)) {
+                    freshPrinters = rawRes;
+                  } else if (typeof rawRes === 'string') {
+                    if (rawRes.includes('[') && rawRes.includes(']')) {
+                      try {
+                        const jsonSubstr = rawRes.substring(rawRes.indexOf('['), rawRes.lastIndexOf(']') + 1);
+                        const parsed = JSON.parse(jsonSubstr);
+                        if (Array.isArray(parsed)) freshPrinters = parsed;
+                      } catch (e) {}
+                    }
+                  }
+                  
+                  if (freshPrinters.length > 0) {
+                    showToast(`✓ Quét mạng LAN hoàn tất, tìm thấy ${freshPrinters.length} máy in!`, 'success', 4000);
+                    try {
+                      fetchApi('/api/new-devices', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          lan_uid: currentLanUid || 'default',
+                          devices: freshPrinters
+                        })
+                      }).catch(() => {});
+                    } catch (err) {}
+                    setLanSites((prevSites: any[]) => {
+                      return prevSites.map((site: any) => {
+                        if (site.lan_uid === currentLanUid) {
+                          return {
+                            ...site,
+                            printers: freshPrinters.map((p: any, idx: number) => ({
+                              id: p.id || (90000 + idx),
+                              ...p,
+                            })),
+                          };
+                        }
+                        return site;
+                      });
+                    });
+                  } else {
+                    showToast('✓ Quét mạng LAN hoàn tất', 'success', 4000);
+                  }
+                },
+                async (_err: any) => {
+                  showToast('[-] Quét mạng LAN có lỗi', 'error', 4000);
+                },
+                '⏳ Đang chờ Agent hoàn tất quét ngầm mạng LAN...'
+              );
+            }
+          })
+          .catch(e => {
+            console.error(e);
+          });
+        }
+      }
+    }
+  }, [showToast, pollCommandStatus, utilityCommands]);
+
+  const filteredPrinters = useMemo(() => {
+    if (!selectedLan) return [];
+    const filtered = (selectedLan.printers || []).filter((p: any) => {
+      const name = (p.printer_name || '').toLowerCase().trim();
+      if (name.includes('unknown') || name === 'unknown printer') return false;
+      if (
+        name.includes('pdf') ||
+        name.includes('fax') ||
+        name.includes('brother') ||
+        name.includes('canon lbp') ||
+        name.includes('rustdesk')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    if (initialLastViewedId) {
+      return [...filtered].sort((a, b) => {
+        const aMatch = String(a.id) === initialLastViewedId;
+        const bMatch = String(b.id) === initialLastViewedId;
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
+
+    return filtered;
+  }, [selectedLan, initialLastViewedId]);
+
+  const getTargetAgentUid = useCallback((printerId: string | number) => {
+    const pId = Number(printerId);
+    const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId);
+    if (!printer || !selectedLan) return '';
+    const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_agent_active);
+    const selected = selectedTargetAgents[pId];
+    if (selected) {
+      const isSelOnline = onlineAgents.some((a: any) => a.agent_uid === selected);
+      if (isSelOnline) return selected;
+    }
+    const matchedAgent = onlineAgents.find((a: any) => a.agent_uid === printer.agent_uid) || onlineAgents[0];
+    return matchedAgent ? matchedAgent.agent_uid : (printer.agent_uid || '');
+  }, [selectedLan, selectedTargetAgents]);
+
+  const handleCopierClick = (printerId: string) => {
+    localStorage.setItem('goxprint_last_viewed_copier_id', printerId);
+  };
+
+  useEffect(() => {
+    if (selectedLan) {
+      const defaultTargets: Record<string, string> = {};
+
+      selectedLan.printers.forEach((p: any) => {
+        const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_agent_active);
+        const matchedAgent = onlineAgents.find((a: any) => a.agent_uid === p.agent_uid) || onlineAgents[0];
+        defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
+      });
+
+      setSelectedTargetAgents((prev) => ({ ...defaultTargets, ...prev }));
+
+      setCopierCredentials((prev) => {
+        const next = { ...prev };
+        selectedLan.printers.forEach((p: any) => {
+          const agentPushUser = p.auth_user || p.user || '';
+          const agentPushPass = p.auth_password || p.password || '';
+
+          const savedLocal = (() => {
+            try {
+              const raw = localStorage.getItem(`copier_auth_${p.id}`) || (p.mac_id ? localStorage.getItem(`copier_auth_${p.mac_id}`) : null);
+              return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+              return null;
+            }
+          })();
+
+          const existing = next[p.id];
+          const user = (existing?.user !== undefined)
+            ? existing.user
+            : (agentPushUser !== '')
+              ? agentPushUser
+              : (savedLocal?.user !== undefined ? savedLocal.user : '');
+
+          const pass = (existing?.pass !== undefined)
+            ? existing.pass
+            : (agentPushPass !== '')
+              ? agentPushPass
+              : (savedLocal?.pass !== undefined ? savedLocal.pass : '');
+
+          next[p.id] = { user, pass };
+        });
+        return next;
+      });
+    }
+  }, [selectedLan]);
+
+  const handleSaveAuth = async (p: any) => {
+    const printerId = String(typeof p === 'object' ? p.id : p);
+    const macId = typeof p === 'object' ? (p.mac_id || p.mac_address || '') : printerId;
+    const pType = typeof p === 'object' ? (p.printer_type || p.type || '') : '';
+    const creds = copierCredentials[printerId] || { user: '', pass: '' };
+
+    try {
+      localStorage.setItem(`copier_auth_${printerId}`, JSON.stringify(creds));
+      if (macId) localStorage.setItem(`copier_auth_${macId}`, JSON.stringify(creds));
+    } catch (e) {}
+
+    setSaveAuthLoading((prev) => ({ ...prev, [printerId]: true }));
+    try {
+      const res = await saveCopierCredentials(macId || printerId, creds.user, creds.pass, macId, pType);
+      if (res.ok) {
+        const cmdId = res.command_id || res.id;
+        if (cmdId && pollCommandStatus) {
+          showToast('Đã tạo lệnh lưu Auth, đang đợi Agent thực thi và ghi vào đĩa...', 'info', 3000);
+          pollCommandStatus(
+            cmdId,
+            printerId,
+            (resStatus: any) => {
+              const extraMsg = resStatus?.error ? ` (${resStatus.error})` : (resStatus?.result ? ` (${resStatus.result})` : '');
+              showToast(`Đã test đăng nhập thành công và lưu vào database!${extraMsg}`, 'success', 5000);
+              setLanSites((prevSites) =>
+                prevSites.map((site) => ({
+                  ...site,
+                  printers: site.printers.map((item: any) =>
+                    String(item.id) === String(printerId) || (macId && item.mac_id === macId)
+                      ? { ...item, auth_user: creds.user, auth_password: creds.pass }
+                      : item
+                  ),
+                }))
+              );
+              setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+            },
+            (errorMsg: any) => {
+              showToast(`Lỗi Agent lưu Auth: ${errorMsg}`, 'error');
+              setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+            },
+            'Đang thực thi lưu tài khoản vào tệp printers.json...'
+          );
+        } else {
+          showToast('Đã lưu tài khoản Web UI máy photocopy thành công', 'success');
+          setLanSites((prevSites) =>
+            prevSites.map((site) => ({
+              ...site,
+              printers: site.printers.map((item: any) =>
+                String(item.id) === String(printerId) || (macId && item.mac_id === macId)
+                  ? { ...item, auth_user: creds.user, auth_password: creds.pass }
+                  : item
+              ),
+            }))
+          );
+          setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+        }
+      } else {
+        throw new Error(res.error || 'Lỗi lưu thông tin đăng nhập');
+      }
+    } catch (err: any) {
+      showToast(`Lỗi lưu Auth: ${err.message}`, 'error');
+      setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
+    }
+  };
+
+  const handleEditIP = (copier: any) => {
+    const defaultAgentUid = getTargetAgentUid(copier.id);
+    setEditIpModalData({
+      isOpen: true,
+      copier,
+      oldIp: copier.ip || '',
+      newIp: copier.ip || '',
+      targetAgentUid: defaultAgentUid,
+      status: '',
+      error: ''
+    });
+  };
+
+  const handleSaveEditIP = async () => {
+    if (!editIpModalData.copier || !editIpModalData.newIp) return;
+    const copier = editIpModalData.copier;
+    const oldIp = editIpModalData.oldIp;
+    const newIp = editIpModalData.newIp.trim();
+    const targetAgentUid = editIpModalData.targetAgentUid;
+
+    if (!newIp) {
+      setEditIpModalData((p) => ({ ...p, error: 'Vui lòng nhập địa chỉ IP mới!' }));
+      return;
+    }
+
+    setEditIpModalData((p) => ({ ...p, status: '⌛ Đang gửi lệnh đổi IP tới Agent...', error: '' }));
+    showToast(`Đang gửi lệnh đổi IP từ ${oldIp} ➔ ${newIp}...`, 'info', 3000);
+
+    try {
+      const isToshiba = (copier.printer_type || copier.printer_name || '').toLowerCase().includes('toshiba');
+      const cmdName = isToshiba ? 'toshiba_change_ftp' : 'ricoh_change_ftp';
+
+      const res = await triggerAgentUtilityExec(targetAgentUid, cmdName, '', {
+        old_ip: oldIp,
+        new_ip: newIp,
+        printer_ip: oldIp,
+        target_ip: oldIp
+      });
+
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh đổi IP');
+      }
+
+      setEditIpModalData((p) => ({ ...p, status: '⌛ Agent đang kết nối máy in để thực hiện đổi IP...' }));
+      if (pollCommandStatus) {
+        pollCommandStatus(
+          res.command_id,
+          `edit_ip_${copier.id}`,
+          (_pollData: any) => {
+            showToast(`✓ Đã đổi IP thành công từ ${oldIp} ➔ ${newIp}!`, 'success', 5000);
+            setLanSites((prevSites) =>
+              prevSites.map((site) => ({
+                ...site,
+                printers: site.printers.map((item: any) =>
+                  String(item.id) === String(copier.id) || item.mac_id === copier.mac_id
+                    ? { ...item, ip: newIp }
+                    : item
+                ),
+              }))
+            );
+            setEditIpModalData((p) => ({ ...p, isOpen: false, status: '', error: '' }));
+          },
+          (errorMsg: any) => {
+            showToast(`[-] Lỗi đổi IP: ${errorMsg}`, 'error');
+            setEditIpModalData((p) => ({ ...p, status: '', error: errorMsg }));
+          },
+          '⏳ Agent đang cập nhật địa chỉ IP trên máy photo...'
+        );
+      }
+    } catch (err: any) {
+      setEditIpModalData((p) => ({ ...p, status: '', error: err.message || 'Lỗi không xác định' }));
+      showToast(`Lỗi gửi lệnh đổi IP: ${err.message}`, 'error');
+    }
+  };
+
+  return {
+    lanSites, setLanSites,
+    selectedLanUid, setSelectedLanUid,
+    selectedLan, lanSitesLoading, setLanSitesLoading,
+    fetchLanSitesData, triggerLanScan, filteredPrinters,
+    copierCredentials, setCopierCredentials,
+    saveAuthLoading, setSaveAuthLoading, handleSaveAuth,
+    editIpModalData, setEditIpModalData, handleEditIP, handleSaveEditIP,
+    expandedPrinters, setExpandedPrinters,
+    selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick
+  };
+};
