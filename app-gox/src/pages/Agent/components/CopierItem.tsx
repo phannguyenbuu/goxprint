@@ -113,7 +113,16 @@ export function CopierItem({
     wasPendingRef.current = isPending;
   }, [isPending, fetchFreshSync]);
 
-  const activeSyncObj = localSync || sync;
+  const macKey = p.mac_id || p.mac_address || p.mac || '';
+  const ipKey = p.ip || '';
+  const idKey = String(p.id !== undefined && p.id !== null ? p.id : '');
+
+  const cmdStatusObj = 
+    (macKey && commandStatus?.[macKey]) ||
+    (ipKey && commandStatus?.[ipKey]) ||
+    (idKey && commandStatus?.[idKey]);
+
+  const activeSyncObj = localSync || sync || cmdStatusObj?.address_book_sync || cmdStatusObj;
   const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
   const driversExpanded = expandedDrivers[p.id];
   const rawAddressList = (() => {
@@ -125,10 +134,10 @@ export function CopierItem({
       activeSyncObj?.result,
       activeSyncObj?.result_payload,
       activeSyncObj?.raw,
-      commandStatus?.[p.id]?.result,
-      commandStatus?.[p.id]?.result_payload,
-      commandStatus?.[p.id]?.address_list,
-      commandStatus?.[p.id]?.address_book_sync?.address_list,
+      cmdStatusObj?.result,
+      cmdStatusObj?.result_payload,
+      cmdStatusObj?.address_list,
+      cmdStatusObj?.address_book_sync?.address_list,
     ];
 
     for (const cand of candidates) {

@@ -1203,11 +1203,28 @@ verify_auth()
             if cmd.status == "success":
                 address_book_sync = None
                 if cmd.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify", "trigger_utility") and cmd.error_message:
-                    try:
-                        import json as _json
-                        address_book_sync = _json.loads(cmd.error_message)
-                    except Exception:
-                        pass
+                    msg_str = str(cmd.error_message)
+                    if "__ADDRESS_BOOK_JSON_START__" in msg_str:
+                        try:
+                            import json as _json
+                            part = msg_str.split("__ADDRESS_BOOK_JSON_START__")[1].split("__ADDRESS_BOOK_JSON_END__")[0].strip()
+                            address_book_sync = _json.loads(part)
+                        except Exception:
+                            pass
+                    if not address_book_sync:
+                        try:
+                            import json as _json, re
+                            m = re.search(r'(\{[\s\S]*"address_list"[\s\S]*\})', msg_str)
+                            if m:
+                                address_book_sync = _json.loads(m.group(1))
+                        except Exception:
+                            pass
+                    if not address_book_sync:
+                        try:
+                            import json as _json
+                            address_book_sync = _json.loads(msg_str)
+                        except Exception:
+                            pass
                 res_text = cmd.error_message or ""
                 if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
                     try:

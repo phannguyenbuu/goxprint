@@ -627,8 +627,31 @@ export const useAgentScanActions = (deps: any = {}) => {
           res.command_id,
           pId,
           async (pollData: any) => {
+            let resultSync = pollData?.address_book_sync || pollData?.address_book_data || pollData?.result;
+            if (!resultSync && typeof pollData?.result_payload === 'string') {
+              const rawStr = pollData.result_payload;
+              if (rawStr.includes('__ADDRESS_BOOK_JSON_START__')) {
+                try {
+                  const part = rawStr.split('__ADDRESS_BOOK_JSON_START__')[1].split('__ADDRESS_BOOK_JSON_END__')[0].trim();
+                  resultSync = JSON.parse(part);
+                } catch (e) {}
+              }
+              if (!resultSync) {
+                const match = rawStr.match(/(\{\s*"status"[\s\S]*"address_list"[\s\S]*\})/);
+                if (match) {
+                  try {
+                    resultSync = JSON.parse(match[1]);
+                  } catch (e) {}
+                }
+              }
+            }
+
+            console.log('==================================================');
+            console.log(`[FRONTEND] KẾT QUẢ ĐỒNG BỘ DANH BẠ MÁY IN (Command ID #${res.command_id}):`, pollData);
+            console.log(`[FRONTEND] CHI TIẾT DANH BẠ (Count: ${resultSync?.count || 0}):`, resultSync?.address_list || resultSync);
+            console.log('==================================================');
+
             if (showToast) showToast('✓ Đã cập nhật danh bạ máy in thành công!', 'success');
-            const resultSync = pollData?.address_book_sync || pollData?.address_book_data || pollData?.result;
             if (resultSync && deps.setCommandStatus) {
               deps.setCommandStatus((prev: any) => ({
                 ...prev,
@@ -638,6 +661,7 @@ export const useAgentScanActions = (deps: any = {}) => {
             if (fetchLanSitesData) await fetchLanSitesData();
           },
           (errorMsg: any) => {
+            console.error(`[FRONTEND LỖI ĐỒNG BỘ DANH BẠ] Command ID #${res.command_id}:`, errorMsg);
             if (showToast) showToast(`Lỗi đọc danh bạ: ${errorMsg}`, 'error');
           },
           '⌛ Agent đang đọc danh bạ máy in...'
