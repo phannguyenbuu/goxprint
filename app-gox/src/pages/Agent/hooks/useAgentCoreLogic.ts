@@ -2299,9 +2299,6 @@ except Exception as e:
         return false;
       }
 
-      // 3. Ẩn copier offline (chỉ ẩn sau khi đã probe xong)
-      if (p.probed && !p.is_online) return false;
-
       return true;
     });
 

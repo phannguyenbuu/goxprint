@@ -172,7 +172,7 @@ function safePathToken(value: string): string {
             >
               {lanSites.map((site) => (
                 <option key={site.lan_uid} value={site.lan_uid}>
-                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.filter((p: any) => p.is_online).length ?? 0} máy Photo)
+                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.length ?? 0} máy Photo)
                 </option>
               ))}
             </select>
