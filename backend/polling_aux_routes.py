@@ -629,6 +629,11 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                                     session.commit()
                                             else:
                                                 p_item["address_book_sync"] = sp_rec.address_book_data
+
+                                enriched_json_str = _json.dumps(scanned_printers, ensure_ascii=False, indent=2)
+                                command.result_payload = f"[*] Đang thực thi 100% Clean Fresh Scan theo Native Built-in PrintAgent Service...\n  [✓] CLEAN SCAN SUCCESS: Đã quét xong mạng LAN (Clean Fresh Scan). Tìm thấy {len(scanned_printers)} máy in ({len(scanned_printers)} Online).\n__PRINTERS_JSON_START__\n{enriched_json_str}\n__PRINTERS_JSON_END__\n\n{enriched_json_str}"
+                                command.output = command.result_payload
+                                session.commit()
                             except Exception as sp_merge_err:
                                 LOGGER.warning("Error attaching ScanPoint in force_subnet_scan: %s", sp_merge_err)
 
