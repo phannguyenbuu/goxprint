@@ -587,6 +587,33 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             printer.address_book_sync = sync_data
                             LOGGER.info("[polling_control_result] Updated Printer.address_book_sync for printer_id=%d in PostgreSQL", printer.id)
 
+                        try:
+                            from models import ScanPoint
+                            target_mac = (printer.mac_address if printer and printer.mac_address else "").strip().upper().replace("-", ":")
+                            if not target_mac and body.get("mac_id"):
+                                target_mac = str(body.get("mac_id")).strip().upper().replace("-", ":")
+                            if not target_mac and body.get("mac_address"):
+                                target_mac = str(body.get("mac_address")).strip().upper().replace("-", ":")
+                            if target_mac:
+                                sp_rec = session.get(ScanPoint, target_mac)
+                                if sp_rec is None:
+                                    sp_rec = ScanPoint(
+                                        mac_id=target_mac,
+                                        printer_name=printer.printer_name if printer else "Photocopy",
+                                        ip=printer.ip if printer else "",
+                                        agent_uid=command.agent_uid or "",
+                                        address_book_data=sync_data,
+                                        status="success"
+                                    )
+                                    session.add(sp_rec)
+                                else:
+                                    sp_rec.address_book_data = sync_data
+                                    sp_rec.updated_at = datetime.now(timezone.utc)
+                                session.commit()
+                                LOGGER.info("[polling_control_result] Updated ScanPoint PostgreSQL table for mac_id=%s", target_mac)
+                        except Exception as sp_update_err:
+                            LOGGER.warning("[polling_control_result] Error updating ScanPoint DB table: %s", sp_update_err)
+
                     if not command.error_message:
                         command.error_message = _to_text(body.get("result_payload") or body.get("output") or error_message or "")
 

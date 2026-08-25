@@ -617,18 +617,36 @@ def logout(session: requests.Session):
     except: pass
 
 def login() -> requests.Session:
+    global BASE_URL
     session = requests.Session()
+    session.verify = False
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
     logout(session)
-    time.sleep(1.0)
-    print(f"[2/4] Đang đăng nhập Web Image Monitor...")
+    time.sleep(0.5)
+    print(f"[2/4] Đang đăng nhập Web Image Monitor ({BASE_URL})...")
     form_url = f"{BASE_URL}/web/guest/en/websys/webArch/authForm.cgi"
-    resp = session.get(form_url, timeout=10)
+    try:
+        resp = session.get(form_url, timeout=5, verify=False)
+    except Exception as net_err:
+        if BASE_URL.startswith("http://"):
+            print(f"  [!] HTTP port 80 timeout/lỗi ({net_err}). Tự động thử HTTPS (port 443)...")
+            BASE_URL = f"https://{IP}"
+            form_url = f"{BASE_URL}/web/guest/en/websys/webArch/authForm.cgi"
+            resp = session.get(form_url, timeout=8, verify=False)
+        else:
+            raise net_err
     wim_token = extract_wim_token(resp.text)
     login_url = f"{BASE_URL}/web/guest/en/websys/webArch/login.cgi"
     encoded_user = base64.b64encode(USER.encode()).decode()
     encoded_pass = base64.b64encode(PASSWORD.encode()).decode()
     data = {"userid": encoded_user, "username": encoded_user, "password": encoded_pass, "wimToken": wim_token, "open": "websys/webArch/authForm.cgi"}
-    session.post(login_url, data=data, headers={"Referer": form_url}, timeout=10)
+    r_log = session.post(login_url, data=data, headers={"Referer": form_url}, timeout=8, verify=False)
+    if "Authentication has failed" in r_log.text or "not correct" in r_log.text:
+        raise RuntimeError("Sai tài khoản hoặc mật khẩu đăng nhập Ricoh WIM!")
     print("  [✓] Đăng nhập thành công!")
     return session
 
@@ -1469,7 +1487,7 @@ def reset_single_toshiba_template(ip, user, password, target_id):
     print("")
     print(f"[4/4] XÁC MINH THÀNH CÔNG: Đã xóa/reset điểm scan ID '{target_id}' trên máy in Toshiba {ip}.")
     if 'final_result' in locals() and final_result:
-        print(json.dumps(final_result, ensure_ascii=False))
+        print(f"__ADDRESS_BOOK_JSON_START__\n{json.dumps(final_result, ensure_ascii=False)}\n__ADDRESS_BOOK_JSON_END__")
 
 if globals().get('context') and isinstance(globals()['context'], dict):
     ctx = globals()['context']

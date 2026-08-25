@@ -277,9 +277,7 @@ export const useAgentScanActions = (deps: any = {}) => {
           if (normMac && syncObj) {
             setLiveAddressBooks((prev) => ({ ...prev, [normMac]: syncObj }));
           }
-          if (handleRefetchAddressBook) {
-            handleRefetchAddressBook(printerId);
-          }
+          handleRefetchAddressBook(printerObj || printerId);
           await fetchLanSitesData(true);
         },
         (errorMsg) => {
