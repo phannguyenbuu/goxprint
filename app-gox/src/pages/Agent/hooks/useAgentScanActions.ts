@@ -720,6 +720,14 @@ export const useAgentScanActions = (deps: any = {}) => {
     }
   };
 
+  const getDestinationStatus = useCallback((entry: any) => {
+    return getDestinationStatusHtml(
+      entry,
+      selectedLan?.emails || [],
+      selectedLan?.agents || []
+    );
+  }, [selectedLan]);
+
   return {
     executeRemoteInstallDriver,
     formatBytes,

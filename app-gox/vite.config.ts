@@ -13,6 +13,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/ui': {
+        target: 'https://agentapi.quanlymay.com',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   test: {
