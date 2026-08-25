@@ -540,7 +540,7 @@ export function CopierItem({
                                     showToast('Không tìm thấy Agent nào trong dải mạng LAN này', 'error');
                                     return;
                                   }
-                                  fetchRemotePage(p.ip, '', 'GET', null, false, targetAgent, 80);
+                                  fetchRemotePage(targetAgent, p.ip, '/');
                                 }}
                                 disabled={!selectedLan || !selectedLan.agents || selectedLan.agents.length === 0}
                                 title="Xem trực tiếp trang quản trị Web Setting (Port 80)"

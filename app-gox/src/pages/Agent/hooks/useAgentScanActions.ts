@@ -61,7 +61,7 @@ function safePathToken(value: string): string {
 }
 
 export const useAgentScanActions = (deps: any = {}) => {
-  const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, handleRefetchAddressBook, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [], detectBrand } = deps;
+  const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [], detectBrand } = deps;
   const handleQueryVideo = async (agentUid: string, cameraId: number, customTimestamp?: string, customDuration?: number) => {
     const ts = customTimestamp || queryTimestamp;
     const dur = customDuration || queryDuration;
@@ -599,14 +599,142 @@ export const useAgentScanActions = (deps: any = {}) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const getDestinationStatus = (entry: any) => {
-    return getDestinationStatusHtml(
-      entry,
-      selectedLan?.emails || [],
-      selectedLan?.agents || []
-    );
+  const handleRefetchAddressBook = async (printerId: any) => {
+    const pId = String(typeof printerId === 'object' ? printerId.id : printerId);
+    const targetAgent = getTargetAgentUid ? getTargetAgentUid(pId) : '';
+    if (showToast) showToast('⌛ Đang yêu cầu Agent đọc trực tiếp danh bạ từ máy photocopy...', 'info', 3000);
+    try {
+      const res = await triggerFetchAddressBook(pId, targetAgent || undefined);
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Không thể tạo lệnh đọc danh bạ');
+      }
+      if (pollCommandStatus) {
+        pollCommandStatus(
+          res.command_id,
+          pId,
+          async (_pollData: any) => {
+            if (showToast) showToast('✓ Đã cập nhật danh bạ máy in thành công!', 'success');
+            if (fetchLanSitesData) await fetchLanSitesData();
+          },
+          (errorMsg: any) => {
+            if (showToast) showToast(`Lỗi đọc danh bạ: ${errorMsg}`, 'error');
+          },
+          '⌛ Agent đang đọc danh bạ máy in...'
+        );
+      }
+    } catch (err: any) {
+      if (showToast) showToast(`Lỗi gửi lệnh đọc danh bạ: ${err.message}`, 'error');
+    }
   };
 
+  const handleAddPublicFtp = async () => {
+    const { printerId, name, email, agentUid } = deps.publicFtpData || {};
+    if (!name || !name.trim()) {
+      if (showToast) showToast('Vui lòng nhập tên điểm scan', 'error');
+      return;
+    }
+    if (deps.setPublicFtpLoading) deps.setPublicFtpLoading(true);
+    try {
+      const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
+      const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
+      const normMac = printerObj?.mac_address || printerObj?.mac_id || printerId;
+      const creds = copierCredentials[normMac] || copierCredentials[printerId] || {};
+      const authUser = creds.user || printerObj?.auth_user || printerObj?.username || 'admin';
+      const authPass = creds.pass || printerObj?.auth_password || printerObj?.password || '';
 
-  return { executeRemoteInstallDriver, formatBytes, getDestinationStatus, handleConfirmDeleteScanPoint, handleDeleteDest, handleEditIP, handleOpenStorageFiles, handlePlaySegmentFile, handleQueryVideo, handleRemoteInstallDriver, handleSaveEditIP };
+      const extraPayload = {
+        mac_address: normMac,
+        printer_ip: printerObj?.ip || '',
+        auth_user: authUser,
+        auth_password: authPass,
+      };
+      const res = await addEmailDestination(printerId, name.trim(), email, agentUid || undefined, extraPayload);
+      if (deps.setPublicFtpLoading) deps.setPublicFtpLoading(false);
+      if (setActiveModal) setActiveModal(null);
+
+      if (!res.ok || !res.command_id) {
+        throw new Error(res.error || 'Lỗi gửi lệnh');
+      }
+
+      if (pollCommandStatus) {
+        pollCommandStatus(
+          res.command_id,
+          printerId,
+          async (_pollData: any) => {
+            if (showToast) showToast(`Đã tạo điểm scan "${name.trim()}" thành công!`, 'success');
+            handleRefetchAddressBook(printerId);
+            if (fetchLanSitesData) await fetchLanSitesData();
+          },
+          (errorMsg: any) => {
+            if (showToast) showToast(`Thêm điểm scan thất bại: ${errorMsg}`, 'error');
+          },
+          `⌛ Đang tạo điểm scan "${name.trim()}"...`
+        );
+      }
+    } catch (err: any) {
+      if (deps.setPublicFtpLoading) deps.setPublicFtpLoading(false);
+      if (showToast) showToast(`Lỗi: ${err.message}`, 'error');
+    }
+  };
+
+  const handleAddPrivateFtp = async () => {
+    const { lanUid, agentUid, email } = deps.privateFtpData || {};
+    if (!email || !email.includes('@')) {
+      if (showToast) showToast('Địa chỉ email không hợp lệ', 'error');
+      return;
+    }
+    if (deps.setPrivateFtpLoading) deps.setPrivateFtpLoading(true);
+    try {
+      const res = await addPrivateLanEmail('default', lanUid, agentUid, email);
+      if (deps.setPrivateFtpLoading) deps.setPrivateFtpLoading(false);
+      if (setActiveModal) setActiveModal(null);
+
+      if (res.ok) {
+        if (showToast) showToast('Đã thêm Private FTP thành công', 'success');
+        if (fetchLanSitesData) await fetchLanSitesData();
+      } else {
+        throw new Error(res.error || 'Lỗi server');
+      }
+    } catch (err: any) {
+      if (deps.setPrivateFtpLoading) deps.setPrivateFtpLoading(false);
+      if (showToast) showToast(`Lỗi thêm FTP riêng: ${err.message}`, 'error');
+    }
+  };
+
+  const handleEmergencyRestart = async () => {
+    if (!activeAgentUid) {
+      if (showToast) showToast('Chưa chọn Agent để khởi động lại', 'error');
+      return;
+    }
+    if (showToast) showToast(`Đang gửi lệnh khởi động lại Agent (${activeAgentUid})...`, 'info', 4000);
+    try {
+      const res = await triggerEmergencyRestart(activeAgentUid);
+      if (res.ok) {
+        if (showToast) showToast('Đã gửi lệnh khởi động lại Agent khẩn cấp!', 'success');
+        if (setActiveModal) setActiveModal(null);
+      } else {
+        throw new Error(res.error || 'Thất bại');
+      }
+    } catch (err: any) {
+      if (showToast) showToast(`Lỗi khởi động lại: ${err.message}`, 'error');
+    }
+  };
+
+  return {
+    executeRemoteInstallDriver,
+    formatBytes,
+    getDestinationStatus,
+    handleAddPrivateFtp,
+    handleAddPublicFtp,
+    handleConfirmDeleteScanPoint,
+    handleDeleteDest,
+    handleEditIP,
+    handleEmergencyRestart,
+    handleOpenStorageFiles,
+    handlePlaySegmentFile,
+    handleQueryVideo,
+    handleRefetchAddressBook,
+    handleRemoteInstallDriver,
+    handleSaveEditIP
+  };
 }
