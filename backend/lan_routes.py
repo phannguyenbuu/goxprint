@@ -354,10 +354,6 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     continue
 
                 is_on = bool(dev.get("is_online", True))
-                from active_agents_registry import LAST_LIVE_PING_IPS
-                live_set = LAST_LIVE_PING_IPS.get(p_lan) or LAST_LIVE_PING_IPS.get("default")
-                if live_set and p_ip and p_ip not in live_set:
-                    continue
 
                 printers_by_lan[p_lan].append({
                     "id": 0,
