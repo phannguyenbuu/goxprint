@@ -626,8 +626,15 @@ export const useAgentScanActions = (deps: any = {}) => {
         pollCommandStatus(
           res.command_id,
           pId,
-          async (_pollData: any) => {
+          async (pollData: any) => {
             if (showToast) showToast('✓ Đã cập nhật danh bạ máy in thành công!', 'success');
+            const resultSync = pollData?.address_book_sync || pollData?.address_book_data || pollData?.result;
+            if (resultSync && deps.setCommandStatus) {
+              deps.setCommandStatus((prev: any) => ({
+                ...prev,
+                [pId]: { ...(prev[pId] || {}), address_book_sync: resultSync, isPending: false }
+              }));
+            }
             if (fetchLanSitesData) await fetchLanSitesData();
           },
           (errorMsg: any) => {
