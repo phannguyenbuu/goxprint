@@ -314,8 +314,19 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         ram_printers_lookup[norm_mac]["_lan_uid"] = agent_info["lan_uid"] if "lan_uid" in agent_info else "default"
 
 
-            # Build printers_by_lan from real discovered printers, matching mac_id against ScanPoint VPS DB
+            # Sweep & hard-delete all ScanPoint records in PostgreSQL DB older than 3 days (72 hours)
             from models import ScanPoint
+            from sqlalchemy import delete
+            three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+            try:
+                deleted_count = session.execute(
+                    delete(ScanPoint).where(ScanPoint.updated_at < three_days_ago)
+                ).rowcount
+                if deleted_count > 0:
+                    session.commit()
+                    LOGGER.info("[ScanPoint Cleanup] Hard deleted %d ScanPoint DB rows older than 3 days from VPS DB", deleted_count)
+            except Exception as sweep_err:
+                LOGGER.warning("Error running ScanPoint 3-day hard delete sweep: %s", sweep_err)
 
             for p_mac, dev in ram_printers_lookup.items():
                 p_ip = str(dev.get("ip", "")).strip()
@@ -338,7 +349,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 if p_mac:
                     try:
                         sp_rec = session.get(ScanPoint, p_mac)
-                        if sp_rec and sp_rec.address_book_data:
+                        if sp_rec:
                             if sp_rec.updated_at:
                                 now_utc = datetime.now(timezone.utc)
                                 updated_at_utc = sp_rec.updated_at
@@ -346,13 +357,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                     updated_at_utc = updated_at_utc.replace(tzinfo=timezone.utc)
                                 age_seconds = (now_utc - updated_at_utc).total_seconds()
                                 if age_seconds < (3 * 86400):  # Less than 3 days (< 72h)
-                                    sync_data = sp_rec.address_book_data
+                                    sync_data = sp_rec.address_book_data or {}
                                 else:
-                                    # 3 days or older: clear address_book_data in DB
-                                    sp_rec.address_book_data = None
+                                    # 3 days or older: Hard delete the actual ScanPoint row from DB!
+                                    session.delete(sp_rec)
                                     session.commit()
+                                    LOGGER.info("[ScanPoint] Hard deleted ScanPoint DB row for mac_id=%s (age=%.1f days)", p_mac, age_seconds / 86400.0)
                             else:
-                                sync_data = sp_rec.address_book_data
+                                sync_data = sp_rec.address_book_data or {}
                     except Exception as db_err:
                         LOGGER.warning("Error looking up ScanPoint for mac %s: %s", p_mac, db_err)
 
