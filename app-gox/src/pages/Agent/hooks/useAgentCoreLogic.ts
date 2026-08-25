@@ -17,10 +17,8 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     return (saved === 'agents' || saved === 'copiers' || saved === 'cameras') ? saved : 'agents';
   });
 
-  // Polling / Command Status Map (key: printerId or entryRegNo, value: status message)
   const [commandStatus, setCommandStatus] = useState<Record<string, { message: string; isPending: boolean }>>({});
-  
-  // Collapsible lists
+
   const [expandedPrinters, setExpandedPrinters] = useState<Record<string, boolean>>(() => {
     try {
       const saved = localStorage.getItem('goxprint_expanded_printers');
@@ -32,14 +30,11 @@ export const useAgentCoreLogic = (deps: any = {}) => {
   const [expandedDrivers, setExpandedDrivers] = useState<Record<string, boolean>>({});
   const [expandedDriverMenus, setExpandedDriverMenus] = useState<Record<string, boolean>>({});
 
-  // Credentials input states (key: printerId)
   const [copierCredentials, setCopierCredentials] = useState<Record<string, { user: string; pass: string }>>({});
   const [saveAuthLoading, setSaveAuthLoading] = useState<Record<string, boolean>>({});
 
-  // Target Agent Select state (key: printerId, value: agentUid)
   const [selectedTargetAgents, setSelectedTargetAgents] = useState<Record<string, string>>({});
 
-  // Live (uncached) address books loaded from agents (key: printerId) - PERSISTED IN SESSIONSTORAGE & GLOBAL CACHE
   const [liveAddressBooks, setLiveAddressBooksState] = useState<Record<string, any>>(() => {
     try {
       const saved = sessionStorage.getItem('gox_live_address_books');
@@ -60,7 +55,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     });
   }, []);
 
-  // Camera States
   const [cameras, setCameras] = useState<any[]>([]);
   const [camerasLoading, setCamerasLoading] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState<any | null>(null);
@@ -90,33 +84,29 @@ export const useAgentCoreLogic = (deps: any = {}) => {
   const [recording30sCountdown, setRecording30sCountdown] = useState(30);
   const [customRecordDuration, setCustomRecordDuration] = useState(30);
 
-
   useEffect(() => {
     if (!queryVideoLoading) {
       setActiveLoadingFile(null);
     }
   }, [queryVideoLoading]);
 
-  // Register parent window dummy functions for Ricoh iframe scripts
   useEffect(() => {
     (window as any).fnGetCookie = (_name?: string) => {
       return '';
     };
     (window as any).fnSetCookie = (_name?: string, _value?: string) => {
-      // Dummy
+
     };
     (window as any).fnGetLocalestring = (_key?: string) => {
       return '';
     };
     (window as any).fnGetHelp = (_url?: string) => {
-      // Dummy
+
     };
   }, []);
 
-  // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Modals
   const [activeModal, setActiveModal] = useState<'storage' | 'public_ftp' | 'private_ftp' | 'info_detail' | 'ftp_detail' | 'utilities' | 'edit_ip' | 'remote_lock' | 'toshiba_vnc' | null>(null);
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any | null>(null);
   const [ftpDetailData, setFtpDetailData] = useState<{ port: string | number; path: string; error?: string } | null>(null);
@@ -172,15 +162,13 @@ export const useAgentCoreLogic = (deps: any = {}) => {
   const modalContentRef = useRef<any>(null);
   const autoScanTriggers = useRef<Record<string, number>>({});
 
-
   const [editIpModalData, setEditIpModalData] = useState<{
     printerId: string;
     entry: any;
     currentIp: string;
     newIp: string;
   } | null>(null);
-  
-  // Custom Confirm Modal state
+
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -223,7 +211,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     selectedAgentUids: [],
   });
 
-  // IP Input Modal state
   const [ipInputModal, setIpInputModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -244,24 +231,18 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     onConfirm: () => {},
   });
 
-
-  // Storage Modal states
   const [storageModalData, setStorageModalData] = useState<{ lanUid: string; email: string }>({ lanUid: '', email: '' });
   const [storageFiles, setStorageFiles] = useState<any[]>([]);
   const [storageLoading, setStorageLoading] = useState(false);
 
-  // Add Public FTP states
   const [publicFtpData, setPublicFtpData] = useState<{ printerId: string; name: string; email: string; agentUid: string }>({ printerId: '', name: '', email: '', agentUid: '' });
   const [publicFtpLoading, setPublicFtpLoading] = useState(false);
 
-  // Add Private FTP states
   const [privateFtpData, setPrivateFtpData] = useState<{ lanUid: string; agentUid: string; email: string }>({ lanUid: '', agentUid: '', email: '' });
   const [privateFtpLoading, setPrivateFtpLoading] = useState(false);
 
-  // Info Detail states
   const [infoDetailData] = useState<{ regNo: string; name: string; details: any; error?: string }>({ regNo: '', name: '', details: null });
 
-  // 📋 Scan Points Viewer Modal State
   const [scanPointsViewerModal, setScanPointsViewerModal] = useState<{
     isOpen: boolean;
     copierName: string;
@@ -321,12 +302,10 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-  // Scroll and tracking references
   const [initialLastViewedId] = useState<string>(() => {
     return localStorage.getItem('goxprint_last_viewed_copier_id') || '';
   });
 
-  // ── LOCAL STORAGE SYNC ──
   useEffect(() => {
     localStorage.setItem('goxprint_active_tab', activeTab);
   }, [activeTab]);
@@ -335,7 +314,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     localStorage.setItem('goxprint_expanded_printers', JSON.stringify(expandedPrinters));
   }, [expandedPrinters]);
 
-  // ── TOAST HELPER ──
   const showToast = useCallback((message: string, type: Toast['type'] = 'info', duration = 5000) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -346,7 +324,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   }, []);
 
-  // Replace a toast by fixed ID — removes old one first, then adds new
   const replaceToast = useCallback((fixedId: string, message: string, type: Toast['type'] = 'info') => {
     setToasts((prev) => [
       ...prev.filter((t) => t.id !== fixedId),
@@ -363,16 +340,16 @@ export const useAgentCoreLogic = (deps: any = {}) => {
         return relative;
       }
     }
-    
+
     if (relative.startsWith('/')) {
       return relative;
     }
-    
+
     const baseClean = current.split('?')[0];
     const parts = baseClean.split('/');
-    parts.pop(); // remove filename
+    parts.pop(); 
     const baseDir = parts.join('/');
-    
+
     const resolved = baseDir + '/' + relative;
     try {
       const urlObj = new URL(resolved, 'http://localhost');
@@ -399,12 +376,11 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
 
     if (directLan) {
-      // Direct LAN mode: Open directly in a new tab immediately
+
       window.open(`http://${printerIp}:${printerPort}${targetPath || '/'}`, '_blank');
       return;
     }
 
-    // Tunnel mode: Open both loading tabs immediately to bypass browser popup blocker
     const createLoaderHtml = (title: string, desc: string) => `
       <html>
         <head>
@@ -473,407 +449,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-  /* const fetchRemotePageOld = async (
-    printerIp: string,
-    targetPath: string,
-    method: string = 'GET',
-    postData?: any,
-    isHistoryNav: boolean = false,
-    agentUidParam?: string
-  ) => {
-    const activeAgentUid = agentUidParam || webPreviewModal?.agentUid;
-    if (!activeAgentUid) {
-      console.error('No agent UID available for remote page fetch');
-      return;
-    }
-    
-    setWebPreviewModal(prev => {
-      const isFirstLoad = !prev || prev.html === 'LOADING';
-      return {
-        isOpen: true,
-        title: prev?.title || ('Web Image Monitor - ' + printerIp),
-        html: isFirstLoad ? 'LOADING' : prev.html,
-        ip: printerIp,
-        path: targetPath,
-        agentUid: activeAgentUid
-      };
-    });
-    if (directLan) {
-      setWebPreviewModal(prev => {
-        return {
-          isOpen: true,
-          title: prev?.title || ('Web Image Monitor (LAN) - ' + printerIp),
-          html: 'DIRECT_LAN',
-          ip: printerIp,
-          path: targetPath,
-          agentUid: activeAgentUid
-        };
-      });
-      setWebPreviewLoading(false);
-      return;
-    }
-
-    setWebPreviewLoading(true);
-
-    try {
-      const base64Data = postData ? btoa(JSON.stringify(postData)) : '';
-      const script = `target_ip = '${printerIp}'\ntarget_path = '${targetPath}'\ntarget_method = '${method}'\ntarget_data = '${base64Data}'`;
-      
-      const res: any = await triggerAgentUtilityExec(activeAgentUid, 'open_web_setting', script);
-      if (!res.ok || !res.command_id) {
-        setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${res.error || 'Không thể tạo lệnh tiện ích'}` } : null);
-        setWebPreviewLoading(false);
-        return;
-      }
-
-      const commandId = res.command_id;
-      const maxPollMs = 60000;
-      const startTime = Date.now();
-      
-      const pollTimer = setInterval(async () => {
-        try {
-          const elapsed = Date.now() - startTime;
-          if (elapsed > maxPollMs) {
-            clearInterval(pollTimer);
-            setWebPreviewModal(prev => prev ? { ...prev, html: 'ERROR: Yêu cầu quá thời gian chờ (60s)' } : null);
-            return;
-          }
-
-          const statusRes = await getCommandStatus(commandId);
-          if (statusRes.status === 'success') {
-            clearInterval(pollTimer);
-            let parsedRes: any = {};
-            try {
-              let raw = statusRes.result_payload || statusRes.error || '';
-              if (typeof raw === 'string') {
-                raw = raw.trim();
-                if (raw.startsWith('"') && raw.endsWith('"')) {
-                  try {
-                    raw = JSON.parse(raw);
-                  } catch {}
-                }
-                parsedRes = JSON.parse(raw);
-              } else {
-                parsedRes = raw;
-              }
-            } catch (parseErr) {
-              parsedRes = { error: 'Lỗi parse JSON: ' + (statusRes.result_payload || statusRes.error) };
-            }
-
-            if (parsedRes.html) {
-              let rawHtml = parsedRes.html;
-              const returnedPath = parsedRes.path || targetPath;
-
-              let preparedHtml = rawHtml;
-
-              // 1. Strip render-blocking stylesheets and external scripts to prevent the browser from freezing on unreachable IP assets
-              preparedHtml = preparedHtml.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
-              preparedHtml = preparedHtml.replace(/<script[^>]*src=[^>]*><\/script>/gi, '');
-              preparedHtml = preparedHtml.replace(/<script[^>]*src=[^>]*\s*\/>/gi, '');
-
-              // 2. Insert base tag, CDN jQuery, and top-level fallbacks to prevent ReferenceErrors from executing inline scripts early
-              const fallbacks = `
-                <script>
-                  // Toshiba fallbacks
-                  window.fnGetLocaleString = window.fnGetLocaleString || function(id, defaultVal) { return defaultVal || id || ""; };
-                  window.fnGetResolveLocaleForDisplay = window.fnGetResolveLocaleForDisplay || function(id, defaultVal) { return defaultVal || id || ""; };
-                  window.fnGetResolveLocale = window.fnGetResolveLocale || function(id, defaultVal) { return defaultVal || id || ""; };
-                  window.fnGetLocale = window.fnGetLocale || function(id, defaultVal) { return defaultVal || id || ""; };
-                  window.InitiateServerRequest = window.InitiateServerRequest || function() {};
-
-                  // Ricoh fallbacks
-                  window.mouseOverTransfer = window.mouseOverTransfer || function() {};
-                  window.mouseOutTransfer = window.mouseOutTransfer || function() {};
-                  window.menuParent_Mouseover = window.menuParent_Mouseover || function() {};
-                  window.menuParent_Mouseout = window.menuParent_Mouseout || function() {};
-                  window.menuChild_Mouseover = window.menuChild_Mouseover || function() {};
-                  window.menuChild_Mouseout = window.menuChild_Mouseout || function() {};
-
-                  // Override navigation functions
-                  window.wsMenu_jumpUrl = window.wsMenu_jumpurl = window.wsMenu_jumpURL = function(url) {
-                    window.parent.postMessage({
-                      type: 'iframe_navigate',
-                      href: url,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      target: '_self'
-                    }, '*');
-                  };
-                  window.jumpTo = function(url) {
-                    window.parent.postMessage({
-                      type: 'iframe_navigate',
-                      href: url,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      target: '_self'
-                    }, '*');
-                  };
-                </script>
-              `;
-              const jqueryCdn = `<script src="https://code.jquery.com/jquery-1.4.4.min.js"></script>`;
-              const baseTag = `<base href="http://${printerIp}/">${jqueryCdn}${fallbacks}`;
-              if (/<head[^>]*>/i.test(preparedHtml)) {
-                preparedHtml = preparedHtml.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
-              } else {
-                preparedHtml = `${baseTag}${preparedHtml}`;
-              }
-
-              const customStyle = `
-                <style>
-                  body {
-                    font-family: system-ui, -apple-system, sans-serif;
-                    color: #1e293b;
-                    background-color: #f8fafc;
-                    margin: 20px;
-                    line-height: 1.5;
-                  }
-                  a {
-                    color: #2563eb;
-                    text-decoration: none;
-                    font-weight: 500;
-                  }
-                  a:hover {
-                    text-decoration: underline;
-                  }
-                  ul {
-                    padding-left: 20px;
-                  }
-                  li {
-                    margin-bottom: 6px;
-                  }
-                  table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin: 15px 0;
-                    background: white;
-                    border-radius: 8px;
-                    overflow: hidden;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-                  }
-                  th, td {
-                    padding: 10px 14px;
-                    border: 1px solid #e2e8f0;
-                    text-align: left;
-                  }
-                  th {
-                    background-color: #f1f5f9;
-                    font-weight: 600;
-                  }
-                  input[type="text"], input[type="password"], select, textarea {
-                    padding: 8px 12px;
-                    border: 1px solid #cbd5e1;
-                    border-radius: 6px;
-                    font-size: 0.9rem;
-                    background: white;
-                  }
-                  input[type="submit"], input[type="button"], button {
-                    background-color: #2563eb;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 6px;
-                    font-weight: 500;
-                    cursor: pointer;
-                  }
-                  input[type="submit"]:hover, button:hover {
-                    background-color: #1d4ed8;
-                  }
-                  #shortcutlink, #topwrap form, select[name="language"], input[name="switch"] {
-                    display: inline-block;
-                    margin-right: 10px;
-                  }
-                  #sideColumn ul {
-                    list-style: none;
-                    padding: 0;
-                    margin: 0;
-                  }
-                  #sideColumn > div > ul > li {
-                    background: #e2e8f0;
-                    margin-bottom: 10px;
-                    padding: 10px;
-                    border-radius: 8px;
-                    font-weight: bold;
-                  }
-                  #sideColumn .submenu {
-                    font-weight: normal;
-                    margin-top: 6px;
-                    padding-left: 10px;
-                    background: #f1f5f9;
-                    border-radius: 6px;
-                    padding: 6px;
-                  }
-                  #sideColumn .submenu li {
-                    margin: 4px 0;
-                  }
-                  .display-n {
-                    display: block !important;
-                  }
-                </style>
-              `;
-
-              if (preparedHtml.includes('</head>')) {
-                preparedHtml = preparedHtml.replace('</head>', `${customStyle}</head>`);
-              } else {
-                preparedHtml = customStyle + preparedHtml;
-              }
-
-              const injectScript = `
-                <script>
-                (function() {
-                  // Register dummy fallback locale functions for Toshiba printers
-                  window.fnGetLocaleString = window.fnGetLocaleString || function(id, defaultVal) {
-                    return defaultVal || id || "";
-                  };
-                  window.fnGetResolveLocaleForDisplay = window.fnGetResolveLocaleForDisplay || function(id, defaultVal) {
-                    return defaultVal || id || "";
-                  };
-                  window.fnGetResolveLocale = window.fnGetResolveLocale || function(id, defaultVal) {
-                    return defaultVal || id || "";
-                  };
-                  window.fnGetLocale = window.fnGetLocale || function(id, defaultVal) {
-                    return defaultVal || id || "";
-                  };
-
-                  // Register dummy fallback menu/hover functions for Ricoh printers
-                  window.mouseOverTransfer = window.mouseOverTransfer || function() {};
-                  window.mouseOutTransfer = window.mouseOutTransfer || function() {};
-                  window.menuParent_Mouseover = window.menuParent_Mouseover || function() {};
-                  window.menuParent_Mouseout = window.menuParent_Mouseout || function() {};
-                  window.menuChild_Mouseover = window.menuChild_Mouseover || function() {};
-                  window.menuChild_Mouseout = window.menuChild_Mouseout || function() {};
-
-                  // Redefine Ricoh menu navigation functions
-                  window.wsMenu_jumpUrl = window.wsMenu_jumpurl = window.wsMenu_jumpURL = function(url) {
-                    window.parent.postMessage({
-                      type: 'iframe_navigate',
-                      href: url,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      target: '_self'
-                    }, '*');
-                  };
-                  window.jumpTo = function(url) {
-                    window.parent.postMessage({
-                      type: 'iframe_navigate',
-                      href: url,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      target: '_self'
-                    }, '*');
-                  };
-
-                  // Intercept anchor clicks
-                  document.addEventListener('click', function(e) {
-                    var anchor = e.target.closest('a');
-                    if (anchor) {
-                      var href = anchor.getAttribute('href');
-                      if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
-                        if (href.startsWith('http') && !href.includes('${printerIp}')) {
-                          return;
-                        }
-                        e.preventDefault();
-                        window.parent.postMessage({
-                          type: 'iframe_navigate',
-                          href: href,
-                          currentPath: ${JSON.stringify(returnedPath)},
-                          target: anchor.getAttribute('target') || '_self'
-                        }, '*');
-                      }
-                    }
-                  }, true);
-
-                  // Intercept standard form submit events
-                  document.addEventListener('submit', function(e) {
-                    var form = e.target;
-                    var action = form.getAttribute('action') || '';
-                    e.preventDefault();
-                    
-                    var formData = {};
-                    var inputs = form.querySelectorAll('input, select, textarea');
-                    inputs.forEach(function(input) {
-                      if (input.name) {
-                        if (input.type === 'checkbox' || input.type === 'radio') {
-                          if (input.checked) {
-                            formData[input.name] = input.value;
-                          }
-                        } else {
-                          formData[input.name] = input.value;
-                        }
-                      }
-                    });
-
-                    window.parent.postMessage({
-                      type: 'iframe_submit',
-                      action: action,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      formData: formData,
-                      target: form.getAttribute('target') || '_self'
-                    }, '*');
-                  }, true);
-
-                  // Intercept programmatic form.submit() calls
-                  var originalSubmit = HTMLFormElement.prototype.submit;
-                  HTMLFormElement.prototype.submit = function() {
-                    var form = this;
-                    var action = form.getAttribute('action') || '';
-                    
-                    var formData = {};
-                    var inputs = form.querySelectorAll('input, select, textarea');
-                    inputs.forEach(function(input) {
-                      if (input.name) {
-                        if (input.type === 'checkbox' || input.type === 'radio') {
-                          if (input.checked) {
-                            formData[input.name] = input.value;
-                          }
-                        } else {
-                          formData[input.name] = input.value;
-                        }
-                      }
-                    });
-
-                    window.parent.postMessage({
-                      type: 'iframe_submit',
-                      action: action,
-                      currentPath: ${JSON.stringify(returnedPath)},
-                      formData: formData,
-                      target: form.getAttribute('target') || '_self'
-                    }, '*');
-                  };
-                })();
-                </script>
-              `;
-
-              if (preparedHtml.includes('</body>')) {
-                preparedHtml = preparedHtml.replace('</body>', `${injectScript}</body>`);
-              } else {
-                preparedHtml += injectScript;
-              }
-
-              if (!isHistoryNav) {
-                const newHistory = webPreviewHistory.slice(0, webPreviewHistoryIndex + 1);
-                newHistory.push(returnedPath);
-                setWebPreviewHistory(newHistory);
-                setWebPreviewHistoryIndex(newHistory.length - 1);
-              }
-
-              setWebPreviewModal(prev => prev ? { ...prev, html: preparedHtml, path: returnedPath } : null);
-              setWebPreviewLoading(false);
-            } else {
-              setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${parsedRes.error || 'Agent không trả về HTML'}` } : null);
-              setWebPreviewLoading(false);
-            }
-          } else if (statusRes.status === 'failed' || !statusRes.ok) {
-            clearInterval(pollTimer);
-            setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${statusRes.error || 'Lệnh thất bại từ Agent'}` } : null);
-            setWebPreviewLoading(false);
-          }
-        } catch (pollErr: any) {
-          console.error('Poll error:', pollErr);
-        }
-      }, 1500);
-
-    } catch (err: any) {
-      setWebPreviewModal(prev => prev ? { ...prev, html: `ERROR: ${err.message}` } : null);
-      setWebPreviewLoading(false);
-    }
-  }; */
-
   const handleHistoryBack = () => {
     if (webPreviewHistoryIndex > 0 && webPreviewModal) {
       const prevIdx = webPreviewHistoryIndex - 1;
@@ -897,7 +472,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
         setWebPreviewModal(prev => prev ? { ...prev, html: 'DIRECT_LAN' } : null);
         setWebPreviewLoading(false);
       } else {
-        // Trigger a fresh remote page fetch via Agent
+
         fetchRemotePage(webPreviewModal.ip, webPreviewModal.path, 'GET', undefined, false, webPreviewModal.agentUid);
       }
     }
@@ -949,7 +524,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   }, [webPreviewModal?.html]);
 
-  // Apply scaling to iframe content
   useEffect(() => {
     const applyScaling = () => {
       try {
@@ -957,7 +531,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
         if (!iframe) return;
         const doc = iframe.contentDocument || iframe.contentWindow?.document;
         if (doc && doc.body) {
-          // Reset html and body height constraints to let them grow dynamically to fit the full content height, avoiding cutoffs
+
           doc.documentElement.style.height = 'auto';
           doc.body.style.height = 'auto';
           doc.body.style.minHeight = '100%';
@@ -985,14 +559,12 @@ export const useAgentCoreLogic = (deps: any = {}) => {
 
   const prevAgentIpsRef = useRef<Record<string, string>>({});
 
-  // ── FETCH DATA ──
   const fetchLanSitesData = useCallback(async (showLoader = false) => {
     if (showLoader) setLanSitesLoading(true);
     try {
       const data = await getLanSites();
       setLanSites(data);
 
-      // Check for Agent IP changes to show Toast & log to Jobs
       if (Array.isArray(data)) {
         data.forEach((site: any) => {
           const agents = site.agents || site.nodes || [];
@@ -1023,7 +595,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
                     }).catch(() => {});
                   } catch (e) {}
 
-                  // Iterate over printers in this site to trigger change_ftp commands
                   const printers = site.printers || [];
                   const cleanHost = (val: string) => {
                     if (!val) return "";
@@ -1066,7 +637,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
                       }
 
                       console.log(`🚀 [AUTO TRIGGER ${cmdName.toUpperCase()}] Printer: ${printerIp}, Target ID: ${targetId}, Name: ${targetName}, IP: ${prevIp} -> ${currentIp}`);
-                      
+
                       triggerAgentUtilityExec(uid, cmdName, "", {
                         printer_ip: printerIp,
                         auth_user: authUser,
@@ -1089,16 +660,15 @@ export const useAgentCoreLogic = (deps: any = {}) => {
           }
         });
       }
-      // console.log("🌐 [LAN SITES DATA RECEIVED FROM VPS]:", data);
+
       if (data && data.length > 0) {
-        // console.log("🖨️ [PRINTERS IN SELECTED LAN]:", data[0].printers);
+
       }
-      
-      // Auto select first LAN only if none selected or current selection becomes invalid
+
       if (data.length > 0) {
         setSelectedLanUid((prev) => {
           const isCurrentValid = prev && data.some(site => site.lan_uid === prev);
-          if (isCurrentValid) return prev; // Don't overwrite user's current selection
+          if (isCurrentValid) return prev; 
           const savedLanUid = localStorage.getItem('goxprint_selected_lan_uid');
           const isValidSaved = savedLanUid && data.some(site => site.lan_uid === savedLanUid);
           if (isValidSaved) return savedLanUid;
@@ -1122,7 +692,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     return () => clearInterval(timer);
   }, [fetchLanSitesData]);
 
-  // 2s Background Polling for Agent IP Changes
   useEffect(() => {
     const ipCheckTimer = setInterval(async () => {
       try {
@@ -1139,7 +708,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
             const referenceIp = item.reference_ip;
             const currentIp = item.current_ip;
 
-            // Trigger exec to query local IP from agent every 2s
             if (agentUid) {
               fetch(`${BASE_URL}/api/agents/${agentUid}/utility/exec?lead=default`, {
                 method: 'POST',
@@ -1155,11 +723,9 @@ export const useAgentCoreLogic = (deps: any = {}) => {
               }).catch(() => {});
             }
 
-            // Compare running IP with VPS database IPDatas table referenceIp
             if (referenceIp && currentIp && currentIp !== referenceIp) {
               showToast(`Cảnh báo: Agent [${agentName}] đã thay đổi IP từ [${referenceIp}] sang [${currentIp}]!`, 'warning');
 
-              // Save the new IP back to VPS database (IPDatas table)
               fetch(`${BASE_URL}/api/agent-ips/save`, {
                 method: 'POST',
                 headers: { 
@@ -1202,7 +768,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   }, [showToast]);
 
-  // Computed active LAN
   const selectedLan = useMemo(() => {
     return lanSites.find((site) => site.lan_uid === selectedLanUid);
   }, [lanSites, selectedLanUid]);
@@ -1245,7 +810,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     });
   }, [activeAgentUid]);
 
-  // ── POLLING COMMAND STATUS ──
   const pollCommandStatus = useCallback((
     commandId: number,
     targetKey: string,
@@ -1328,7 +892,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     const now = Date.now();
     if (!autoScanTriggers.current[selectedLanUid] || now - autoScanTriggers.current[selectedLanUid] > 3 * 60 * 1000) {
       autoScanTriggers.current[selectedLanUid] = now;
-      
+
       const activeAgentsList = (lanData.agents || []).filter((a: any) => a.is_agent_active);
       if (activeAgentsList.length > 0) {
         activeAgentsList.sort((a: any, b: any) => {
@@ -1365,7 +929,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
                           console.log('[DEBUG_LAN_SCAN] pollData received from LAN scan:', pollData);
                           let freshPrinters: any[] = [];
                           const rawRes = pollData?.result || pollData?.result_payload || pollData?.output || pollData?.error_message || pollData?.raw || '';
-                          
+
                           if (Array.isArray(rawRes)) {
                               freshPrinters = rawRes;
                           } else if (typeof rawRes === 'string') {
@@ -1377,7 +941,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
                                   } catch (e) {}
                               }
                           }
-                          
+
                           if (freshPrinters.length > 0) {
                               showToast(`✓ Quét mạng LAN hoàn tất, tìm thấy ${freshPrinters.length} máy in!`, 'success', 4000);
                               try {
@@ -1442,7 +1006,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     return printer.agent_uid || '';
   }, [selectedLan, selectedTargetAgents]);
 
-  // State to store scan file counts for each private email destination on VPS
   const [emailFileCounts, setEmailFileCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -1450,12 +1013,12 @@ export const useAgentCoreLogic = (deps: any = {}) => {
       setEmailFileCounts({});
       return;
     }
-    
+
     let isMounted = true;
     const fetchCounts = async () => {
       const counts: Record<string, number> = {};
       const privateEmails = selectedLan.emails.filter(e => e.email_type === 'private');
-      
+
       await Promise.all(
         privateEmails.map(async (em) => {
           try {
@@ -1479,14 +1042,13 @@ export const useAgentCoreLogic = (deps: any = {}) => {
         setEmailFileCounts(counts);
       }
     };
-    
+
     fetchCounts();
     return () => {
       isMounted = false;
     };
   }, [selectedLan]);
 
-  // Agent utilities states
   const [scanAutoOpenFile, setScanAutoOpenFile] = useState(true);
   const [scanAutoOpenDir, setScanAutoOpenDir] = useState(true);
   const [utilitySettingsLoading, setUtilitySettingsLoading] = useState(false);
@@ -1639,7 +1201,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     if (!agent) return;
     setUtilitySettingsLoading(true);
     setUtilityStatusMsg(null);
-    
+
     try {
       const data = await getAgentSettings(agent.agent_uid);
       if (data.ok) {
@@ -1668,7 +1230,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
   const handleToggleSetting = useCallback(async (key: 'scan_auto_open_file' | 'scan_auto_open_dir', currentValue: boolean) => {
     if (!selectedUtilityAgent) return;
     const nextValue = !currentValue;
-    
+
     // Optimistic update
     if (key === 'scan_auto_open_file') {
       setScanAutoOpenFile(nextValue);
@@ -1717,18 +1279,18 @@ export const useAgentCoreLogic = (deps: any = {}) => {
 
     setUtilityActionPending(action);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
-    
+
     try {
       const res = await triggerAgentUtility(selectedUtilityAgent.agent_uid, backendAction, payload);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
       }
-      
+
       const commandId = res.command_id;
       const maxPollMs = 60000;
       const pollInterval = 1000;
       const startTime = Date.now();
-      
+
       const timer = setInterval(async () => {
         try {
           const elapsed = Date.now() - startTime;
@@ -1738,7 +1300,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
             setUtilityActionPending(null);
             return;
           }
-          
+
           const statusRes = await getCommandStatus(commandId);
           if (statusRes.status === 'success') {
             clearInterval(timer);
@@ -1760,7 +1322,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
           console.error('Error polling utility status:', pollErr);
         }
       }, pollInterval);
-      
+
     } catch (err: any) {
       console.error(`Failed to trigger ${action}:`, err);
       setUtilityStatusMsg({
@@ -1782,7 +1344,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
       showToast('Yêu cầu chạy script/lệnh này đang chờ phản hồi từ Agent!', 'info');
       return;
     }
-    
+
     // Find cmd in local state utilityCommands
     const cmdObj = utilityCommands.find(c => c.command === command);
     const isOutputModal = cmdObj?.output_modal || VIEW_COMMANDS.has(command);
@@ -1792,7 +1354,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
       const isChangeIp = command === 'change_agent_ip';
       const currentIp = selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '';
-      
+
       // Open IP input modal immediately without blocking
       setIpInputModal({
         isOpen: true,
@@ -2138,7 +1700,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   }, [selectedLan]);
 
-  // ── SAVE AUTH (WEB CREDENTIALS) ──
   const handleSaveAuth = async (p: any) => {
     const printerId = String(typeof p === 'object' ? p.id : p);
     const macId = typeof p === 'object' ? (p.mac_id || p.mac_address || '') : printerId;
@@ -2224,7 +1785,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-  // ── REFECTH / SYNC ADDRESS BOOK ──
   const handleRefetchAddressBook = async (pTarget: any) => {
     const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
     const pObj = (typeof pTarget === 'object' && pTarget !== null)
@@ -2244,7 +1804,7 @@ export const useAgentCoreLogic = (deps: any = {}) => {
 
     const targetAgent = getTargetAgentUid(printerId) || getTargetAgentUid(printerIp) || getTargetAgentUid(macAddr);
     showToast('Bắt đầu gửi yêu cầu đồng bộ danh bạ máy in...', 'info', 3000);
-    
+
     const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
     if (normMac) {
       setLiveAddressBooks((prev) => ({ ...prev, [normMac]: { status: 'loading', address_list: [] } }));
@@ -2305,9 +1865,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-
-
-  // ── ADD PUBLIC FTP ──
   const handleAddPublicFtp = async () => {
     const { printerId, name, email, agentUid } = publicFtpData;
     if (!name || !name.trim()) {
@@ -2380,7 +1937,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-  // ── ADD PRIVATE FTP ──
   const handleAddPrivateFtp = async () => {
     const { lanUid, agentUid, email } = privateFtpData;
     if (!email || !email.includes('@')) {
@@ -2405,7 +1961,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }
   };
 
-  // ── CAMERA HANDLERS ──
   const fetchCameraStatus = async (agentUid: string, cameraId: number) => {
     try {
       const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/status`, { method: 'POST' });
@@ -2429,10 +1984,9 @@ export const useAgentCoreLogic = (deps: any = {}) => {
         setCameraFiles(data.files || []);
       }
     } catch (err) {
-      // silent fail
+
     }
   };
-
 
   return { VIEW_COMMANDS, activeAgentUid, activeLoadingFile, activeModal, activeTab, allocatedVncAddr, autoScanTriggers, cameraFiles, cameraForm, cameraLogs, cameraStatus, cameraTestLoading, cameraTestResult, cameras, camerasLoading, commandStatus, confirmModal, copierCredentials, customRecordDuration, customRunCommand, deleteScanPointModal, detectBrand, directLan, editIpModalData, editableSettingsText, emailFileCounts, expandedDriverMenus, expandedDrivers, expandedPrinters, fetchCameraFiles, fetchCameraStatus, fetchCameras, fetchLanSitesData, fetchRemotePage, filteredPrinters, formatJsonText, ftpDetailData, getLiveQueryTimestamp, getTargetAgentUid, handleAddPrivateFtp, handleAddPublicFtp, handleCloseWebPreview, handleCopierClick, handleEmergencyRestart, handleHistoryBack, handleHistoryForward, handleRefetchAddressBook, handleSaveAuth, handleSaveSettings, handleToggleDirectLan, handleToggleSetting, handleTriggerUtility, handleTriggerUtilityExec, handleViewScanPointsJson, installDriverModal, ipInputModal, isDuplicatePending, isRecording30s, isSavingSettings, lanSites, lanSitesLoading, liveAddressBooks, loadUtilitySettings, lockAspect, modalContentRef, onlineAgents, pollCommandStatus, previewBlobUrl, previewIframeRef, privateFtpData, privateFtpLoading, publicFtpData, publicFtpLoading, queriedVideoUrl, queryDuration, queryTimestamp, queryVideoLoading, recording30sCountdown, remoteLockPrinter, replaceToast, resolveRelativePath, saveAuthLoading, saveScanPointToDb, scaleX, scaleY, scanAutoOpenDir, scanAutoOpenFile, scanPointsViewerModal, selectedCamera, selectedCameraAgentUid, selectedLan, selectedLanUid, selectedTargetAgents, selectedUtilityAgent, setActiveLoadingFile, setActiveModal, setActiveTab, setAllocatedVncAddr, setCameraFiles, setCameraForm, setCameraLogs, setCameraStatus, setCameraTestLoading, setCameraTestResult, setCameras, setCamerasLoading, setCommandStatus, setConfirmModal, setCopierCredentials, setCustomRecordDuration, setCustomRunCommand, setDeleteScanPointModal, setDirectLan, setEditIpModalData, setEditableSettingsText, setEmailFileCounts, setExpandedDriverMenus, setExpandedDrivers, setExpandedPrinters, setFtpDetailData, setInstallDriverModal, setIpInputModal, setIsRecording30s, setIsSavingSettings, setLanSites, setLanSitesLoading, setLiveAddressBooks, setLockAspect, setPreviewBlobUrl, setPrivateFtpData, setPrivateFtpLoading, setPublicFtpData, setPublicFtpLoading, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setRecording30sCountdown, setRemoteLockPrinter, setSaveAuthLoading, setScaleX, setScaleY, setScanAutoOpenDir, setScanAutoOpenFile, setScanPointsViewerModal, setSelectedCamera, setSelectedCameraAgentUid, setSelectedLanUid, setSelectedTargetAgents, setSelectedUtilityAgent, setSettingsSaveStatus, setShowPreviewDetails, setShowSettings, setStorageFiles, setStorageLoading, setStorageModalData, setToasts, setToshibaVncData, setUtilityActionPending, setUtilityCommands, setUtilityCommandsLoading, setUtilitySettingsLoading, setUtilityStatusMsg, setViewOutputModal, setVncTunnelLoading, setWebPreviewHistory, setWebPreviewHistoryIndex, setWebPreviewLoading, setWebPreviewModal, setWebPreviewTab, settingsSaveStatus, showPreviewDetails, showSettings, showToast, storageFiles, storageLoading, storageModalData, toasts, toshibaVncData, triggerLanScan, utilityActionPending, utilityCommands, utilityCommandsLoading, utilitySettingsLoading, utilityStatusMsg, viewOutputModal, vncTunnelLoading, webPreviewHistory, webPreviewHistoryIndex, webPreviewLoading, webPreviewModal, webPreviewTab };
 }
