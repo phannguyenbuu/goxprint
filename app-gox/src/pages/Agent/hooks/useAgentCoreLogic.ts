@@ -15,6 +15,8 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     }, duration);
   }, []);
 
+  const [activeTab, setActiveTab] = useState<'agents' | 'copiers' | 'cameras'>('copiers');
+
   const [commandStatus, setCommandStatus] = useState<Record<string, { message: string; isPending: boolean }>>({});
 
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -113,8 +115,6 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     pollCommandStatus: utility.pollCommandStatus,
     setViewOutputModal
   });
-
-  const [activeTab, setActiveTab] = useState<'agents' | 'copiers' | 'cameras'>('copiers');
 
   return {
     toasts,
