@@ -153,6 +153,33 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
 
     return None
 
+def _resolve_copier_auth(session, printer, body: dict = None) -> tuple[str, str]:
+    from models import PrinterAuthCredential
+    if body is None:
+        body = {}
+    mac = _normalize_mac(printer.mac_address if printer else (body.get("mac_address") or body.get("mac_id") or "")) or ""
+    ip = (printer.ip if printer else (body.get("printer_ip") or body.get("ip") or "")).strip()
+
+    cred = None
+    if mac:
+        cred = session.query(PrinterAuthCredential).filter(
+            func.upper(PrinterAuthCredential.mac_address) == mac.upper()
+        ).first()
+    if not cred and ip and ip != "0.0.0.0":
+        cred = session.query(PrinterAuthCredential).filter(
+            PrinterAuthCredential.ip == ip
+        ).first()
+
+    if cred and cred.auth_user:
+        return (cred.auth_user.strip(), (cred.auth_password or "").strip())
+
+    if printer and printer.auth_user:
+        return (printer.auth_user.strip(), (printer.auth_password or "").strip())
+
+    user = str(body.get("auth_user") or body.get("user") or "admin").strip()
+    pwd = str(body.get("auth_password") or body.get("password") or "").strip()
+    return (user, pwd)
+
 
 def _resolve_target_agent_uid(session: Any, printer: Printer | None, req_agent_uid: str, mac_address: str = "") -> str:
     agent_uid = req_agent_uid.strip()
@@ -411,10 +438,7 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             if not printer_ip_val or printer_ip_val == "0.0.0.0":
                 return jsonify({"ok": False, "error": "Thiếu thông tin IP máy in hợp lệ. Vui lòng chọn máy in cụ thể."}), 400
             printer_enabled_val = printer.enabled if printer else True
-            printer_auth_user_val = (printer.auth_user if (printer and printer.auth_user) else str(body.get("auth_user") or "")).strip()
-            printer_auth_pass_val = (printer.auth_password if (printer and printer.auth_password) else str(body.get("auth_password") or "")).strip()
-            if not printer_auth_user_val:
-                printer_auth_user_val = "admin"
+            printer_auth_user_val, printer_auth_pass_val = _resolve_copier_auth(session, printer, body)
 
             target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
 
@@ -850,10 +874,7 @@ verify_auth()
                 frontend_ip = ""
             printer_ip_val = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or "0.0.0.0"
             printer_enabled_val = printer.enabled if printer else True
-            printer_auth_user_val = (printer.auth_user if (printer and printer.auth_user) else str(body.get("auth_user") or "")).strip()
-            printer_auth_pass_val = (printer.auth_password if (printer and printer.auth_password) else str(body.get("auth_password") or "")).strip()
-            if not printer_auth_user_val:
-                printer_auth_user_val = "admin"
+            printer_auth_user_val, printer_auth_pass_val = _resolve_copier_auth(session, printer, body)
 
             target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
 
@@ -1001,10 +1022,7 @@ verify_auth()
             if frontend_ip == "0.0.0.0":
                 frontend_ip = ""
             effective_ip = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or "0.0.0.0"
-            printer_user_val = (printer.auth_user if (printer and printer.auth_user) else str(body.get("auth_user") or "")).strip()
-            printer_pass_val = (printer.auth_password if (printer and printer.auth_password) else str(body.get("auth_password") or "")).strip()
-            if not printer_user_val:
-                printer_user_val = "admin"
+            printer_user_val, printer_pass_val = _resolve_copier_auth(session, printer, body)
 
             is_toshiba = (
                 (printer and (getattr(printer, 'printer_type', '') == 'toshiba' or 'toshiba' in (printer.printer_name or '').lower() or 'e-studio' in (printer.printer_name or '').lower())) or
@@ -1140,6 +1158,7 @@ verify_auth()
                 req_agent_uid = request.args.get("agent_uid", "").strip() or body.get("agent_uid", "").strip()
                 target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
+                del_user, del_pass = _resolve_copier_auth(session, printer, body)
                 cmd_params_dict = {
                     "registration_no": registration_no,
                     "name": name,
@@ -1151,6 +1170,8 @@ verify_auth()
                     "ip": printer.ip or ip,
                     "mac_address": printer_mac_value,
                     "printer_mac_id": printer_mac_value,
+                    "auth_user": del_user,
+                    "auth_password": del_pass,
                 }
 
                 command = PrinterControlCommand(
@@ -1162,8 +1183,8 @@ verify_auth()
                     ip=printer.ip or ip,
                     desired_enabled=printer.enabled,
                     command_type="address_modify",
-                    auth_user=printer.auth_user or "",
-                    auth_password=printer.auth_password or "",
+                    auth_user=del_user,
+                    auth_password=del_pass,
                     command_params=_json.dumps(cmd_params_dict),
                     status="pending",
                     error_message="",
