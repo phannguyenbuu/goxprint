@@ -175,7 +175,7 @@ export function CopiersTab(props: any) {
                 return obj;
               };
 
-              const pMac = (p.mac_id || p.mac_address || '').toUpperCase().replace(/-/g, ':');
+              const pMac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
               const liveSync = parseSyncObj(pMac ? liveAddressBooks?.[pMac] : null);
               const dbSync = parseSyncObj(p.address_book_sync);
 

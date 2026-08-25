@@ -175,28 +175,15 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                   if (freshPrinters.length > 0) {
                     showToast(`✓ Quét mạng LAN hoàn tất, tìm thấy ${freshPrinters.length} máy in!`, 'success', 4000);
                     try {
-                      fetchApi('/api/new-devices', {
+                      await fetchApi('/api/new-devices', {
                         method: 'POST',
                         body: JSON.stringify({
                           lan_uid: currentLanUid || 'default',
                           devices: freshPrinters
                         })
-                      }).catch(() => {});
-                    } catch (err) {}
-                    setLanSites((prevSites: any[]) => {
-                      return prevSites.map((site: any) => {
-                        if (site.lan_uid === currentLanUid) {
-                          return {
-                            ...site,
-                            printers: freshPrinters.map((p: any, idx: number) => ({
-                              id: p.id || (90000 + idx),
-                              ...p,
-                            })),
-                          };
-                        }
-                        return site;
                       });
-                    });
+                    } catch (err) {}
+                    fetchLanSitesData();
                   } else {
                     showToast('✓ Quét mạng LAN hoàn tất', 'success', 4000);
                   }
