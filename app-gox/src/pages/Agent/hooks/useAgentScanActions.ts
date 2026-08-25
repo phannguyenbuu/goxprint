@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { DEFAULT_EXEC_TEMPLATES } from '../constants/execTemplates';
-import { addEmailDestination, addPrivateLanEmail, deleteEmailDestination, deleteLanEmail, deleteScanPoint, getAgentSettings, getAgentUtilityCommands, getCommandStatus, getJobs, getLanSites, getScansFiles, installDriverOnAgent, modifyDeviceAddress, saveCopierCredentials, triggerAgentUtility, triggerAgentUtilityExec, triggerEmergencyRestart, triggerFetchAddressBook, updateAgentSettings } from '../../../api/mockAgentApi';
+import { fetchApi, addEmailDestination, addPrivateLanEmail, deleteEmailDestination, deleteLanEmail, deleteScanPoint, getAgentSettings, getAgentUtilityCommands, getCommandStatus, getJobs, getLanSites, getScansFiles, installDriverOnAgent, modifyDeviceAddress, saveCopierCredentials, triggerAgentUtility, triggerAgentUtilityExec, triggerEmergencyRestart, triggerFetchAddressBook, updateAgentSettings } from '../../../api/mockAgentApi';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AgentApi } from '../../../api/AgentApi';
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';

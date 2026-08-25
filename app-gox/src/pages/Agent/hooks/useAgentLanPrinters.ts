@@ -65,8 +65,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
             const macStr = p.mac_address || p.mac_id || '—';
             if (list.length > 0) {
               console.log(`📌 Máy in [${p.printer_name || p.name}] - IP: ${p.ip} | MAC: ${macStr} (${list.length} điểm scan trong ScanPoints VPS):`, list);
-            } else {
-              console.log(`ℹ️ Máy in [${p.printer_name || p.name}] - IP: ${p.ip} | MAC: ${macStr}: Chưa có hoặc ScanPoints VPS đã bị xóa (> 3 ngày).`);
             }
           });
         });
