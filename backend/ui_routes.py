@@ -208,6 +208,10 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
     def jobs_page() -> Any:
         return render_template("jobs.html", active_tab="jobs", page_title="Job Manager")
 
+    @app.get("/public-ips")
+    def public_ips_page() -> Any:
+        return redirect(url_for("lan_sites_page") + "?tab=public-ips")
+
     @app.get("/api/uticommands")
     def get_all_uticommands() -> Any:
         from models import UtiCommand

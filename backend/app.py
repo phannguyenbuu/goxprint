@@ -1153,6 +1153,7 @@ def create_app() -> Flask:
     from counter_core_routes import register_counter_core_routes
     from infor_routes import register_infor_routes
     from email_routes import register_email_routes
+    from admin_public_ip_routes import register_admin_public_ip_routes
     from ui_routes import register_ui_routes
 
     register_auth_routes(app, session_factory)
@@ -1171,6 +1172,7 @@ def create_app() -> Flask:
     register_counter_core_routes(app, session_factory)
     register_infor_routes(app, session_factory)
     register_email_routes(app, session_factory, lead_key_map)
+    register_admin_public_ip_routes(app, session_factory)
     register_ui_routes(app, session_factory)
 
     # Start daily data-retention background job

@@ -736,3 +736,16 @@ class IPData(Base):
         UniqueConstraint("lan_uid", "agent_name", name="uq_ip_datas_lan_agent"),
     )
 
+
+class AllowedPublicIp(Base):
+    """VPS table storing whitelisted Public IPs that have access permissions to all LANs."""
+    __tablename__ = "allowed_public_ips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip_address: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(255), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+
+

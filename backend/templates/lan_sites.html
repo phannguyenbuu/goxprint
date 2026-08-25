@@ -3,6 +3,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
 <section class="panel lan-site-dashboard">
+  <!-- Sub-tabs Navigation Bar -->
+  <div class="lan-subtabs-bar" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 12px; width: 100%;">
+    <button id="subtab-lan-sites-btn" class="subtab-btn active" style="padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.2); color: #60a5fa; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
+      🖥️ Mạng LAN (LAN Sites)
+    </button>
+    <button id="subtab-public-ips-btn" class="subtab-btn" style="padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: var(--text-muted, #94a3b8); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
+      🌐 Public IP (Quyền tất cả LAN)
+    </button>
+  </div>
+
+  <!-- Tab 1 Content: LAN Sites Dashboard -->
+  <div id="lan-sites-tab-content" style="width: 100%;">
   <!-- Top selector section -->
   <div class="dashboard-header-bar">
     <div class="selector-row" style="display: flex; gap: 16px; align-items: flex-end; width: 100%; flex-wrap: wrap;">
@@ -138,11 +150,386 @@
         </div>
       </div>
     </div>
-  </div>
+  </div> <!-- End #lan-sites-tab-content -->
+
+  <!-- Tab 2 Content: Public IP Manager -->
+  <div id="public-ips-tab-content" style="display: none; width: 100%;">
+    <div class="panel-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3 style="margin: 0; font-size: 1.3rem; font-weight: 700; color: #f3f4f6;">Public IP Manager (Quyền tất cả LAN)</h3>
+      <div style="display: flex; gap: 10px;">
+        <button id="add-ip-btn" class="glass-btn primary" style="background: rgba(40,167,69,0.25); border-color: #28a745; color: #28a745; font-weight: bold;">+ Thêm Public IP</button>
+        <button id="ip-refresh-btn" class="glass-btn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="filter-board" style="display: flex; gap: 16px; margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 16px;">
+      <div class="filter-group" style="flex: 1; min-width: 250px;">
+        <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Search Public IP, Ghi chú...</label>
+        <input type="text" id="ip-filter-search" class="glass-input" placeholder="Nhập IP hoặc mô tả để tìm kiếm..." style="width: 100%; height: 42px; box-sizing: border-box;">
+      </div>
+      <div class="filter-group" style="width: 180px;">
+        <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Trạng thái</label>
+        <select id="ip-filter-status" class="glass-select" style="width: 100%; height: 42px;">
+          <option value="all">Tất cả</option>
+          <option value="enabled">Active (Đang bật)</option>
+          <option value="disabled">Disabled (Đã tắt)</option>
+        </select>
+      </div>
+      <button id="ip-apply-filters" class="glass-btn primary" style="height: 42px;">Search</button>
+    </div>
+
+    <div class="glass-panel-table-wrap">
+      <table class="generic-table" style="width: 100%; border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th style="padding: 12px 16px; width: 60px;">ID</th>
+            <th style="padding: 12px 16px; width: 220px;">Public IP / Subnet</th>
+            <th style="padding: 12px 16px;">Tên đại diện / Ghi chú</th>
+            <th style="padding: 12px 16px; width: 150px;">Quyền truy cập</th>
+            <th style="padding: 12px 16px; width: 120px;">Trạng thái</th>
+            <th style="padding: 12px 16px; width: 180px;">Ngày tạo</th>
+            <th style="padding: 12px 16px; width: 180px;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="public-ips-tbody">
+          <tr><td colspan="7" class="loading" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading Public IPs...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
+      <button id="ip-prev-page" class="glass-btn secondary" style="padding: 6px 14px; font-weight: bold;">&lt;</button>
+      <div id="ip-current-page-display" style="background: var(--color-primary, #ff5722); color: #fff; font-weight: bold; padding: 6px 14px; border-radius: 6px; font-size: 13px;">1</div>
+      <button id="ip-next-page" class="glass-btn secondary" style="padding: 6px 14px; font-weight: bold;">&gt;</button>
+      <select id="ip-page-size-select" class="glass-select" style="padding: 6px 10px; font-size: 13px;">
+        <option value="20">20 / page</option>
+        <option value="50" selected>50 / page</option>
+        <option value="100">100 / page</option>
+        <option value="200">200 / page</option>
+      </select>
+    </div>
+  </div> <!-- End #public-ips-tab-content -->
 </section>
+
+<!-- Custom Modal for Add/Edit Public IP -->
+<div id="ip-modal" class="custom-modal" hidden>
+  <div class="modal-backdrop" id="ip-modal-backdrop"></div>
+  <div class="modal-dialog" style="width: 480px; max-width: 90%;">
+    <div class="modal-header">
+      <h3 id="modal-ip-title" style="margin: 0; font-size: 1.2rem; font-weight: 700;">+ Thêm Public IP</h3>
+      <button id="ip-modal-close-x" class="modal-close-btn">&times;</button>
+    </div>
+    <form id="ip-form">
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <input type="hidden" id="modal-ip-id" value="">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: 600; font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Public IP / Subnet (CIDR) <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="modal-ip-address" placeholder="Ví dụ: 203.162.1.1 hoặc 118.69.1.0/24 hoặc *" required class="glass-input">
+          <small style="color: #94a3b8; font-size: 11px;">Hỗ trợ IP đơn (`203.162.1.1`), dải CIDR (`203.162.1.0/24`), hoặc `*` cho tất cả.</small>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: 600; font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Tên đại diện / Ghi chú</label>
+          <input type="text" id="modal-description" placeholder="Ví dụ: Văn phòng HCM, Server VPN..." class="glass-input">
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" id="modal-enabled" checked style="width: 18px; height: 18px; cursor: pointer;">
+          <label for="modal-enabled" style="font-size: 13px; cursor: pointer; color: #f3f4f6;">Kích hoạt quyền truy cập tất cả LAN</label>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--glass-border);">
+        <button type="button" id="ip-modal-close-btn" class="glass-btn secondary">Hủy</button>
+        <button type="submit" id="ip-modal-save-btn" class="glass-btn primary" style="background: #ff5722; color: #fff;">Lưu thông tin</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Sub-Tab Switching Logic ---
+    const subtabLanBtn = document.getElementById('subtab-lan-sites-btn');
+    const subtabIpBtn = document.getElementById('subtab-public-ips-btn');
+    const lanTabContent = document.getElementById('lan-sites-tab-content');
+    const ipTabContent = document.getElementById('public-ips-tab-content');
+
+    const switchSubtab = (tabName) => {
+        if (tabName === 'public-ips') {
+            if (subtabLanBtn) {
+                subtabLanBtn.classList.remove('active');
+                subtabLanBtn.style.background = 'rgba(255,255,255,0.04)';
+                subtabLanBtn.style.color = 'var(--text-muted, #94a3b8)';
+                subtabLanBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+            }
+            if (subtabIpBtn) {
+                subtabIpBtn.classList.add('active');
+                subtabIpBtn.style.background = 'rgba(59, 130, 246, 0.2)';
+                subtabIpBtn.style.color = '#60a5fa';
+                subtabIpBtn.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+            }
+            if (lanTabContent) lanTabContent.style.display = 'none';
+            if (ipTabContent) ipTabContent.style.display = 'block';
+
+            loadPublicIps();
+        } else {
+            if (subtabIpBtn) {
+                subtabIpBtn.classList.remove('active');
+                subtabIpBtn.style.background = 'rgba(255,255,255,0.04)';
+                subtabIpBtn.style.color = 'var(--text-muted, #94a3b8)';
+                subtabIpBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+            }
+            if (subtabLanBtn) {
+                subtabLanBtn.classList.add('active');
+                subtabLanBtn.style.background = 'rgba(59, 130, 246, 0.2)';
+                subtabLanBtn.style.color = '#60a5fa';
+                subtabLanBtn.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+            }
+            if (ipTabContent) ipTabContent.style.display = 'none';
+            if (lanTabContent) lanTabContent.style.display = 'block';
+        }
+    };
+
+    if (subtabLanBtn && subtabIpBtn) {
+        subtabLanBtn.addEventListener('click', () => switchSubtab('lan-sites'));
+        subtabIpBtn.addEventListener('click', () => switchSubtab('public-ips'));
+    }
+
+    // Auto-switch based on URL query param ?tab=public-ips or hash #public-ips
+    const initialUrlParams = new URLSearchParams(window.location.search);
+    if (initialUrlParams.get('tab') === 'public-ips' || window.location.hash === '#public-ips') {
+        switchSubtab('public-ips');
+    }
+
+    // --- Public IP CRUD Logic ---
+    let publicIpsData = [];
+    let ipCurrentPage = 1;
+    let ipPageSize = 50;
+    let ipTotalItems = 0;
+
+    const escapeHtmlStr = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
+    const renderPublicIpsTable = () => {
+        const tbody = document.getElementById('public-ips-tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        if (!publicIpsData || publicIpsData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="loading" style="text-align: center; padding: 20px; color: var(--text-muted);">Không tìm thấy Public IP nào.</td></tr>';
+            return;
+        }
+
+        publicIpsData.forEach(row => {
+            const tr = document.createElement('tr');
+            const isEnabled = row.enabled;
+            const statusStyle = isEnabled 
+                ? 'background: rgba(34, 197, 94, 0.15); color: #4ade80;' 
+                : 'background: rgba(239, 68, 68, 0.15); color: #f87171;';
+            const statusText = isEnabled ? 'Active' : 'Disabled';
+
+            tr.innerHTML = `
+                <td style="padding: 12px 16px;">${row.id}</td>
+                <td style="padding: 12px 16px;"><code class="font-mono" style="font-size: 14px; font-weight: bold; color: #f59e0b;">${escapeHtmlStr(row.ip_address)}</code></td>
+                <td style="padding: 12px 16px;"><div style="font-size: 13px; font-weight: 500; color: #e2e8f0;">${escapeHtmlStr(row.description || '-')}</div></td>
+                <td style="padding: 12px 16px;"><span style="font-size: 11px; font-weight: bold; background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 4px 10px; border-radius: 12px;">ALL LANs</span></td>
+                <td style="padding: 12px 16px;"><span style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; ${statusStyle}">${escapeHtmlStr(statusText)}</span></td>
+                <td style="padding: 12px 16px;"><div style="font-size: 12px; color: #94a3b8;">${escapeHtmlStr(row.created_at || '')}</div></td>
+                <td style="padding: 12px 16px;">
+                    <button class="glass-btn secondary" style="padding: 4px 10px; font-size: 12px; margin-right: 4px;" onclick="openEditIpModal(${row.id})">Sửa</button>
+                    <button class="glass-btn secondary" style="padding: 4px 10px; font-size: 12px; margin-right: 4px; color: #f59e0b;" onclick="toggleIpStatus(${row.id})">${isEnabled ? 'Tắt' : 'Bật'}</button>
+                    <button class="glass-btn danger" style="padding: 4px 10px; font-size: 12px; color: #ef4444;" onclick="deleteIp(${row.id}, '${escapeHtmlStr(row.ip_address)}')">Xóa</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    };
+
+    const loadPublicIps = (silent = false) => {
+        const tbody = document.getElementById('public-ips-tbody');
+        if (!silent && tbody) {
+            tbody.innerHTML = '<tr><td colspan="7" class="loading" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading Public IPs...</td></tr>';
+        }
+
+        const searchVal = document.getElementById('ip-filter-search')?.value.trim() || '';
+        const statusVal = document.getElementById('ip-filter-status')?.value || 'all';
+
+        const params = new URLSearchParams({
+            limit: ipPageSize,
+            page: ipCurrentPage,
+            status: statusVal,
+            q: searchVal
+        });
+
+        fetch(`/api/public-ips?${params.toString()}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.ok) {
+                    publicIpsData = data.public_ips || [];
+                    ipTotalItems = data.total || 0;
+                    renderPublicIpsTable();
+                    updateIpPaginationUI();
+                } else if (!silent && tbody) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading" style="text-align: center; padding: 20px; color: #ef4444;">Không thể tải danh sách Public IP.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading public IPs:', err);
+                if (!silent && tbody) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading" style="text-align: center; padding: 20px; color: #ef4444;">Lỗi kết nối Server.</td></tr>';
+                }
+            });
+    };
+
+    const updateIpPaginationUI = () => {
+        const pageDisp = document.getElementById('ip-current-page-display');
+        const prevBtn = document.getElementById('ip-prev-page');
+        const nextBtn = document.getElementById('ip-next-page');
+        if (pageDisp) pageDisp.textContent = ipCurrentPage;
+        if (prevBtn) prevBtn.disabled = ipCurrentPage <= 1;
+
+        const totalPages = Math.ceil(ipTotalItems / ipPageSize);
+        if (nextBtn) nextBtn.disabled = ipCurrentPage >= totalPages || totalPages === 0;
+    };
+
+    const ipModal = document.getElementById('ip-modal');
+    const modalIpTitle = document.getElementById('modal-ip-title');
+    const modalIpId = document.getElementById('modal-ip-id');
+    const modalIpAddress = document.getElementById('modal-ip-address');
+    const modalDescription = document.getElementById('modal-description');
+    const modalEnabled = document.getElementById('modal-enabled');
+
+    window.openAddIpModal = () => {
+        if (!ipModal) return;
+        modalIpTitle.textContent = '+ Thêm Public IP mới';
+        modalIpId.value = '';
+        modalIpAddress.value = '';
+        modalDescription.value = '';
+        modalEnabled.checked = true;
+        ipModal.hidden = false;
+    };
+
+    window.openEditIpModal = (id) => {
+        const item = publicIpsData.find(x => x.id === id);
+        if (!item || !ipModal) return;
+        modalIpTitle.textContent = `Chỉnh sửa Public IP #${id}`;
+        modalIpId.value = item.id;
+        modalIpAddress.value = item.ip_address || '';
+        modalDescription.value = item.description || '';
+        modalEnabled.checked = !!item.enabled;
+        ipModal.hidden = false;
+    };
+
+    const closeIpModal = () => {
+        if (ipModal) ipModal.hidden = true;
+    };
+
+    document.getElementById('add-ip-btn')?.addEventListener('click', openAddIpModal);
+    document.getElementById('ip-modal-close-btn')?.addEventListener('click', closeIpModal);
+    document.getElementById('ip-modal-close-x')?.addEventListener('click', closeIpModal);
+    document.getElementById('ip-modal-backdrop')?.addEventListener('click', closeIpModal);
+
+    document.getElementById('ip-form')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const id = modalIpId.value;
+        const ipAddress = modalIpAddress.value.trim();
+        const description = modalDescription.value.trim();
+        const enabled = modalEnabled.checked;
+
+        const payload = { ip_address: ipAddress, description, enabled };
+        const isEdit = !!id;
+        const url = isEdit ? `/api/public-ips/${id}` : '/api/public-ips';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.ok) {
+                closeIpModal();
+                alert(data.message || 'Thành công');
+                loadPublicIps();
+            } else {
+                alert(data.error || 'Có lỗi xảy ra');
+            }
+        })
+        .catch(err => {
+            alert('Lỗi gửi dữ liệu lên server');
+        });
+    });
+
+    window.toggleIpStatus = (id) => {
+        fetch(`/api/public-ips/${id}/toggle`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.ok) {
+                    loadPublicIps(true);
+                } else {
+                    alert(data.error || 'Lỗi thao tác');
+                }
+            })
+            .catch(() => alert('Lỗi kết nối'));
+    };
+
+    window.deleteIp = (id, ipStr) => {
+        if (!confirm(`Bạn có chắc chắn muốn xóa Public IP [${ipStr}] không?`)) return;
+        fetch(`/api/public-ips/${id}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.ok) {
+                    loadPublicIps();
+                } else {
+                    alert(data.error || 'Lỗi xóa Public IP');
+                }
+            })
+            .catch(() => alert('Lỗi kết nối'));
+    };
+
+    document.getElementById('ip-prev-page')?.addEventListener('click', () => {
+        if (ipCurrentPage > 1) {
+            ipCurrentPage--;
+            loadPublicIps();
+        }
+    });
+
+    document.getElementById('ip-next-page')?.addEventListener('click', () => {
+        const totalPages = Math.ceil(ipTotalItems / ipPageSize);
+        if (ipCurrentPage < totalPages) {
+            ipCurrentPage++;
+            loadPublicIps();
+        }
+    });
+
+    document.getElementById('ip-page-size-select')?.addEventListener('change', (e) => {
+        ipPageSize = parseInt(e.target.value, 10);
+        ipCurrentPage = 1;
+        loadPublicIps();
+    });
+
+    document.getElementById('ip-refresh-btn')?.addEventListener('click', () => loadPublicIps(false));
+    document.getElementById('ip-apply-filters')?.addEventListener('click', () => {
+        ipCurrentPage = 1;
+        loadPublicIps();
+    });
+    document.getElementById('ip-filter-status')?.addEventListener('change', () => {
+        ipCurrentPage = 1;
+        loadPublicIps();
+    });
+    document.getElementById('ip-filter-search')?.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') {
+            ipCurrentPage = 1;
+            loadPublicIps();
+        }
+    });
+
     let lanSites = [];
     let selectedLanUid = null;
 

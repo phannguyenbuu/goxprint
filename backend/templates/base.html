@@ -19,6 +19,7 @@
         <a class="link {% if active_tab == 'copier_auths' %}active{% endif %}" href="{{ url_for('copier_auths_page') }}"><span class="link-ico">&bull;</span><span>Copier Auths</span></a>
         <a class="link {% if active_tab == 'uticommands' %}active{% endif %}" href="{{ url_for('uticommands_page') }}"><span class="link-ico">&bull;</span><span>Uti Commands</span></a>
         <a class="link {% if active_tab == 'jobs' %}active{% endif %}" href="{{ url_for('jobs_page') }}"><span class="link-ico">&bull;</span><span>Job Manager</span></a>
+        <a class="link {% if active_tab == 'public_ips' or request.args.get('tab') == 'public-ips' %}active{% endif %}" href="{{ url_for('lan_sites_page') }}?tab=public-ips"><span class="link-ico">&bull;</span><span>Public IPs</span></a>
         <div class="sidebar-sep"></div>
         <a class="link {% if active_tab == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span class="link-ico">&bull;</span><span>Dashboard</span></a>
         <a class="link {% if active_tab == 'api_docs' %}active{% endif %}" href="{{ url_for('api_docs_page') }}"><span class="link-ico">&bull;</span><span>API</span></a>
