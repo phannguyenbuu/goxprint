@@ -114,9 +114,13 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     setViewOutputModal
   });
 
+  const [activeTab, setActiveTab] = useState<'agents' | 'copiers' | 'cameras'>('copiers');
+
   return {
     toasts,
     showToast,
+    activeTab,
+    setActiveTab,
     commandStatus,
     setCommandStatus,
     activeModal,
