@@ -590,17 +590,29 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         try:
                             from models import ScanPoint
                             target_mac = (printer.mac_address if printer and printer.mac_address else "").strip().upper().replace("-", ":")
-                            if not target_mac and body.get("mac_id"):
-                                target_mac = str(body.get("mac_id")).strip().upper().replace("-", ":")
-                            if not target_mac and body.get("mac_address"):
-                                target_mac = str(body.get("mac_address")).strip().upper().replace("-", ":")
+                            if not target_mac:
+                                target_mac = _to_text(body.get("mac_id") or body.get("mac_address") or body.get("printer_mac_id"))
+                                if not target_mac and command.command_params:
+                                    try:
+                                        cp = _json.loads(command.command_params)
+                                        target_mac = _to_text(cp.get("mac_address") or cp.get("mac_id") or cp.get("printer_mac_id"))
+                                    except Exception:
+                                        pass
+                                target_mac = _normalize_mac(target_mac)
+
+                            target_ip = (printer.ip if printer and printer.ip else "").strip() or _to_text(command.ip)
+                            if not target_mac and target_ip:
+                                sp_by_ip = session.execute(select(ScanPoint).where(ScanPoint.ip == target_ip)).scalars().first()
+                                if sp_by_ip:
+                                    target_mac = sp_by_ip.mac_id
+
                             if target_mac:
                                 sp_rec = session.get(ScanPoint, target_mac)
                                 if sp_rec is None:
                                     sp_rec = ScanPoint(
                                         mac_id=target_mac,
-                                        printer_name=printer.printer_name if printer else "Photocopy",
-                                        ip=printer.ip if printer else "",
+                                        printer_name=printer.printer_name if printer else (command.printer_name or "Photocopy"),
+                                        ip=target_ip,
                                         agent_uid=command.agent_uid or "",
                                         address_book_data=sync_data,
                                         status="success"
