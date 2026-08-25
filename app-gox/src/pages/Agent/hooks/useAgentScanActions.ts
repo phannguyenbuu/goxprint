@@ -724,6 +724,7 @@ export const useAgentScanActions = (deps: any = {}) => {
     executeRemoteInstallDriver,
     formatBytes,
     getDestinationStatus,
+    getDestinationStatusHtml,
     handleAddPrivateFtp,
     handleAddPublicFtp,
     handleConfirmDeleteScanPoint,

@@ -50,7 +50,7 @@ export function ScanDestinations({
                                           else if (folderVal.startsWith('\\\\')) destType = 'SMB';
                                           else if (emailVal || emailVal.includes('@')) destType = 'Email';
   
-                                          const statusInfo = getDestinationStatus(entry);
+                                          const statusInfo = typeof getDestinationStatus === 'function' ? getDestinationStatus(entry) : { label: '✔ ACTIVE', type: 'success', title: '' };
                                           const regNo = (entry.registration_no && entry.registration_no !== '-') ? entry.registration_no : (entry.entry_id || (eIdx + 1));
                                           const rowKey = `${p.id}-${regNo}`;
                                           const isRowPending = commandStatus[rowKey]?.isPending || false;
