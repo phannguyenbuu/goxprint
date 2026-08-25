@@ -25,8 +25,10 @@ def main() -> None:
                     PrinterRecognizePort(port=515, port_type="definitive", description="LPR/LPD Print Port", enabled=False),
                     PrinterRecognizePort(port=631, port_type="definitive", description="IPP Print Port", enabled=False),
                 ]
-                session.add_all(defaults)
-                session.commit()
+                print("[OK] Seeded default PrinterRecognizePort records into DB")
+    except Exception as seed_exc:
+        print(f"[!] Seed PrinterRecognizePort error: {seed_exc}")
+
     # Seed default AllowedPublicIp rule (* for all LANs)
     try:
         from models import AllowedPublicIp
