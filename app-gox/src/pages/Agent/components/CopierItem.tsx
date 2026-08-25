@@ -117,6 +117,11 @@ export function CopierItem({
   const ipKey = p.ip || '';
   const idKey = String(p.id !== undefined && p.id !== null ? p.id : '');
 
+  const cmdStatusObj = 
+    (macKey && commandStatus?.[macKey]) ||
+    (ipKey && commandStatus?.[ipKey]) ||
+    (idKey && commandStatus?.[idKey]);
+
   const hasItems = (obj: any) => obj && ((Array.isArray(obj.address_list) && obj.address_list.length > 0) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list) && obj.address_book_data.address_list.length > 0));
 
   const activeSyncObj = 
