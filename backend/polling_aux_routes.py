@@ -610,6 +610,28 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 pass
 
                         if scanned_printers:
+                            try:
+                                from models import ScanPoint
+                                now_utc = datetime.now(timezone.utc)
+                                for p_item in scanned_printers:
+                                    p_mac = str(p_item.get("mac_address") or p_item.get("mac_id") or "").strip().upper().replace("-", ":")
+                                    if p_mac:
+                                        sp_rec = session.get(ScanPoint, p_mac)
+                                        if sp_rec and sp_rec.address_book_data:
+                                            if sp_rec.updated_at:
+                                                up_utc = sp_rec.updated_at
+                                                if up_utc.tzinfo is None:
+                                                    up_utc = up_utc.replace(tzinfo=timezone.utc)
+                                                if (now_utc - up_utc).total_seconds() < (3 * 86400):
+                                                    p_item["address_book_sync"] = sp_rec.address_book_data
+                                                else:
+                                                    session.delete(sp_rec)
+                                                    session.commit()
+                                            else:
+                                                p_item["address_book_sync"] = sp_rec.address_book_data
+                            except Exception as sp_merge_err:
+                                LOGGER.warning("Error attaching ScanPoint in force_subnet_scan: %s", sp_merge_err)
+
                             from active_agents_registry import update_new_lan_site_devices, update_agent_in_memory
                             update_new_lan_site_devices(command.lan_uid or "default", scanned_printers)
                             update_new_lan_site_devices("default", scanned_printers)
