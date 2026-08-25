@@ -1520,50 +1520,12 @@ export const useAgentCoreLogic = (deps: any = {}) => {
     setIsSavingSettings(true);
     setSettingsSaveStatus('⌛ Đang gửi cấu hình mới tới Agent...');
     const base64Content = btoa(unescape(encodeURIComponent(editableSettingsText)));
-    const pythonScript = `import os, sys, json, base64
-new_content = base64.b64decode("${base64Content}").decode("utf-8")
-try:
-    parsed = json.loads(new_content)
-    exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
-    candidates = [
-        os.path.join(exe_dir, 'settings.json'),
-        os.path.join(os.getcwd(), 'settings.json'),
-        'settings.json',
-    ]
-    found = None
-    for p in candidates:
-        if os.path.exists(p):
-            found = p
-            break
-    if not found:
-        found = candidates[0]
-
-    with open(found + '.bak', 'w', encoding='utf-8') as f_bak:
-        try:
-            with open(found, 'r', encoding='utf-8') as f_orig:
-                f_bak.write(f_orig.read())
-        except:
-            pass
-
-    with open(found, 'w', encoding='utf-8') as f:
-        json.dump(parsed, f, ensure_ascii=False, indent=2)
-
-    try:
-        if 'bridge' in globals():
-            globals()['bridge']._config.reload()
-    except Exception as e:
-        pass
-
-    msg = "Đã lưu cấu hình thành công!"
-    if globals().get('context'):
-        globals()['context']['result_payload'] = msg
-    else:
-        raise RuntimeError(msg)
-except Exception as e:
-    raise RuntimeError(str(e))
-`;
     try {
-      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'save_settings_json', pythonScript);
+      const saveCmdObj = (utilityCommands || []).find((c: any) => c.command === 'save_settings_json');
+      const scriptContent = saveCmdObj?.command_content || '';
+      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'save_settings_json', scriptContent, {
+        base64_content: base64Content
+      });
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
       }

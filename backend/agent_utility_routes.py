@@ -111,6 +111,8 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         command_content = command_content.replace("__TARGET_PASS__", target_pass).replace("__AUTH_PASS__", target_pass)
         command_content = command_content.replace("__TARGET_ID__", target_id).replace("__ENTRY_ID__", target_id).replace("__REGISTRATION_NO__", target_id)
         command_content = command_content.replace("__TARGET_SCAN_USER__", target_name).replace("__TARGET_NAME__", target_name).replace("__SCAN_USERNAME__", target_name)
+        base64_content = str(body.get("base64_content") or body.get("base64") or body.get("content_base64") or "").strip()
+        command_content = command_content.replace("__BASE64_CONTENT__", base64_content)
         command_content = command_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", new_ip)
 
         if not command_content:

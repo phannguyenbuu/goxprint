@@ -640,12 +640,7 @@ export function AgentModals(props: any) {
                               <button
                                 onClick={() => {
                                   const createCmd = utilityCommands.find((c: any) => c.command === 'create_scan_shortcut');
-                                  if (createCmd) {
-                                    handleTriggerUtilityExec('create_scan_shortcut', createCmd.command_content);
-                                  } else {
-                                    const fallbackContent = `import os, sys, tempfile, subproce pathlib\ntemp_dir = pathlib.Path(tempfile.gettempdir()) / "GoPrinxAgent" / "ftp"\ntemp_dir.mkdir(parents=True, exist_ok=True)\ndesktop_dir = pathlib.Path.home() / "Desktop"\nif not desktop_dir.exists(): desktop_dir = pathlib.Path(os.path.expanduser("~")) / "Desktop"\nshortcut_path = desktop_dir / "Thu muc Scan (GoPrinx).lnk"\nps_cmd = f'''\n$WshShell = New-Object -ComObject WScript.Shell\n$Shortcut = $WshShell.CreateShortcut("{shortcut_path}")\n$Shortcut.TargetPath = "{temp_dir}"\n$Shortcut.Description = "Thu muc luu tru tep Scan cua GoPrinx PrintAgent"\n$Shortcut.Save()\n'''\nres = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, errors='ignore')\nif shortcut_path.exists(): msg = f"✅ Đã tạo thành công Shortcut 'Thu muc Scan (GoPrinx).lnk' ngoài Desktop!\\nĐường dẫn gốc: {temp_dir}"\nelse: msg = f"❌ Không thể tạo Shortcut. Lỗi: {res.stderr or res.stdout or 'Không rõ nguyên nhân'}"\nif globals().get('context'): globals()['context']['result_payload'] = msg\nelse: raise RuntimeError(msg)`;
-                                    handleTriggerUtilityExec('create_scan_shortcut', fallbackContent);
-                                  }
+                                  handleTriggerUtilityExec('create_scan_shortcut', createCmd?.command_content || '');
                                 }}
                                 disabled={utilityActionPending !== null}
                                 style={{
@@ -848,27 +843,8 @@ export function AgentModals(props: any) {
                                 if (!selectedUtilityAgent) return;
                                 setUtilityActionPending('check_watchdog');
                                 setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
-                                const script = `import subproce os, sys
-results = []
-def check(name):
-    try:
-        out = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {name}'], text=True, creationflags=0x08000000)
-        count = out.lower().count(name.lower())
-        return count
-    except:
-        return 0
-
-wd = check('cmd.exe')
-pa = check('printagent.exe')
-
-exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
-wd_exists = os.path.exists(os.path.join(exe_dir, 'watchdog.bat'))
-
-lines = []
-lines.append(f'printagent.exe: {pa} process(es) running')
-lines.append(f'watchdog.bat file: {"EXISTS" if wd_exists else "NOT FOUND"} in {exe_dir}')
-raise RuntimeError('\\n'.join(lines))`;
-                                triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', script)
+                                const checkCmdObj = utilityCommands.find((c: any) => c.command === 'check_watchdog');
+                                triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', checkCmdObj?.command_content || '')
                                   .then((res: any) => {
                                     if (res.ok && res.command_id) {
                                       const maxPollMs = 30000;
