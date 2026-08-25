@@ -49,7 +49,7 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
     @app.get("/api/public/crm/printers")
     def public_crm_printers() -> Any:
         sent_token = _request_api_token()
-        ok_auth, lead, auth_error = _resolve_request_lead({}, lead_key_map, sent_token, request.args.get("lead"))
+        ok_auth, lead, auth_error = _resolve_request_lead({}, lead_key_map, sent_token, request.args.get("lead"), session_factory=session_factory)
         if not ok_auth:
             return auth_error
 

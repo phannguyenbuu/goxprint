@@ -969,6 +969,7 @@ def create_app() -> Flask:
     _configure_server_logging()
     cfg = ServerConfig()
     session_factory = create_session_factory(cfg)
+    app.config["SESSION_FACTORY"] = session_factory
     drive_sync = GoogleDriveSync(cfg)
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     try:
