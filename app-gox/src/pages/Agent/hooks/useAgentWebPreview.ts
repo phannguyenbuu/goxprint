@@ -54,32 +54,83 @@ export const useAgentWebPreview = (deps: any = {}) => {
     setWebPreviewModal((p) => ({ ...p, isOpen: false }));
   }, [previewBlobUrl]);
 
-  const fetchRemotePage = useCallback(async (agentUid: string, printerIp: string, targetPath = '/') => {
+  const fetchRemotePage = useCallback(async (agentUid: string, printerIp: string, _targetPath = '/') => {
+    if (!agentUid) {
+      if (showToast) showToast('Không tìm thấy Agent UID', 'error');
+      return;
+    }
+
+    const createLoaderHtml = (title: string, desc: string) => `
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body {
+              background: #0f172a;
+              color: #f8fafc;
+              font-family: sans-serif;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+            }
+            .spinner {
+              border: 4px solid rgba(255,255,255,0.1);
+              width: 36px;
+              height: 36px;
+              border-radius: 50%;
+              border-left-color: #3b82f6;
+              animation: spin 1s linear infinite;
+              margin-bottom: 16px;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="spinner"></div>
+          <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 8px;">${title}</div>
+          <div style="color: #94a3b8; font-size: 0.9rem;">${desc}</div>
+        </body>
+      </html>
+    `;
+
+    const wildcardTab = window.open('about:blank', '_blank');
+    if (wildcardTab) {
+      wildcardTab.document.write(createLoaderHtml(
+        'Đang kết nối tên miền...',
+        `Đang kết nối đến máy in ${printerIp} qua tên miền *.app.goxprint.com...`
+      ));
+    }
+
     setWebPreviewLoading(true);
     try {
-      const resp = await fetch(`/api/agents/${agentUid}/web-proxy?ip=${encodeURIComponent(printerIp)}&path=${encodeURIComponent(targetPath)}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const text = await resp.text();
-
-      if (previewBlobUrl) {
-        URL.revokeObjectURL(previewBlobUrl);
-      }
-      const blob = new Blob([text], { type: 'text/html' });
-      const newBlobUrl = URL.createObjectURL(blob);
-      setPreviewBlobUrl(newBlobUrl);
-
-      setWebPreviewHistory((prev) => {
-        const next = [...prev.slice(0, webPreviewHistoryIndex + 1), targetPath];
-        setWebPreviewHistoryIndex(next.length - 1);
-        return next;
+      const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
+      const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/tunnel/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_ip: printerIp, printer_port: 80 })
       });
-    } catch (e: any) {
-      console.error('Failed to proxy web preview:', e);
-      if (showToast) showToast(`Không thể tải trang Web Setting: ${e.message}`, 'error');
+      const data = await response.json();
+      if (data.ok && data.url) {
+        if (wildcardTab) {
+          wildcardTab.location.href = data.url;
+        }
+      } else {
+        if (wildcardTab) wildcardTab.close();
+        if (showToast) showToast('Kết nối lỗi: ' + (data.error || 'Không thể khởi động đường hầm SSH ngược trên Agent'), 'error');
+      }
+    } catch (err: any) {
+      if (wildcardTab) wildcardTab.close();
+      if (showToast) showToast('Lỗi hệ thống VPS: ' + (err.message || err), 'error');
     } finally {
       setWebPreviewLoading(false);
     }
-  }, [webPreviewHistoryIndex, previewBlobUrl, showToast]);
+  }, [showToast]);
 
   const handleHistoryBack = useCallback(() => {
     if (webPreviewHistoryIndex > 0) {
