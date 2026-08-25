@@ -299,6 +299,15 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             session.add(command)
             session.commit()
             command_id = int(command.id)
+            try:
+                p_dict = _json.loads(command.command_params or '{}')
+                if isinstance(p_dict, dict):
+                    p_dict['command_id'] = command_id
+                    p_dict['exec_uid'] = command_id
+                    command.command_params = _json.dumps(p_dict, ensure_ascii=False)
+                    session.commit()
+            except Exception:
+                pass
 
         timeout_seconds = 25
         deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
@@ -478,6 +487,15 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             session.add(command)
             session.commit()
             command_id = int(command.id)
+            try:
+                p_dict = _json.loads(command.command_params or '{}')
+                if isinstance(p_dict, dict):
+                    p_dict['command_id'] = command_id
+                    p_dict['exec_uid'] = command_id
+                    command.command_params = _json.dumps(p_dict, ensure_ascii=False)
+                    session.commit()
+            except Exception:
+                pass
 
         return jsonify(
             {
@@ -912,6 +930,15 @@ verify_auth()
             session.commit()
 
             command_id = int(command.id)
+            try:
+                p_dict = _json.loads(command.command_params or '{}')
+                if isinstance(p_dict, dict):
+                    p_dict['command_id'] = command_id
+                    p_dict['exec_uid'] = command_id
+                    command.command_params = _json.dumps(p_dict, ensure_ascii=False)
+                    session.commit()
+            except Exception:
+                pass
 
         return jsonify({
             "ok": True,
@@ -1035,6 +1062,15 @@ verify_auth()
 
             session.commit()
             command_id = int(command.id)
+            try:
+                p_dict = _json.loads(command.command_params or '{}')
+                if isinstance(p_dict, dict):
+                    p_dict['command_id'] = command_id
+                    p_dict['exec_uid'] = command_id
+                    command.command_params = _json.dumps(p_dict, ensure_ascii=False)
+                    session.commit()
+            except Exception:
+                pass
 
         return jsonify({
             "ok": True,
@@ -1127,6 +1163,15 @@ verify_auth()
                 session.add(command)
                 session.commit()
                 command_id = int(command.id)
+                try:
+                    p_dict = _json.loads(command.command_params or '{}')
+                    if isinstance(p_dict, dict):
+                        p_dict['command_id'] = command_id
+                        p_dict['exec_uid'] = command_id
+                        command.command_params = _json.dumps(p_dict, ensure_ascii=False)
+                        session.commit()
+                except Exception:
+                    pass
 
             return jsonify({
                 "ok": True,
