@@ -113,7 +113,7 @@ export function CopierItem({
     wasPendingRef.current = isPending;
   }, [isPending, fetchFreshSync]);
 
-  const macKey = p.mac_id || p.mac_address || p.mac || '';
+  const macKey = p.mac_address || '';
   const ipKey = p.ip || '';
   const idKey = String(p.id !== undefined && p.id !== null ? p.id : '');
 
