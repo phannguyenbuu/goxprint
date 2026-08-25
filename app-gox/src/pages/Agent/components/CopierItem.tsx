@@ -80,15 +80,11 @@ export function CopierItem({
     try {
       const res = await fetchApi(`/api/lan-sites?t=${Date.now()}`);
       if (res && res.ok && Array.isArray(res.rows)) {
-        const pMac = (p.mac_id || p.mac_address || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-        const pIp = (p.ip || '').trim();
+        const pMac = (p.mac_id || p.mac_address || p.mac || '').toUpperCase().replace(/[^0-9A-F]/g, '');
         for (const site of res.rows) {
           for (const item of (site.printers || [])) {
-            const itemMac = (item.mac_id || item.mac_address || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-            const itemIp = (item.ip || '').trim();
-            const isMacMatch = pMac && itemMac && pMac.length >= 10 && pMac === itemMac;
-            const isIpMatch = pIp && itemIp && pIp === itemIp;
-            if (isMacMatch || isIpMatch) {
+            const itemMac = (item.mac_id || item.mac_address || item.mac || '').toUpperCase().replace(/[^0-9A-F]/g, '');
+            if (pMac && itemMac && pMac.length >= 10 && pMac === itemMac) {
               if (item.address_book_sync) {
                 setLocalSync(item.address_book_sync);
               }
