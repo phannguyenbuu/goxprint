@@ -121,6 +121,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                 Number(cmdId),
                 `scan_lan_${currentLanUid}`,
                 async (pollData: any) => {
+                  console.log("🔍 [PRINTAGENT RESULT] Kết quả force_subnet_scan:", pollData);
                   let freshPrinters: any[] = [];
                   const rawRes = pollData?.result || pollData?.result_payload || pollData?.output || pollData?.error_message || pollData?.raw || '';
                   
