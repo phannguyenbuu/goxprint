@@ -600,11 +600,25 @@ export const useAgentScanActions = (deps: any = {}) => {
   };
 
   const handleRefetchAddressBook = async (printerId: any) => {
-    const pId = String(typeof printerId === 'object' ? printerId.id : printerId);
-    const targetAgent = getTargetAgentUid ? getTargetAgentUid(pId) : '';
+    let pId = String(typeof printerId === 'object' ? (printerId.id || printerId.ip || printerId.mac_address || printerId.mac_id) : printerId);
+    if (!pId || pId === '0' || pId === 'undefined') {
+      if (typeof printerId === 'object') {
+        pId = printerId.ip || printerId.mac_address || printerId.mac_id || '0';
+      }
+    }
+    const printerObj = typeof printerId === 'object' ? printerId : null;
+    const targetAgent = getTargetAgentUid ? getTargetAgentUid(pId) : (printerObj?.agent_uid || '');
     if (showToast) showToast('⌛ Đang yêu cầu Agent đọc trực tiếp danh bạ từ máy photocopy...', 'info', 3000);
     try {
-      const res = await triggerFetchAddressBook(pId, targetAgent || undefined);
+      const extraData: any = {};
+      if (printerObj) {
+        if (printerObj.ip) extraData.printer_ip = printerObj.ip;
+        if (printerObj.name || printerObj.printer_name) extraData.printer_name = printerObj.name || printerObj.printer_name;
+        if (printerObj.mac_address || printerObj.mac_id) extraData.mac_id = printerObj.mac_address || printerObj.mac_id;
+        if (printerObj.user || printerObj.auth_user) extraData.auth_user = printerObj.user || printerObj.auth_user;
+        if (printerObj.password || printerObj.auth_password) extraData.auth_password = printerObj.password || printerObj.auth_password;
+      }
+      const res = await triggerFetchAddressBook(pId, targetAgent || undefined, extraData);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh đọc danh bạ');
       }
