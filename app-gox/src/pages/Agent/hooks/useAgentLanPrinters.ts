@@ -55,6 +55,25 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       const rows = data?.rows || (Array.isArray(data) ? data : []);
       setLanSites(rows);
 
+      try {
+        console.log('==================================================');
+        console.log('[FRONTEND SCANPOINTS VPS] DANH SÁCH DANH BẠ TỪ SCANPOINTS VPS (< 3 NGÀY):');
+        rows.forEach((site: any) => {
+          (site.printers || []).forEach((p: any) => {
+            const sync = p.address_book_sync || {};
+            const list = Array.isArray(sync.address_list) ? sync.address_list : (sync.address_book_data?.address_list || []);
+            if (list.length > 0) {
+              console.log(`📌 Máy in [${p.printer_name}] - IP: ${p.ip} | MAC: ${p.mac_id} (${list.length} điểm scan trong ScanPoints VPS):`, list);
+            } else {
+              console.log(`ℹ️ Máy in [${p.printer_name}] - IP: ${p.ip} | MAC: ${p.mac_id}: Chưa có hoặc ScanPoints VPS đã bị xóa (> 3 ngày).`);
+            }
+          });
+        });
+        console.log('==================================================');
+      } catch (logErr) {
+        console.error('Console log error:', logErr);
+      }
+
       if (rows.length > 0) {
         setSelectedLanUid((prev) => {
           if (prev && rows.some((s: any) => s.lan_uid === prev)) return prev;
