@@ -66,38 +66,31 @@ export const useAgentScanActions = (deps: any = {}) => {
   const resolveCopierCredentials = async (printerObj: any): Promise<{ user: string; pass: string; mac: string }> => {
     const mac = String(printerObj?.mac_address || printerObj?.mac_id || printerObj?.mac || '').toUpperCase().replace(/[^0-9A-F:]/g, '');
     const normMac = mac.replace(/[:-]/g, '');
-    const pIdKey = String(printerObj?.id || '');
-    const ipKey = String(printerObj?.ip || printerObj?.printer_ip || '');
 
-    let user = (printerObj?.auth_user || printerObj?.user || '').trim();
-    let pass = (printerObj?.auth_password || printerObj?.password || '').trim();
-
-    if (!user) {
-      const cred = (mac && copierCredentials[mac]) || (normMac && copierCredentials[normMac]) || (ipKey && copierCredentials[ipKey]) || (pIdKey && copierCredentials[pIdKey]);
-      if (cred) {
-        user = (cred.user || '').trim();
-        pass = (cred.pass || '').trim();
-      }
+    if (!mac && !normMac) {
+      throw new Error('⚠️ Không xác định được địa chỉ MAC của thiết bị để tra cứu tài khoản trên VPS!');
     }
 
-    if (!user && (mac || normMac)) {
-      try {
-        const res = await fetchApi(`/api/devices/credentials-map?t=${Date.now()}`);
-        if (res && res.ok && res.credentials) {
-          const matched = res.credentials[mac] || res.credentials[normMac] || res.credentials[mac.replace(/:/g, '-')];
-          if (matched && matched.user) {
-            user = (matched.user || '').trim();
-            pass = (matched.password || matched.pass || '').trim();
-          }
+    let user = '';
+    let pass = '';
+
+    // Truy vấn trực tiếp bảng PrinterAuthCredential trên VPS theo mac_id
+    try {
+      const res = await fetchApi(`/api/devices/credentials-map?t=${Date.now()}`);
+      if (res && res.ok && res.credentials) {
+        const matched = res.credentials[mac] || res.credentials[normMac] || res.credentials[mac.replace(/:/g, '-')];
+        if (matched && matched.user) {
+          user = (matched.user || '').trim();
+          pass = (matched.password || matched.pass || '').trim();
         }
-      } catch (e) {
-        console.warn('[resolveCopierCredentials] VPS lookup error:', e);
       }
+    } catch (e: any) {
+      throw new Error(`❌ Lỗi kết nối VPS khi tải tài khoản máy in: ${e.message || 'Lỗi mạng'}`);
     }
 
+    // Nếu không tìm thấy trong bảng PrinterAuthCredential trên VPS, văng lỗi để user xử lý
     if (!user) {
-      const macDisplay = mac || ipKey || 'chưa xác định';
-      throw new Error(`⚠️ Chưa có Tài khoản Web máy in (admin) cho thiết bị (MAC: ${macDisplay}). Vui lòng nhập Tài khoản/Mật khẩu và bấm "Lưu Auth" trước khi thực hiện!`);
+      throw new Error(`⚠️ Chưa có Tài khoản Web máy in (admin) trong bảng PrinterAuthCredential trên VPS cho thiết bị (MAC: ${mac}). Vui lòng nhập Tài khoản/Mật khẩu và bấm "Lưu Auth" trước!`);
     }
 
     return { user, pass, mac };
