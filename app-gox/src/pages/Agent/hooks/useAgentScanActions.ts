@@ -62,6 +62,46 @@ function safePathToken(value: string): string {
 
 export const useAgentScanActions = (deps: any = {}) => {
   const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [], detectBrand } = deps;
+
+  const resolveCopierCredentials = async (printerObj: any): Promise<{ user: string; pass: string; mac: string }> => {
+    const mac = String(printerObj?.mac_address || printerObj?.mac_id || printerObj?.mac || '').toUpperCase().replace(/[^0-9A-F:]/g, '');
+    const normMac = mac.replace(/[:-]/g, '');
+    const pIdKey = String(printerObj?.id || '');
+    const ipKey = String(printerObj?.ip || printerObj?.printer_ip || '');
+
+    let user = (printerObj?.auth_user || printerObj?.user || '').trim();
+    let pass = (printerObj?.auth_password || printerObj?.password || '').trim();
+
+    if (!user) {
+      const cred = (mac && copierCredentials[mac]) || (normMac && copierCredentials[normMac]) || (ipKey && copierCredentials[ipKey]) || (pIdKey && copierCredentials[pIdKey]);
+      if (cred) {
+        user = (cred.user || '').trim();
+        pass = (cred.pass || '').trim();
+      }
+    }
+
+    if (!user && (mac || normMac)) {
+      try {
+        const res = await fetchApi(`/api/devices/credentials-map?t=${Date.now()}`);
+        if (res && res.ok && res.credentials) {
+          const matched = res.credentials[mac] || res.credentials[normMac] || res.credentials[mac.replace(/:/g, '-')];
+          if (matched && matched.user) {
+            user = (matched.user || '').trim();
+            pass = (matched.password || matched.pass || '').trim();
+          }
+        }
+      } catch (e) {
+        console.warn('[resolveCopierCredentials] VPS lookup error:', e);
+      }
+    }
+
+    if (!user) {
+      const macDisplay = mac || ipKey || 'chưa xác định';
+      throw new Error(`⚠️ Chưa có Tài khoản Web máy in (admin) cho thiết bị (MAC: ${macDisplay}). Vui lòng nhập Tài khoản/Mật khẩu và bấm "Lưu Auth" trước khi thực hiện!`);
+    }
+
+    return { user, pass, mac };
+  };
   const handleQueryVideo = async (agentUid: string, cameraId: number, customTimestamp?: string, customDuration?: number) => {
     const ts = customTimestamp || queryTimestamp;
     const dur = customDuration || queryDuration;
@@ -187,11 +227,7 @@ export const useAgentScanActions = (deps: any = {}) => {
           } catch {}
         }
         const printerIp = printerObj?.ip || printerObj?.printer_ip || (printerId.includes('.') ? printerId : '');
-        const macAddr = printerObj?.mac_address || printerObj?.mac_id || '';
-        const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
-        const creds = copierCredentials[normMac] || copierCredentials[printerId] || {};
-        const authUser = creds.user || printerObj?.auth_user || 'admin';
-        const authPass = creds.pass || printerObj?.auth_password || '';
+        const { user: authUser, pass: authPass } = await resolveCopierCredentials(printerObj);
         const realTargetId = String(entry?.entry_id || entry?.id || regNo || '').trim() || 'null';
 
         let scriptContent = activeCmdObj?.command_content || DEFAULT_EXEC_TEMPLATES[cmdName] || '';
@@ -610,13 +646,15 @@ export const useAgentScanActions = (deps: any = {}) => {
     const targetAgent = getTargetAgentUid ? getTargetAgentUid(pId) : (printerObj?.agent_uid || '');
     if (showToast) showToast('⌛ Đang yêu cầu Agent đọc trực tiếp danh bạ từ máy photocopy...', 'info', 3000);
     try {
-      const extraData: any = {};
+      const { user: authUser, pass: authPass } = await resolveCopierCredentials(printerObj || { ip: pId, mac_address: pId });
+      const extraData: any = {
+        auth_user: authUser,
+        auth_password: authPass,
+      };
       if (printerObj) {
         if (printerObj.ip) extraData.printer_ip = printerObj.ip;
         if (printerObj.name || printerObj.printer_name) extraData.printer_name = printerObj.name || printerObj.printer_name;
         if (printerObj.mac_address || printerObj.mac_id) extraData.mac_id = printerObj.mac_address || printerObj.mac_id;
-        if (printerObj.user || printerObj.auth_user) extraData.auth_user = printerObj.user || printerObj.auth_user;
-        if (printerObj.password || printerObj.auth_password) extraData.auth_password = printerObj.password || printerObj.auth_password;
       }
       const res = await triggerFetchAddressBook(pId, targetAgent || undefined, extraData);
       if (!res.ok || !res.command_id) {
@@ -682,10 +720,7 @@ export const useAgentScanActions = (deps: any = {}) => {
     try {
       const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
       const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
-      const normMac = printerObj?.mac_address || printerObj?.mac_id || printerId;
-      const creds = copierCredentials[normMac] || copierCredentials[printerId] || {};
-      const authUser = creds.user || printerObj?.auth_user || printerObj?.username || 'admin';
-      const authPass = creds.pass || printerObj?.auth_password || printerObj?.password || '';
+      const { user: authUser, pass: authPass, mac: normMac } = await resolveCopierCredentials(printerObj || { id: printerId, mac_address: printerId });
 
       const extraPayload = {
         mac_address: normMac,
