@@ -127,13 +127,30 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                   
                   if (Array.isArray(rawRes)) {
                     freshPrinters = rawRes;
-                  } else if (typeof rawRes === 'string') {
-                    if (rawRes.includes('[') && rawRes.includes(']')) {
+                  } else if (typeof rawRes === 'string' && rawRes.trim()) {
+                    try {
+                      const directParsed = JSON.parse(rawRes.trim());
+                      if (Array.isArray(directParsed)) freshPrinters = directParsed;
+                    } catch {}
+
+                    if (freshPrinters.length === 0) {
                       try {
-                        const jsonSubstr = rawRes.substring(rawRes.indexOf('['), rawRes.lastIndexOf(']') + 1);
-                        const parsed = JSON.parse(jsonSubstr);
-                        if (Array.isArray(parsed)) freshPrinters = parsed;
-                      } catch (e) {}
+                        let jsonStr = '';
+                        if (rawRes.includes('__PRINTERS_JSON_START__')) {
+                          jsonStr = rawRes.split('__PRINTERS_JSON_START__')[1].split('__PRINTERS_JSON_END__')[0].trim();
+                        } else {
+                          const jsonArrayMatch = rawRes.match(/(\[\s*\{[\s\S]*\}\s*\])/);
+                          if (jsonArrayMatch) {
+                            jsonStr = jsonArrayMatch[1];
+                          }
+                        }
+                        if (jsonStr) {
+                          const parsed = JSON.parse(jsonStr);
+                          if (Array.isArray(parsed)) freshPrinters = parsed;
+                        }
+                      } catch (e) {
+                        console.error("🔍 [Frontend] Lỗi parse JSON máy in:", e);
+                      }
                     }
                   }
                   
