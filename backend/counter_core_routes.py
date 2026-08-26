@@ -331,7 +331,18 @@ def register_counter_core_routes(app: Flask, session_factory: Any) -> None:
         with session_factory() as session:
             row = session.get(DeviceInforHistory, row_id)
             if row is None:
-                return jsonify({"ok": False, "error": "Infor row not found"}), 404
+                row_di = session.get(DeviceInfor, row_id)
+                if row_di is not None:
+                    session.delete(row_di)
+                    session.commit()
+                    return jsonify({"ok": True, "id": row_id})
+                row_p = session.get(Printer, row_id)
+                if row_p is not None:
+                    session.delete(row_p)
+                    session.commit()
+                    return jsonify({"ok": True, "id": row_id})
+                return jsonify({"ok": True, "id": row_id, "deleted": False})
+
             lead = _to_text(row.lead)
             lan_uid = _to_text(row.lan_uid)
             machine_uid = _to_text(row.machine_uid)
