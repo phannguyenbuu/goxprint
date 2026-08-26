@@ -566,18 +566,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch(`/api/lan-sites?${params.toString()}`);
             const data = await resp.json();
             
-            lanSites = data.rows || [];
+            lanSites = (data.rows || []).sort((a, b) => {
+                const activeA = (a.agents || []).filter(ag => ag.is_agent_active).length;
+                const activeB = (b.agents || []).filter(ag => ag.is_agent_active).length;
+                if (activeA !== activeB) return activeB - activeA;
+                const printA = (a.printers || []).length;
+                const printB = (b.printers || []).length;
+                return printB - printA;
+            });
             
             // Populating LAN select dropdown
             populateSelect();
             
-            // Auto-restore selection or pick the first one
+            // Default to empty ("-- Choose a LAN network --") to display Summary Table
             const selectEl = document.getElementById('global-lan-select');
-            if (selectedLanUid && lanSites.some(r => r.lan_uid === selectedLanUid)) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlLanUid = urlParams.get('lan_uid');
+            
+            if (urlLanUid && lanSites.some(r => r.lan_uid === urlLanUid)) {
+                selectedLanUid = urlLanUid;
+                selectEl.value = urlLanUid;
+            } else if (selectedLanUid && lanSites.some(r => r.lan_uid === selectedLanUid)) {
                 selectEl.value = selectedLanUid;
-            } else if (lanSites.length > 0) {
-                selectEl.value = lanSites[0].lan_uid;
-                selectedLanUid = lanSites[0].lan_uid;
             } else {
                 selectEl.value = '';
                 selectedLanUid = null;
