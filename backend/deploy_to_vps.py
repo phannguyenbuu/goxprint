@@ -99,7 +99,12 @@ if dist_dir.exists():
             ensure_remote_parent_dir(target_www)
             sftp.put(str(local_path), target_www)
             
-            # Destination 2: /opt/printagent/static (Flask static directory)
+            # Destination 2: /var/www/printagentx.com/html (Nginx root for printagentx.com)
+            target_px = f"/var/www/printagentx.com/html/{rel_path}"
+            ensure_remote_parent_dir(target_px)
+            sftp.put(str(local_path), target_px)
+
+            # Destination 3: /opt/printagent/static (Flask static directory)
             target_static = f"/opt/printagent/static/{rel_path}"
             ensure_remote_parent_dir(target_static)
             sftp.put(str(local_path), target_static)
