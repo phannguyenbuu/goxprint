@@ -204,6 +204,7 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             session.commit()
             
             rows: list[dict[str, Any]] = []
+            seen_devices: dict[str, dict[str, Any]] = {}
 
             # 1. Pipeline: mac_id -> resolve ip -> fetch counter & status (from RAM devices or SQL DeviceInforHistory/DeviceInfor)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
@@ -464,26 +465,39 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         status_data["printer_status"] = "online" if p_online_state else "offline"
 
                     now_dt = datetime.now(timezone.utc)
-                    rows.append(
-                        serialize_infor_row(
-                            row_id=dummy_id,
-                            row_lead=a_lead,
-                            row_lan_uid=a_lan_uid,
-                            row_agent_uid=agent_uid,
-                            row_printer_name=p_name,
-                            row_ip=p_ip,
-                            row_mac_id=p_mac,
-                            row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
-                            row_is_latest=True,
-                            counter_data=counter_data or {},
-                            status_data=status_data,
-                            last_counter_at=last_counter_at or now_dt,
-                            last_status_at=last_status_at or now_dt,
-                            created_at=now_dt,
-                            updated_at=now_dt,
-                        )
+                    dev_key = p_mac or p_ip
+                    serialized = serialize_infor_row(
+                        row_id=dummy_id,
+                        row_lead=a_lead,
+                        row_lan_uid=a_lan_uid,
+                        row_agent_uid=agent_uid,
+                        row_printer_name=p_name,
+                        row_ip=p_ip,
+                        row_mac_id=p_mac,
+                        row_machine_uid=p_mac or (f"IP:{p_ip}" if p_ip else "unknown"),
+                        row_is_latest=True,
+                        counter_data=counter_data or {},
+                        status_data=status_data,
+                        last_counter_at=last_counter_at or now_dt,
+                        last_status_at=last_status_at or now_dt,
+                        created_at=now_dt,
+                        updated_at=now_dt,
                     )
-                    dummy_id += 1
+                    
+                    if dev_key not in seen_devices:
+                        seen_devices[dev_key] = serialized
+                        dummy_id += 1
+                    else:
+                        existing = seen_devices[dev_key]
+                        ex_counter = existing.get("counter") or {}
+                        new_counter = serialized.get("counter") or {}
+                        if not ex_counter and new_counter:
+                            existing["counter"] = new_counter
+                            existing["counter_data"] = new_counter
+                        if p_ip and not existing.get("ip"):
+                            existing["ip"] = p_ip
+
+            rows = list(seen_devices.values())
 
             # 2. FALLBACK ONLY IF RAM IS EMPTY (e.g. right after server reboot)
             if not rows:
