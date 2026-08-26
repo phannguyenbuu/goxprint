@@ -51,6 +51,27 @@ def is_public_ip_allowed(client_ip: str, session_factory: Any) -> bool:
     return False
 
 
+def get_active_public_ips(session_factory: Any) -> list[dict[str, Any]]:
+    """Helper to return all active AllowedPublicIp entries."""
+    try:
+        with session_factory() as session:
+            rows = session.execute(
+                select(AllowedPublicIp).where(AllowedPublicIp.enabled == True).order_by(AllowedPublicIp.id.asc())  # noqa: E712
+            ).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "ip_address": r.ip_address,
+                    "description": r.description or "",
+                    "enabled": r.enabled
+                }
+                for r in rows
+            ]
+    except Exception as exc:
+        LOGGER.warning("[get_active_public_ips] Error: %s", exc)
+        return []
+
+
 def register_admin_public_ip_routes(app: Flask, session_factory: Any) -> None:
 
     @app.get("/api/public-ips")

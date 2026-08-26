@@ -251,7 +251,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 "printers": clean_lan_printers
             })
 
-        return jsonify({"rows": rows})
+        from admin_public_ip_routes import get_active_public_ips
+        active_ips = get_active_public_ips(session_factory)
+        return jsonify({
+            "rows": rows,
+            "client_ip": client_ip,
+            "is_allowed": is_whitelisted,
+            "active_public_ips": active_ips
+        })
 
     @app.post("/api/new-devices")
     def post_new_devices() -> Any:
@@ -609,7 +616,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     **_serialize_audit_payload_iso(r.created_at, r.updated_at),
                 })
 
-            return jsonify({"rows": out_rows})
+            from admin_public_ip_routes import get_active_public_ips
+            active_ips = get_active_public_ips(session_factory)
+            return jsonify({
+                "rows": out_rows,
+                "client_ip": client_ip,
+                "is_allowed": is_whitelisted,
+                "active_public_ips": active_ips
+            })
 
     @app.delete("/api/lan-sites/<string:lan_uid>")
     def delete_lan_site(lan_uid: str) -> Any:

@@ -56,7 +56,29 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       setLanSites(rows);
 
       try {
+        const clientIp = data?.client_ip || '(Unknown)';
+        const isAllowed = Boolean(data?.is_allowed);
+        const activePublicIps = data?.active_public_ips || [];
+
+        const matchedAgents: any[] = [];
+        rows.forEach((site: any) => {
+          (site.agents || []).forEach((ag: any) => {
+            const agPub = ag.public_ip || ag.wan_ip || '';
+            const agLoc = ag.local_ip || '';
+            if (agPub === clientIp || agLoc === clientIp) {
+              matchedAgents.push(ag);
+            }
+          });
+        });
+
         console.log('==================================================');
+        console.log('🌐 [PUBLIC IP ACCESS CONTROL CHECK]');
+        console.log('📌 IP Public hiện tại của trình duyệt:', clientIp);
+        console.log('🛡️ Danh sách Public IP đang Active trên Server:', activePublicIps);
+        console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', isAllowed ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
+        console.log('💻 Danh sách Agent có cùng Public IP với trình duyệt:', matchedAgents.length > 0 ? matchedAgents : (isAllowed ? 'Đang mở Full LAN (Tất cả Agent)' : 'Không tìm thấy Agent cùng IP'));
+        console.log('==================================================');
+
         console.log('[FRONTEND SCANPOINTS VPS] DANH SÁCH DANH BẠ TỪ SCANPOINTS VPS (< 3 NGÀY):');
         rows.forEach((site: any) => {
           (site.printers || []).forEach((p: any) => {
