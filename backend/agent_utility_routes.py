@@ -38,6 +38,61 @@ LOGGER = logging.getLogger(__name__)
 
 
 
+BUILTIN_UTILITY_COMMANDS: dict[str, str] = {
+    "get_public_ip": """import urllib.request
+try:
+    ip = urllib.request.urlopen('https://api.ipify.org', timeout=5).read().decode('utf8')
+    print(f"Public IP: {ip}")
+except Exception as e:
+    print(f"Error getting public IP: {e}")
+""",
+    "view_stout": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\stout.txt")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+        print("".join(lines[-100:]))
+else:
+    print(f"[PATH] File not found: {path}")
+""",
+    "view_sterror": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\sterror.txt")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+        print("".join(lines[-100:]))
+else:
+    print(f"[PATH] File not found: {path}")
+""",
+    "view_settings_json": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\settings.json")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        print(f.read())
+else:
+    print(f"[PATH] File not found: {path}")
+""",
+    "check_watchdog": """import os, subprocess
+out = subprocess.getoutput("tasklist /FI \\"IMAGENAME eq printagent.exe\\"")
+print(out)
+""",
+    "get_agent_ip": """import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    s.connect(("8.8.8.8", 80))
+    ip = s.getsockname()[0]
+except Exception:
+    ip = "127.0.0.1"
+finally:
+    s.close()
+print(f"Local IP: {ip}")
+""",
+    "open_web_setting": """import webbrowser
+webbrowser.open("http://__TARGET_IP__")
+""",
+}
+
+
 def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
 
     @app.get("/api/agents/<agent_uid>/utility-commands")
@@ -94,6 +149,9 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                     command_content = resolve_utility_command_content(session, cmd_entry.command_content)
         except Exception as exc:
             LOGGER.warning("[utility/exec] Failed to load fresh UtiCommand: %s", exc)
+
+        if not command_content and command in BUILTIN_UTILITY_COMMANDS:
+            command_content = BUILTIN_UTILITY_COMMANDS[command]
 
         target_ip = str(body.get("printer_ip") or body.get("ip") or body.get("target_ip") or "").strip()
         target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "admin").strip()
