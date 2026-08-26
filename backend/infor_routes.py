@@ -296,12 +296,13 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     # 1. Nếu RAM chưa có counter_data, truy vấn DeviceInfor và DeviceInforHistory trong CSDL theo MAC chuẩn hoặc IP
                     if not counter_data and (p_mac or p_ip):
                         try:
+                            clean_mac = p_mac.replace(':', '').replace('-', '').upper() if p_mac else ""
                             # 1a. Ưu tiên tìm trong DeviceInfor theo p_mac
                             d_row = None
-                            if p_mac:
+                            if clean_mac:
                                 d_row = session.execute(
                                     select(DeviceInfor)
-                                    .where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
+                                    .where(func.upper(func.replace(func.replace(DeviceInfor.mac_id, ':', ''), '-', '')) == clean_mac)
                                     .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
                                     .limit(1)
                                 ).scalars().first()
@@ -326,10 +327,10 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             # 1b. Nếu vẫn chưa có, tìm trong DeviceInforHistory theo p_mac
                             if not counter_data:
                                 dh_row = None
-                                if p_mac:
+                                if clean_mac:
                                     dh_row = session.execute(
                                         select(DeviceInforHistory)
-                                        .where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
+                                        .where(func.upper(func.replace(func.replace(DeviceInforHistory.mac_id, ':', ''), '-', '')) == clean_mac)
                                         .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
                                         .limit(1)
                                     ).scalars().first()
