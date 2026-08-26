@@ -93,10 +93,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         if (!hasAccess && clientIp) {
           console.warn(`[ACCESS DENIED] Public IP ${clientIp} is not allowed and not in the same network.`);
           setAccessDeniedState({ isOpen: true, ip: clientIp });
-          setTimeout(() => {
-            alert(`Public IP ${clientIp} không được chấp nhận, hãy liên hệ admin`);
-            window.location.href = '/dashboard';
-          }, 100);
           return;
         }
 
