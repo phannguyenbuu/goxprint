@@ -7,6 +7,7 @@ import { AnimatedList } from '../../../components/ui/AnimatedList';
 import { safePathToken } from '../utils/agentUtils';
 import { CopierItem } from './CopierItem';
 import { LoadingSpinner } from '../../../components/ui/LoadingSpinner';
+import { fetchApi } from '../../../api/mockAgentApi';
 
 export function AgentModals(props: any) {
   const {
@@ -114,6 +115,7 @@ export function AgentModals(props: any) {
     selectedLanUid,
     selectedTargetAgents,
     selectedUtilityAgent,
+    setAccessDeniedState,
     setActiveLoadingFile,
     setActiveModal,
     setActiveTab,
@@ -212,6 +214,57 @@ export function AgentModals(props: any) {
     webPreviewModal = { isOpen: false },
     webPreviewTab
   } = props;
+
+  const [inputPublicIp, setInputPublicIp] = React.useState('');
+  const [isConnectingIp, setIsConnectingIp] = React.useState(false);
+  const [ipErrorMsg, setIpErrorMsg] = React.useState('');
+
+  React.useEffect(() => {
+    if (accessDeniedState?.isOpen) {
+      setInputPublicIp(accessDeniedState.ip || '');
+      setIpErrorMsg('');
+    }
+  }, [accessDeniedState?.isOpen, accessDeniedState?.ip]);
+
+  const handleConnectWithPublicIp = async (targetIpOverride?: any) => {
+    const targetIp = (typeof targetIpOverride === 'string' ? targetIpOverride : inputPublicIp || accessDeniedState?.ip || '').trim();
+    if (!targetIp) {
+      setIpErrorMsg('Vui lòng nhập Public IP hợp lệ');
+      return;
+    }
+    setIsConnectingIp(true);
+    setIpErrorMsg('');
+    try {
+      await fetchApi('/api/public-ips', {
+        method: 'POST',
+        body: JSON.stringify({
+          ip_address: targetIp,
+          description: 'Allowed from App-Gox Modal',
+          enabled: true,
+        }),
+      });
+      if (setAccessDeniedState) {
+        setAccessDeniedState({ isOpen: false, ip: '' });
+      }
+      if (props.fetchLanSitesData) {
+        await props.fetchLanSitesData(true);
+      }
+    } catch (err: any) {
+      console.error('Error adding public IP:', err);
+      if (err?.message?.includes('đã tồn tại') || err?.message?.includes('already exists')) {
+        if (setAccessDeniedState) {
+          setAccessDeniedState({ isOpen: false, ip: '' });
+        }
+        if (props.fetchLanSitesData) {
+          await props.fetchLanSitesData(true);
+        }
+      } else {
+        setIpErrorMsg(err?.message || 'Không thể kết nối IP này');
+      }
+    } finally {
+      setIsConnectingIp(false);
+    }
+  };
 
   return (
     <>
@@ -1580,42 +1633,121 @@ export function AgentModals(props: any) {
             <motion.div
               style={{
                 ...styles.confirmModalCard,
-                maxWidth: '420px',
+                maxWidth: '460px',
+                width: '90%',
                 textAlign: 'center',
                 border: '1px solid rgba(239, 68, 68, 0.4)',
                 background: 'rgba(24, 24, 32, 0.98)',
-                padding: '24px'
+                padding: '28px 24px',
+                borderRadius: '16px',
+                boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
               }}
               onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
             >
-              <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>🚫</div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-error)', margin: '0 0 12px 0' }}>
-                Truy cập bị từ chối
+              <div style={{ fontSize: '2.8rem', marginBottom: '10px' }}>🌐</div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f87171', margin: '0 0 8px 0' }}>
+                Cảnh báo Public IP / Cho phép kết nối
               </h3>
-              <p style={{ fontSize: '0.88rem', color: 'var(--color-text)', lineHeight: 1.5, margin: '0 0 20px 0' }}>
-                Public IP <strong>{accessDeniedState.ip}</strong> không được chấp nhận, hãy liên hệ admin
+              <p style={{ fontSize: '0.86rem', color: '#9ca3af', lineHeight: 1.5, margin: '0 0 16px 0' }}>
+                Public IP hiện tại của trình duyệt (<strong>{accessDeniedState.ip || 'Chưa xác định'}</strong>) chưa có trong danh sách được kết nối với Agent.
               </p>
-              <button
-                onClick={() => {
-                  window.location.href = '/dashboard';
-                }}
-                style={{
-                  width: '100%',
-                  padding: '10px 16px',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  background: 'var(--color-primary)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer'
-                }}
-              >
-                Quay về Dashboard ↗
-              </button>
+
+              {/* Input section */}
+              <div style={{ textAlign: 'left', marginBottom: '16px' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e5e7eb', display: 'block', marginBottom: '6px' }}>
+                  Nhập Public IP muốn kết nối với Agent:
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={inputPublicIp}
+                    onChange={(e) => setInputPublicIp(e.target.value)}
+                    placeholder="Ví dụ: 116.98.0.59 hoặc *"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      fontSize: '0.9rem',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      background: 'rgba(0,0,0,0.4)',
+                      color: '#fff',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                {ipErrorMsg && (
+                  <div style={{ fontSize: '0.78rem', color: '#ef4444', marginTop: '6px' }}>
+                    ⚠️ {ipErrorMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  onClick={() => handleConnectWithPublicIp()}
+                  disabled={isConnectingIp}
+                  style={{
+                    width: '100%',
+                    padding: '11px 16px',
+                    fontSize: '0.9rem',
+                    fontWeight: 700,
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: isConnectingIp ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  {isConnectingIp ? <LoadingSpinner size="sm" /> : '⚡ Cho phép IP & Kết nối với Agent'}
+                </button>
+
+                <button
+                  onClick={() => handleConnectWithPublicIp('*')}
+                  disabled={isConnectingIp}
+                  style={{
+                    width: '100%',
+                    padding: '9px 16px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    color: '#60a5fa',
+                    border: '1px solid rgba(59, 130, 246, 0.4)',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔓 Mở quyền cho tất cả IP (Thêm Wildcard *)
+                </button>
+
+                <button
+                  onClick={() => {
+                    window.location.href = '/dashboard';
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '9px 16px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    background: 'transparent',
+                    color: '#9ca3af',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Quay về Dashboard ↗
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
