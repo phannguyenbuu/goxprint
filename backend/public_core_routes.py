@@ -349,13 +349,43 @@ context["result_payload"] = payload
                     .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
                     .limit(1)
                 ).scalar_one_or_none()
+                now_dt = datetime.now(timezone.utc)
                 if row:
                     row.counter_data = res_dict.get("counter")
                     row.status_data = res_dict.get("status")
                     if res_dict.get("ip"):
                         row.ip = res_dict.get("ip")
-                    row.updated_at = datetime.now(timezone.utc)
-                
+                    row.updated_at = now_dt
+                else:
+                    row = DeviceInfor(
+                        lead=lead_val or "default",
+                        lan_uid=lan_uid_val or "default",
+                        agent_uid=agent_uid or "",
+                        mac_id=normalized_mac,
+                        ip=res_dict.get("ip") or ip or "",
+                        printer_name=printer_name or "Photocopy",
+                        counter_data=res_dict.get("counter") or {},
+                        status_data=res_dict.get("status") or {},
+                        created_at=now_dt,
+                        updated_at=now_dt,
+                    )
+                    session.add(row)
+
+                dh_new = DeviceInforHistory(
+                    lead=lead_val or "default",
+                    lan_uid=lan_uid_val or "default",
+                    agent_uid=agent_uid or "",
+                    machine_uid=normalized_mac,
+                    mac_id=normalized_mac,
+                    ip=res_dict.get("ip") or ip or "",
+                    printer_name=printer_name or "Photocopy",
+                    counter_data=res_dict.get("counter") or {},
+                    status_data=res_dict.get("status") or {},
+                    created_at=now_dt,
+                    updated_at=now_dt,
+                )
+                session.add(dh_new)
+
                 printer_row = session.execute(
                     select(Printer)
                     .where(func.upper(Printer.mac_address) == normalized_mac)
@@ -364,7 +394,7 @@ context["result_payload"] = payload
                 ).scalar_one_or_none()
                 if printer_row and res_dict.get("ip"):
                     printer_row.ip = res_dict.get("ip")
-                    printer_row.updated_at = datetime.now(timezone.utc)
+                    printer_row.updated_at = now_dt
 
                 session.commit()
 
