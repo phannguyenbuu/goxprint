@@ -96,25 +96,40 @@
     </div>
   </div>
 
-  <!-- Placeholder Card displayed when no LAN is selected -->
-  <div id="lan-placeholder-card" class="placeholder-card">
-    <div class="placeholder-icon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <line x1="6" y1="21" x2="18" y2="21" />
-        <line x1="12" y1="17" x2="12" y2="21" />
-        <circle cx="6" cy="10" r="1" fill="currentColor" />
-        <circle cx="10" cy="10" r="1" fill="currentColor" />
-        <circle cx="14" cy="10" r="1" fill="currentColor" />
-      </svg>
+  <!-- LAN Summary Table Card displayed when no LAN is selected -->
+  <div id="lan-placeholder-card" class="glass-panel" style="padding: 24px; border-radius: 12px; margin-top: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+      <div>
+        <h3 style="margin: 0; font-size: 1.3rem; font-weight: 700; color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+          🌐 Thống kê Danh sách Mạng LAN & Public IP
+        </h3>
+        <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
+          Tổng hợp tất cả dải mạng LAN, Public IP kết nối, trạng thái Agent và máy Photocopy đang quản lý.
+        </p>
+      </div>
+      <span id="lan-summary-count-badge" class="status-badge ok" style="font-size: 0.8rem; padding: 6px 12px;">0 Mạng LAN</span>
     </div>
-    <h2>LAN Network Manager</h2>
-    <p>Please select an available LAN network from the dropdown above to view connected agents, edit copier credentials, and manage scanner address book destinations.</p>
-  </div>
-  
-  <div class="card-layout">
-  <div id="lan-placeholder-card" class="lan-card glass-panel flex-center" style="min-height: 400px; display: none;">
-    <p style="color: var(--text-muted); font-size: 15px;">Please select an available LAN network from the dropdown above...</p>
+
+    <div class="glass-panel-table-wrap" style="border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08);">
+      <table class="glass-table" style="font-size: 0.88rem; width: 100%;">
+        <thead>
+          <tr style="background: rgba(15, 23, 42, 0.7);">
+            <th style="width: 50px; text-align: center;">STT</th>
+            <th style="text-align: left;">Tên Mạng LAN / LAN UID</th>
+            <th style="width: 140px; text-align: left;">Lead Company</th>
+            <th style="width: 220px; text-align: left;">Public IP</th>
+            <th style="width: 130px; text-align: center;">Số Agent</th>
+            <th style="width: 140px; text-align: center;">Số Máy Photo</th>
+            <th style="width: 120px; text-align: center;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="lan-summary-table-body">
+          <tr>
+            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 32px 0;">Đang tải danh sách mạng LAN...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   
   <!-- Selected LAN Dashboard (Hidden by default) -->
@@ -574,6 +589,86 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    const renderLanSummaryTable = () => {
+        const summaryBody = document.getElementById('lan-summary-table-body');
+        const badgeEl = document.getElementById('lan-summary-count-badge');
+        if (!summaryBody) return;
+
+        const filterVal = (document.getElementById('lan-search-filter')?.value || '').toLowerCase().trim();
+        const filteredRows = lanSites.filter(row => {
+            if (!filterVal) return true;
+            const lanName = (row.lan_name || '').toLowerCase();
+            const lanUid = (row.lan_uid || '').toLowerCase();
+            const lead = (row.lead || '').toLowerCase();
+            const pubIp = (row.public_ip || row.wan_ip || '').toLowerCase();
+            return lanName.includes(filterVal) || lanUid.includes(filterVal) || lead.includes(filterVal) || pubIp.includes(filterVal);
+        });
+
+        if (badgeEl) badgeEl.textContent = `${filteredRows.length} Mạng LAN`;
+
+        if (filteredRows.length === 0) {
+            summaryBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 32px 0;">Không tìm thấy dải mạng LAN nào phù hợp.</td></tr>';
+            return;
+        }
+
+        let html = '';
+        filteredRows.forEach((row, idx) => {
+            const lanName = row.lan_name || row.lan_uid;
+            const leadName = row.lead || 'default';
+            const activeAgentsCount = row.active_agents || (row.agents || []).filter(a => a.is_agent_active).length || 0;
+            const totalAgentsCount = (row.agents || []).length;
+            const printersCount = (row.printers || []).length;
+
+            const pubIps = new Set();
+            if (row.public_ip) pubIps.add(row.public_ip);
+            if (row.wan_ip) pubIps.add(row.wan_ip);
+            (row.agents || []).forEach(ag => {
+                const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
+                if (agPub && agPub !== '127.0.0.1' && agPub !== 'localhost') {
+                    pubIps.add(agPub);
+                }
+            });
+            const pubIpList = Array.from(pubIps);
+            const pubIpHtml = pubIpList.length > 0
+                ? pubIpList.map(ip => `<span class="font-mono" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 0.8rem; display: inline-block; margin: 2px;">${ip}</span>`).join(' ')
+                : '<span style="color: var(--text-muted); font-size: 0.8rem;">Chưa xác định</span>';
+
+            html += `
+                <tr style="cursor: pointer;" onclick="selectLanByUid('${row.lan_uid}')">
+                    <td style="text-align: center; color: var(--text-muted); font-weight: 600;">${idx + 1}</td>
+                    <td>
+                        <div style="font-weight: 700; color: #f3f4f6;">${lanName}</div>
+                        <div class="font-mono" style="font-size: 0.75rem; color: #9ca3af;">${row.lan_uid}</div>
+                    </td>
+                    <td style="color: #60a5fa; font-weight: 600;">${leadName}</td>
+                    <td>${pubIpHtml}</td>
+                    <td style="text-align: center;">
+                        <span class="status-badge ${activeAgentsCount > 0 ? 'ok' : 'pending'}" style="font-size: 0.75rem;">
+                            ${activeAgentsCount} / ${totalAgentsCount} Online
+                        </span>
+                    </td>
+                    <td style="text-align: center; font-weight: 700; color: #34d399;">
+                        🖨️ ${printersCount} máy
+                    </td>
+                    <td style="text-align: center;">
+                        <button class="glass-btn primary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="event.stopPropagation(); selectLanByUid('${row.lan_uid}')">
+                            Xem chi tiết
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+        summaryBody.innerHTML = html;
+    };
+
+    window.selectLanByUid = function(lanUid) {
+        const selectEl = document.getElementById('global-lan-select');
+        if (selectEl) {
+            selectEl.value = lanUid;
+            handleLanChange();
+        }
+    };
+
     const populateSelect = () => {
         const selectEl = document.getElementById('global-lan-select');
         const filterVal = document.getElementById('lan-search-filter').value.toLowerCase().trim();
@@ -594,6 +689,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (prevVal && Array.from(selectEl.options).some(o => o.value === prevVal)) {
             selectEl.value = prevVal;
         }
+        renderLanSummaryTable();
     };
 
     const handleLanChange = () => {
@@ -604,13 +700,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const dashboard = document.getElementById('lan-selected-dashboard');
         
         if (!selectedLanUid) {
-            placeholder.hidden = false;
-            dashboard.hidden = true;
+            if (placeholder) placeholder.hidden = false;
+            if (dashboard) dashboard.hidden = true;
+            renderLanSummaryTable();
             return;
         }
         
-        placeholder.hidden = true;
-        dashboard.hidden = false;
+        if (placeholder) placeholder.hidden = true;
+        if (dashboard) dashboard.hidden = false;
         
         const selectedLan = lanSites.find(row => row.lan_uid === selectedLanUid);
         if (selectedLan) {
@@ -622,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('global-lan-select').addEventListener('change', handleLanChange);
     document.getElementById('lan-search-filter').addEventListener('input', () => {
         populateSelect();
-        handleLanChange();
+        renderLanSummaryTable();
     });
     
     document.getElementById('refresh-btn').addEventListener('click', fetchLanSites);
