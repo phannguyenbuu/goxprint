@@ -110,11 +110,13 @@ def update_agent_in_memory(
                 continue
 
             p_name = d.get("printer_name") or d.get("model") or "Unknown Printer"
+            d_counter = d.get("counter") if isinstance(d.get("counter"), dict) and d.get("counter") else (d.get("counter_data") if isinstance(d.get("counter_data"), dict) else {})
+            d_status = d.get("status") if isinstance(d.get("status"), dict) and d.get("status") else (d.get("status_data") if isinstance(d.get("status_data"), dict) else {})
             devices_dict[d_mac] = {
                 "printer_name": str(p_name),
                 "ip": str(d.get("ip") or d.get("printer_ip") or ""),
-                "counter": d.get("counter") or {},
-                "status": d.get("status") or {},
+                "counter": d_counter,
+                "status": d_status,
                 "updated_at": now.isoformat(),
             }
 
