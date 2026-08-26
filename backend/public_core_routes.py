@@ -198,21 +198,21 @@ import subprocess
 from agent.services.api_client import Printer
 
 def resolve_ip(mac, default_ip):
+    cleaned_mac = mac.replace(':', '-').lower()
+    
+    # 1. Check if default_ip is responding and matches MAC
     try:
-        # Check if default_ip is responding first (ping with 1 packet, timeout 1s)
-        ping_cmd = f"ping -n 1 -w 1000 {default_ip}"
-        res = subprocess.run(ping_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        res = subprocess.run(f"ping -n 1 -w 500 {default_ip}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode == 0:
             arp_out = subprocess.check_output(f"arp -a {default_ip}", shell=True, timeout=2).decode('ansi', errors='ignore')
-            cleaned_mac = mac.replace(':', '-').lower()
             if cleaned_mac in arp_out.replace(':', '-').lower():
                 return default_ip
     except:
         pass
 
+    # 2. Check local ARP table
     try:
         out = subprocess.check_output("arp -a", shell=True, timeout=3).decode('ansi', errors='ignore')
-        cleaned_mac = mac.replace(':', '-').lower()
         for line in out.splitlines():
             if cleaned_mac in line.replace(':', '-').lower():
                 parts = line.split()
@@ -220,6 +220,31 @@ def resolve_ip(mac, default_ip):
                     return parts[0]
     except:
         pass
+
+    # 3. Threaded Subnet Sweep Fallback: Ping sweep local subnet to populate ARP table & find new IP
+    try:
+        import socket, concurrent.futures
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_net_ip = s.getsockname()[0]
+        s.close()
+        
+        network_prefix = ".".join(local_net_ip.split(".")[:3])
+        def _quick_ping(target_ip):
+            subprocess.run(f"ping -n 1 -w 200 {target_ip}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            list(executor.map(_quick_ping, [f"{network_prefix}.{i}" for i in range(1, 255)]))
+            
+        out_after_scan = subprocess.check_output("arp -a", shell=True, timeout=3).decode('ansi', errors='ignore')
+        for line in out_after_scan.splitlines():
+            if cleaned_mac in line.replace(':', '-').lower():
+                parts = line.split()
+                if parts and len(parts) >= 2:
+                    return parts[0]
+    except:
+        pass
+
     return default_ip
 
 ip = resolve_ip("__MAC__", "__IP__")
