@@ -29,19 +29,24 @@ def main() -> None:
     except Exception as seed_exc:
         print(f"[!] Seed PrinterRecognizePort error: {seed_exc}")
 
-    # Seed default AllowedPublicIp rule (* for all LANs)
+    # Seed default AllowedPublicIp rules (116.98.0.59 and * for all LANs)
     try:
         from models import AllowedPublicIp
         with session_factory() as session:
-            if not session.query(AllowedPublicIp).first():
-                default_rule = AllowedPublicIp(
-                    ip_address="*",
-                    description="Allow all Public IPs access to all LANs by default",
+            if not session.query(AllowedPublicIp).filter_by(ip_address="116.98.0.59").first():
+                session.add(AllowedPublicIp(
+                    ip_address="116.98.0.59",
+                    description="User Public IP (Full Access)",
                     enabled=True
-                )
-                session.add(default_rule)
-                session.commit()
-                print("[OK] Seeded default AllowedPublicIp wildcard rule into DB")
+                ))
+            if not session.query(AllowedPublicIp).filter_by(ip_address="*").first():
+                session.add(AllowedPublicIp(
+                    ip_address="*",
+                    description="Allow all Public IPs access to all LANs",
+                    enabled=True
+                ))
+            session.commit()
+            print("[OK] Seeded 116.98.0.59 and wildcard AllowedPublicIp rules into DB")
     except Exception as ip_exc:
         print(f"[!] Seed AllowedPublicIp error: {ip_exc}")
 

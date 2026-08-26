@@ -262,6 +262,17 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/'/g, '&#039;');
     };
 
+    function updateIpPaginationUI() {
+        const pageDisp = document.getElementById('ip-current-page-display');
+        const prevBtn = document.getElementById('ip-prev-page');
+        const nextBtn = document.getElementById('ip-next-page');
+        if (pageDisp) pageDisp.textContent = ipCurrentPage;
+        if (prevBtn) prevBtn.disabled = ipCurrentPage <= 1;
+
+        const totalPages = Math.ceil(ipTotalItems / ipPageSize);
+        if (nextBtn) nextBtn.disabled = ipCurrentPage >= totalPages || totalPages === 0;
+    }
+
     function renderPublicIpsTable() {
         const tbody = document.getElementById('public-ips-tbody');
         if (!tbody) return;
@@ -333,13 +344,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    // --- Sub-Tab Switching Logic ---
-    const subtabLanBtn = document.getElementById('subtab-lan-sites-btn');
-    const subtabIpBtn = document.getElementById('subtab-public-ips-btn');
-    const lanTabContent = document.getElementById('lan-sites-tab-content');
-    const ipTabContent = document.getElementById('public-ips-tab-content');
+    function switchSubtab(tabName) {
+        const subtabLanBtn = document.getElementById('subtab-lan-sites-btn');
+        const subtabIpBtn = document.getElementById('subtab-public-ips-btn');
+        const lanTabContent = document.getElementById('lan-sites-tab-content');
+        const ipTabContent = document.getElementById('public-ips-tab-content');
 
-    const switchSubtab = (tabName) => {
         if (tabName === 'public-ips') {
             if (subtabLanBtn) {
                 subtabLanBtn.classList.remove('active');
@@ -373,8 +383,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (ipTabContent) ipTabContent.style.display = 'none';
             if (lanTabContent) lanTabContent.style.display = 'block';
         }
-    };
+    }
 
+    const subtabLanBtn = document.getElementById('subtab-lan-sites-btn');
+    const subtabIpBtn = document.getElementById('subtab-public-ips-btn');
     if (subtabLanBtn && subtabIpBtn) {
         subtabLanBtn.addEventListener('click', () => switchSubtab('lan-sites'));
         subtabIpBtn.addEventListener('click', () => switchSubtab('public-ips'));
@@ -385,17 +397,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (initialUrlParams.get('tab') === 'public-ips' || window.location.hash === '#public-ips') {
         switchSubtab('public-ips');
     }
-
-    const updateIpPaginationUI = () => {
-        const pageDisp = document.getElementById('ip-current-page-display');
-        const prevBtn = document.getElementById('ip-prev-page');
-        const nextBtn = document.getElementById('ip-next-page');
-        if (pageDisp) pageDisp.textContent = ipCurrentPage;
-        if (prevBtn) prevBtn.disabled = ipCurrentPage <= 1;
-
-        const totalPages = Math.ceil(ipTotalItems / ipPageSize);
-        if (nextBtn) nextBtn.disabled = ipCurrentPage >= totalPages || totalPages === 0;
-    };
 
     const ipModal = document.getElementById('ip-modal');
     const modalIpTitle = document.getElementById('modal-ip-title');
