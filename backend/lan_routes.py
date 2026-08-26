@@ -187,11 +187,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         continue
 
                 a_lan = a_info.get("lan_uid", "default")
+                pub_ip = a_info.get("public_ip", "") or a_info.get("wan_ip", "")
                 agents_by_lan[a_lan].append({
                     "agent_uid": a_uid,
                     "hostname": a_info.get("hostname", ""),
                     "local_ip": a_info.get("local_ip", ""),
                     "local_mac": a_info.get("local_mac", ""),
+                    "public_ip": pub_ip,
+                    "wan_ip": pub_ip,
                     "lan_uid": a_lan,
                     "app_version": a_info.get("app_version", ""),
                     "run_mode": a_info.get("run_mode", "web"),
@@ -453,11 +456,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 db_mac = db_a.local_mac if db_a else ""
                 db_host = db_a.hostname if db_a else ""
                 
+                pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
                 agent_dict = {
                     "agent_uid": agent_uid,
                     "hostname": db_host or agent_info.get("hostname", ""),
                     "local_ip": db_ip or agent_info.get("local_ip", ""),
                     "local_mac": db_mac or agent_info.get("local_mac", ""),
+                    "public_ip": pub_ip,
+                    "wan_ip": pub_ip,
                     "app_version": agent_info.get("app_version", ""),
                     "run_mode": agent_info.get("run_mode", "web"),
                     "web_port": agent_info.get("web_port", 9173),
@@ -481,11 +487,14 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
                 if db_a.agent_uid not in existing_uids:
                     # Agent is in DB but NOT in RAM → it's offline
+                    db_pub_ip = getattr(db_a, "public_ip", "") or getattr(db_a, "wan_ip", "")
                     agent_dict = {
                         "agent_uid": db_a.agent_uid,
                         "hostname": db_a.hostname or "",
                         "local_ip": db_a.local_ip or "",
                         "local_mac": db_a.local_mac or "",
+                        "public_ip": db_pub_ip,
+                        "wan_ip": db_pub_ip,
                         "app_version": db_a.app_version or "",
                         "run_mode": db_a.run_mode or "web",
                         "web_port": db_a.web_port or 9173,

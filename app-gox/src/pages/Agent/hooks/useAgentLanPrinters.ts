@@ -64,16 +64,16 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       setLanSites(rows);
 
       try {
-        const clientIp = data?.client_ip || '';
+        const clientIp = (data?.client_ip || '').trim();
         const isAllowed = Boolean(data?.is_allowed);
         const activePublicIps = data?.active_public_ips || [];
 
         const matchedAgents: any[] = [];
         rows.forEach((site: any) => {
           (site.agents || []).forEach((ag: any) => {
-            const agPub = ag.public_ip || ag.wan_ip || '';
-            const agLoc = ag.local_ip || '';
-            if (agPub === clientIp || agLoc === clientIp) {
+            const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
+            const agLoc = (ag.local_ip || '').trim();
+            if (clientIp && ((agPub && agPub === clientIp) || (agLoc && agLoc === clientIp))) {
               matchedAgents.push(ag);
             }
           });
