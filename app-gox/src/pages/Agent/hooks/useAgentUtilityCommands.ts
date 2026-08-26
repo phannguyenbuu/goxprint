@@ -45,6 +45,8 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
   const [utilityStatusMsg, setUtilityStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [utilityActionPending, setUtilityActionPending] = useState<string | null>(null);
 
+  const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any>(null);
+
   const [editableSettingsText, setEditableSettingsText] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState('');
@@ -207,13 +209,34 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
     }
   };
 
-  const handleTriggerUtility = useCallback(async (selectedUtilityAgent: any, action: string, backendAction: string, payload: any = {}) => {
-    if (!selectedUtilityAgent) return;
+  const handleTriggerUtility = useCallback(async (
+    agentOrAction: any,
+    actionOrBackend?: string,
+    backendActionOrPayload?: any,
+    payload: any = {}
+  ) => {
+    let targetAgent = selectedUtilityAgent;
+    let action = '';
+    let backendAction = '';
+    let extraPayload = {};
+
+    if (typeof agentOrAction === 'string') {
+      action = agentOrAction;
+      backendAction = actionOrBackend || action;
+      extraPayload = backendActionOrPayload || {};
+    } else {
+      targetAgent = agentOrAction || selectedUtilityAgent;
+      action = actionOrBackend || '';
+      backendAction = backendActionOrPayload || action;
+      extraPayload = payload || {};
+    }
+
+    if (!targetAgent) return;
     setUtilityActionPending(action);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
 
     try {
-      const res = await triggerAgentUtility(selectedUtilityAgent.agent_uid, backendAction, payload);
+      const res = await triggerAgentUtility(targetAgent.agent_uid, backendAction, extraPayload);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
       }
@@ -263,12 +286,29 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
       });
       setUtilityActionPending(null);
     }
-  }, []);
+  }, [selectedUtilityAgent]);
 
-  const handleTriggerUtilityExec = useCallback(async (selectedUtilityAgent: any, command: string, commandContent: string) => {
-    if (!selectedUtilityAgent) return;
+  const handleTriggerUtilityExec = useCallback(async (
+    agentOrCommand: any,
+    commandOrContent?: string,
+    contentOrExtra?: any
+  ) => {
+    let targetAgent = selectedUtilityAgent;
+    let command = '';
+    let commandContent = '';
 
-    const isDup = await isDuplicatePending(selectedUtilityAgent.agent_uid, 'trigger_utility', {
+    if (typeof agentOrCommand === 'string') {
+      command = agentOrCommand;
+      commandContent = commandOrContent || '';
+    } else {
+      targetAgent = agentOrCommand || selectedUtilityAgent;
+      command = commandOrContent || '';
+      commandContent = contentOrExtra || '';
+    }
+
+    if (!targetAgent) return;
+
+    const isDup = await isDuplicatePending(targetAgent.agent_uid, 'trigger_utility', {
       action: 'exec_utility',
       command: command
     });
@@ -283,7 +323,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
 
     if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
       const isChangeIp = command === 'change_agent_ip';
-      const currentIp = selectedUtilityAgent?.local_ip || selectedUtilityAgent?.ip || selectedUtilityAgent?.agent_ip || selectedUtilityAgent?.localIp || '';
+      const currentIp = targetAgent?.local_ip || targetAgent?.ip || targetAgent?.agent_ip || targetAgent?.localIp || '';
 
       if (setIpInputModal) {
         setIpInputModal({
@@ -300,7 +340,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
             const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
             setUtilityActionPending(command);
             setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh tới Agent...', isError: false });
-            triggerAgentUtilityExec(selectedUtilityAgent!.agent_uid, command, finalContent, {
+            triggerAgentUtilityExec(targetAgent!.agent_uid, command, finalContent, {
               target_ip: targetIp,
               ip: targetIp,
               printer_ip: targetIp,
@@ -361,7 +401,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh thực thi tới Agent...', isError: false });
 
     try {
-      const res = await triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, command, commandContent);
+      const res = await triggerAgentUtilityExec(targetAgent.agent_uid, command, commandContent);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh tiện ích');
       }
@@ -397,30 +437,45 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
             setUtilityActionPending(null);
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
-            setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            if (isOutputModal && setViewOutputModal) {
+              setViewOutputModal({
+                isOpen: true,
+                title: displayTitle,
+                content: statusRes.error || (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.result || '(không có nội dung)'),
+                rawPayload: statusRes.result_payload || statusRes.result || ''
+              });
+            } else {
+              setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+            }
             setUtilityActionPending(null);
           } else {
             const elapsedSec = Math.round(elapsed / 1000);
-            if (statusRes.received_at) {
-              setUtilityStatusMsg({ text: `⚡ Agent đã nhận lệnh - đang thực thi... (${elapsedSec}s)`, isError: false });
-            } else {
-              setUtilityStatusMsg({ text: `⌛ Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, isError: false });
-            }
+            const prog = statusRes.progress_text || `Đang xử lý... (${elapsedSec}s)`;
+            setUtilityStatusMsg({ text: `⌛ ${prog}`, isError: false });
           }
         } catch (pollErr: any) {
-          console.error('Error polling utility status:', pollErr);
+          const errMsg = pollErr?.message || String(pollErr || '');
+          if (isOutputModal && setViewOutputModal && (errMsg.startsWith('[PATH]') || errMsg.includes('stout') || errMsg.includes('sterror') || errMsg.includes('settings.json'))) {
+            clearInterval(timer);
+            setViewOutputModal({
+              isOpen: true,
+              title: displayTitle,
+              content: errMsg,
+              rawPayload: errMsg
+            });
+            setUtilityStatusMsg(null);
+            setUtilityActionPending(null);
+          } else {
+            console.error('Poll error:', pollErr);
+          }
         }
       }, pollInterval);
 
     } catch (err: any) {
-      console.error(`Failed to trigger exec ${command}:`, err);
-      setUtilityStatusMsg({
-        text: `Lỗi kết nối hoặc gửi lệnh: ${err.message}`,
-        isError: true
-      });
+      setUtilityStatusMsg({ text: `Lỗi: ${err.message}`, isError: true });
       setUtilityActionPending(null);
     }
-  }, [utilityCommands, showToast, setIpInputModal, setViewOutputModal]);
+  }, [selectedUtilityAgent, utilityCommands, showToast, setIpInputModal, setViewOutputModal]);
 
   return {
     VIEW_COMMANDS, VIEW_COMMAND_TITLES,
@@ -429,6 +484,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
     utilitySettingsLoading, setUtilitySettingsLoading,
     utilityStatusMsg, setUtilityStatusMsg,
     utilityActionPending, setUtilityActionPending,
+    selectedUtilityAgent, setSelectedUtilityAgent,
     editableSettingsText, setEditableSettingsText,
     isSavingSettings, setIsSavingSettings,
     settingsSaveStatus, setSettingsSaveStatus,
