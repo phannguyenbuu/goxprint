@@ -100,6 +100,8 @@ function safePathToken(value: string): string {
     toasts = [],
     lanSitesLoading,
     lanSites = [],
+    selectedPublicIp,
+    setSelectedPublicIp,
     selectedLanUid,
     setSelectedLanUid,
     activeTab,
@@ -159,24 +161,53 @@ function safePathToken(value: string): string {
           </button>
         </div>
 
-        {/* LAN Select filter */}
+        {/* Public IP LAN Input filter */}
         <div style={styles.filterBar}>
-          <label style={styles.filterLabel}>Mạng LAN hiện tại:</label>
-          {lanSitesLoading && lanSites.length === 0 ? (
-            <LoadingSpinner size="sm" />
-          ) : (
-            <select
-              value={selectedLanUid}
-              onChange={(e) => { setSelectedLanUid(e.target.value); localStorage.setItem('goxprint_selected_lan_uid', e.target.value); }}
-              style={styles.lanSelect}
-            >
-              {lanSites.map((site) => (
-                <option key={site.lan_uid} value={site.lan_uid}>
-                  {site.lan_name || site.lan_uid} ({site.active_agents} Agent - {site.printers?.length ?? 0} máy Photo)
-                </option>
-              ))}
-            </select>
-          )}
+          <label style={styles.filterLabel}>🌐 IP Public LAN:</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '380px' }}>
+            <input
+              type="text"
+              value={selectedPublicIp}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedPublicIp(val);
+                localStorage.setItem('goxprint_selected_public_ip', val);
+                localStorage.setItem('gox_connect_public_ip', val);
+              }}
+              placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                fontSize: '0.88rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'rgba(0, 0, 0, 0.4)',
+                color: '#fff',
+                outline: 'none',
+              }}
+            />
+            {selectedPublicIp && (
+              <button
+                onClick={() => {
+                  setSelectedPublicIp('');
+                  localStorage.removeItem('goxprint_selected_public_ip');
+                  localStorage.removeItem('gox_connect_public_ip');
+                }}
+                title="Xóa IP Public"
+                style={{
+                  padding: '6px 10px',
+                  fontSize: '0.8rem',
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  color: '#ef4444',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab bar switch */}

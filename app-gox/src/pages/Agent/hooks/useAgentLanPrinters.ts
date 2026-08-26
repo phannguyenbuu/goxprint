@@ -6,6 +6,9 @@ export const useAgentLanPrinters = (deps: any = {}) => {
   const { showToast, pollCommandStatus, utilityCommands } = deps;
 
   const [lanSites, setLanSites] = useState<any[]>([]);
+  const [selectedPublicIp, setSelectedPublicIp] = useState<string>(() => {
+    return localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '';
+  });
   const [selectedLanUid, setSelectedLanUid] = useState<string>(() => {
     return localStorage.getItem('goxprint_selected_lan_uid') || '';
   });
@@ -136,10 +139,29 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     fetchLanSitesData();
   }, [fetchLanSitesData]);
 
+  const filteredLanSites = useMemo(() => {
+    if (!lanSites || lanSites.length === 0) return [];
+    const cleanTargetIp = selectedPublicIp.trim().toLowerCase();
+    if (!cleanTargetIp) return lanSites;
+
+    const matched = lanSites.filter((site) => {
+      const sitePubIp = (site.public_ip || site.wan_ip || '').trim().toLowerCase();
+      if (sitePubIp && sitePubIp === cleanTargetIp) return true;
+      return (site.agents || []).some((ag: any) => {
+        const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim().toLowerCase();
+        return agPub && agPub === cleanTargetIp;
+      });
+    });
+    return matched.length > 0 ? matched : lanSites;
+  }, [lanSites, selectedPublicIp]);
+
   const selectedLan = useMemo(() => {
+    if (filteredLanSites && filteredLanSites.length > 0) {
+      return filteredLanSites[0];
+    }
     if (!lanSites || lanSites.length === 0) return null;
     return lanSites.find((site) => site.lan_uid === selectedLanUid) || lanSites[0];
-  }, [lanSites, selectedLanUid]);
+  }, [filteredLanSites, lanSites, selectedLanUid]);
 
   const triggerLanScan = useCallback((lanData: any) => {
     if (!lanData) return;
@@ -482,6 +504,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   return {
     lanSites, setLanSites,
+    selectedPublicIp, setSelectedPublicIp, filteredLanSites,
     selectedLanUid, setSelectedLanUid,
     selectedLan, lanSitesLoading, setLanSitesLoading,
     fetchLanSitesData, triggerLanScan, filteredPrinters,
