@@ -155,7 +155,11 @@ def register_admin_public_ip_routes(app: Flask, session_factory: Any) -> None:
                     select(AllowedPublicIp).where(AllowedPublicIp.ip_address == ip_address)
                 ).scalar_one_or_none()
                 if existing:
-                    return jsonify({"ok": False, "error": f"Public IP '{ip_address}' đã tồn tại"}), 400
+                    if not existing.enabled:
+                        existing.enabled = True
+                        existing.updated_at = datetime.now(timezone.utc)
+                        session.commit()
+                    return jsonify({"ok": True, "message": f"Public IP '{ip_address}' đã được cho phép", "id": existing.id})
 
                 new_ip = AllowedPublicIp(
                     ip_address=ip_address,
