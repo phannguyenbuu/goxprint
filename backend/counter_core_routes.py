@@ -26,6 +26,7 @@ from models import (
     CounterBaseline,
     DeviceInforHistory,
     DeviceInfor,
+    Printer,
 )
 
 LOGGER = logging.getLogger(__name__)
