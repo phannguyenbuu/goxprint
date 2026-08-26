@@ -25,6 +25,7 @@ export function AgentModals(props: any) {
     camerasLoading,
     commandStatus,
     confirmModal = { isOpen: false },
+    accessDeniedState = { isOpen: false, ip: '' },
     copierCredentials,
     customRecordDuration,
     customRunCommand,
@@ -1567,6 +1568,54 @@ export function AgentModals(props: any) {
                   Hủy bỏ
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5.5 ACCESS DENIED MODAL */}
+      <AnimatePresence>
+        {accessDeniedState.isOpen && (
+          <div style={styles.confirmOverlay}>
+            <motion.div
+              style={{
+                ...styles.confirmModalCard,
+                maxWidth: '420px',
+                textAlign: 'center',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                background: 'rgba(24, 24, 32, 0.98)',
+                padding: '24px'
+              }}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>🚫</div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-error)', margin: '0 0 12px 0' }}>
+                Truy cập bị từ chối
+              </h3>
+              <p style={{ fontSize: '0.88rem', color: 'var(--color-text)', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+                Public IP <strong>{accessDeniedState.ip}</strong> không được chấp nhận, hãy liên hệ admin
+              </p>
+              <button
+                onClick={() => {
+                  window.location.href = '/dashboard';
+                }}
+                style={{
+                  width: '100%',
+                  padding: '10px 16px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  background: 'var(--color-primary)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              >
+                Quay về Dashboard ↗
+              </button>
             </motion.div>
           </div>
         )}

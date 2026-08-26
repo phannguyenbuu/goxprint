@@ -42,6 +42,14 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     error: ''
   });
 
+  const [accessDeniedState, setAccessDeniedState] = useState<{
+    isOpen: boolean;
+    ip: string;
+  }>({
+    isOpen: false,
+    ip: ''
+  });
+
   const autoScanTriggers = useRef<Record<string, number>>({});
 
   const initialLastViewedId = useMemo(() => {
@@ -56,7 +64,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       setLanSites(rows);
 
       try {
-        const clientIp = data?.client_ip || '(Unknown)';
+        const clientIp = data?.client_ip || '';
         const isAllowed = Boolean(data?.is_allowed);
         const activePublicIps = data?.active_public_ips || [];
 
@@ -71,6 +79,9 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           });
         });
 
+        const isSameNetwork = matchedAgents.length > 0;
+        const hasAccess = isAllowed || isSameNetwork;
+
         console.log('==================================================');
         console.log('🌐 [PUBLIC IP ACCESS CONTROL CHECK]');
         console.log('📌 IP Public hiện tại của trình duyệt:', clientIp);
@@ -78,6 +89,16 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', isAllowed ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
         console.log('💻 Danh sách Agent có cùng Public IP với trình duyệt:', matchedAgents.length > 0 ? matchedAgents : (isAllowed ? 'Đang mở Full LAN (Tất cả Agent)' : 'Không tìm thấy Agent cùng IP'));
         console.log('==================================================');
+
+        if (!hasAccess && clientIp) {
+          console.warn(`[ACCESS DENIED] Public IP ${clientIp} is not allowed and not in the same network.`);
+          setAccessDeniedState({ isOpen: true, ip: clientIp });
+          setTimeout(() => {
+            alert(`Public IP ${clientIp} không được chấp nhận, hãy liên hệ admin`);
+            window.location.href = '/dashboard';
+          }, 100);
+          return;
+        }
 
         console.log('[FRONTEND SCANPOINTS VPS] DANH SÁCH DANH BẠ TỪ SCANPOINTS VPS (< 3 NGÀY):');
         rows.forEach((site: any) => {
@@ -469,6 +490,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     saveAuthLoading, setSaveAuthLoading, handleSaveAuth,
     editIpModalData, setEditIpModalData, handleEditIP, handleSaveEditIP,
     expandedPrinters, setExpandedPrinters,
-    selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick
+    selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick,
+    accessDeniedState, setAccessDeniedState
   };
 };
