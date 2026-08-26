@@ -391,18 +391,13 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         except Exception as cb_err:
                             LOGGER.warning("[infor_list] CounterBaseline lookup exception: %s", cb_err)
 
-                    # 3.8. Nếu vẫn chưa có counter_data và có MAC chuẩn, tự động dò tìm IP & probe counter trực tiếp
+                    # 3.8. Nếu vẫn chưa có counter_data và có MAC chuẩn, tự động dò tìm IP an toàn
                     if not counter_data and p_mac and len(p_mac) == 17:
                         try:
                             from public_core_routes import resolve_ip
-                            res_ok, res_ip, res_dict = resolve_ip(p_mac)
-                            if res_ok and isinstance(res_dict, dict):
-                                if res_dict.get("counter"):
-                                    counter_data = res_dict.get("counter") or {}
-                                if not status_data and res_dict.get("status"):
-                                    status_data = res_dict.get("status") or {}
-                                if res_ip:
-                                    p_ip = res_ip
+                            auto_ip = resolve_ip(p_mac, p_ip or "")
+                            if auto_ip:
+                                p_ip = auto_ip
                         except Exception as auto_heal_err:
                             LOGGER.debug("[infor_list] Auto-heal probe skipped for MAC %s: %s", p_mac, auto_heal_err)
 
