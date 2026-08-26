@@ -382,16 +382,56 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             )
                             session.add(dh_obj)
 
-                    # Purge stale DeviceInfor records for this lead not in agent printers.json
-                    existing_d = session.execute(select(DeviceInfor).where(DeviceInfor.lead == lead)).scalars().all()
-                    active_macs_normalized = {_normalize_mac(m) for m in active_macs if m and _normalize_mac(m)}
-                    for ed in existing_d:
-                        ed_mac = _normalize_mac(ed.mac_id)
-                        ed_ip = (ed.ip or "").strip()
-                        is_active = (ed_mac and ed_mac in active_macs_normalized) or (ed_ip and ed_ip in active_ips)
-                        if not is_active:
-                            session.delete(ed)
-                            LOGGER.info("[ingest_polling] Deleted stale DeviceInfor ID %s (%s, IP %s, MAC %s) for lead %s - not found in agent printers.json", ed.id, ed.printer_name, ed.ip, ed.mac_id, lead)
+                    # Auto-update AgentNode, LanSite, and AllowedPublicIp DB tables with client_pub_ip
+                    if client_pub_ip and client_pub_ip not in ("127.0.0.1", "localhost", "::1"):
+                        from models import AgentNode, LanSite, AllowedPublicIp
+                        agent_node = session.execute(
+                            select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+                        ).scalars().first()
+                        if agent_node:
+                            agent_node.public_ip = client_pub_ip
+                            agent_node.is_online = True
+                            agent_node.last_seen_at = utc_now
+                        else:
+                            agent_node = AgentNode(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                agent_uid=agent_uid,
+                                hostname=hostname,
+                                local_ip=local_ip,
+                                local_mac=local_mac,
+                                public_ip=client_pub_ip,
+                                app_version=app_version,
+                                run_mode=run_mode,
+                                web_port=web_port,
+                                is_online=True,
+                                last_seen_at=utc_now
+                            )
+                            session.add(agent_node)
+
+                        lan_site_rec = session.execute(
+                            select(LanSite).where(LanSite.lan_uid == lan_uid)
+                        ).scalars().first()
+                        if lan_site_rec:
+                            lan_site_rec.public_ip = client_pub_ip
+                        else:
+                            lan_site_rec = LanSite(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                lan_name=f"LAN {lan_uid}",
+                                public_ip=client_pub_ip
+                            )
+                            session.add(lan_site_rec)
+
+                        ip_rule = session.execute(
+                            select(AllowedPublicIp).where(AllowedPublicIp.ip_address == client_pub_ip)
+                        ).scalars().first()
+                        if not ip_rule:
+                            session.add(AllowedPublicIp(
+                                ip_address=client_pub_ip,
+                                description=f"Auto-registered from Agent {hostname or agent_uid} ({lan_uid})",
+                                enabled=True
+                            ))
 
                 session.commit()
             except Exception as p_exc:  # noqa: BLE001

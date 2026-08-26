@@ -677,6 +677,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     p["is_online"] = p.get("is_online", False)
                     deduped_printers.append(p)
 
+                lan_pub_ip = getattr(r, "public_ip", "") or ""
+                if not lan_pub_ip and agents_by_lan.get(r.lan_uid):
+                    for ag in agents_by_lan.get(r.lan_uid, []):
+                        if ag.get("public_ip"):
+                            lan_pub_ip = ag.get("public_ip")
+                            break
+
                 out_rows.append({
                     "lead": r.lead,
                     "lan_uid": r.lan_uid,
@@ -685,6 +692,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "subnet_cidr": r.subnet_cidr,
                     "gateway_ip": r.gateway_ip,
                     "gateway_mac": r.gateway_mac,
+                    "public_ip": lan_pub_ip,
+                    "wan_ip": lan_pub_ip,
                     "fingerprint_signature": r.fingerprint_signature,
                     "active_agents": len(active_agents_by_lan.get(r.lan_uid, [])),
                     "agents": agents_by_lan.get(r.lan_uid, []),

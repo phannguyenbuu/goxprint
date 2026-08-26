@@ -72,6 +72,8 @@ def main() -> None:
         'ALTER TABLE "scan_points" ADD COLUMN IF NOT EXISTS agent_uid VARCHAR(128) DEFAULT \'\'',
         'DELETE FROM "scan_points" WHERE LOWER(printer_name) LIKE \'%f671y%\' OR LOWER(printer_name) LIKE \'%router%\' OR LOWER(printer_name) LIKE \'%gateway%\' OR LOWER(printer_name) LIKE \'%modem%\'',
         'ALTER TABLE "Printer" ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMP WITH TIME ZONE DEFAULT NULL',
+        'ALTER TABLE "LanSite" ADD COLUMN IF NOT EXISTS public_ip VARCHAR(64) DEFAULT \'\'',
+        'ALTER TABLE "AgentNode" ADD COLUMN IF NOT EXISTS public_ip VARCHAR(64) DEFAULT \'\'',
     ]
 
     with bind.connect() as conn:
