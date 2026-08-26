@@ -212,11 +212,15 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
             prune_offline_agents(timeout_seconds=180)
             dummy_id = 1
 
-            for agent_uid, agent_info in ACTIVE_AGENTS.items():
+            agent_items = list(ACTIVE_AGENTS.items())
+            if lead:
+                matching = [(a_uid, a_info) for a_uid, a_info in agent_items if a_info.get("lead") == lead]
+                if matching:
+                    agent_items = matching
+
+            for agent_uid, agent_info in agent_items:
                 a_lead = agent_info.get("lead", "default")
                 a_lan_uid = agent_info.get("lan_uid", "default")
-                if lead and a_lead != lead:
-                    continue
 
                 printers_list = agent_info.get("printers_json") or []
                 printers_list = [p for p in printers_list if isinstance(p, dict) and _to_text(p.get("status")).lower() != "offline"]
@@ -469,15 +473,17 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
 
             # 2. FALLBACK ONLY IF RAM IS EMPTY (e.g. right after server reboot)
             if not rows:
-                history_stmt = select(DeviceInforHistory).order_by(
-                    DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()
-                )
-                if lead:
-                    history_stmt = history_stmt.where(DeviceInforHistory.lead == lead)
-                if updated_from:
-                    history_stmt = history_stmt.where(DeviceInforHistory.updated_at >= updated_from)
+                def _get_history(filter_lead=True):
+                    history_stmt = select(DeviceInforHistory).order_by(
+                        DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()
+                    )
+                    if filter_lead and lead:
+                        history_stmt = history_stmt.where(DeviceInforHistory.lead == lead)
+                    if updated_from:
+                        history_stmt = history_stmt.where(DeviceInforHistory.updated_at >= updated_from)
+                    return session.execute(history_stmt).scalars().all()
 
-                history_rows = session.execute(history_stmt).scalars().all()
+                history_rows = _get_history(filter_lead=True) or _get_history(filter_lead=False)
                 if history_rows:
                     latest_by_lan_mac: set[tuple[str, str, str]] = set()
                     for h in history_rows:
@@ -522,11 +528,14 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         )
 
             if not rows:
-                base_stmt = select(DeviceInfor).order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                if lead:
-                    base_stmt = base_stmt.where(DeviceInfor.lead == lead)
+                def _get_base(filter_lead=True):
+                    base_stmt = select(DeviceInfor).order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                    if filter_lead and lead:
+                        base_stmt = base_stmt.where(DeviceInfor.lead == lead)
+                    return session.execute(base_stmt).scalars().all()
 
-                for d in session.execute(base_stmt).scalars().all():
+                base_rows = _get_base(filter_lead=True) or _get_base(filter_lead=False)
+                for d in base_rows:
                     counter_data = d.counter_data if isinstance(d.counter_data, dict) else {}
                     status_data = d.status_data if isinstance(d.status_data, dict) else {}
                     resolved_mac = _normalize_mac(d.mac_id)
@@ -560,11 +569,14 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
 
             if not rows:
                 from models import Printer
-                p_stmt = select(Printer)
-                if lead:
-                    p_stmt = p_stmt.where(Printer.lead == lead)
-                for p in session.execute(p_stmt).scalars().all():
-                    now_dt = datetime.now(timezone.utc)
+                def _get_printers(filter_lead=True):
+                    p_stmt = select(Printer)
+                    if filter_lead and lead:
+                        p_stmt = p_stmt.where(Printer.lead == lead)
+                    return session.execute(p_stmt).scalars().all()
+
+                now_dt = datetime.now(timezone.utc)
+                for p in (_get_printers(filter_lead=True) or _get_printers(filter_lead=False)):
                     p_mac = _normalize_mac(p.mac_address)
                     rows.append(
                         serialize_infor_row(
@@ -578,7 +590,7 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                             row_machine_uid=p_mac or (f"IP:{p.ip}" if p.ip else "unknown"),
                             row_is_latest=True,
                             counter_data={"total": 0},
-                            status_data={"printer_status": "online" if p.is_online else "offline"},
+                            status_data={"printer_status": "online" if p.is_online else "offline", "system_status": "Ready" if p.is_online else "Offline"},
                             last_counter_at=now_dt,
                             last_status_at=now_dt,
                             created_at=getattr(p, "created_at", now_dt),
