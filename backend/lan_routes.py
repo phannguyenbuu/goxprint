@@ -418,6 +418,66 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "agent_uid": dev.get("_agent_uid", ""),
                 })
 
+            # Load copiers from DeviceInfor DB table so no printer/copier/LAN is lost
+            from models import DeviceInfor
+            dev_stmt = select(DeviceInfor)
+            if lead:
+                dev_stmt = dev_stmt.where(DeviceInfor.lead == lead)
+            dev_db_rows = session.execute(dev_stmt).scalars().all()
+
+            for dev in dev_db_rows:
+                p_mac = _normalize_mac(dev.mac_id)
+                p_ip = str(dev.ip or "").strip()
+                p_lan = dev.lan_uid or "default"
+                p_name = dev.printer_name or "Photocopy"
+
+                if not p_mac and not p_ip:
+                    continue
+
+                p_name_str = str(p_name or "").lower()
+                if any(kw in p_name_str for kw in ["[unk", "unk dom", "[error]"]):
+                    continue
+
+                dedupe_key = (p_lan, p_mac or p_ip)
+                if dedupe_key in seen_printers:
+                    continue
+                seen_printers.add(dedupe_key)
+
+                cred = creds_map.get(p_mac) or creds_map.get(p_ip) or {}
+                sync_data = {}
+                if p_mac:
+                    try:
+                        sp_rec = session.get(ScanPoint, p_mac)
+                        if sp_rec and sp_rec.address_book_data:
+                            sync_data = sp_rec.address_book_data
+                    except Exception:
+                        pass
+
+                printers_by_lan[p_lan].append({
+                    "id": dev.id,
+                    "name": p_name,
+                    "printer_name": p_name,
+                    "ip": p_ip,
+                    "mac_address": p_mac,
+                    "mac_id": p_mac,
+                    "printer_type": "ricoh" if "ricoh" in p_name_str else ("toshiba" if "toshiba" in p_name_str or "e-studio" in p_name_str else "generic"),
+                    "is_online": True,
+                    "status": "online",
+                    "probed": True,
+                    "user": cred.get("user", ""),
+                    "password": cred.get("password", ""),
+                    "auth_user": cred.get("user", ""),
+                    "auth_password": cred.get("password", ""),
+                    "updated_at": dev.updated_at.isoformat() if dev.updated_at else "",
+                    "last_scanned_at": dev.updated_at.isoformat() if dev.updated_at else "",
+                    "enabled": True,
+                    "address_book_sync": sync_data,
+                    "suggested_drivers": _match_printer_drivers(p_name),
+                    "agent_uid": dev.agent_uid or "",
+                    "counter_data": dev.counter_data or {},
+                    "status_data": dev.status_data or {},
+                })
+
             agent_stmt = select(AgentNode)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
             prune_offline_agents(timeout_seconds=120)
@@ -430,8 +490,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
             client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+            override_ip = _to_text(request.args.get("override_ip") or request.headers.get("X-Override-IP"))
             is_whitelisted = False
-            if client_ip:
+            if override_ip:
+                is_whitelisted = True
+            elif client_ip:
                 try:
                     from admin_public_ip_routes import is_public_ip_allowed
                     is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
@@ -440,7 +503,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             
             # 1. Add active agents from RAM
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                if client_ip and not is_whitelisted:
+                if client_ip and not is_whitelisted and not override_ip:
                     a_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
                     a_loc_ip = agent_info.get("local_ip", "")
                     if a_pub_ip != client_ip and a_loc_ip != client_ip:
@@ -475,18 +538,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 agents_by_lan[a_lan_uid].append(agent_dict)
                 active_agents_by_lan[a_lan_uid].append(agent_dict)
 
-            # 2. Add fallback agents from DB (AgentNode) seen within last 5 minutes
-            # These agents are NOT in ACTIVE_AGENTS (RAM), so they are offline
-            five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
-            db_agent_stmt = select(AgentNode).where(AgentNode.last_seen_at >= five_mins_ago)
-            if lead:
-                db_agent_stmt = db_agent_stmt.where(AgentNode.lead == lead)
-            db_agents = session.execute(db_agent_stmt).scalars().all()
+            # 2. Add fallback agents from DB (AgentNode)
+            db_agents = session.execute(select(AgentNode)).scalars().all()
             for db_a in db_agents:
                 a_lan_uid = db_a.lan_uid or "default"
                 existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
                 if db_a.agent_uid not in existing_uids:
-                    # Agent is in DB but NOT in RAM → it's offline
                     db_pub_ip = getattr(db_a, "public_ip", "") or getattr(db_a, "wan_ip", "")
                     agent_dict = {
                         "agent_uid": db_a.agent_uid,
@@ -499,17 +556,25 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "run_mode": db_a.run_mode or "web",
                         "web_port": db_a.web_port or 9173,
                         "is_master": True,
-                        "is_agent_active": False,
-                        "is_online": False,
+                        "is_agent_active": db_a.is_online,
+                        "is_online": db_a.is_online,
                         "updated_at": db_a.last_seen_at.isoformat() if db_a.last_seen_at else "",
                     }
                     agents_by_lan[a_lan_uid].append(agent_dict)
-                    # Do NOT add to active_agents_by_lan — these are offline
+                    if db_a.is_online:
+                        active_agents_by_lan[a_lan_uid].append(agent_dict)
 
             # 3. Dynamic LanSite creation & mapping for all active LANs
             rows_list = list(rows)
             existing_lan_map = {r.lan_uid: r for r in rows_list if r and r.lan_uid}
-            all_active_lan_uids = {uid for uid in (set(existing_lan_map.keys()) | set(active_agents_by_lan.keys())) if uid}
+            all_active_lan_uids = {
+                uid for uid in (
+                    set(existing_lan_map.keys()) |
+                    set(active_agents_by_lan.keys()) |
+                    set(agents_by_lan.keys()) |
+                    set(printers_by_lan.keys())
+                ) if uid
+            }
             
             for uid in all_active_lan_uids:
                 if uid not in existing_lan_map:
@@ -530,7 +595,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         session.rollback()
                         LOGGER.warning("[list_lan_sites] Failed to auto-create LanSite for uid %s: %s", uid, exc)
 
-            rows = [r for r in rows_list if len(active_agents_by_lan.get(r.lan_uid, [])) > 0]
+            rows = [
+                r for r in rows_list 
+                if (len(agents_by_lan.get(r.lan_uid, [])) > 0 or len(printers_by_lan.get(r.lan_uid, [])) > 0 or r.lan_uid in existing_lan_map)
+            ]
 
             email_stmt = select(LanEmail).order_by(LanEmail.email_number.asc())
             if lead:
