@@ -140,13 +140,13 @@ export interface LanSiteInfo {
   printers: any[];
 }
 
-export async function getLanSites(): Promise<LanSiteInfo[]> {
+export async function getLanSites(): Promise<any> {
   try {
     const res = await fetchApi('/api/new-lan-sites?lead=default');
-    return res.rows || [];
+    return res || { rows: [] };
   } catch (err) {
     console.error('Failed to fetch LAN sites:', err);
-    return [];
+    return { rows: [] };
   }
 }
 
