@@ -337,11 +337,6 @@ def register_counter_core_routes(app: Flask, session_factory: Any) -> None:
                     session.delete(row_di)
                     session.commit()
                     return jsonify({"ok": True, "id": row_id})
-                row_p = session.get(Printer, row_id)
-                if row_p is not None:
-                    session.delete(row_p)
-                    session.commit()
-                    return jsonify({"ok": True, "id": row_id})
                 return jsonify({"ok": True, "id": row_id, "deleted": False})
 
             lead = _to_text(row.lead)
