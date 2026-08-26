@@ -267,8 +267,8 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         continue
 
                     # Bước 2 & 3: Lấy counter_data và status_data
-                    counter_data = {}
-                    status_data = {}
+                    counter_data = p.get("counter") if isinstance(p.get("counter"), dict) and p.get("counter") else (p.get("counter_data") if isinstance(p.get("counter_data"), dict) else {})
+                    status_data = p.get("status") if isinstance(p.get("status"), dict) and p.get("status") else (p.get("status_data") if isinstance(p.get("status_data"), dict) else {})
                     last_counter_at = None
                     last_status_at = None
 
@@ -283,8 +283,12 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                                 break
 
                     if ram_dev:
-                        counter_data = ram_dev.get("counter") or ram_dev.get("counter_data") or {}
-                        status_data = ram_dev.get("status") or ram_dev.get("status_data") or {}
+                        if not counter_data:
+                            counter_data = ram_dev.get("counter") or ram_dev.get("counter_data") or {}
+                        if not status_data:
+                            status_data = ram_dev.get("status") or ram_dev.get("status_data") or {}
+                        if isinstance(ram_dev, dict) and ram_dev.get("ip"):
+                            p_ip = ram_dev.get("ip")
 
                     from sqlalchemy import or_
 
@@ -386,6 +390,21 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                                 last_counter_at = cb_row.baseline_timestamp or cb_row.created_at
                         except Exception as cb_err:
                             LOGGER.warning("[infor_list] CounterBaseline lookup exception: %s", cb_err)
+
+                    # 3.8. Nếu vẫn chưa có counter_data và có MAC chuẩn, tự động dò tìm IP & probe counter trực tiếp
+                    if not counter_data and p_mac and len(p_mac) == 17:
+                        try:
+                            from public_core_routes import resolve_ip
+                            res_ok, res_ip, res_dict = resolve_ip(p_mac)
+                            if res_ok and isinstance(res_dict, dict):
+                                if res_dict.get("counter"):
+                                    counter_data = res_dict.get("counter") or {}
+                                if not status_data and res_dict.get("status"):
+                                    status_data = res_dict.get("status") or {}
+                                if res_ip:
+                                    p_ip = res_ip
+                        except Exception as auto_heal_err:
+                            LOGGER.debug("[infor_list] Auto-heal probe skipped for MAC %s: %s", p_mac, auto_heal_err)
 
                     # 4. Nếu vẫn chưa có status_data, truy vấn trực tiếp từ bảng StatusInfor
                     if not status_data and (p_mac or p_ip):

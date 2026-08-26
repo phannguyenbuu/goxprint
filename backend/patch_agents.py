@@ -1,4 +1,4 @@
-﻿lines = open('active_agents_registry.py', encoding='utf-8').read().split('\n')
+lines = open('active_agents_registry.py', encoding='utf-8').read().split('\n')
 start_idx = -1
 end_idx = -1
 for i, line in enumerate(lines):
@@ -30,9 +30,13 @@ if start_idx != -1 and end_idx != -1:
                 continue
             
             p_name = d.get("printer_name") or d.get("model") or "Unknown Printer"
+            d_counter = d.get("counter") if isinstance(d.get("counter"), dict) and d.get("counter") else (d.get("counter_data") if isinstance(d.get("counter_data"), dict) else {})
+            d_status = d.get("status") if isinstance(d.get("status"), dict) and d.get("status") else (d.get("status_data") if isinstance(d.get("status_data"), dict) else {})
             devices_dict[d_mac] = {
                 "printer_name": str(p_name),
                 "ip": str(d.get("ip", "")).strip(),
+                "counter": d_counter,
+                "status": d_status,
                 "is_online": bool(d.get("is_online", True)),
                 "probed": bool(d.get("probed", False)),
                 "updated_at": now.isoformat(),
