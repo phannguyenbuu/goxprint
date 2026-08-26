@@ -384,10 +384,11 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
 
                     # Purge stale DeviceInfor records for this lead not in agent printers.json
                     existing_d = session.execute(select(DeviceInfor).where(DeviceInfor.lead == lead)).scalars().all()
+                    active_macs_normalized = {_normalize_mac(m) for m in active_macs if m and _normalize_mac(m)}
                     for ed in existing_d:
-                        ed_mac = (ed.mac_id or "").strip().upper()
+                        ed_mac = _normalize_mac(ed.mac_id)
                         ed_ip = (ed.ip or "").strip()
-                        is_active = (ed_mac and ed_mac in active_macs) or (ed_ip and ed_ip in active_ips)
+                        is_active = (ed_mac and ed_mac in active_macs_normalized) or (ed_ip and ed_ip in active_ips)
                         if not is_active:
                             session.delete(ed)
                             LOGGER.info("[ingest_polling] Deleted stale DeviceInfor ID %s (%s, IP %s, MAC %s) for lead %s - not found in agent printers.json", ed.id, ed.printer_name, ed.ip, ed.mac_id, lead)
