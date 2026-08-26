@@ -267,8 +267,8 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                         continue
 
                     # Bước 2 & 3: Lấy counter_data và status_data
-                    counter_data = p.get("counter") if isinstance(p.get("counter"), dict) and p.get("counter") else (p.get("counter_data") if isinstance(p.get("counter_data"), dict) else {})
-                    status_data = p.get("status") if isinstance(p.get("status"), dict) and p.get("status") else (p.get("status_data") if isinstance(p.get("status_data"), dict) else {})
+                    counter_data = dev.get("counter") if isinstance(dev.get("counter"), dict) and dev.get("counter") else (dev.get("counter_data") if isinstance(dev.get("counter_data"), dict) else {})
+                    status_data = dev.get("status") if isinstance(dev.get("status"), dict) and dev.get("status") else (dev.get("status_data") if isinstance(dev.get("status_data"), dict) else {})
                     last_counter_at = None
                     last_status_at = None
 
