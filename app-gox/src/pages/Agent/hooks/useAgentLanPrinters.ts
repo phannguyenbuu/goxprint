@@ -67,27 +67,30 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         const clientIp = (data?.client_ip || '').trim();
         const isAllowed = Boolean(data?.is_allowed);
         const activePublicIps = data?.active_public_ips || [];
+        const overrideConnectIp = (localStorage.getItem('gox_connect_public_ip') || '').trim();
+        const effectiveIp = overrideConnectIp || clientIp;
 
         const matchedAgents: any[] = [];
         rows.forEach((site: any) => {
           (site.agents || []).forEach((ag: any) => {
             const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
             const agLoc = (ag.local_ip || '').trim();
-            if (clientIp && ((agPub && agPub === clientIp) || (agLoc && agLoc === clientIp))) {
+            if (effectiveIp && ((agPub && agPub === effectiveIp) || (agLoc && agLoc === effectiveIp))) {
               matchedAgents.push(ag);
             }
           });
         });
 
         const isSameNetwork = matchedAgents.length > 0;
-        const hasAccess = isAllowed || isSameNetwork;
+        const hasAccess = Boolean(overrideConnectIp) || isAllowed || isSameNetwork;
 
         console.log('==================================================');
         console.log('🌐 [PUBLIC IP ACCESS CONTROL CHECK]');
         console.log('📌 IP Public hiện tại của trình duyệt:', clientIp);
+        if (overrideConnectIp) console.log('⚡ IP Public do người dùng chỉ định kết nối:', overrideConnectIp);
         console.log('🛡️ Danh sách Public IP đang Active trên Server:', activePublicIps);
-        console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', isAllowed ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
-        console.log('💻 Danh sách Agent có cùng Public IP với trình duyệt:', matchedAgents.length > 0 ? matchedAgents : (isAllowed ? 'Đang mở Full LAN (Tất cả Agent)' : 'Không tìm thấy Agent cùng IP'));
+        console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', (isAllowed || overrideConnectIp) ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
+        console.log('💻 Danh sách Agent có cùng Public IP:', matchedAgents.length > 0 ? matchedAgents : (hasAccess ? 'Đang mở Full LAN (Tất cả Agent)' : 'Không tìm thấy Agent cùng IP'));
         console.log('==================================================');
 
         if (!hasAccess && clientIp) {

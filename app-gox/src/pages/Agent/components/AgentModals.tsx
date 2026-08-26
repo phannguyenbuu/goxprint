@@ -221,7 +221,8 @@ export function AgentModals(props: any) {
 
   React.useEffect(() => {
     if (accessDeniedState?.isOpen) {
-      setInputPublicIp(accessDeniedState.ip || '');
+      const savedIp = localStorage.getItem('gox_connect_public_ip') || '';
+      setInputPublicIp(savedIp || accessDeniedState.ip || '');
       setIpErrorMsg('');
     }
   }, [accessDeniedState?.isOpen, accessDeniedState?.ip]);
@@ -235,6 +236,7 @@ export function AgentModals(props: any) {
     setIsConnectingIp(true);
     setIpErrorMsg('');
     try {
+      localStorage.setItem('gox_connect_public_ip', targetIp);
       await fetchApi('/api/public-ips', {
         method: 'POST',
         body: JSON.stringify({
@@ -242,7 +244,8 @@ export function AgentModals(props: any) {
           description: 'Allowed from App-Gox Modal',
           enabled: true,
         }),
-      });
+      }).catch((e) => console.log('Allowed IP API response:', e));
+
       if (setAccessDeniedState) {
         setAccessDeniedState({ isOpen: false, ip: '' });
       }
@@ -250,16 +253,14 @@ export function AgentModals(props: any) {
         await props.fetchLanSitesData(true);
       }
     } catch (err: any) {
-      console.error('Error adding public IP:', err);
-      if (err?.message?.includes('đã tồn tại') || err?.message?.includes('already exists')) {
-        if (setAccessDeniedState) {
-          setAccessDeniedState({ isOpen: false, ip: '' });
-        }
-        if (props.fetchLanSitesData) {
-          await props.fetchLanSitesData(true);
-        }
-      } else {
-        setIpErrorMsg(err?.message || 'Không thể kết nối IP này');
+      console.error('Error connecting public IP:', err);
+      // Always store override and proceed to connect
+      localStorage.setItem('gox_connect_public_ip', targetIp);
+      if (setAccessDeniedState) {
+        setAccessDeniedState({ isOpen: false, ip: '' });
+      }
+      if (props.fetchLanSitesData) {
+        await props.fetchLanSitesData(true);
       }
     } finally {
       setIsConnectingIp(false);
@@ -1708,7 +1709,7 @@ export function AgentModals(props: any) {
                     boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
                   }}
                 >
-                  {isConnectingIp ? <LoadingSpinner size="sm" /> : '⚡ Cho phép IP & Kết nối với Agent'}
+                  {isConnectingIp ? <LoadingSpinner size="sm" /> : 'Kết nối Public IP'}
                 </button>
 
                 <button
