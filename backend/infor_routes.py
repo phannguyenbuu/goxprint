@@ -293,57 +293,65 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
 
                     from sqlalchemy import or_
 
-                    # 1. Nếu RAM chưa có, lấy từ DeviceInforHistory trong CSDL theo mac_id / ip
+                    # 1. Nếu RAM chưa có counter_data, truy vấn DeviceInfor và DeviceInforHistory trong CSDL theo MAC chuẩn hoặc IP
                     if not counter_data and (p_mac or p_ip):
                         try:
-                            def _get_dh(filter_lead=True):
-                                stmt = select(DeviceInforHistory)
-                                if filter_lead:
-                                    stmt = stmt.where(DeviceInforHistory.lead == a_lead)
-                                if p_mac and p_ip:
-                                    stmt = stmt.where(or_(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac, DeviceInforHistory.ip == p_ip))
-                                elif p_mac:
-                                    stmt = stmt.where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
-                                elif p_ip:
-                                    stmt = stmt.where(DeviceInforHistory.ip == p_ip)
-                                return session.execute(stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)).scalars().first()
+                            # 1a. Ưu tiên tìm trong DeviceInfor theo p_mac
+                            d_row = None
+                            if p_mac:
+                                d_row = session.execute(
+                                    select(DeviceInfor)
+                                    .where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
+                                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                                    .limit(1)
+                                ).scalars().first()
+                            if not d_row and p_ip:
+                                d_row = session.execute(
+                                    select(DeviceInfor)
+                                    .where(DeviceInfor.ip == p_ip)
+                                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                                    .limit(1)
+                                ).scalars().first()
 
-                            dh_row = _get_dh(filter_lead=True) or _get_dh(filter_lead=False)
-                            if dh_row:
-                                if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
-                                    counter_data = dh_row.counter_data
-                                if isinstance(dh_row.status_data, dict) and dh_row.status_data:
-                                    status_data = dh_row.status_data
-                                last_counter_at = dh_row.last_counter_at or dh_row.updated_at
-                                last_status_at = dh_row.last_status_at or dh_row.updated_at
-                        except Exception as dh_err:
-                            LOGGER.warning("[infor_list] DeviceInforHistory lookup exception: %s", dh_err)
-
-                    # 2. Lấy từ DeviceInfor
-                    if not counter_data and (p_mac or p_ip):
-                        try:
-                            def _get_di(filter_lead=True):
-                                stmt = select(DeviceInfor)
-                                if filter_lead:
-                                    stmt = stmt.where(DeviceInfor.lead == a_lead)
-                                if p_mac and p_ip:
-                                    stmt = stmt.where(or_(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac, DeviceInfor.ip == p_ip))
-                                elif p_mac:
-                                    stmt = stmt.where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
-                                elif p_ip:
-                                    stmt = stmt.where(DeviceInfor.ip == p_ip)
-                                return session.execute(stmt.order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc()).limit(1)).scalars().first()
-
-                            d_row = _get_di(filter_lead=True) or _get_di(filter_lead=False)
                             if d_row:
                                 if isinstance(d_row.counter_data, dict) and d_row.counter_data:
                                     counter_data = d_row.counter_data
                                 if not status_data and isinstance(d_row.status_data, dict) and d_row.status_data:
                                     status_data = d_row.status_data
+                                if d_row.ip:
+                                    p_ip = d_row.ip
                                 last_counter_at = d_row.last_counter_at or d_row.updated_at
                                 last_status_at = d_row.last_status_at or d_row.updated_at
-                        except Exception as d_err:
-                            LOGGER.warning("[infor_list] DeviceInfor lookup exception: %s", d_err)
+
+                            # 1b. Nếu vẫn chưa có, tìm trong DeviceInforHistory theo p_mac
+                            if not counter_data:
+                                dh_row = None
+                                if p_mac:
+                                    dh_row = session.execute(
+                                        select(DeviceInforHistory)
+                                        .where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
+                                        .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
+                                        .limit(1)
+                                    ).scalars().first()
+                                if not dh_row and p_ip:
+                                    dh_row = session.execute(
+                                        select(DeviceInforHistory)
+                                        .where(DeviceInforHistory.ip == p_ip)
+                                        .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
+                                        .limit(1)
+                                    ).scalars().first()
+
+                                if dh_row:
+                                    if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
+                                        counter_data = dh_row.counter_data
+                                    if not status_data and isinstance(dh_row.status_data, dict) and dh_row.status_data:
+                                        status_data = dh_row.status_data
+                                    if dh_row.ip:
+                                        p_ip = dh_row.ip
+                                    last_counter_at = dh_row.last_counter_at or dh_row.updated_at
+                                    last_status_at = dh_row.last_status_at or dh_row.updated_at
+                        except Exception as db_err:
+                            LOGGER.warning("[infor_list] DeviceInfor/History lookup exception: %s", db_err)
 
                     # 3. Nếu vẫn chưa có counter_data, truy vấn trực tiếp từ bảng CounterInfor
                     if not counter_data and (p_mac or p_ip):
