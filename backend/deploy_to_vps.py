@@ -85,6 +85,25 @@ for local_file, remote_file in files_to_copy:
         print(f"Uploading {local_file} to {remote_file}...")
         sftp.put(local_file, remote_file)
 
+# Upload built frontend app-gox/dist to /var/www/app-gox and /opt/printagent/static
+dist_dir = root_dir / "app-gox" / "dist"
+if dist_dir.exists():
+    print("Uploading built frontend (app-gox/dist) to /var/www/app-gox and /opt/printagent/static...")
+    for root_path, _, files in os.walk(dist_dir):
+        for f in files:
+            local_path = Path(root_path) / f
+            rel_path = local_path.relative_to(dist_dir).as_posix()
+            
+            # Destination 1: /var/www/app-gox (Nginx root for app.goxprint.com)
+            target_www = f"/var/www/app-gox/{rel_path}"
+            ensure_remote_parent_dir(target_www)
+            sftp.put(str(local_path), target_www)
+            
+            # Destination 2: /opt/printagent/static (Flask static directory)
+            target_static = f"/opt/printagent/static/{rel_path}"
+            ensure_remote_parent_dir(target_static)
+            sftp.put(str(local_path), target_static)
+
 sftp.close()
 
 print("Cleaning up obsolete utility_commands.json on VPS...")
