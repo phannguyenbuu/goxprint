@@ -11,6 +11,7 @@ import { GlowCard } from '../components/ui/GlowCard';
 import { AnimatedList } from '../components/ui/AnimatedList';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import {
+  fetchApi,
   getLanSites,
   saveCopierCredentials,
   triggerFetchAddressBook,
@@ -113,6 +114,39 @@ function safePathToken(value: string): string {
     fetchLanSitesData
   } = propsToPass as any;
 
+  const [inputIpDraft, setInputIpDraft] = useState(() => selectedPublicIp || '');
+
+  useEffect(() => {
+    setInputIpDraft(selectedPublicIp || '');
+  }, [selectedPublicIp]);
+
+  const handleApplyPublicIp = async (ipVal: string) => {
+    const cleanIp = (ipVal || '').trim();
+    setSelectedPublicIp(cleanIp);
+    if (cleanIp) {
+      localStorage.setItem('goxprint_selected_public_ip', cleanIp);
+      localStorage.setItem('gox_connect_public_ip', cleanIp);
+      try {
+        await fetchApi('/api/public-ips', {
+          method: 'POST',
+          body: JSON.stringify({
+            ip_address: cleanIp,
+            description: 'Added via Enter/Plane button in App-Gox',
+            enabled: true,
+          }),
+        }).catch((e) => console.log('Allowed IP API response:', e));
+      } catch (err) {
+        console.log('Error adding public IP:', err);
+      }
+    } else {
+      localStorage.removeItem('goxprint_selected_public_ip');
+      localStorage.removeItem('gox_connect_public_ip');
+    }
+    if (fetchLanSitesData) {
+      await fetchLanSitesData(true);
+    }
+  };
+
   return (
     <motion.div
       style={styles.container}
@@ -161,37 +195,61 @@ function safePathToken(value: string): string {
           </button>
         </div>
 
-        {/* Public IP LAN Input filter */}
+        {/* Public IP LAN Input filter with Enter & Plane button */}
         <div style={styles.filterBar}>
           <label style={styles.filterLabel}>🌐 IP Public LAN:</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '380px' }}>
-            <input
-              type="text"
-              value={selectedPublicIp}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedPublicIp(val);
-                localStorage.setItem('goxprint_selected_public_ip', val);
-                localStorage.setItem('gox_connect_public_ip', val);
-              }}
-              placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                fontSize: '0.88rem',
-                borderRadius: '8px',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                background: 'rgba(0, 0, 0, 0.4)',
-                color: '#fff',
-                outline: 'none',
-              }}
-            />
-            {selectedPublicIp && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '420px' }}>
+            <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={inputIpDraft}
+                onChange={(e) => setInputIpDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleApplyPublicIp(inputIpDraft);
+                  }
+                }}
+                placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
+                style={{
+                  width: '100%',
+                  padding: '8px 42px 8px 12px',
+                  fontSize: '0.88rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  color: '#fff',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <button
+                onClick={() => handleApplyPublicIp(inputIpDraft)}
+                title="Gửi & Kết nối IP Public (Enter)"
+                style={{
+                  position: 'absolute',
+                  right: '4px',
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                ✈️
+              </button>
+            </div>
+
+            {(selectedPublicIp || inputIpDraft) && (
               <button
                 onClick={() => {
-                  setSelectedPublicIp('');
-                  localStorage.removeItem('goxprint_selected_public_ip');
-                  localStorage.removeItem('gox_connect_public_ip');
+                  setInputIpDraft('');
+                  handleApplyPublicIp('');
                 }}
                 title="Xóa IP Public"
                 style={{
@@ -202,6 +260,7 @@ function safePathToken(value: string): string {
                   border: '1px solid rgba(239, 68, 68, 0.4)',
                   borderRadius: '6px',
                   cursor: 'pointer',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 ✕ Clear
