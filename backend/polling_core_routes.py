@@ -127,6 +127,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         if gds_status not in ("running", "stopped", "not_installed", "unknown"):
             gds_status = "unknown"
 
+        client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
         from active_agents_registry import update_agent_in_memory
         update_agent_in_memory(
             lead=lead,
@@ -144,6 +146,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
             counter_data=counter_data,
             status_data=status_data,
             devices_list=body.get("devices"),
+            public_ip=client_pub_ip,
         )
 
         def _is_placeholder_name(name_str: str, ip_str: str = "") -> bool:

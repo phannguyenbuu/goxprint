@@ -168,9 +168,24 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        is_whitelisted = False
+        if client_ip:
+            try:
+                from admin_public_ip_routes import is_public_ip_allowed
+                is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
+            except Exception:
+                pass
+
         agents_by_lan = defaultdict(list)
         for a_uid, a_info in ACTIVE_AGENTS.items():
             if isinstance(a_info, dict):
+                if client_ip and not is_whitelisted:
+                    a_pub_ip = a_info.get("public_ip", "") or a_info.get("wan_ip", "")
+                    a_loc_ip = a_info.get("local_ip", "")
+                    if a_pub_ip != client_ip and a_loc_ip != client_ip:
+                        continue
+
                 a_lan = a_info.get("lan_uid", "default")
                 agents_by_lan[a_lan].append({
                     "agent_uid": a_uid,
@@ -403,9 +418,24 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
             agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+            client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+            is_whitelisted = False
+            if client_ip:
+                try:
+                    from admin_public_ip_routes import is_public_ip_allowed
+                    is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
+                except Exception:
+                    pass
             
             # 1. Add active agents from RAM
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
+                if client_ip and not is_whitelisted:
+                    a_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
+                    a_loc_ip = agent_info.get("local_ip", "")
+                    if a_pub_ip != client_ip and a_loc_ip != client_ip:
+                        continue
+
                 a_lead = agent_info.get("lead", "default")
                 a_lan_uid = agent_info.get("lan_uid", "default")
                 if lead and a_lead != lead:

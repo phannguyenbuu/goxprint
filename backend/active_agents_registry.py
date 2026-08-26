@@ -52,6 +52,7 @@ def update_agent_in_memory(
     counter_data: dict[str, Any] | None = None,
     status_data: dict[str, Any] | None = None,
     devices_list: list[dict[str, Any]] | None = None,
+    public_ip: str = "",
 ) -> None:
     now = datetime.now(timezone.utc)
     key = agent_uid or "legacy-agent"
@@ -67,6 +68,7 @@ def update_agent_in_memory(
             "app_version": app_version,
             "run_mode": run_mode,
             "web_port": web_port,
+            "public_ip": public_ip,
             "last_seen_at": now,
             "devices": {},
             "printers_json": devices_list or [],
@@ -79,6 +81,8 @@ def update_agent_in_memory(
         agent_entry["local_ip"] = local_ip or agent_entry["local_ip"]
         agent_entry["local_mac"] = local_mac or agent_entry["local_mac"]
         agent_entry["app_version"] = app_version or agent_entry["app_version"]
+        if public_ip:
+            agent_entry["public_ip"] = public_ip
         agent_entry["last_seen_at"] = now
 
     agent_entry = ACTIVE_AGENTS[key]
@@ -108,30 +112,24 @@ def update_agent_in_memory(
             p_name = d.get("printer_name") or d.get("model") or "Unknown Printer"
             devices_dict[d_mac] = {
                 "printer_name": str(p_name),
-                "ip": str(d.get("ip", "")).strip(),
-                "is_online": True,
-                "probed": bool(d.get("probed", False)),
+                "ip": str(d.get("ip") or d.get("printer_ip") or ""),
+                "counter": d.get("counter") or {},
+                "status": d.get("status") or {},
                 "updated_at": now.isoformat(),
             }
 
-    # If there is a specific single-device update (e.g. counter/status ping)
-    if mac_id:
+    # Also record individual printer update telemetry if provided
+    if mac_id and printer_name:
         norm_mac = mac_id.upper().replace("-", ":")
-        dev = devices_dict.setdefault(norm_mac, {})
-        if printer_name and "unknown" not in printer_name.lower():
-            dev["printer_name"] = printer_name
-        elif "printer_name" not in dev or "unknown" in str(dev.get("printer_name", "")).lower():
-            dev["printer_name"] = printer_name or "Unknown Printer"
-        
-        if ip:
-            dev["ip"] = ip
-        if isinstance(counter_data, dict) and counter_data:
-            dev["counter"] = counter_data
-        if isinstance(status_data, dict) and status_data:
-            dev["status"] = status_data
-            s = str(status_data.get("status", "")).lower()
-            dev["is_online"] = (s != "offline") if s else dev.get("is_online", True)
-        dev["updated_at"] = now.isoformat()
+        dev_item = devices_dict.setdefault(norm_mac, {})
+        dev_item["printer_name"] = printer_name
+        dev_item["ip"] = ip
+        if counter_data:
+            dev_item["counter"] = counter_data
+        if status_data:
+            dev_item["status"] = status_data
+        dev_item["updated_at"] = now.isoformat()
+
 
 def prune_offline_agents(timeout_seconds: int = 120) -> None:
     """Purge agents from in-memory registry that haven't sent a heartbeat/poll within timeout_seconds."""
@@ -190,10 +188,25 @@ def get_device_by_mac_in_memory(mac_id: str) -> dict[str, Any] | None:
     return None
 
 
-def get_all_devices_in_memory() -> list[dict[str, Any]]:
+def get_all_devices_in_memory(client_ip: str = "", session_factory: Any = None) -> list[dict[str, Any]]:
     prune_offline_agents(timeout_seconds=120)
+
+    is_whitelisted = False
+    if client_ip and session_factory:
+        try:
+            from admin_public_ip_routes import is_public_ip_allowed
+            is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
+        except Exception as exc:
+            LOGGER.warning("[get_all_devices_in_memory] Public IP check error: %s", exc)
+
     output = []
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
+        if client_ip and not is_whitelisted:
+            agent_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
+            agent_loc_ip = agent_info.get("local_ip", "")
+            if agent_pub_ip != client_ip and agent_loc_ip != client_ip:
+                continue
+
         devices = agent_info.get("devices", {})
         for mac_id, dev in devices.items():
             output.append({
@@ -211,10 +224,25 @@ def get_all_devices_in_memory() -> list[dict[str, Any]]:
 
 
 
-def get_all_active_agents_in_memory(timeout_seconds: int = 30) -> list[dict[str, Any]]:
+def get_all_active_agents_in_memory(timeout_seconds: int = 30, client_ip: str = "", session_factory: Any = None) -> list[dict[str, Any]]:
     prune_offline_agents(timeout_seconds=timeout_seconds)
+
+    is_whitelisted = False
+    if client_ip and session_factory:
+        try:
+            from admin_public_ip_routes import is_public_ip_allowed
+            is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
+        except Exception as exc:
+            LOGGER.warning("[get_all_active_agents_in_memory] Public IP check error: %s", exc)
+
     output = []
     for agent_uid, agent_info in ACTIVE_AGENTS.items():
+        if client_ip and not is_whitelisted:
+            agent_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
+            agent_loc_ip = agent_info.get("local_ip", "")
+            if agent_pub_ip != client_ip and agent_loc_ip != client_ip:
+                continue
+
         output.append({
             "lead": agent_info.get("lead", "default"),
             "lan_uid": agent_info.get("lan_uid", "default"),
@@ -225,8 +253,8 @@ def get_all_active_agents_in_memory(timeout_seconds: int = 30) -> list[dict[str,
             "app_version": agent_info.get("app_version", ""),
             "run_mode": agent_info.get("run_mode", "web"),
             "web_port": agent_info.get("web_port", 9173),
+            "public_ip": agent_info.get("public_ip", ""),
             "last_seen_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
             "device_count": len(agent_info.get("devices", {})),
         })
     return output
-

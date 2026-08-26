@@ -174,6 +174,8 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
             if not isinstance(devices_payload, list) and isinstance(devices_payload, dict):
                 devices_payload = list(devices_payload.values())
 
+            client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
             from active_agents_registry import update_agent_in_memory
             update_agent_in_memory(
                 lead=lead,
@@ -186,6 +188,7 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
                 run_mode=run_mode,
                 web_port=web_port,
                 devices_list=devices_payload if isinstance(devices_payload, list) else None,
+                public_ip=client_pub_ip,
             )
 
         LOGGER.info("register: lead=%s lan_uid=%s agent_uid=%s hostname=%s master=%s", lead, lan_uid, agent_uid, hostname, is_master)

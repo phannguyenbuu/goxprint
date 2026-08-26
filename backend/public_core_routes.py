@@ -53,8 +53,10 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         if not ok_auth:
             return auth_error
 
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
         from active_agents_registry import get_all_devices_in_memory
-        devices = get_all_devices_in_memory()
+        devices = get_all_devices_in_memory(client_ip=client_ip, session_factory=session_factory)
         return jsonify({"ok": True, "printers": devices})
 
 
