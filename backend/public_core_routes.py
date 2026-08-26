@@ -60,8 +60,8 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         return jsonify({"ok": True, "printers": devices})
 
 
-    @app.get("/api/public/device/by-mac")
-    def public_device_by_mac() -> Any:
+    @app.get("/api/public/device/by-mac-backup")
+    def public_device_by_mac_backup() -> Any:
         mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
         if not mac_input:
             return jsonify({"ok": False, "error": "Missing parameter: mac_id"}), 400
@@ -96,6 +96,7 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         return jsonify({"ok": False, "error": "Device not found for mac_id in active agents"}), 404
 
 
+    @app.get("/api/public/device/by-mac")
     @app.get("/api/public/device/by-mac-now")
     def public_device_by_mac_now() -> Any:
         mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
