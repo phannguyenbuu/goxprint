@@ -1712,24 +1712,6 @@ export function AgentModals(props: any) {
                 </button>
 
                 <button
-                  onClick={() => handleConnectWithPublicIp('*')}
-                  disabled={isConnectingIp}
-                  style={{
-                    width: '100%',
-                    padding: '9px 16px',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    background: 'rgba(59, 130, 246, 0.15)',
-                    color: '#60a5fa',
-                    border: '1px solid rgba(59, 130, 246, 0.4)',
-                    borderRadius: '8px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🔓 Mở quyền cho tất cả IP (Thêm Wildcard *)
-                </button>
-
-                <button
                   onClick={() => {
                     window.location.href = '/dashboard';
                   }}
