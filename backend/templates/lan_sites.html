@@ -304,10 +304,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td style="padding: 12px 16px;"><div style="font-size: 12px; color: #94a3b8;">${escapeHtmlStr(row.created_at || '-')}</div></td>
                 <td style="padding: 12px 16px;"><div style="font-size: 12px; color: #94a3b8;">${escapeHtmlStr(row.updated_at || row.created_at || '-')}</div></td>
-                <td style="padding: 12px 16px;">
-                    <button class="glass-btn secondary" style="padding: 4px 10px; font-size: 12px; margin-right: 4px;" onclick="openEditIpModal(${row.id})">Sửa</button>
-                    <button class="glass-btn secondary" style="padding: 4px 10px; font-size: 12px; margin-right: 4px; color: #f59e0b;" onclick="toggleIpStatus(${row.id})">${isEnabled ? 'Tắt' : 'Bật'}</button>
-                    <button class="glass-btn danger" style="padding: 4px 10px; font-size: 12px; color: #ef4444;" onclick="deleteIp(${row.id}, '${escapeHtmlStr(row.ip_address)}')">Xóa</button>
+                <td style="padding: 12px 16px; white-space: nowrap;">
+                    <button class="glass-btn secondary" style="padding: 5px 10px; font-size: 13px; margin-right: 4px;" onclick="openEditIpModal(${row.id})" title="Chỉnh sửa IP">✏️</button>
+                    <button class="glass-btn secondary" style="padding: 5px 10px; font-size: 13px; margin-right: 4px; color: ${isEnabled ? '#f59e0b' : '#10b981'};" onclick="toggleIpStatus(${row.id})" title="${isEnabled ? 'Tắt quy tắc' : 'Bật quy tắc'}">${isEnabled ? '⏸️' : '▶️'}</button>
+                    <button class="glass-btn danger" style="padding: 5px 10px; font-size: 13px; color: #ef4444;" onclick="deleteIp(${row.id}, '${escapeHtmlStr(row.ip_address)}')" title="Xóa quy tắc">🗑️</button>
                 </td>
             `;
             tbody.appendChild(tr);
