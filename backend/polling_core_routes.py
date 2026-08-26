@@ -279,6 +279,9 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         if not d_ip and not d_mac:
                             continue
 
+                        dev_counter = dev.get("counter") if isinstance(dev.get("counter"), dict) and dev.get("counter") else (dev.get("counter_data") if isinstance(dev.get("counter_data"), dict) else {})
+                        dev_status = dev.get("status") if isinstance(dev.get("status"), dict) and dev.get("status") else (dev.get("status_data") if isinstance(dev.get("status_data"), dict) else {})
+
                         if not dev_counter:
                             try:
                                 c_hist_stmt = select(CounterInfor).where(CounterInfor.lead == lead)
