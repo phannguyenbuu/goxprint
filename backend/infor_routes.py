@@ -32,6 +32,8 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
     @app.get("/api/infor/list")
     def infor_list() -> Any:
         lead = _to_text(request.args.get("lead"))
+        if lead and lead.lower() in {"_t", "undefined", "null", "none", "all", "*"}:
+            lead = None
         row_id_query = _to_text(request.args.get("id"))
         printer_name_query = _to_text(request.args.get("printer_name") or request.args.get("name"))
         ip_query = _to_text(request.args.get("ip"))
@@ -285,14 +287,19 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     # 1. Nếu RAM chưa có, lấy từ DeviceInforHistory trong CSDL theo mac_id / ip
                     if not counter_data and (p_mac or p_ip):
                         try:
-                            d_stmt = select(DeviceInforHistory).where(DeviceInforHistory.lead == a_lead)
-                            if p_mac and p_ip:
-                                d_stmt = d_stmt.where(or_(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac, DeviceInforHistory.ip == p_ip))
-                            elif p_mac:
-                                d_stmt = d_stmt.where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
-                            elif p_ip:
-                                d_stmt = d_stmt.where(DeviceInforHistory.ip == p_ip)
-                            dh_row = session.execute(d_stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)).scalars().first()
+                            def _get_dh(filter_lead=True):
+                                stmt = select(DeviceInforHistory)
+                                if filter_lead:
+                                    stmt = stmt.where(DeviceInforHistory.lead == a_lead)
+                                if p_mac and p_ip:
+                                    stmt = stmt.where(or_(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac, DeviceInforHistory.ip == p_ip))
+                                elif p_mac:
+                                    stmt = stmt.where(func.replace(func.upper(DeviceInforHistory.mac_id), '-', ':') == p_mac)
+                                elif p_ip:
+                                    stmt = stmt.where(DeviceInforHistory.ip == p_ip)
+                                return session.execute(stmt.order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc()).limit(1)).scalars().first()
+
+                            dh_row = _get_dh(filter_lead=True) or _get_dh(filter_lead=False)
                             if dh_row:
                                 if isinstance(dh_row.counter_data, dict) and dh_row.counter_data:
                                     counter_data = dh_row.counter_data
@@ -306,14 +313,19 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     # 2. Lấy từ DeviceInfor
                     if not counter_data and (p_mac or p_ip):
                         try:
-                            d_stmt2 = select(DeviceInfor).where(DeviceInfor.lead == a_lead)
-                            if p_mac and p_ip:
-                                d_stmt2 = d_stmt2.where(or_(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac, DeviceInfor.ip == p_ip))
-                            elif p_mac:
-                                d_stmt2 = d_stmt2.where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
-                            elif p_ip:
-                                d_stmt2 = d_stmt2.where(DeviceInfor.ip == p_ip)
-                            d_row = session.execute(d_stmt2).scalars().first()
+                            def _get_di(filter_lead=True):
+                                stmt = select(DeviceInfor)
+                                if filter_lead:
+                                    stmt = stmt.where(DeviceInfor.lead == a_lead)
+                                if p_mac and p_ip:
+                                    stmt = stmt.where(or_(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac, DeviceInfor.ip == p_ip))
+                                elif p_mac:
+                                    stmt = stmt.where(func.replace(func.upper(DeviceInfor.mac_id), '-', ':') == p_mac)
+                                elif p_ip:
+                                    stmt = stmt.where(DeviceInfor.ip == p_ip)
+                                return session.execute(stmt.order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc()).limit(1)).scalars().first()
+
+                            d_row = _get_di(filter_lead=True) or _get_di(filter_lead=False)
                             if d_row:
                                 if isinstance(d_row.counter_data, dict) and d_row.counter_data:
                                     counter_data = d_row.counter_data
@@ -327,14 +339,19 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     # 3. Nếu vẫn chưa có counter_data, truy vấn trực tiếp từ bảng CounterInfor
                     if not counter_data and (p_mac or p_ip):
                         try:
-                            c_stmt = select(CounterInfor).where(CounterInfor.lead == a_lead)
-                            if p_mac and p_ip:
-                                c_stmt = c_stmt.where(or_(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac, CounterInfor.ip == p_ip))
-                            elif p_mac:
-                                c_stmt = c_stmt.where(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac)
-                            elif p_ip:
-                                c_stmt = c_stmt.where(CounterInfor.ip == p_ip)
-                            c_row = session.execute(c_stmt.order_by(CounterInfor.created_at.desc(), CounterInfor.id.desc()).limit(1)).scalars().first()
+                            def _get_ci(filter_lead=True):
+                                stmt = select(CounterInfor)
+                                if filter_lead:
+                                    stmt = stmt.where(CounterInfor.lead == a_lead)
+                                if p_mac and p_ip:
+                                    stmt = stmt.where(or_(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac, CounterInfor.ip == p_ip))
+                                elif p_mac:
+                                    stmt = stmt.where(func.replace(func.upper(CounterInfor.mac_id), '-', ':') == p_mac)
+                                elif p_ip:
+                                    stmt = stmt.where(CounterInfor.ip == p_ip)
+                                return session.execute(stmt.order_by(CounterInfor.created_at.desc(), CounterInfor.id.desc()).limit(1)).scalars().first()
+
+                            c_row = _get_ci(filter_lead=True) or _get_ci(filter_lead=False)
                             if c_row:
                                 if isinstance(c_row.raw_payload, dict) and c_row.raw_payload:
                                     counter_data = c_row.raw_payload
@@ -369,14 +386,19 @@ def register_infor_routes(app: Flask, session_factory: Any) -> None:
                     # 4. Nếu vẫn chưa có status_data, truy vấn trực tiếp từ bảng StatusInfor
                     if not status_data and (p_mac or p_ip):
                         try:
-                            s_stmt = select(StatusInfor).where(StatusInfor.lead == a_lead)
-                            if p_mac and p_ip:
-                                s_stmt = s_stmt.where(or_(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac, StatusInfor.ip == p_ip))
-                            elif p_mac:
-                                s_stmt = s_stmt.where(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac)
-                            elif p_ip:
-                                s_stmt = s_stmt.where(StatusInfor.ip == p_ip)
-                            s_row = session.execute(s_stmt.order_by(StatusInfor.created_at.desc(), StatusInfor.id.desc()).limit(1)).scalars().first()
+                            def _get_si(filter_lead=True):
+                                stmt = select(StatusInfor)
+                                if filter_lead:
+                                    stmt = stmt.where(StatusInfor.lead == a_lead)
+                                if p_mac and p_ip:
+                                    stmt = stmt.where(or_(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac, StatusInfor.ip == p_ip))
+                                elif p_mac:
+                                    stmt = stmt.where(func.replace(func.upper(StatusInfor.mac_id), '-', ':') == p_mac)
+                                elif p_ip:
+                                    stmt = stmt.where(StatusInfor.ip == p_ip)
+                                return session.execute(stmt.order_by(StatusInfor.created_at.desc(), StatusInfor.id.desc()).limit(1)).scalars().first()
+
+                            s_row = _get_si(filter_lead=True) or _get_si(filter_lead=False)
                             if s_row and isinstance(s_row.raw_payload, dict) and s_row.raw_payload:
                                 status_data = s_row.raw_payload
                                 last_status_at = s_row.created_at or s_row.updated_at
