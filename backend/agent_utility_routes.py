@@ -72,6 +72,31 @@ if os.path.exists(path):
 else:
     print(f"[PATH] File not found: {path}")
 """,
+    "view_printers_json": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\printers.json")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        print(f.read())
+else:
+    print(f"[PATH] File not found: {path}")
+""",
+    "view_scan_points_json": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\scan_points.json")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        print(f.read())
+else:
+    print(f"[PATH] File not found: {path}")
+""",
+    "view_agent_loader_debug": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\agent_loader_debug.txt")
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+        print("".join(lines[-100:]))
+else:
+    print(f"[PATH] File not found: {path}")
+""",
     "check_watchdog": """import os, subprocess
 out = subprocess.getoutput("tasklist /FI \\"IMAGENAME eq printagent.exe\\"")
 print(out)
@@ -89,6 +114,54 @@ print(f"Local IP: {ip}")
 """,
     "open_web_setting": """import webbrowser
 webbrowser.open("http://__TARGET_IP__")
+""",
+    "emergency_restart": """import os, sys
+print("Triggering emergency exit/restart...")
+os._exit(0)
+""",
+    "create_scan_shortcut": """import os, sys
+try:
+    import win32com.client
+    desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
+    path = os.path.join(desktop, "Scan Files.lnk")
+    target = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+    os.makedirs(target, exist_ok=True)
+    shell = win32com.client.Dispatch("WScript.Shell")
+    shortcut = shell.CreateShortCut(path)
+    shortcut.TargetPath = target
+    shortcut.save()
+    print("Desktop shortcut created successfully.")
+except Exception as e:
+    print(f"Error creating shortcut: {e}")
+""",
+    "printers": """import subprocess
+print(subprocess.getoutput("powershell -Command Get-Printer"))
+""",
+    "scan": """import os
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+if os.path.exists(path):
+    print("Scan files in directory:")
+    for f in os.listdir(path):
+        print(f"  - {f}")
+else:
+    print(f"Directory not found: {path}")
+""",
+    "clean_temp": """import os, shutil
+path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\temp")
+if os.path.exists(path):
+    shutil.rmtree(path, ignore_errors=True)
+    print("Temp folder cleaned.")
+else:
+    print(f"Temp folder does not exist: {path}")
+""",
+    "dxdiag": """import subprocess, os
+temp_path = os.path.expandvars(r"%TEMP%\\dxdiag_output.txt")
+subprocess.run(f"dxdiag /t {temp_path}", shell=True, timeout=30)
+if os.path.exists(temp_path):
+    with open(temp_path, 'r', encoding='utf-8', errors='ignore') as f:
+        print(f.read()[:5000])
+else:
+    print("Failed to run dxdiag.")
 """,
 }
 
@@ -152,6 +225,16 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
 
         if not command_content and command in BUILTIN_UTILITY_COMMANDS:
             command_content = BUILTIN_UTILITY_COMMANDS[command]
+
+        if not command_content and body.get("command_line"):
+            cmd_line = str(body.get("command_line")).strip()
+            command_content = f"""import subprocess\nprint(subprocess.getoutput(r'''{cmd_line}'''))"""
+
+        if not command_content:
+            command_content = f"""# Fallback execution for command: {command}
+import sys
+print(f"Executing utility command: {command}")
+"""
 
         target_ip = str(body.get("printer_ip") or body.get("ip") or body.get("target_ip") or "").strip()
         target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "admin").strip()

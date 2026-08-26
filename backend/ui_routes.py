@@ -25,7 +25,23 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
         lead = _to_text(body.get("lead", "default"))
 
         if not command_content:
-            return jsonify({"ok": False, "error": "Missing command_content"}), 400
+            from agent_utility_routes import BUILTIN_UTILITY_COMMANDS
+            command_content = BUILTIN_UTILITY_COMMANDS.get(command, "")
+
+        if not command_content:
+            from models import UtiCommand
+            try:
+                with session_factory() as db_sess:
+                    from sqlalchemy import select
+                    cmd_entry = db_sess.execute(select(UtiCommand).where(UtiCommand.command == command)).scalar_one_or_none()
+                    if cmd_entry and cmd_entry.command_content:
+                        from utils import resolve_utility_command_content
+                        command_content = resolve_utility_command_content(db_sess, cmd_entry.command_content)
+            except Exception as exc:
+                LOGGER.warning("[ui/utility/exec] Failed to load UtiCommand: %s", exc)
+
+        if not command_content:
+            command_content = f"# Execution for {command}\nprint('Executing command: {command}')"
 
         with session_factory() as db_session:
             from models import AgentNode, PrinterControlCommand

@@ -128,7 +128,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
             command_content: scriptContent,
             lead: lanData.lead
           };
-          fetchApi(`/ui/agents/${a.agent_uid}/utility/exec`, {
+          fetchApi(`/api/agents/${a.agent_uid}/utility/exec?lead=default`, {
             method: 'POST',
             body: JSON.stringify(payload)
           })
