@@ -12,7 +12,6 @@ const tabs: NavTab[] = [
   { label: 'Dashboard', icon: '📊', path: '/dashboard' },
   { label: 'Yêu cầu', icon: '📋', path: '/requests' },
   { label: 'Kỹ thuật', icon: '🖥️', path: '/tech' },
-  { label: 'Địa điểm', icon: '📍', path: '/locations' },
   { label: 'Tài khoản', icon: '👤', path: '/account' },
 ];
 
