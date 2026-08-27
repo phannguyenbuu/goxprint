@@ -153,8 +153,8 @@ export function CopierItem({
         }
       ];
 
-  const hasDrivers = true;
-  const driversExpanded = expandedDrivers[p.id];
+  const pKey = String(p.id !== undefined && p.id !== null ? p.id : (p.mac_id || p.mac_address || p.ip || 'copier'));
+  const driversExpanded = Boolean(expandedDrivers[pKey] || expandedDrivers[p.id] || expandedDrivers[p.mac_id] || expandedDrivers[p.mac_address] || expandedDrivers[p.ip]);
   const rawAddressList = (() => {
     if (Array.isArray(activeSyncObj?.address_list) && activeSyncObj.address_list.length > 0) return activeSyncObj.address_list;
     if (activeSyncObj?.address_book_data && Array.isArray(activeSyncObj.address_book_data.address_list)) return activeSyncObj.address_book_data.address_list;
@@ -479,7 +479,12 @@ export function CopierItem({
                                 <button
                                   style={styles.expandSubBtn}
                                   onClick={() =>
-                                    setExpandedDrivers((prev) => ({ ...prev, [p.id]: !driversExpanded }))
+                                    setExpandedDrivers((prev) => ({
+                                      ...prev,
+                                      [pKey]: !driversExpanded,
+                                      [p.id]: !driversExpanded,
+                                      [p.ip]: !driversExpanded
+                                    }))
                                   }
                                 >
                                   {driversExpanded ? '▲ Ẩn driver đề xuất' : '▼ Xem driver đề xuất từ catalog'}
@@ -501,8 +506,8 @@ export function CopierItem({
                                               : sd.brand === 'toshiba'
                                               ? 'var(--color-error)'
                                               : 'var(--color-success)';
-                                          const sdMenuKey = `${p.id}-${idx}`;
-                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] !== undefined ? expandedDriverMenus[sdMenuKey] : true;
+                                          const sdMenuKey = `${pKey}-${idx}`;
+                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] !== undefined ? expandedDriverMenus[sdMenuKey] : (expandedDriverMenus[`${p.id}-${idx}`] !== undefined ? expandedDriverMenus[`${p.id}-${idx}`] : true);
                                           return (
                                             <div key={idx} style={styles.driverSuggestionItem}>
                                               <div
@@ -511,6 +516,7 @@ export function CopierItem({
                                                   setExpandedDriverMenus((prev) => ({
                                                     ...prev,
                                                     [sdMenuKey]: !isMenuOpen,
+                                                    [`${p.id}-${idx}`]: !isMenuOpen,
                                                   }))
                                                 }
                                               >
@@ -610,21 +616,33 @@ export function CopierItem({
                               <button
                                 style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#60a5fa', color: '#60a5fa' }}
                                 onClick={() => {
-                                  const pId = p.id;
                                   if (setExpandedDrivers) {
                                     setExpandedDrivers((prev: any) => ({
                                       ...prev,
-                                      [pId]: !prev[pId]
+                                      [pKey]: !driversExpanded,
+                                      [p.id]: !driversExpanded,
+                                      [p.ip]: !driversExpanded
                                     }));
                                   }
-                                  if (p.suggested_drivers && p.suggested_drivers.length > 0 && setExpandedDriverMenus) {
+                                  if (effectiveDrivers && effectiveDrivers.length > 0 && setExpandedDriverMenus) {
                                     setExpandedDriverMenus((prev: any) => {
                                       const nextState = { ...prev };
-                                      p.suggested_drivers.forEach((_: any, idx: number) => {
-                                        nextState[`${pId}-${idx}`] = true;
+                                      effectiveDrivers.forEach((_: any, idx: number) => {
+                                        nextState[`${pKey}-${idx}`] = true;
+                                        nextState[`${p.id}-${idx}`] = true;
                                       });
                                       return nextState;
                                     });
+                                  }
+                                  if (handleRemoteInstallDriver && effectiveDrivers[0]?.drivers?.[0]) {
+                                    const firstDrv = effectiveDrivers[0].drivers[0];
+                                    handleRemoteInstallDriver(
+                                      p.mac_id || p.mac_address || p.ip || p.id,
+                                      effectiveDrivers[0].brand || 'Ricoh',
+                                      effectiveDrivers[0].model || 'Photocopy',
+                                      firstDrv.name,
+                                      firstDrv.url
+                                    );
                                   }
                                 }}
                                 title="Xem và cài đặt Driver máy in tự động cho các máy tính trong mạng LAN"
