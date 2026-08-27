@@ -111,23 +111,29 @@ if dist_dir.exists():
 
 sftp.close()
 
+def safe_print(label, text):
+    try:
+        print(f"{label} {text}")
+    except Exception:
+        print(f"{label} {text.encode('ascii', 'ignore').decode('ascii')}")
+
 print("Cleaning up obsolete utility_commands.json on VPS...")
 ssh.exec_command('rm -f /opt/printagent/storage/utility_commands.json')
 
 print("Running database migrations on remote VPS...")
 _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/init_db.py')
-print("Migration STDOUT:", out.read().decode('utf-8'))
-print("Migration STDERR:", err.read().decode('utf-8'))
+safe_print("Migration STDOUT:", out.read().decode('utf-8', errors='ignore'))
+safe_print("Migration STDERR:", err.read().decode('utf-8', errors='ignore'))
 
 print("Updating UtiCommand force_subnet_scan in Database...")
 _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/update_force_scan_cmd.py')
-print("Update force_scan STDOUT:", out.read().decode('utf-8'))
-print("Update force_scan STDERR:", err.read().decode('utf-8'))
+safe_print("Update force_scan STDOUT:", out.read().decode('utf-8', errors='ignore'))
+safe_print("Update force_scan STDERR:", err.read().decode('utf-8', errors='ignore'))
 
 print("Restarting printagent service on remote VPS...")
 _, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
-print("Restart STDOUT:", out.read().decode('utf-8'))
-print("Restart STDERR:", err.read().decode('utf-8'))
+safe_print("Restart STDOUT:", out.read().decode('utf-8', errors='ignore'))
+safe_print("Restart STDERR:", err.read().decode('utf-8', errors='ignore'))
 
 ssh.close()
 print("Done!")
