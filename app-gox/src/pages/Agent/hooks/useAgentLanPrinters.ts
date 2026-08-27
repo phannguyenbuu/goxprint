@@ -154,46 +154,13 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const filteredLanSites = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return [];
-    const cleanTargetIp = selectedPublicIp.trim().toLowerCase();
-    if (!cleanTargetIp) return lanSites;
-
-    return lanSites.filter((site) => {
-      const sitePubIp = (site.public_ip || site.wan_ip || '').trim().toLowerCase();
-      if (sitePubIp && sitePubIp === cleanTargetIp) return true;
-      return (site.agents || []).some((ag: any) => {
-        const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim().toLowerCase();
-        return agPub && agPub === cleanTargetIp;
-      });
-    });
-  }, [lanSites, selectedPublicIp]);
+    return lanSites;
+  }, [lanSites]);
 
   const selectedLan = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return null;
-    const cleanTargetIp = selectedPublicIp.trim().toLowerCase();
-
-    let baseLan = null;
-    if (cleanTargetIp) {
-      if (filteredLanSites && filteredLanSites.length > 0) {
-        baseLan = filteredLanSites[0];
-      }
-    } else {
-      baseLan = lanSites.find((site) => site.lan_uid === selectedLanUid) || lanSites[0];
-    }
-
-    if (!baseLan) return null;
-
-    if (!cleanTargetIp) return baseLan;
-
-    const matchingAgents = (baseLan.agents || []).filter((ag: any) => {
-      const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim().toLowerCase();
-      return agPub && agPub === cleanTargetIp;
-    });
-
-    return {
-      ...baseLan,
-      agents: matchingAgents
-    };
-  }, [filteredLanSites, lanSites, selectedLanUid, selectedPublicIp]);
+    return lanSites.find((site) => site.lan_uid === selectedLanUid) || lanSites[0];
+  }, [lanSites, selectedLanUid]);
 
   const triggerLanScan = useCallback((lanData: any) => {
     if (!lanData) return;
