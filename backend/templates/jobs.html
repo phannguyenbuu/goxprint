@@ -258,12 +258,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <!-- 3 Modal Tabs Header -->
                 <div style="display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 18px;">
-                    <button class="job-modal-tab-btn active" data-target="job-tab-info">ℹ️ Thông tin chung</button>
+                    <button class="job-modal-tab-btn active" data-target="job-tab-info">ℹ️ Thông tin chung & Tham số</button>
                     <button class="job-modal-tab-btn" data-target="job-tab-error">⚠️ Kết quả / Log Error ${formattedError ? '🔴' : ''}</button>
-                    <button class="job-modal-tab-btn" data-target="job-tab-params">📦 Tham số Lệnh & Script</button>
+                    <button class="job-modal-tab-btn" data-target="job-tab-script">🐍 Code / Script ${codeScript ? '💻' : ''}</button>
                 </div>
 
-                <!-- Tab 1: General Info -->
+                <!-- Tab 1: General Info & Command Params -->
                 <div id="job-tab-info" class="job-modal-pane" style="display: block;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 0.88rem; background: #f8fafc; padding: 18px; border-radius: 10px; border: 1px solid #e2e8f0;">
                         <div><span style="color: #64748b; font-weight: 500;">Job ID:</span> <b style="color: #0f172a; font-family: monospace;">#${row.id}</b></div>
@@ -275,37 +275,26 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div><span style="color: #64748b; font-weight: 500;">Thời gian Yêu cầu:</span> <span style="color: #334155;">${escapeHtml(row.requested_at || '-')}</span></div>
                         <div><span style="color: #64748b; font-weight: 500;">Thời gian Phản hồi:</span> <span style="color: #334155;">${escapeHtml(row.responded_at || '-')}</span></div>
                     </div>
+
+                    ${jsonParamsBlockHtml ? jsonParamsBlockHtml : '<div style="margin-top: 14px; color: #64748b; font-style: italic;">Không có tham số bổ sung.</div>'}
                 </div>
 
                 <!-- Tab 2: Response & Error Details -->
                 <div id="job-tab-error" class="job-modal-pane" style="display: none;">
-                    ${formattedError ? `
-                        <div>
-                            <div style="font-size: 0.85rem; font-weight: 700; color: #dc2626; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">⚠️ Chi tiết Phản hồi / Kết quả / Log Error:</div>
-                            <pre style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 16px; border-radius: 10px; font-size: 0.82rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 380px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.5;">${escapeHtml(formattedError)}</pre>
-                        </div>
-                    ` : `
+                    ${errorBlockHtml ? errorBlockHtml : `
                         <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; padding: 20px; border-radius: 10px; text-align: center; font-size: 0.9rem; font-weight: 600;">
                             ✅ Lệnh thực thi thành công, không phát sinh thông báo lỗi.
                         </div>
                     `}
                 </div>
 
-                <!-- Tab 3: Command Params & Code Script -->
-                <div id="job-tab-params" class="job-modal-pane" style="display: none;">
-                    ${codeScript ? `
-                        <div style="margin-bottom: 18px;">
-                            <div style="font-size: 0.85rem; font-weight: 700; color: #059669; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">🐍 Nội dung Code / Script (Command Content):</div>
-                            <pre style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; padding: 16px; border-radius: 10px; font-size: 0.82rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 320px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.5;">${escapeHtml(codeScript)}</pre>
+                <!-- Tab 3: Python Code Script -->
+                <div id="job-tab-script" class="job-modal-pane" style="display: none;">
+                    ${scriptBlockHtml ? scriptBlockHtml : `
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; color: #64748b; padding: 20px; border-radius: 10px; text-align: center; font-size: 0.9rem; font-weight: 500;">
+                            ℹ️ Lệnh này không chứa mã script Python (Command Content).
                         </div>
-                    ` : ''}
-
-                    ${jsonParams ? `
-                        <div>
-                            <div style="font-size: 0.85rem; font-weight: 700; color: #0284c7; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">📦 Tham số Lệnh (Command Params JSON):</div>
-                            <pre style="background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; padding: 16px; border-radius: 10px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 250px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(jsonParams)}</pre>
-                        </div>
-                    ` : (!codeScript ? '<div style="color: #64748b; font-style: italic;">Không có tham số bổ sung.</div>' : '')}
+                    `}
                 </div>
 
                 <!-- Footer -->
