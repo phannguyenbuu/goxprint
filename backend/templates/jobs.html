@@ -227,6 +227,40 @@ document.addEventListener('DOMContentLoaded', () => {
         return { jsonParams, codeScript };
     };
 
+    const createCopyableBlock = (title, content, type = 'json') => {
+        if (!content) return '';
+        const blockId = 'copy-block-' + Math.random().toString(36).substring(2, 9);
+        
+        let headerColor = '#0284c7';
+        let bgColor = '#f0f9ff';
+        let borderColor = '#bae6fd';
+        let textColor = '#0369a1';
+
+        if (type === 'code') {
+            headerColor = '#059669';
+            bgColor = '#f0fdf4';
+            borderColor = '#bbf7d0';
+            textColor = '#166534';
+        } else if (type === 'error') {
+            headerColor = '#dc2626';
+            bgColor = '#fef2f2';
+            borderColor = '#fecaca';
+            textColor = '#991b1b';
+        }
+
+        return `
+            <div style="margin-top: 14px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="font-size: 0.82rem; font-weight: 700; color: ${headerColor}; display: flex; align-items: center; gap: 6px;">${escapeHtml(title)}</div>
+                    <button type="button" class="copy-code-btn" data-target="${blockId}" style="background: #ffffff; border: 1px solid ${borderColor}; color: ${headerColor}; padding: 3px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        📋 Copy
+                    </button>
+                </div>
+                <textarea id="${blockId}" readonly style="width: 100%; background: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 12px 14px; border-radius: 8px; font-size: 0.8rem; overflow-y: auto; white-space: pre; word-break: normal; resize: vertical; min-height: 120px; max-height: 350px; font-family: Consolas, Monaco, monospace; line-height: 1.45; box-sizing: border-box; outline: none;">${escapeHtml(content)}</textarea>
+            </div>
+        `;
+    };
+
     const showJobDetailModal = (row) => {
         const modal = document.getElementById('detail-modal');
         const body = document.getElementById('detail-modal-body');
@@ -244,6 +278,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let statusText = row.status || 'Failed';
         if (row.status === 'pending') { statusClass = 'status-pending'; statusText = 'Pending'; }
         if (row.status === 'success') { statusClass = 'status-success'; statusText = 'Success'; }
+
+        const jsonParamsBlockHtml = createCopyableBlock('📦 Tham số Lệnh (Command Params JSON)', jsonParams, 'json');
+        const errorBlockHtml = createCopyableBlock('⚠️ Chi tiết Phản hồi / Kết quả / Log Error', formattedError, 'error');
+        const scriptBlockHtml = createCopyableBlock('🐍 Nội dung Code / Script (Command Content)', codeScript, 'code');
 
         body.innerHTML = `
             <div style="background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 14px; max-width: 800px; width: 92vw; max-height: 90vh; overflow-y: auto; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box;">
