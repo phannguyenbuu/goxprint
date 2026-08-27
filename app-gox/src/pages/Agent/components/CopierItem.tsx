@@ -585,14 +585,31 @@ export function CopierItem({
                               </button>
   
                               <button
-                                style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#ef4444', color: '#ef4444' }}
+                                style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#60a5fa', color: '#60a5fa' }}
                                 onClick={() => {
-                                  setRemoteLockPrinter({ ip: p.ip, name: p.name || p.printer_name || p.ip, id: p.id, agentUid: selectedAgentUid });
-                                  setActiveModal('remote_lock');
+                                  const printerKey = p.id || p.ip;
+                                  if (setExpandedDrivers) {
+                                    setExpandedDrivers((prev: any) => ({ ...prev, [printerKey]: !prev[printerKey] }));
+                                  }
+                                  const firstBrand = (p.suggested_drivers?.[0]?.brand) || detectBrand(p.name || p.printer_name || p.ip) || 'Ricoh';
+                                  const firstModel = (p.suggested_drivers?.[0]?.model) || p.name || p.printer_name || 'Photocopy';
+                                  const firstDrv = p.suggested_drivers?.[0]?.drivers?.[0];
+                                  const drvName = firstDrv?.name || `${firstBrand} ${firstModel} Driver`;
+                                  const drvUrl = firstDrv?.url || '';
+                                  if (handleRemoteInstallDriver) {
+                                    handleRemoteInstallDriver(
+                                      p.mac_id || p.mac_address || p.ip || p.id,
+                                      firstBrand,
+                                      firstModel,
+                                      drvName,
+                                      drvUrl
+                                    );
+                                  }
                                 }}
                                 disabled={onlineAgents.length === 0}
+                                title="Cài đặt Driver máy in tự động cho các máy tính trong mạng LAN"
                               >
-                                🔒 Khóa máy từ xa
+                                💻 Cài driver
                               </button>
   
                               {detectBrand(p.name || p.printer_name || p.ip) === 'ricoh' && (p.name || p.printer_name || '').toLowerCase().includes('6503') && (
