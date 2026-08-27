@@ -292,53 +292,56 @@ context["result_payload"] = payload
    .replace("__TYPE__", printer_type)
 
         from models import PrinterControlCommand
+        from sqlalchemy import delete
         cmd_params = {
             "action": "exec_utility",
             "command": "query_device_now",
-            "command_content": code_content
+            "command_content": code_content,
+            "is_auto": True
         }
         
-        requested_at = datetime.now(timezone.utc)
-        with session_factory() as session:
-            command = PrinterControlCommand(
-                printer_id=0,
-                lead=lead_val,
-                lan_uid=lan_uid_val,
-                agent_uid=agent_uid,
-                printer_name="",
-                ip="",
-                command_type="trigger_utility",
-                command_params=json.dumps(cmd_params),
-                status="pending",
-                requested_at=requested_at,
-            )
-            session.add(command)
-            session.commit()
-            command_id = int(command.id)
-
-        success = False
-        result_payload_str = ""
-        import time
-        for _ in range(100):
-            time.sleep(0.2)
-            with session_factory() as session:
-                cmd_status = session.execute(
-                    select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
-                ).scalars().first()
-                if cmd_status:
-                    if cmd_status.status == "success":
-                        success = True
-                        result_payload_str = cmd_status.error_message or ""
-                        break
-                    elif cmd_status.status == "failed":
-                        success = False
-                        result_payload_str = cmd_status.error_message or "Agent failed execution"
-                        break
-
-        if not success:
-            return jsonify({"ok": False, "error": f"Timeout or failed waiting for Agent response: {result_payload_str}"}), 504
-
+        command_id = None
         try:
+            requested_at = datetime.now(timezone.utc)
+            with session_factory() as session:
+                command = PrinterControlCommand(
+                    printer_id=0,
+                    lead=lead_val,
+                    lan_uid=lan_uid_val,
+                    agent_uid=agent_uid,
+                    printer_name="",
+                    ip="",
+                    command_type="trigger_utility",
+                    command_params=json.dumps(cmd_params),
+                    status="pending",
+                    requested_at=requested_at,
+                )
+                session.add(command)
+                session.commit()
+                command_id = int(command.id)
+
+            success = False
+            result_payload_str = ""
+            import time
+            for _ in range(100):
+                time.sleep(0.2)
+                with session_factory() as session:
+                    cmd_status = session.execute(
+                        select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
+                    ).scalars().first()
+                    if cmd_status:
+                        if cmd_status.status == "success":
+                            success = True
+                            result_payload_str = cmd_status.error_message or ""
+                            break
+                        elif cmd_status.status == "failed":
+                            success = False
+                            result_payload_str = cmd_status.error_message or "Agent failed execution"
+                            break
+
+            if not success:
+                return jsonify({"ok": False, "error": f"Timeout or failed waiting for Agent response: {result_payload_str}"}), 504
+
             res_dict = json.loads(result_payload_str)
             if not res_dict.get("ok", False):
                 return jsonify({"ok": False, "error": res_dict.get("error", "Unknown error querying printer")}), 500
@@ -413,6 +416,14 @@ context["result_payload"] = payload
                 "status_data": res_dict.get("status"),
                 "updated_at": datetime.now(timezone.utc).isoformat()
             })
+        finally:
+            if command_id:
+                try:
+                    with session_factory() as session:
+                        session.execute(delete(PrinterControlCommand).where(PrinterControlCommand.id == command_id))
+                        session.commit()
+                except Exception as del_err:
+                    LOGGER.warning("Could not delete transient query_device_now command %s: %s", command_id, del_err)
         except Exception as e:
             return jsonify({"ok": False, "error": f"Failed parsing payload: {e}. Raw: {result_payload_str}"}), 500
 

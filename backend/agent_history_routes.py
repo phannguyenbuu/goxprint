@@ -386,6 +386,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                 (
                     (
                         (~PrinterControlCommand.command_params.like("%check_scan_ip_match%")) &
+                        (~PrinterControlCommand.command_params.like("%query_device_now%")) &
                         (~PrinterControlCommand.command_params.like('%"is_auto": true%'))
                     ) |
                     (PrinterControlCommand.command_params.like('%child_command_ids%'))

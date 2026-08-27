@@ -74,6 +74,7 @@ def main() -> None:
         'ALTER TABLE "Printer" ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMP WITH TIME ZONE DEFAULT NULL',
         'ALTER TABLE "LanSite" ADD COLUMN IF NOT EXISTS public_ip VARCHAR(64) DEFAULT \'\'',
         'ALTER TABLE "AgentNode" ADD COLUMN IF NOT EXISTS public_ip VARCHAR(64) DEFAULT \'\'',
+        'DELETE FROM "PrinterControlCommand" WHERE command_params LIKE \'%query_device_now%\' OR command_params LIKE \'%\"is_auto\": true%\'',
     ]
 
     with bind.connect() as conn:
