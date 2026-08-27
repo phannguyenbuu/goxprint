@@ -154,7 +154,8 @@ export function CopierItem({
       ];
 
   const pKey = String(p.id !== undefined && p.id !== null ? p.id : (p.mac_id || p.mac_address || p.ip || 'copier'));
-  const driversExpanded = Boolean(expandedDrivers[pKey] || expandedDrivers[p.id] || expandedDrivers[p.mac_id] || expandedDrivers[p.mac_address] || expandedDrivers[p.ip]);
+  const hasDrivers = true;
+  const driversExpanded = Boolean(expandedDrivers[pKey] || (p.id !== undefined && expandedDrivers[p.id]) || (p.mac_id && expandedDrivers[p.mac_id]) || (p.mac_address && expandedDrivers[p.mac_address]) || (p.ip && expandedDrivers[p.ip]));
   const rawAddressList = (() => {
     if (Array.isArray(activeSyncObj?.address_list) && activeSyncObj.address_list.length > 0) return activeSyncObj.address_list;
     if (activeSyncObj?.address_book_data && Array.isArray(activeSyncObj.address_book_data.address_list)) return activeSyncObj.address_book_data.address_list;
