@@ -130,7 +130,30 @@ export function CopierItem({
     (hasItems(cmdStatusObj) ? cmdStatusObj : null) ||
     (hasItems(sync) ? sync : null) ||
     localSync || cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
-  const hasDrivers = p.suggested_drivers && p.suggested_drivers.length > 0;
+  const detectedBrand = detectBrand(p.name || p.printer_name || p.ip || 'generic');
+  const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
+  const modelName = p.name || p.printer_name || 'Photocopy';
+
+  const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers) && p.suggested_drivers.length > 0)
+    ? p.suggested_drivers
+    : [
+        {
+          brand: detectedBrand,
+          model: modelName,
+          drivers: [
+            {
+              name: `${brandName} ${modelName} PCL6 Universal Driver (x64)`,
+              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_pcl6.exe`
+            },
+            {
+              name: `${brandName} ${modelName} PostScript3 Driver (x64)`,
+              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_ps.exe`
+            }
+          ]
+        }
+      ];
+
+  const hasDrivers = true;
   const driversExpanded = expandedDrivers[p.id];
   const rawAddressList = (() => {
     if (Array.isArray(activeSyncObj?.address_list) && activeSyncObj.address_list.length > 0) return activeSyncObj.address_list;
@@ -471,7 +494,7 @@ export function CopierItem({
                                       style={{ overflow: 'hidden', marginTop: '6px' }}
                                     >
                                       <div style={styles.suggestedDriverBlock}>
-                                        {p.suggested_drivers.map((sd: any, idx: number) => {
+                                        {effectiveDrivers.map((sd: any, idx: number) => {
                                           const brandColor =
                                             sd.brand === 'ricoh'
                                               ? 'var(--color-primary)'
@@ -479,8 +502,8 @@ export function CopierItem({
                                               ? 'var(--color-error)'
                                               : 'var(--color-success)';
                                           const sdMenuKey = `${p.id}-${idx}`;
-                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] || false;
-  return (
+                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] !== undefined ? expandedDriverMenus[sdMenuKey] : true;
+                                          return (
                                             <div key={idx} style={styles.driverSuggestionItem}>
                                               <div
                                                 style={styles.driverModelHeader}
@@ -502,7 +525,7 @@ export function CopierItem({
                                                       marginRight: '6px',
                                                     }}
                                                   />
-                                                  {sd.brand.toUpperCase()} - {sd.model}
+                                                  {String(sd.brand || '').toUpperCase()} - {sd.model}
                                                 </span>
                                                 <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>
                                                   {isMenuOpen ? '▲' : '▼'}
@@ -521,7 +544,7 @@ export function CopierItem({
                                                           </div>
                                                         </div>
                                                         <div style={{ display: 'flex', gap: '4px' }}>
-
+  
                                                           <button
                                                             style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
                                                             onClick={() =>
