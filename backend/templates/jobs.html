@@ -8,13 +8,6 @@
     </div>
   </div>
 
-  <!-- 3 Sub-Tabs for Quick Filter -->
-  <div class="sub-tabs-bar" style="display: flex; gap: 10px; margin-bottom: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px;">
-    <button class="job-tab-btn active" data-status="all" style="padding: 8px 18px; border: 1px solid #0284c7; background: #0284c7; color: #ffffff; cursor: pointer; font-weight: 600; font-size: 0.85rem; border-radius: 8px; transition: all 0.2s; box-shadow: 0 2px 6px rgba(2,132,199,0.25);">📋 Tất cả Jobs</button>
-    <button class="job-tab-btn" data-status="success" style="padding: 8px 18px; border: 1px solid #cbd5e1; background: #ffffff; color: #475569; cursor: pointer; font-weight: 600; font-size: 0.85rem; border-radius: 8px; transition: all 0.2s;">✅ Thành công</button>
-    <button class="job-tab-btn" data-status="failed" style="padding: 8px 18px; border: 1px solid #cbd5e1; background: #ffffff; color: #475569; cursor: pointer; font-weight: 600; font-size: 0.85rem; border-radius: 8px; transition: all 0.2s;">❌ Thất bại / Lỗi</button>
-  </div>
-
   <div class="filter-board" style="display: flex; gap: 12px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-end;">
     <div class="filter-group" style="flex: 1;">
       <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Search Command, Agent ID...</label>
@@ -84,22 +77,33 @@
 .status-pending { background-color: #fffbe6; color: #d97706; border: 1px solid #fef3c7; }
 .status-success { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
 .status-failed { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.toast-msg {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #0f172a;
-    color: #fff;
-    padding: 12px 20px;
-    border-radius: 6px;
-    z-index: 9999;
-    font-size: 14px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    display: none;
+
+/* Modal 3-Tab Styling */
+.job-modal-tab-btn {
+    padding: 9px 16px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #64748b;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.15s ease-in-out;
+    margin-right: 4px;
+    border-bottom: 2px solid transparent;
+}
+.job-modal-tab-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+.job-modal-tab-btn.active {
+    background: #ffffff;
+    color: #0284c7;
+    border-color: #cbd5e1;
+    border-bottom: 3px solid #0284c7;
+    font-weight: 700;
 }
 </style>
-
-<div id="custom-toast" class="toast-msg"></div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -181,8 +185,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    const formatParamsAndContent = (paramsStr) => {
-        if (!paramsStr) return { paramsHtml: '', contentHtml: '' };
+    const parseAndFormatParams = (paramsStr) => {
+        if (!paramsStr) return { jsonParams: '', codeScript: '' };
 
         let parsed = null;
         let isJson = false;
@@ -194,61 +198,33 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!isJson) {
-            const unescaped = String(paramsStr).replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
-            return {
-                paramsHtml: `
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 0.82rem; font-weight: 700; color: #0284c7; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">📦 Tham số Lệnh (Command Params):</div>
-                        <pre style="background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; padding: 14px; border-radius: 8px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 250px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(unescaped)}</pre>
-                    </div>
-                `,
-                contentHtml: ''
-            };
+            const unescaped = String(paramsStr || '').replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
+            return { jsonParams: unescaped, codeScript: '' };
         }
 
         const obj = { ...parsed };
-        let codeContent = '';
+        let codeScript = '';
         if (obj.command_content) {
-            codeContent = obj.command_content;
+            codeScript = obj.command_content;
             delete obj.command_content;
         } else if (obj.code) {
-            codeContent = obj.code;
+            codeScript = obj.code;
             delete obj.code;
         } else if (obj.script) {
-            codeContent = obj.script;
+            codeScript = obj.script;
             delete obj.script;
         }
 
-        if (typeof codeContent === 'string') {
-            codeContent = codeContent.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
+        if (typeof codeScript === 'string') {
+            codeScript = codeScript.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
         }
 
-        let jsonFormatted = '';
+        let jsonParams = '';
         if (Object.keys(obj).length > 0) {
-            jsonFormatted = JSON.stringify(obj, null, 2);
+            jsonParams = JSON.stringify(obj, null, 2);
         }
 
-        let paramsHtml = '';
-        if (jsonFormatted) {
-            paramsHtml = `
-                <div style="margin-bottom: 16px;">
-                    <div style="font-size: 0.82rem; font-weight: 700; color: #0284c7; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">📦 Tham số Lệnh (Command Params JSON):</div>
-                    <pre style="background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; padding: 14px; border-radius: 8px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 220px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(jsonFormatted)}</pre>
-                </div>
-            `;
-        }
-
-        let contentHtml = '';
-        if (codeContent) {
-            contentHtml = `
-                <div style="margin-bottom: 16px;">
-                    <div style="font-size: 0.82rem; font-weight: 700; color: #059669; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">🐍 Nội dung Code / Script (Command Content):</div>
-                    <pre style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 14px; border-radius: 8px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 320px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(codeContent)}</pre>
-                </div>
-            `;
-        }
-
-        return { paramsHtml, contentHtml };
+        return { jsonParams, codeScript };
     };
 
     const showJobDetailModal = (row) => {
@@ -257,7 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal || !body || !row) return;
 
         const cmdName = getCommandName(row.command_type, row.command_params);
-        const { paramsHtml, contentHtml } = formatParamsAndContent(row.command_params);
+        const { jsonParams, codeScript } = parseAndFormatParams(row.command_params);
 
         let formattedError = row.error_message || '';
         if (formattedError) {
@@ -270,41 +246,91 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row.status === 'success') { statusClass = 'status-success'; statusText = 'Success'; }
 
         body.innerHTML = `
-            <div style="background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 14px; max-width: 760px; width: 92vw; max-height: 88vh; overflow-y: auto; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box;">
+            <div style="background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 14px; max-width: 800px; width: 92vw; max-height: 90vh; overflow-y: auto; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box;">
+                <!-- Header -->
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px; margin-bottom: 16px;">
                     <div>
                         <div style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">JOB #${row.id}</div>
-                        <h3 style="margin: 4px 0 0 0; color: #0284c7; font-size: 1.15rem; font-weight: 700;">${escapeHtml(cmdName)}</h3>
+                        <h3 style="margin: 4px 0 0 0; color: #0284c7; font-size: 1.2rem; font-weight: 700;">${escapeHtml(cmdName)}</h3>
                     </div>
                     <button id="job-modal-close-btn" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #64748b; font-size: 1.3rem; cursor: pointer; padding: 2px 10px; border-radius: 6px; line-height: 1; transition: all 0.2s;">&times;</button>
                 </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.85rem; margin-bottom: 16px; background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e2e8f0;">
-                    <div><span style="color: #64748b;">Agent UID:</span> <b style="color: #0f172a; font-family: monospace;">${escapeHtml(row.agent_uid || 'N/A')}</b></div>
-                    <div><span style="color: #64748b;">Trạng thái:</span> <span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></div>
-                    <div><span style="color: #64748b;">Máy in:</span> <b style="color: #0f172a;">${escapeHtml(row.printer_name || '-')}</b></div>
-                    <div><span style="color: #64748b;">IP:</span> <span style="font-family: monospace; color: #0284c7; font-weight: 600;">${escapeHtml(row.ip || '-')}</span></div>
-                    <div><span style="color: #64748b;">Yêu cầu lúc:</span> <span style="color: #334155;">${escapeHtml(row.requested_at || '-')}</span></div>
-                    <div><span style="color: #64748b;">Phản hồi lúc:</span> <span style="color: #334155;">${escapeHtml(row.responded_at || '-')}</span></div>
+
+                <!-- 3 Modal Tabs Header -->
+                <div style="display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 18px;">
+                    <button class="job-modal-tab-btn active" data-target="job-tab-info">ℹ️ Thông tin chung</button>
+                    <button class="job-modal-tab-btn" data-target="job-tab-error">⚠️ Kết quả / Log Error ${formattedError ? '🔴' : ''}</button>
+                    <button class="job-modal-tab-btn" data-target="job-tab-params">📦 Tham số Lệnh & Script</button>
                 </div>
 
-                ${formattedError ? `
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 0.82rem; font-weight: 700; color: #dc2626; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">⚠️ Chi tiết Phản hồi / Kết quả / Log Error:</div>
-                        <pre style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 14px; border-radius: 8px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 220px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(formattedError)}</pre>
+                <!-- Tab 1: General Info -->
+                <div id="job-tab-info" class="job-modal-pane" style="display: block;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 0.88rem; background: #f8fafc; padding: 18px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                        <div><span style="color: #64748b; font-weight: 500;">Job ID:</span> <b style="color: #0f172a; font-family: monospace;">#${row.id}</b></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Trạng thái:</span> <span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Agent UID:</span> <b style="color: #0284c7; font-family: monospace;">${escapeHtml(row.agent_uid || 'N/A')}</b></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Loại Lệnh:</span> <b style="color: #0f172a;">${escapeHtml(row.command_type || '-')}</b></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Máy in liên quan:</span> <b style="color: #0f172a;">${escapeHtml(row.printer_name || '-')}</b></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Địa chỉ IP:</span> <span style="font-family: monospace; color: #0284c7; font-weight: 600;">${escapeHtml(row.ip || '-')}</span></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Thời gian Yêu cầu:</span> <span style="color: #334155;">${escapeHtml(row.requested_at || '-')}</span></div>
+                        <div><span style="color: #64748b; font-weight: 500;">Thời gian Phản hồi:</span> <span style="color: #334155;">${escapeHtml(row.responded_at || '-')}</span></div>
                     </div>
-                ` : ''}
+                </div>
 
-                ${contentHtml}
-                ${paramsHtml}
+                <!-- Tab 2: Response & Error Details -->
+                <div id="job-tab-error" class="job-modal-pane" style="display: none;">
+                    ${formattedError ? `
+                        <div>
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #dc2626; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">⚠️ Chi tiết Phản hồi / Kết quả / Log Error:</div>
+                            <pre style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 16px; border-radius: 10px; font-size: 0.82rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 380px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.5;">${escapeHtml(formattedError)}</pre>
+                        </div>
+                    ` : `
+                        <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; padding: 20px; border-radius: 10px; text-align: center; font-size: 0.9rem; font-weight: 600;">
+                            ✅ Lệnh thực thi thành công, không phát sinh thông báo lỗi.
+                        </div>
+                    `}
+                </div>
 
-                <div style="display: flex; justify-content: flex-end; margin-top: 18px;">
+                <!-- Tab 3: Command Params & Code Script -->
+                <div id="job-tab-params" class="job-modal-pane" style="display: none;">
+                    ${codeScript ? `
+                        <div style="margin-bottom: 18px;">
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #059669; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">🐍 Nội dung Code / Script (Command Content):</div>
+                            <pre style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; padding: 16px; border-radius: 10px; font-size: 0.82rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 320px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.5;">${escapeHtml(codeScript)}</pre>
+                        </div>
+                    ` : ''}
+
+                    ${jsonParams ? `
+                        <div>
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #0284c7; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">📦 Tham số Lệnh (Command Params JSON):</div>
+                            <pre style="background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; padding: 16px; border-radius: 10px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 250px; margin: 0; font-family: Consolas, Monaco, monospace; line-height: 1.45;">${escapeHtml(jsonParams)}</pre>
+                        </div>
+                    ` : (!codeScript ? '<div style="color: #64748b; font-style: italic;">Không có tham số bổ sung.</div>' : '')}
+                </div>
+
+                <!-- Footer -->
+                <div style="display: flex; justify-content: flex-end; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 14px;">
                     <button id="job-modal-ok-btn" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #fff; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.88rem; box-shadow: 0 2px 8px rgba(2,132,199,0.3);">Đóng</button>
                 </div>
             </div>
         `;
 
         modal.hidden = false;
+
+        // Modal Tab Switcher Handler
+        const tabBtns = body.querySelectorAll('.job-modal-tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                body.querySelectorAll('.job-modal-pane').forEach(pane => pane.style.display = 'none');
+                
+                const target = e.currentTarget;
+                target.classList.add('active');
+                const targetId = target.dataset.target;
+                const activePane = body.querySelector('#' + targetId);
+                if (activePane) activePane.style.display = 'block';
+            });
+        });
 
         const closeModal = () => { modal.hidden = true; };
         const closeX = document.getElementById('job-modal-close-btn');
@@ -357,30 +383,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('next-page').disabled = currentPage >= totalPages || totalPages === 0;
     };
 
-    // Sub-Tabs Handler
-    document.querySelectorAll('.job-tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.job-tab-btn').forEach(b => {
-                b.classList.remove('active');
-                b.style.background = '#ffffff';
-                b.style.color = '#475569';
-                b.style.borderColor = '#cbd5e1';
-                b.style.boxShadow = 'none';
-            });
-            const target = e.currentTarget;
-            target.classList.add('active');
-            target.style.background = '#0284c7';
-            target.style.color = '#ffffff';
-            target.style.borderColor = '#0284c7';
-            target.style.boxShadow = '0 2px 6px rgba(2,132,199,0.25)';
-
-            const status = target.dataset.status;
-            document.getElementById('filter-status').value = status;
-            currentPage = 1;
-            loadJobs();
-        });
-    });
-
     document.getElementById('prev-page').addEventListener('click', () => {
         if (currentPage > 1) {
             currentPage--;
@@ -407,23 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPage = 1;
         loadJobs();
     });
-    document.getElementById('filter-status').addEventListener('change', (e) => {
-        const val = e.target.value;
-        document.querySelectorAll('.job-tab-btn').forEach(b => {
-            if (b.dataset.status === val) {
-                b.classList.add('active');
-                b.style.background = '#0284c7';
-                b.style.color = '#ffffff';
-                b.style.borderColor = '#0284c7';
-                b.style.boxShadow = '0 2px 6px rgba(2,132,199,0.25)';
-            } else {
-                b.classList.remove('active');
-                b.style.background = '#ffffff';
-                b.style.color = '#475569';
-                b.style.borderColor = '#cbd5e1';
-                b.style.boxShadow = 'none';
-            }
-        });
+    document.getElementById('filter-status').addEventListener('change', () => {
         currentPage = 1;
         loadJobs();
     });
