@@ -136,10 +136,14 @@ export function CopiersTab(props: any) {
         </div>
 
         <AnimatedList className="copiers-grid" style={styles.gridContainer}>
-          {lanSitesLoading ? (
+          {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.values(commandStatus || {}).some((c: any) => c?.isPending && (c?.message?.includes('quét') || c?.message?.includes('scan'))) ? (
             <div style={styles.loadingContainer}>
               <LoadingSpinner />
-              <div style={styles.loadingText}>Đang tải dữ liệu thiết bị...</div>
+              <div style={styles.loadingText}>
+                {utilityActionPending === 'force_subnet_scan' || Object.values(commandStatus || {}).some((c: any) => c?.isPending && (c?.message?.includes('quét') || c?.message?.includes('scan')))
+                  ? '⏳ Đang dò quét mạng LAN tìm máy in & photocopy...'
+                  : 'Đang tải dữ liệu thiết bị...'}
+              </div>
             </div>
           ) : filteredPrinters.length === 0 ? (
             <div style={styles.emptyStateContainer}>

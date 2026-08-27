@@ -9,6 +9,29 @@ import { CopierItem } from './CopierItem';
 import { LoadingSpinner } from '../../../components/ui/LoadingSpinner';
 import { fetchApi } from '../../../api/mockAgentApi';
 
+const defaultFormatJsonText = (val: any) => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    try {
+      return JSON.stringify(val, null, 2);
+    } catch {
+      return String(val);
+    }
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        return val;
+      }
+    }
+  }
+  return String(val);
+};
+
 export function AgentModals(props: any) {
   const {
     AgentPage,
@@ -44,7 +67,7 @@ export function AgentModals(props: any) {
     fetchRemotePage,
     fetchRemotePageOld,
     formatBytes,
-    formatJsonText,
+    formatJsonText: propFormatJsonText,
     ftpDetailData,
     getDestinationStatus = () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
     getDestinationStatusHtml = () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
@@ -218,6 +241,7 @@ export function AgentModals(props: any) {
   const [inputPublicIp, setInputPublicIp] = React.useState('');
   const [isConnectingIp, setIsConnectingIp] = React.useState(false);
   const [ipErrorMsg, setIpErrorMsg] = React.useState('');
+  const formatJsonText = typeof propFormatJsonText === 'function' ? propFormatJsonText : defaultFormatJsonText;
 
   React.useEffect(() => {
     if (accessDeniedState?.isOpen) {
