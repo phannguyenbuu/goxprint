@@ -168,9 +168,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        override_ip = _to_text(request.args.get("override_ip") or request.headers.get("X-Override-IP"))
+        client_ip = override_ip or request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
         is_whitelisted = False
-        if client_ip:
+        if override_ip:
+            is_whitelisted = True
+        elif client_ip:
             try:
                 from admin_public_ip_routes import is_public_ip_allowed
                 is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
@@ -180,7 +183,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         agents_by_lan = defaultdict(list)
         for a_uid, a_info in ACTIVE_AGENTS.items():
             if isinstance(a_info, dict):
-                if client_ip and not is_whitelisted:
+                if client_ip and not is_whitelisted and not override_ip:
                     a_pub_ip = a_info.get("public_ip", "") or a_info.get("wan_ip", "")
                     a_loc_ip = a_info.get("local_ip", "")
                     if a_pub_ip != client_ip and a_loc_ip != client_ip:
@@ -489,8 +492,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-            client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             override_ip = _to_text(request.args.get("override_ip") or request.headers.get("X-Override-IP"))
+            client_ip = override_ip or request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             is_whitelisted = False
             if override_ip:
                 is_whitelisted = True

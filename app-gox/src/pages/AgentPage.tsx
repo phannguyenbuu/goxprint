@@ -212,7 +212,7 @@ function safePathToken(value: string): string {
                 placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
                 style={{
                   width: '100%',
-                  padding: '8px 42px 8px 12px',
+                  padding: (selectedPublicIp || inputIpDraft) ? '8px 74px 8px 12px' : '8px 42px 8px 12px',
                   fontSize: '0.88rem',
                   borderRadius: '8px',
                   border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -220,8 +220,39 @@ function safePathToken(value: string): string {
                   color: '#fff',
                   outline: 'none',
                   boxSizing: 'border-box',
+                  transition: 'padding 0.2s',
                 }}
               />
+              {(selectedPublicIp || inputIpDraft) && (
+                <button
+                  onClick={() => {
+                    setInputIpDraft('');
+                    handleApplyPublicIp('');
+                  }}
+                  title="Xóa IP Public"
+                  style={{
+                    position: 'absolute',
+                    right: '40px',
+                    background: 'rgba(239, 68, 68, 0.25)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    borderRadius: '50%',
+                    width: '24px',
+                    height: '24px',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                    lineHeight: 1,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
               <button
                 onClick={() => handleApplyPublicIp(inputIpDraft)}
                 title="Gửi & Kết nối IP Public (Enter)"
@@ -247,28 +278,6 @@ function safePathToken(value: string): string {
                 </svg>
               </button>
             </div>
-
-            {(selectedPublicIp || inputIpDraft) && (
-              <button
-                onClick={() => {
-                  setInputIpDraft('');
-                  handleApplyPublicIp('');
-                }}
-                title="Xóa IP Public"
-                style={{
-                  padding: '6px 10px',
-                  fontSize: '0.8rem',
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  color: '#ef4444',
-                  border: '1px solid rgba(239, 68, 68, 0.4)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                ✕ Clear
-              </button>
-            )}
           </div>
         </div>
 

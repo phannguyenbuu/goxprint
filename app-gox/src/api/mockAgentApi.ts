@@ -142,7 +142,9 @@ export interface LanSiteInfo {
 
 export async function getLanSites(): Promise<any> {
   try {
-    const res = await fetchApi('/api/new-lan-sites?lead=default');
+    const savedIp = (localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    const query = savedIp ? `&override_ip=${encodeURIComponent(savedIp)}` : '';
+    const res = await fetchApi(`/api/new-lan-sites?lead=default${query}`);
     return res || { rows: [] };
   } catch (err) {
     console.error('Failed to fetch LAN sites:', err);
@@ -152,7 +154,9 @@ export async function getLanSites(): Promise<any> {
 
 export async function mockGetCopiers(lanUid?: string): Promise<Copier[]> {
   try {
-    const res = await fetchApi('/api/new-lan-sites?lead=default');
+    const savedIp = (localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    const query = savedIp ? `&override_ip=${encodeURIComponent(savedIp)}` : '';
+    const res = await fetchApi(`/api/new-lan-sites?lead=default${query}`);
     const rows = res.rows || [];
     const uniqueCopiers = new Map<string, Copier>();
 
