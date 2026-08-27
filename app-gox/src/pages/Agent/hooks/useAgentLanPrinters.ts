@@ -181,6 +181,10 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         const targetAgent = activeAgentsList[0];
         if (targetAgent && pollCommandStatus) {
           showToast(`⏳ Agent (${targetAgent.agent_uid}) đang thực hiện quét ngầm mạng LAN...`, 'info', 6000);
+          deps.setCommandStatus?.((prev: any) => ({
+            ...prev,
+            [`scan_lan_${currentLanUid}`]: { message: '⏳ Agent đang quét ngầm mạng LAN...', isPending: true }
+          }));
           const a = targetAgent;
 
           const cmdObj = (utilityCommands || []).find((c: any) => c.command === 'force_subnet_scan');
