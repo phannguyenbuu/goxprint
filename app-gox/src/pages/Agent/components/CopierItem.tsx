@@ -587,27 +587,24 @@ export function CopierItem({
                               <button
                                 style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#60a5fa', color: '#60a5fa' }}
                                 onClick={() => {
-                                  const printerKey = p.id || p.ip;
+                                  const pId = p.id;
                                   if (setExpandedDrivers) {
-                                    setExpandedDrivers((prev: any) => ({ ...prev, [printerKey]: !prev[printerKey] }));
+                                    setExpandedDrivers((prev: any) => ({
+                                      ...prev,
+                                      [pId]: !prev[pId]
+                                    }));
                                   }
-                                  const firstBrand = (p.suggested_drivers?.[0]?.brand) || detectBrand(p.name || p.printer_name || p.ip) || 'Ricoh';
-                                  const firstModel = (p.suggested_drivers?.[0]?.model) || p.name || p.printer_name || 'Photocopy';
-                                  const firstDrv = p.suggested_drivers?.[0]?.drivers?.[0];
-                                  const drvName = firstDrv?.name || `${firstBrand} ${firstModel} Driver`;
-                                  const drvUrl = firstDrv?.url || '';
-                                  if (handleRemoteInstallDriver) {
-                                    handleRemoteInstallDriver(
-                                      p.mac_id || p.mac_address || p.ip || p.id,
-                                      firstBrand,
-                                      firstModel,
-                                      drvName,
-                                      drvUrl
-                                    );
+                                  if (p.suggested_drivers && p.suggested_drivers.length > 0 && setExpandedDriverMenus) {
+                                    setExpandedDriverMenus((prev: any) => {
+                                      const nextState = { ...prev };
+                                      p.suggested_drivers.forEach((_: any, idx: number) => {
+                                        nextState[`${pId}-${idx}`] = true;
+                                      });
+                                      return nextState;
+                                    });
                                   }
                                 }}
-                                disabled={onlineAgents.length === 0}
-                                title="Cài đặt Driver máy in tự động cho các máy tính trong mạng LAN"
+                                title="Xem và cài đặt Driver máy in tự động cho các máy tính trong mạng LAN"
                               >
                                 💻 Cài driver
                               </button>
