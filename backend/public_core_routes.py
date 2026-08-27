@@ -416,6 +416,8 @@ context["result_payload"] = payload
                 "status_data": res_dict.get("status"),
                 "updated_at": datetime.now(timezone.utc).isoformat()
             })
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Failed parsing payload: {e}. Raw: {result_payload_str}"}), 500
         finally:
             if command_id:
                 try:
@@ -424,8 +426,6 @@ context["result_payload"] = payload
                         session.commit()
                 except Exception as del_err:
                     LOGGER.warning("Could not delete transient query_device_now command %s: %s", command_id, del_err)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Failed parsing payload: {e}. Raw: {result_payload_str}"}), 500
 
     @app.get("/api/public/device/online-status")
     def public_device_online_status() -> Any:
