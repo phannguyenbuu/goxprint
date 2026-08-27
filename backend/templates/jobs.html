@@ -359,6 +359,52 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
+        // Copy Button Handler
+        body.querySelectorAll('.copy-code-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const targetId = btn.getAttribute('data-target');
+                const textarea = body.querySelector('#' + targetId);
+                if (!textarea) return;
+                
+                const textToCopy = textarea.value;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        showCopySuccess(btn);
+                    }).catch(() => {
+                        fallbackCopyText(textarea, btn);
+                    });
+                } else {
+                    fallbackCopyText(textarea, btn);
+                }
+            });
+        });
+
+        function showCopySuccess(btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '✓ Copied!';
+            btn.style.background = '#059669';
+            btn.style.color = '#ffffff';
+            btn.style.borderColor = '#059669';
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.style.background = '#ffffff';
+                btn.style.color = '';
+                btn.style.borderColor = '';
+            }, 2000);
+        }
+
+        function fallbackCopyText(textarea, btn) {
+            textarea.select();
+            textarea.setSelectionRange(0, 99999);
+            try {
+                document.execCommand('copy');
+                showCopySuccess(btn);
+            } catch (err) {
+                alert('Không thể copy tự động!');
+            }
+        }
+
         const closeModal = () => { modal.hidden = true; };
         const closeX = document.getElementById('job-modal-close-btn');
         const closeOk = document.getElementById('job-modal-ok-btn');
