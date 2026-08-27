@@ -119,6 +119,11 @@ _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent
 print("Migration STDOUT:", out.read().decode('utf-8'))
 print("Migration STDERR:", err.read().decode('utf-8'))
 
+print("Updating UtiCommand force_subnet_scan in Database...")
+_, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/update_force_scan_cmd.py')
+print("Update force_scan STDOUT:", out.read().decode('utf-8'))
+print("Update force_scan STDERR:", err.read().decode('utf-8'))
+
 print("Restarting printagent service on remote VPS...")
 _, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
 print("Restart STDOUT:", out.read().decode('utf-8'))
