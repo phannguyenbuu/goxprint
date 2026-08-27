@@ -47,6 +47,27 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
 
   const [selectedUtilityAgent, setSelectedUtilityAgent] = useState<any>(null);
 
+  useEffect(() => {
+    let isMounted = true;
+    const targetUid = selectedUtilityAgent?.agent_uid || 'default';
+    setUtilityCommandsLoading(true);
+    getAgentUtilityCommands(targetUid)
+      .then((res: any) => {
+        if (!isMounted) return;
+        const cmds = Array.isArray(res) ? res : (res?.commands || res?.rows || []);
+        setUtilityCommands(cmds);
+      })
+      .catch((err: any) => {
+        console.error('Failed to load utility commands:', err);
+      })
+      .finally(() => {
+        if (isMounted) setUtilityCommandsLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedUtilityAgent]);
+
   const [editableSettingsText, setEditableSettingsText] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState('');
