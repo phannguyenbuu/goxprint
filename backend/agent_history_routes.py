@@ -337,17 +337,21 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
     def clear_pending_jobs() -> Any:
         try:
             with session_factory() as session:
-                from sqlalchemy import update
+                from sqlalchemy import delete, or_
                 stmt = (
-                    update(PrinterControlCommand)
-                    .where(PrinterControlCommand.status.in_(["pending", "processing", "received"]))
-                    .values(status="failed", error_message="Đã hủy bởi Admin (Clear Pending Jobs)")
+                    delete(PrinterControlCommand)
+                    .where(
+                        or_(
+                            PrinterControlCommand.status.in_(["pending", "processing", "received"]),
+                            PrinterControlCommand.error_message.ilike("%Đã hủy bởi Admin%")
+                        )
+                    )
                 )
                 res = session.execute(stmt)
                 session.commit()
                 count = res.rowcount
-                LOGGER.info("[JOB CLEAR PENDING] Cleared %s unfinished jobs", count)
-                return jsonify({"ok": True, "message": f"Đã xóa/hủy {count} lệnh chưa hoàn thành", "cleared_count": count})
+                LOGGER.info("[JOB CLEAR PENDING] Permanently deleted %s unfinished/cancelled jobs", count)
+                return jsonify({"ok": True, "message": f"Đã xóa hoàn toàn {count} lệnh khỏi hệ thống", "cleared_count": count})
         except Exception as exc:
             LOGGER.error("[JOB CLEAR PENDING FAIL] Error: %s", exc)
             return jsonify({"ok": False, "error": str(exc)}), 500

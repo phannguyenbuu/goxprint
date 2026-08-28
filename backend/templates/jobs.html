@@ -38,10 +38,11 @@
           <th style="padding: 12px 16px; text-align: left; color: #475569; font-weight: 600; width: 160px;">Requested At</th>
           <th style="padding: 12px 16px; text-align: left; color: #475569; font-weight: 600; width: 160px;">Responded At</th>
           <th style="padding: 12px 16px; text-align: left; color: #475569; font-weight: 600;">Error / Details</th>
+          <th style="padding: 12px 16px; text-align: center; color: #475569; font-weight: 600; width: 60px;">Xóa</th>
         </tr>
       </thead>
       <tbody id="jobs-tbody">
-        <tr><td colspan="8" class="loading" style="padding: 20px; text-align: center; color: #64748b;">Loading Jobs...</td></tr>
+        <tr><td colspan="9" class="loading" style="padding: 20px; text-align: center; color: #64748b;">Loading Jobs...</td></tr>
       </tbody>
     </table>
   </div>
@@ -148,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = '';
 
         if (!jobsData || jobsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center; color: #64748b;">No matching jobs found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="padding: 20px; text-align: center; color: #64748b;">No matching jobs found.</td></tr>';
             return;
         }
 
@@ -179,6 +180,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="padding: 12px 16px;"><div style="font-size: 12px; color: #64748b;">${escapeHtml(row.responded_at || '')}</div></td>
                 <td style="padding: 12px 16px;">
                     <div style="font-size: 12px; color: #dc2626; max-height: 50px; overflow-y: auto; white-space: pre-wrap; font-family: monospace;">${escapeHtml((row.error_message || '').replace(/\\n/g, '\n'))}</div>
+                </td>
+                <td style="padding: 12px 16px; text-align: center;">
+                    <button class="delete-job-btn" data-id="${row.id}" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: #dc2626; padding: 4px 8px; transition: all 0.2s;" title="Xóa vĩnh viễn Job #${row.id}">🗑️</button>
                 </td>
             `;
 
@@ -514,6 +518,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') {
             currentPage = 1;
             loadJobs();
+        }
+    });
+
+    document.getElementById('jobs-tbody').addEventListener('click', async (e) => {
+        const btn = e.target.closest('.delete-job-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        const jobId = btn.dataset.id;
+        if (!confirm(`Bạn có chắc chắn muốn XÓA HOÀN TOÀN lệnh #${jobId} ra khỏi hệ thống không?`)) {
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = '⌛';
+        try {
+            const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.ok) {
+                loadJobs(false);
+            } else {
+                alert(`❌ Lỗi xóa lệnh #${jobId}: ${data.error}`);
+            }
+        } catch (err) {
+            alert(`❌ Lỗi kết nối: ${err.message || err}`);
         }
     });
 
