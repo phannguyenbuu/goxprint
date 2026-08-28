@@ -123,6 +123,8 @@ function safePathToken(value: string): string {
   const handleApplyPublicIp = async (ipVal: string) => {
     const cleanIp = (ipVal || '').trim();
     setSelectedPublicIp(cleanIp);
+    localStorage.removeItem('goxprint_selected_lan_uid');
+    if (setSelectedLanUid) setSelectedLanUid('');
     if (cleanIp) {
       localStorage.setItem('goxprint_selected_public_ip', cleanIp);
       localStorage.setItem('gox_connect_public_ip', cleanIp);

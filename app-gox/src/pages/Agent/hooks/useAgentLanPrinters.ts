@@ -133,6 +133,18 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
       if (rows.length > 0) {
         setSelectedLanUid((prev) => {
+          const activeIp = (localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+          if (activeIp) {
+            const matchedSite = rows.find((s: any) => {
+              const pubIp = (s.public_ip || s.wan_ip || '').trim();
+              if (pubIp === activeIp) return true;
+              return (s.agents || []).some((ag: any) => (ag.public_ip || ag.wan_ip || ag.ip || '').trim() === activeIp);
+            });
+            if (matchedSite) {
+              localStorage.setItem('goxprint_selected_lan_uid', matchedSite.lan_uid);
+              return matchedSite.lan_uid;
+            }
+          }
           if (prev && rows.some((s: any) => s.lan_uid === prev)) return prev;
           const firstUid = rows[0].lan_uid;
           localStorage.setItem('goxprint_selected_lan_uid', firstUid);
@@ -159,8 +171,24 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const selectedLan = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return null;
-    return lanSites.find((site) => site.lan_uid === selectedLanUid) || lanSites[0];
-  }, [lanSites, selectedLanUid]);
+    const activePublicIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    if (activePublicIp) {
+      const siteByPubIp = lanSites.find((site) => {
+        const sitePub = (site.public_ip || site.wan_ip || '').trim();
+        if (sitePub === activePublicIp) return true;
+        return (site.agents || []).some((ag: any) => {
+          const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
+          return agPub === activePublicIp;
+        });
+      });
+      if (siteByPubIp) return siteByPubIp;
+    }
+    if (selectedLanUid) {
+      const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
+      if (siteByUid) return siteByUid;
+    }
+    return lanSites[0];
+  }, [lanSites, selectedLanUid, selectedPublicIp]);
 
   const triggerLanScan = useCallback((lanData: any) => {
     if (!lanData) return;
