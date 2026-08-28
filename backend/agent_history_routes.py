@@ -431,7 +431,48 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                 )
                 
                 from sqlalchemy import func
-                total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+                count_stmt = select(func.count(PrinterControlCommand.id))
+                if lead:
+                    count_stmt = count_stmt.where(PrinterControlCommand.lead == lead)
+                if lan_uid:
+                    count_stmt = count_stmt.where(PrinterControlCommand.lan_uid == lan_uid)
+                if agent_uid:
+                    count_stmt = count_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+                if status_filter and status_filter != 'all':
+                    if status_filter == 'failed':
+                        count_stmt = count_stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
+                    else:
+                        count_stmt = count_stmt.where(PrinterControlCommand.status == status_filter)
+                if search_q:
+                    if search_q.isdigit():
+                        count_stmt = count_stmt.where(
+                            (PrinterControlCommand.id == int(search_q)) |
+                            (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
+                        )
+                    else:
+                        count_stmt = count_stmt.where(
+                            (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
+                        )
+                count_stmt = count_stmt.where(
+                    (PrinterControlCommand.command_type != "trigger_utility") |
+                    (PrinterControlCommand.command_params == None) |
+                    (
+                        (
+                            (~PrinterControlCommand.command_params.like("%check_scan_ip_match%")) &
+                            (~PrinterControlCommand.command_params.like("%query_device_now%")) &
+                            (~PrinterControlCommand.command_params.like('%"is_auto": true%'))
+                        ) |
+                        (PrinterControlCommand.command_params.like('%child_command_ids%'))
+                    )
+                )
+
+                total = session.execute(count_stmt).scalar() or 0
                 rows = session.execute(stmt.offset(offset).limit(limit)).scalars().all()
                 
                 jobs = []
