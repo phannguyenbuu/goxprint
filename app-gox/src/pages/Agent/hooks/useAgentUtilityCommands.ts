@@ -486,6 +486,10 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
             });
             setUtilityStatusMsg(null);
             setUtilityActionPending(null);
+          } else if (errMsg.includes('502') || errMsg.includes('404') || errMsg.includes('xóa') || elapsed > 15000) {
+            clearInterval(timer);
+            setUtilityActionPending(null);
+            setUtilityStatusMsg({ text: '❌ Lệnh đã dừng hoặc bị xóa', isError: true });
           } else {
             console.error('Poll error:', pollErr);
           }

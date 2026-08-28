@@ -1216,20 +1216,26 @@ verify_auth()
 
     @app.get("/api/commands/<int:command_id>/status")
     def get_command_status(command_id: int) -> Any:
-        with session_factory() as session:
-            cmd = session.get(PrinterControlCommand, command_id)
-            if cmd is None:
-                return jsonify({"ok": False, "error": "Command not found"}), 404
-            
-            now = datetime.now(timezone.utc)
-            created_at = cmd.created_at
-            if created_at and created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
+        try:
+            with session_factory() as session:
+                cmd = session.get(PrinterControlCommand, command_id)
+                if cmd is None:
+                    return jsonify({
+                        "ok": False,
+                        "status": "failed",
+                        "error": "Lệnh không tồn tại hoặc đã bị xóa khỏi hệ thống",
+                        "error_message": "Lệnh không tồn tại hoặc đã bị xóa khỏi hệ thống"
+                    }), 200
                 
-            if cmd.status == "pending" and created_at and (now - created_at).total_seconds() > 180:
-                cmd.status = "failed"
-                cmd.error_message = "Timeout: Agent did not respond in 180 seconds"
-                session.commit()
+                now = datetime.now(timezone.utc)
+                created_at = cmd.created_at
+                if created_at and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                    
+                if cmd.status == "pending" and created_at and (now - created_at).total_seconds() > 180:
+                    cmd.status = "failed"
+                    cmd.error_message = "Timeout: Agent did not respond in 180 seconds"
+                    session.commit()
 
             if cmd.status == "success":
                 address_book_sync = None
@@ -1303,3 +1309,11 @@ verify_auth()
                     "progress_text": cmd.error_message or "",
                 }
             )
+        except Exception as exc:
+            LOGGER.error("[GET /api/commands/%s/status ERROR] %s", command_id, exc, exc_info=True)
+            return jsonify({
+                "ok": False,
+                "status": "failed",
+                "error": str(exc),
+                "error_message": str(exc)
+            }), 200
