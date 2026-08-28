@@ -166,8 +166,19 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const filteredLanSites = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return [];
+    const activePublicIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    if (activePublicIp) {
+      return lanSites.filter((site) => {
+        const sitePub = (site.public_ip || site.wan_ip || '').trim();
+        if (sitePub === activePublicIp) return true;
+        return (site.agents || []).some((ag: any) => {
+          const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
+          return agPub === activePublicIp;
+        });
+      });
+    }
     return lanSites;
-  }, [lanSites]);
+  }, [lanSites, selectedPublicIp]);
 
   const selectedLan = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return null;
@@ -181,7 +192,8 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           return agPub === activePublicIp;
         });
       });
-      if (siteByPubIp) return siteByPubIp;
+      // DO NOT FALL BACK to lanSites[0] if user entered a specific Public IP! Return exact match or null!
+      return siteByPubIp || null;
     }
     if (selectedLanUid) {
       const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);

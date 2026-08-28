@@ -216,10 +216,10 @@ export function AgentsTab(props: any) {
                 style={styles.tabContent}
               >
                 <AnimatedList>
-                  {selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0 ? (
-                    <div style={styles.emptyText}>Không có Agent nào đang online trong mạng LAN này.</div>
+                  {!selectedLan || (selectedLan.agents || []).filter((a: any) => a.is_agent_active).length === 0 ? (
+                    <div style={styles.emptyText}>⚠️ Không tìm thấy Agent (máy tính) nào đang kết nối khớp với IP Public này.</div>
                   ) : (
-                    selectedLan.agents.filter((a: any) => a.is_agent_active).map((agent) => {
+                    (selectedLan.agents || []).filter((a: any) => a.is_agent_active).map((agent: any) => {
                       const isOnline = agent.is_agent_active;
                       return (
                         <GlowCard key={agent.agent_uid}>
