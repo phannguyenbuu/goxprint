@@ -3,7 +3,8 @@
 <section class="panel" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
   <div class="panel-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <h3 style="margin: 0; color: #0f172a; font-size: 1.25rem; font-weight: 700;">Job Manager</h3>
-    <div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button id="clear-pending-btn" class="filter-btn" style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="Xóa tất cả các lệnh in / utility đang treo ở trạng thái Pending hoặc Processing">🗑️ Xóa các lệnh chưa hoàn thành</button>
       <button id="refresh-btn" class="filter-btn" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">Refresh</button>
     </div>
   </div>
@@ -478,6 +479,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('refresh-btn').addEventListener('click', () => loadJobs(false));
+    document.getElementById('clear-pending-btn').addEventListener('click', async () => {
+        if (!confirm('Bạn có chắc chắn muốn HỦY / XÓA tất cả các lệnh chưa hoàn thành (Pending / Processing) không?')) {
+            return;
+        }
+        const btn = document.getElementById('clear-pending-btn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Đang xóa...';
+        try {
+            const res = await fetch('/api/jobs/clear-pending', { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                alert(`✔ ${data.message || 'Đã xóa các lệnh chưa hoàn thành!'}`);
+                loadJobs(false);
+            } else {
+                alert(`❌ Lỗi: ${data.error || 'Không thể xóa lệnh'}`);
+            }
+        } catch (err) {
+            alert(`❌ Lỗi kết nối: ${err.message || err}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🗑️ Xóa các lệnh chưa hoàn thành';
+        }
+    });
     document.getElementById('apply-filters').addEventListener('click', () => {
         currentPage = 1;
         loadJobs();

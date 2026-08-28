@@ -333,6 +333,38 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     event, agent_uid, old_ip, new_ip, log_text)
         return jsonify({"ok": True})
 
+    @app.post("/api/jobs/clear-pending")
+    def clear_pending_jobs() -> Any:
+        try:
+            with session_factory() as session:
+                from sqlalchemy import update
+                stmt = (
+                    update(PrinterControlCommand)
+                    .where(PrinterControlCommand.status.in_(["pending", "processing", "received"]))
+                    .values(status="failed", error_message="Đã hủy bởi Admin (Clear Pending Jobs)")
+                )
+                res = session.execute(stmt)
+                session.commit()
+                count = res.rowcount
+                LOGGER.info("[JOB CLEAR PENDING] Cleared %s unfinished jobs", count)
+                return jsonify({"ok": True, "message": f"Đã xóa/hủy {count} lệnh chưa hoàn thành", "cleared_count": count})
+        except Exception as exc:
+            LOGGER.error("[JOB CLEAR PENDING FAIL] Error: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.delete("/api/jobs/<int:job_id>")
+    def delete_single_job(job_id: int) -> Any:
+        try:
+            with session_factory() as session:
+                cmd = session.query(PrinterControlCommand).get(job_id)
+                if not cmd:
+                    return jsonify({"ok": False, "error": "Lệnh không tồn tại"}), 404
+                session.delete(cmd)
+                session.commit()
+                return jsonify({"ok": True, "message": f"Đã xóa lệnh #{job_id}"})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.get("/api/jobs")
     def list_jobs() -> Any:
         lead = _to_text(request.args.get("lead"))
