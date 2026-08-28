@@ -371,141 +371,151 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
 
     @app.get("/api/jobs")
     def list_jobs() -> Any:
-        lead = _to_text(request.args.get("lead"))
-        lan_uid = _to_text(request.args.get("lan_uid"))
-        agent_uid = _to_text(request.args.get("agent_uid"))
-        limit = _to_int(request.args.get("limit")) or 50
-        limit = max(1, min(limit, 1000))
-        page = _to_int(request.args.get("page")) or 1
-        page = max(1, page)
-        offset = (page - 1) * limit
-        
-        status_filter = _to_text(request.args.get("status")).lower()
-        search_q = _to_text(request.args.get("q"))
-        
-        with session_factory() as session:
-            stmt = select(PrinterControlCommand).order_by(PrinterControlCommand.id.desc())
-            if lead:
-                stmt = stmt.where(PrinterControlCommand.lead == lead)
-            if lan_uid:
-                stmt = stmt.where(PrinterControlCommand.lan_uid == lan_uid)
-            if agent_uid:
-                stmt = stmt.where(PrinterControlCommand.agent_uid == agent_uid)
-                
-            if status_filter and status_filter != 'all':
-                if status_filter == 'failed':
-                    stmt = stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
-                else:
-                    stmt = stmt.where(PrinterControlCommand.status == status_filter)
+        try:
+            lead = _to_text(request.args.get("lead"))
+            lan_uid = _to_text(request.args.get("lan_uid"))
+            agent_uid = _to_text(request.args.get("agent_uid"))
+            limit = _to_int(request.args.get("limit")) or 50
+            limit = max(1, min(limit, 1000))
+            page = _to_int(request.args.get("page")) or 1
+            page = max(1, page)
+            offset = (page - 1) * limit
+            
+            status_filter = _to_text(request.args.get("status")).lower()
+            search_q = _to_text(request.args.get("q"))
+            
+            with session_factory() as session:
+                stmt = select(PrinterControlCommand).order_by(PrinterControlCommand.id.desc())
+                if lead:
+                    stmt = stmt.where(PrinterControlCommand.lead == lead)
+                if lan_uid:
+                    stmt = stmt.where(PrinterControlCommand.lan_uid == lan_uid)
+                if agent_uid:
+                    stmt = stmt.where(PrinterControlCommand.agent_uid == agent_uid)
                     
-            if search_q:
-                # Cố gắng parse ID nếu user nhập số
-                if search_q.isdigit():
-                    stmt = stmt.where(
-                        (PrinterControlCommand.id == int(search_q)) |
-                        (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
-                    )
-                else:
-                    stmt = stmt.where(
-                        (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
-                        (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
-                    )
-                
-            stmt = stmt.where(
-                (PrinterControlCommand.command_type != "trigger_utility") |
-                (PrinterControlCommand.command_params == None) |
-                (
+                if status_filter and status_filter != 'all':
+                    if status_filter == 'failed':
+                        stmt = stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
+                    else:
+                        stmt = stmt.where(PrinterControlCommand.status == status_filter)
+                        
+                if search_q:
+                    # Cố gắng parse ID nếu user nhập số
+                    if search_q.isdigit():
+                        stmt = stmt.where(
+                            (PrinterControlCommand.id == int(search_q)) |
+                            (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
+                        )
+                    else:
+                        stmt = stmt.where(
+                            (PrinterControlCommand.command_type.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.agent_uid.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.printer_name.ilike(f"%{search_q}%")) |
+                            (PrinterControlCommand.ip.ilike(f"%{search_q}%"))
+                        )
+                    
+                stmt = stmt.where(
+                    (PrinterControlCommand.command_type != "trigger_utility") |
+                    (PrinterControlCommand.command_params == None) |
                     (
-                        (~PrinterControlCommand.command_params.like("%check_scan_ip_match%")) &
-                        (~PrinterControlCommand.command_params.like("%query_device_now%")) &
-                        (~PrinterControlCommand.command_params.like('%"is_auto": true%'))
-                    ) |
-                    (PrinterControlCommand.command_params.like('%child_command_ids%'))
+                        (
+                            (~PrinterControlCommand.command_params.like("%check_scan_ip_match%")) &
+                            (~PrinterControlCommand.command_params.like("%query_device_now%")) &
+                            (~PrinterControlCommand.command_params.like('%"is_auto": true%'))
+                        ) |
+                        (PrinterControlCommand.command_params.like('%child_command_ids%'))
+                    )
                 )
-            )
-            
-            from sqlalchemy import func
-            total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
-            rows = session.execute(stmt.offset(offset).limit(limit)).scalars().all()
-            
-            jobs = []
-            for row in rows:
-                status = row.status
-                error_message = row.error_message or ""
                 
-                # Check parent-child command status resolution
-                if row.command_params and "child_command_ids" in row.command_params and status == "pending":
-                    try:
-                        import json
-                        params = json.loads(row.command_params)
-                        child_ids = params.get("child_command_ids")
-                        if child_ids and isinstance(child_ids, list):
-                            child_cmds = session.execute(
-                                select(PrinterControlCommand).where(PrinterControlCommand.id.in_(child_ids))
-                            ).scalars().all()
-                            
-                            total = len(child_ids)
-                            done = sum(1 for c in child_cmds if c.status not in ("pending", "processing", "received"))
-                            
-                            if done < total:
-                                error_message = (row.error_message or "") + f"\n\n⌛ Đang xử lý ({done}/{total}) lệnh..."
-                            else:
-                                details = []
-                                success_count = 0
-                                failed_count = 0
+                from sqlalchemy import func
+                total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+                rows = session.execute(stmt.offset(offset).limit(limit)).scalars().all()
+                
+                jobs = []
+                need_commit = False
+                for row in rows:
+                    status = row.status
+                    error_message = row.error_message or ""
+                    
+                    # Check parent-child command status resolution
+                    if row.command_params and "child_command_ids" in row.command_params and status == "pending":
+                        try:
+                            import json
+                            params = json.loads(row.command_params)
+                            child_ids = params.get("child_command_ids")
+                            if child_ids and isinstance(child_ids, list):
+                                child_cmds = session.execute(
+                                    select(PrinterControlCommand).where(PrinterControlCommand.id.in_(child_ids))
+                                ).scalars().all()
                                 
-                                for c in child_cmds:
-                                    if c.status == "success":
-                                        status_label = "Thành công"
-                                        success_count += 1
-                                    else:
-                                        status_label = f"Thất bại ({c.error_message or 'Lỗi'})"
-                                        failed_count += 1
-                                    details.append(f"- {c.printer_name or c.ip} ({c.ip}): {status_label}")
+                                total_child = len(child_ids)
+                                done = sum(1 for c in child_cmds if c.status not in ("pending", "processing", "received"))
                                 
-                                if failed_count == 0:
-                                    status = "success"
-                                    msg_prefix = "✅ Đã hoàn tất tất cả các lệnh! Chi tiết:"
-                                elif success_count == 0:
-                                    status = "failed"
-                                    msg_prefix = "❌ Thất bại tất cả các lệnh! Chi tiết:"
+                                if done < total_child:
+                                    error_message = (row.error_message or "") + f"\n\n⌛ Đang xử lý ({done}/{total_child}) lệnh..."
                                 else:
-                                    status = "partial_success"
-                                    msg_prefix = "⚠️ Hoàn thành một phần! Chi tiết:"
-                                
-                                error_message = (row.error_message or "") + f"\n\n{msg_prefix}\n" + "\n".join(details)
-                                
-                                # Write resolution back to database
-                                row.status = status
-                                row.error_message = error_message
-                                from datetime import datetime, timezone
-                                row.responded_at = datetime.now(timezone.utc)
-                                session.add(row)
-                                session.commit()
-                    except Exception as res_err:
-                        LOGGER.warning("Failed to resolve parent status for job %s: %s", row.id, res_err)
+                                    details = []
+                                    success_count = 0
+                                    failed_count = 0
+                                    
+                                    for c in child_cmds:
+                                        if c.status == "success":
+                                            status_label = "Thành công"
+                                            success_count += 1
+                                        else:
+                                            status_label = f"Thất bại ({c.error_message or 'Lỗi'})"
+                                            failed_count += 1
+                                        details.append(f"- {c.printer_name or c.ip} ({c.ip}): {status_label}")
+                                    
+                                    if failed_count == 0:
+                                        status = "success"
+                                        msg_prefix = "✅ Đã hoàn tất tất cả các lệnh! Chi tiết:"
+                                    elif success_count == 0:
+                                        status = "failed"
+                                        msg_prefix = "❌ Thất bại tất cả các lệnh! Chi tiết:"
+                                    else:
+                                        status = "partial_success"
+                                        msg_prefix = "⚠️ Hoàn thành một phần! Chi tiết:"
+                                    
+                                    error_message = (row.error_message or "") + f"\n\n{msg_prefix}\n" + "\n".join(details)
+                                    
+                                    # Write resolution back to database
+                                    row.status = status
+                                    row.error_message = error_message
+                                    from datetime import datetime, timezone
+                                    row.responded_at = datetime.now(timezone.utc)
+                                    session.add(row)
+                                    need_commit = True
+                        except Exception as res_err:
+                            LOGGER.warning("Failed to resolve parent status for job %s: %s", row.id, res_err)
 
-                jobs.append({
-                    "id": int(row.id),
-                    "lead": row.lead,
-                    "lan_uid": row.lan_uid,
-                    "agent_uid": row.agent_uid,
-                    "printer_id": int(row.printer_id or 0),
-                    "printer_name": row.printer_name,
-                    "ip": row.ip,
-                    "command_type": row.command_type,
-                    "command_params": row.command_params,
-                    "status": status,
-                    "error_message": error_message,
-                    "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
-                    "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",
-                })
-        return jsonify({"ok": True, "jobs": jobs, "total": total, "page": page, "limit": limit})
+                    jobs.append({
+                        "id": int(row.id),
+                        "lead": row.lead,
+                        "lan_uid": row.lan_uid,
+                        "agent_uid": row.agent_uid,
+                        "printer_id": int(row.printer_id or 0),
+                        "printer_name": row.printer_name,
+                        "ip": row.ip,
+                        "command_type": row.command_type,
+                        "command_params": row.command_params,
+                        "status": status,
+                        "error_message": error_message,
+                        "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
+                        "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",
+                    })
+                if need_commit:
+                    try:
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+            return jsonify({"ok": True, "jobs": jobs, "total": total, "page": page, "limit": limit})
+        except Exception as exc:
+            LOGGER.error("[GET /api/jobs ERROR] %s", exc, exc_info=True)
+            return jsonify({"ok": False, "error": str(exc), "jobs": [], "total": 0, "page": 1, "limit": 50}), 500
 
     @app.get("/api/agents/history/export")
     def export_agent_history() -> Any:
