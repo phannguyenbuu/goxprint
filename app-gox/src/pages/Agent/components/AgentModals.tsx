@@ -2124,7 +2124,9 @@ export function AgentModals(props: any) {
                         activeModel,
                         activeDrvName,
                         activeDrvUrl,
-                        agentUid
+                        agentUid,
+                        currentModal.printerIp,
+                        currentModal.macId
                       );
                     });
                   }}

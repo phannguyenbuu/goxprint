@@ -21,11 +21,13 @@ export function useAgentDriverInstall({ showToast, replaceToast }: any = {}) {
     model: string,
     drName: string,
     drUrl: string,
-    agentUid: string
+    agentUid: string,
+    printerIp?: string,
+    macId?: string
   ) => {
     notifyToast(`⏳ [${agentUid}] Đang gửi lệnh cài đặt driver (${drName || model})...`, 'info');
     try {
-      const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl, agentUid);
+      const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl, agentUid, printerIp, macId);
       if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
 
       const commandId = res.command_id;

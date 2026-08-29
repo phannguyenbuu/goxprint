@@ -470,7 +470,9 @@ export function CopierItem({
                                       effectiveDrivers[0]?.model || p.name || p.printer_name || 'Photocopy',
                                       firstDrv?.name || '',
                                       firstDrv?.url || '',
-                                      effectiveDrivers || []
+                                      effectiveDrivers || [],
+                                      p.ip || '',
+                                      p.mac_id || p.mac_address || ''
                                     );
                                   }
                                 }}

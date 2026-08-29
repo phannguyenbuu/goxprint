@@ -577,7 +577,16 @@ export const useAgentScanActions = (deps: any = {}) => {
   };
 
   // ── INSTALL DRIVER ON CLIENT PC ──
-  const handleRemoteInstallDriver = (printerId: string, brand: string, model: string, drName: string, drUrl: string, suggestedDrivers?: any[]) => {
+  const handleRemoteInstallDriver = (
+    printerId: string,
+    brand: string,
+    model: string,
+    drName: string,
+    drUrl: string,
+    suggestedDrivers?: any[],
+    printerIp?: string,
+    macId?: string
+  ) => {
     let firstDrvName = drName;
     let firstDrvUrl = drUrl;
     let firstBrand = brand;
@@ -606,6 +615,8 @@ export const useAgentScanActions = (deps: any = {}) => {
     setInstallDriverModal({
       isOpen: true,
       printerId,
+      printerIp: printerIp || (printerId.includes('.') ? printerId : ''),
+      macId: macId || (printerId.includes(':') ? printerId : ''),
       brand: firstBrand,
       model: firstModel,
       driverName: firstDrvName,
