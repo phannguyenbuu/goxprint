@@ -115,6 +115,10 @@ print(f"Local IP: {ip}")
     "open_web_setting": """import webbrowser
 webbrowser.open("http://__TARGET_IP__")
 """,
+    "open_printagentx_wim": """import webbrowser
+webbrowser.open("https://printagentx.com")
+print("Opened https://printagentx.com in default browser.")
+""",
     "emergency_restart": """import os, sys
 print("Triggering emergency exit/restart...")
 os._exit(0)

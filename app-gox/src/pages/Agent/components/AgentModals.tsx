@@ -777,6 +777,42 @@ export function AgentModals(props: any) {
                                 🔗 Tạo Shortcut Desktop
                               </button>
                             </div>
+                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
+
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>🌐 Mở WIM printagentx.com</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở giao diện WIM printagentx.com bằng Agent này để điều khiển máy in trong LAN</div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("https://printagentx.com")`);
+                                  if (selectedUtilityAgent?.agent_uid) {
+                                    window.open(`https://printagentx.com?agent_uid=${encodeURIComponent(selectedUtilityAgent.agent_uid)}`, '_blank');
+                                  } else {
+                                    window.open('https://printagentx.com', '_blank');
+                                  }
+                                }}
+                                disabled={utilityActionPending !== null}
+                                style={{
+                                  padding: '6px 14px',
+                                  fontSize: '0.75rem',
+                                  borderRadius: '8px',
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  border: 'none',
+                                  color: '#fff',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)'
+                                }}
+                              >
+                                🌐 Mở WIM printagentx.com ↗
+                              </button>
+                            </div>
                           </>
                         )}
                       </div>
