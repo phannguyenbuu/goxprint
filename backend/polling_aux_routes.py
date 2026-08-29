@@ -952,44 +952,20 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
 
                         norm_mac = _normalize_mac(target_mac) if target_mac else ""
 
-                        # Update Printer table if found
-                        if printer is None:
-                            if norm_mac:
-                                printer = session.execute(select(Printer).where(Printer.mac_address == norm_mac)).scalars().first()
-                            if not printer and target_ip:
-                                printer = session.execute(select(Printer).where(Printer.ip == target_ip)).scalars().first()
-
-                        if printer is not None:
-                            printer.address_book_sync = abd
-                            if not norm_mac and printer.mac_address:
-                                norm_mac = _normalize_mac(printer.mac_address)
-                            if not target_ip and printer.ip:
-                                target_ip = printer.ip
-                            LOGGER.info("[polling_control_result] Updated Printer.address_book_sync for printer_id=%d from trigger_utility in PostgreSQL", printer.id)
-
-                        # Update DeviceInfor table in PostgreSQL DB
                         from models import DeviceInfor, ScanPoint
-                        if norm_mac:
-                            dev_info = session.execute(select(DeviceInfor).where(DeviceInfor.mac_id == norm_mac)).scalars().first()
-                            if dev_info:
-                                dev_info.address_book_sync = abd
-                                LOGGER.info("[polling_control_result] Updated DeviceInfor.address_book_sync for mac_id=%s in PostgreSQL", norm_mac)
-                        elif target_ip:
+                        if not norm_mac and target_ip:
                             dev_info = session.execute(select(DeviceInfor).where(DeviceInfor.ip == target_ip)).scalars().first()
-                            if dev_info:
-                                dev_info.address_book_sync = abd
-                                if dev_info.mac_id:
-                                    norm_mac = dev_info.mac_id
-                                LOGGER.info("[polling_control_result] Updated DeviceInfor.address_book_sync for ip=%s in PostgreSQL", target_ip)
+                            if dev_info and dev_info.mac_id:
+                                norm_mac = _normalize_mac(dev_info.mac_id)
 
-                        # Update ScanPoint table in PostgreSQL DB
+                        # Update ONLY ScanPoint table in PostgreSQL DB
                         if norm_mac:
                             try:
                                 sp_rec = session.get(ScanPoint, norm_mac)
                                 if sp_rec is None:
                                     sp_rec = ScanPoint(
                                         mac_id=norm_mac,
-                                        printer_name=printer.printer_name if printer else "Photocopy",
+                                        printer_name="Photocopy",
                                         ip=target_ip or "",
                                         agent_uid=command.agent_uid or "",
                                         address_book_data=abd,
