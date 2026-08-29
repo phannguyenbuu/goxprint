@@ -88,11 +88,10 @@ export function CopierItem({
   const hasValidList = (obj: any) => obj && (Array.isArray(obj.address_list) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list)));
 
   const activeSyncObj = 
-    (hasValidList(localSync) ? localSync : null) ||
     (hasValidList(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
     (hasValidList(cmdStatusObj) ? cmdStatusObj : null) ||
     (hasValidList(sync) ? sync : null) ||
-    localSync || cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
+    cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
   const detectedBrand = detectBrand(p.name || p.printer_name || p.ip || 'generic');
   const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
   const modelName = p.name || p.printer_name || 'Photocopy';
