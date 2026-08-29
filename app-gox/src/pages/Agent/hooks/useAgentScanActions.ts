@@ -764,7 +764,7 @@ export const useAgentScanActions = (deps: any = {}) => {
               }
               const pMac = (printerObj?.mac_address || printerObj?.mac_id || (typeof pId === 'string' && pId.includes(':') ? pId : '')).toUpperCase().replace(/-/g, ':');
               if (pMac) {
-                fetchApi('/api/scan-points', {
+                fetchApi('/api/scan-points/save', {
                   method: 'POST',
                   body: JSON.stringify({
                     mac_id: pMac,

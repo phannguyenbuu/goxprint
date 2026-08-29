@@ -1056,6 +1056,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
             return jsonify({"ok": True, "lan_uid": lan_uid, "queued_commands": queued_ids, "message": "Purged DB & queued subnet scan"})
 
+    @app.post("/api/scan-points")
     @app.post("/api/scan-points/save")
     def save_scan_points() -> Any:
         from models import ScanPoint
