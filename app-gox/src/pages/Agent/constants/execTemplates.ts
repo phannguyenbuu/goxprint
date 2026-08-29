@@ -619,6 +619,11 @@ def logout(session: requests.Session):
 def login() -> requests.Session:
     global BASE_URL
     session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
     session.verify = False
     try:
         import urllib3
@@ -806,13 +811,13 @@ def fetch_list():
 
     finally:
         logout(sess)
-        print("  [✓] Đã hoàn tất và đăng xuất.")
 
 try:
     fetch_list()
+    print("  [✓] Đã hoàn tất thành công.")
 except Exception as err:
-    print("")
-    print(f"[-] LỖI THỰC THI QUÉT DANH BẠ: {err}")
+    print(f"\n[-] LỖI THỰC THI QUÉT DANH BẠ: {err}")
+    raise err
 print("==================================================")
 `,
 

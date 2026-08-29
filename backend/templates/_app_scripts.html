@@ -1,4 +1,41 @@
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+  const toggleBtn = document.getElementById('mobile-menu-toggle');
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('mobile-backdrop');
+
+  if (toggleBtn && sidebar && backdrop) {
+    function openMobileMenu() {
+      sidebar.classList.add('mobile-open');
+      toggleBtn.classList.add('open');
+      backdrop.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeMobileMenu() {
+      sidebar.classList.remove('mobile-open');
+      toggleBtn.classList.remove('open');
+      backdrop.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    toggleBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (sidebar.classList.contains('mobile-open')) {
+        closeMobileMenu();
+      } else {
+        openMobileMenu();
+      }
+    });
+
+    backdrop.addEventListener('click', closeMobileMenu);
+
+    sidebar.querySelectorAll('a.link').forEach(function(l) {
+      l.addEventListener('click', closeMobileMenu);
+    });
+  }
+});
+
 async function jget(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

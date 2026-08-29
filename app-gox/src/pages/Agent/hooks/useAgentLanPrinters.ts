@@ -192,8 +192,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           return agPub === activePublicIp;
         });
       });
-      // DO NOT FALL BACK to lanSites[0] if user entered a specific Public IP! Return exact match or null!
-      return siteByPubIp || null;
+      if (siteByPubIp) return siteByPubIp;
     }
     if (selectedLanUid) {
       const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
@@ -202,12 +201,12 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     return lanSites[0];
   }, [lanSites, selectedLanUid, selectedPublicIp]);
 
-  const triggerLanScan = useCallback((lanData: any) => {
+  const triggerLanScan = useCallback((lanData: any, isManual = true) => {
     if (!lanData) return;
     const currentLanUid = lanData.lan_uid;
     const now = Date.now();
 
-    if (!autoScanTriggers.current[currentLanUid] || now - autoScanTriggers.current[currentLanUid] > 3 * 60 * 1000) {
+    if (isManual || !autoScanTriggers.current[currentLanUid] || now - autoScanTriggers.current[currentLanUid] > 30 * 1000) {
       autoScanTriggers.current[currentLanUid] = now;
       
       const activeAgentsList = (lanData.agents || []).filter((a: any) => a.is_agent_active);
@@ -227,12 +226,8 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           }));
           const a = targetAgent;
 
-          const cmdObj = (utilityCommands || []).find((c: any) => c.command === 'force_subnet_scan');
-          const scriptContent = cmdObj?.command_content || '';
-
           const payload = {
             command: 'force_subnet_scan',
-            command_content: scriptContent,
             lead: lanData.lead
           };
           fetchApi(`/api/agents/${a.agent_uid}/utility/exec?lead=default`, {

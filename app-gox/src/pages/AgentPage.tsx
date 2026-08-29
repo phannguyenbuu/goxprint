@@ -191,7 +191,12 @@ function safePathToken(value: string): string {
           <h1 style={styles.title}>🛠️ Quản lý Mạng LAN</h1>
           <button
             style={{ ...styles.smallBtn, borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
-            onClick={() => fetchLanSitesData(true)}
+            onClick={async () => {
+              if (fetchLanSitesData) await fetchLanSitesData(true);
+              if (selectedLan) {
+                triggerLanScan(selectedLan, true);
+              }
+            }}
           >
             🔄 Làm mới
           </button>
@@ -235,9 +240,10 @@ function safePathToken(value: string): string {
                   style={{
                     position: 'absolute',
                     right: '40px',
-                    background: 'rgba(239, 68, 68, 0.25)',
-                    color: '#f87171',
-                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    background: 'rgba(239, 68, 68, 0.2)',
+                    color: '#ef4444',
+                    border: '1.5px solid #ef4444',
+                    boxShadow: '0 0 6px rgba(239, 68, 68, 0.25)',
                     borderRadius: '50%',
                     width: '24px',
                     height: '24px',
@@ -256,7 +262,16 @@ function safePathToken(value: string): string {
                 </button>
               )}
               <button
-                onClick={() => handleApplyPublicIp(inputIpDraft)}
+                onClick={async () => {
+                  if (inputIpDraft) {
+                    await handleApplyPublicIp(inputIpDraft);
+                  }
+                  if (selectedLan) {
+                    triggerLanScan(selectedLan, true);
+                  } else if (fetchLanSitesData) {
+                    fetchLanSitesData(true);
+                  }
+                }}
                 title="Gửi & Kết nối IP Public (Enter)"
                 style={{
                   position: 'absolute',
@@ -303,7 +318,6 @@ function safePathToken(value: string): string {
             }}
             onClick={() => {
               setActiveTab('copiers');
-              triggerLanScan(selectedLan);
             }}
           >
             🖨️ Photocopy ({filteredPrinters.length})

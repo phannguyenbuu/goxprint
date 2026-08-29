@@ -105,6 +105,40 @@
     border-bottom: 3px solid #0284c7;
     font-weight: 700;
 }
+
+@media (max-width: 768px) {
+  .panel { padding: 12px !important; }
+  .panel-header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .panel-header-row > div {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .filter-board {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+  .filter-group {
+    width: 100% !important;
+  }
+  .filter-group select, .filter-group input, #apply-filters {
+    width: 100% !important;
+  }
+  .table-wrap {
+    margin-bottom: 12px;
+  }
+  .generic-table {
+    min-width: 650px !important;
+  }
+  .pagination-container {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+  }
+}
 </style>
 
 <script>

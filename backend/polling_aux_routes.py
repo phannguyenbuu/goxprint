@@ -143,6 +143,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 devices_payload = list(devices_payload.values())
 
             from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
+            client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             update_agent_in_memory(
                 lead=lead_valid,
                 lan_uid=lan_uid,
@@ -154,6 +155,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 run_mode=agent.run_mode if agent else "web",
                 web_port=int(agent.web_port or 9173) if agent else 9173,
                 devices_list=devices_payload if isinstance(devices_payload, list) else None,
+                public_ip=client_pub_ip,
             )
 
             agent_ram = ACTIVE_AGENTS.get(agent_uid)
@@ -677,11 +679,11 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 LOGGER.warning("Error attaching ScanPoint in force_subnet_scan: %s", sp_merge_err)
 
                             from active_agents_registry import update_new_lan_site_devices, update_agent_in_memory
-                            update_new_lan_site_devices(command.lan_uid or "default", scanned_printers)
-                            update_new_lan_site_devices("default", scanned_printers)
+                            target_lan = command.lan_uid or "default"
+                            update_new_lan_site_devices(target_lan, scanned_printers, agent_uid=command.agent_uid)
                             update_agent_in_memory(
                                 lead=command.lead or "default",
-                                lan_uid=command.lan_uid or "default",
+                                lan_uid=target_lan,
                                 agent_uid=command.agent_uid or "kythuat02",
                                 devices_list=scanned_printers
                             )

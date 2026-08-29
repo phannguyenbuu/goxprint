@@ -136,11 +136,11 @@ export function CopiersTab(props: any) {
         </div>
 
         <AnimatedList className="copiers-grid" style={styles.gridContainer}>
-          {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && (k.startsWith('scan_lan_') || c?.message?.includes('quét') || c?.message?.includes('scan') || c?.message?.includes('Agent') || c?.message?.includes('thực thi'))) ? (
+          {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && k.startsWith('scan_lan_')) ? (
             <div style={styles.loadingContainer}>
               <LoadingSpinner />
               <div style={styles.loadingText}>
-                {utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && (k.startsWith('scan_lan_') || c?.message?.includes('quét') || c?.message?.includes('scan') || c?.message?.includes('Agent') || c?.message?.includes('thực thi')))
+                {utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && k.startsWith('scan_lan_'))
                   ? '⏳ Đang dò quét mạng LAN tìm máy in & photocopy...'
                   : 'Đang tải dữ liệu thiết bị...'}
               </div>

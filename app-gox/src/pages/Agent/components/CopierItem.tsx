@@ -9,10 +9,10 @@ import { fetchApi, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 export interface CopierItemProps {
   handleRefetchAddressBook: (pTarget: any) => void;
   expandedDrivers: Record<string, boolean>;
-  setExpandedDrivers: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setExpandedDrivers?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   expandedDriverMenus: Record<string, boolean>;
-  setExpandedDriverMenus: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  handleRemoteInstallDriver: (printerId: string, brand: string, model: string, drName: string, drUrl: string) => void;
+  setExpandedDriverMenus?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  handleRemoteInstallDriver?: (printerId: string, brand: string, model: string, drName: string, drUrl: string, suggestedDrivers?: any[]) => void;
   setPublicFtpData: React.Dispatch<React.SetStateAction<any>>;
 
   p: any;
@@ -134,24 +134,7 @@ export function CopierItem({
   const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
   const modelName = p.name || p.printer_name || 'Photocopy';
 
-  const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers) && p.suggested_drivers.length > 0)
-    ? p.suggested_drivers
-    : [
-        {
-          brand: detectedBrand,
-          model: modelName,
-          drivers: [
-            {
-              name: `${brandName} ${modelName} PCL6 Universal Driver (x64)`,
-              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_pcl6.exe`
-            },
-            {
-              name: `${brandName} ${modelName} PostScript3 Driver (x64)`,
-              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_ps.exe`
-            }
-          ]
-        }
-      ];
+  const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers)) ? p.suggested_drivers : [];
 
   const pKey = String(p.id !== undefined && p.id !== null ? p.id : (p.mac_id || p.mac_address || p.ip || 'copier'));
   const hasDrivers = true;
@@ -469,121 +452,10 @@ export function CopierItem({
                                     handleEditIP={handleEditIP}
                                     handleDeleteDest={handleDeleteDest}
                                     handleChangeFtp={handleChangeFtp}
-                                  />
-                                </div>
-                              )}
-                            </div>
-  
-                            {/* Suggested Drivers Block */}
-                            {hasDrivers && (
-                              <div style={{ marginTop: '8px' }}>
-                                <button
-                                  style={styles.expandSubBtn}
-                                  onClick={() =>
-                                    setExpandedDrivers((prev) => ({
-                                      ...prev,
-                                      [pKey]: !driversExpanded,
-                                      [p.id]: !driversExpanded,
-                                      [p.ip]: !driversExpanded
-                                    }))
-                                  }
-                                >
-                                  {driversExpanded ? '▲ Ẩn driver đề xuất' : '▼ Xem driver đề xuất từ catalog'}
-                                </button>
-  
-                                <AnimatePresence>
-                                  {driversExpanded && (
-                                    <motion.div
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: 'auto' }}
-                                      exit={{ opacity: 0, height: 0 }}
-                                      style={{ overflow: 'hidden', marginTop: '6px' }}
-                                    >
-                                      <div style={styles.suggestedDriverBlock}>
-                                        {effectiveDrivers.map((sd: any, idx: number) => {
-                                          const brandColor =
-                                            sd.brand === 'ricoh'
-                                              ? 'var(--color-primary)'
-                                              : sd.brand === 'toshiba'
-                                              ? 'var(--color-error)'
-                                              : 'var(--color-success)';
-                                          const sdMenuKey = `${pKey}-${idx}`;
-                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] !== undefined ? expandedDriverMenus[sdMenuKey] : (expandedDriverMenus[`${p.id}-${idx}`] !== undefined ? expandedDriverMenus[`${p.id}-${idx}`] : true);
-                                          return (
-                                            <div key={idx} style={styles.driverSuggestionItem}>
-                                              <div
-                                                style={styles.driverModelHeader}
-                                                onClick={() =>
-                                                  setExpandedDriverMenus((prev) => ({
-                                                    ...prev,
-                                                    [sdMenuKey]: !isMenuOpen,
-                                                    [`${p.id}-${idx}`]: !isMenuOpen,
-                                                  }))
-                                                }
-                                              >
-                                                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                                                  <span
-                                                    style={{
-                                                      display: 'inline-block',
-                                                      width: '6px',
-                                                      height: '6px',
-                                                      borderRadius: '50%',
-                                                      backgroundColor: brandColor,
-                                                      marginRight: '6px',
-                                                    }}
-                                                  />
-                                                  {String(sd.brand || '').toUpperCase()} - {sd.model}
-                                                </span>
-                                                <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>
-                                                  {isMenuOpen ? '▲' : '▼'}
-                                                </span>
-                                              </div>
-  
-                                              {isMenuOpen && (
-                                                <div style={styles.driverOptionsList}>
-                                                  {sd.drivers && sd.drivers.length > 0 ? (
-                                                    sd.drivers.map((drv: any, dIdx: number) => (
-                                                      <div key={dIdx} style={styles.driverFileRow}>
-                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                          <div style={styles.driverFileName}>{drv.name}</div>
-                                                          <div style={styles.driverFileUrl} title={drv.url}>
-                                                            {drv.url.split('/').pop()}
-                                                          </div>
-                                                        </div>
-                                                        <div style={{ display: 'flex', gap: '4px' }}>
-  
-                                                          <button
-                                                            style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
-                                                            onClick={() =>
-                                                              handleRemoteInstallDriver(
-                                                                p.mac_id || p.mac_address || p.ip || p.id,
-                                                                sd.brand,
-                                                                sd.model,
-                                                                drv.name,
-                                                                drv.url
-                                                              )
-                                                            }
-                                                            disabled={onlineAgents.length === 0}
-                                                          >
-                                                            Cài đặt
-                                                          </button>
-                                                        </div>
-                                                      </div>
-                                                    ))
-                                                  ) : (
-                                                    <div style={styles.emptySubText}>Không tìm thấy driver nào.</div>
-                                                  )}
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            )}
+                                   />
+                                 </div>
+                               )}
+                             </div>
   
                             {/* Top Action buttons */}
                             <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -635,14 +507,15 @@ export function CopierItem({
                                       return nextState;
                                     });
                                   }
-                                  if (handleRemoteInstallDriver && effectiveDrivers[0]?.drivers?.[0]) {
-                                    const firstDrv = effectiveDrivers[0].drivers[0];
+                                  if (handleRemoteInstallDriver) {
+                                    const firstDrv = effectiveDrivers[0]?.drivers?.[0];
                                     handleRemoteInstallDriver(
                                       p.mac_id || p.mac_address || p.ip || p.id,
-                                      effectiveDrivers[0].brand || 'Ricoh',
-                                      effectiveDrivers[0].model || 'Photocopy',
-                                      firstDrv.name,
-                                      firstDrv.url
+                                      effectiveDrivers[0]?.brand || p.printer_type || 'Ricoh',
+                                      effectiveDrivers[0]?.model || p.name || p.printer_name || 'Photocopy',
+                                      firstDrv?.name || '',
+                                      firstDrv?.url || '',
+                                      effectiveDrivers || []
                                     );
                                   }
                                 }}

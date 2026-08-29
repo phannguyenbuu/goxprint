@@ -244,6 +244,33 @@ export function AgentModals(props: any) {
   const formatJsonText = typeof propFormatJsonText === 'function' ? propFormatJsonText : defaultFormatJsonText;
 
   React.useEffect(() => {
+    if (installDriverModal?.isOpen) {
+      const isSuggestedEmpty = !installDriverModal.suggestedDrivers || installDriverModal.suggestedDrivers.length === 0;
+      if (isSuggestedEmpty && typeof setInstallDriverModal === 'function') {
+        const query = installDriverModal.model || installDriverModal.brand || installDriverModal.printerId || '';
+        if (query) {
+          fetchApi(`/api/v1/match-drivers?name=${encodeURIComponent(query)}`)
+            .then((res: any) => {
+              if (res && res.matches && Array.isArray(res.matches) && res.matches.length > 0) {
+                const firstCat = res.matches[0];
+                const firstDrv = firstCat?.drivers?.[0];
+                setInstallDriverModal((prev: any) => ({
+                  ...prev,
+                  suggestedDrivers: res.matches,
+                  brand: prev.brand || firstCat?.brand || 'ricoh',
+                  model: prev.model || firstCat?.model || 'Photocopy',
+                  driverName: prev.driverName || firstDrv?.name || '',
+                  driverUrl: prev.driverUrl || firstDrv?.url || '',
+                }));
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+  }, [installDriverModal?.isOpen, installDriverModal?.printerId, installDriverModal?.model, installDriverModal?.brand]);
+
+  React.useEffect(() => {
     if (accessDeniedState?.isOpen) {
       const savedIp = localStorage.getItem('gox_connect_public_ip') || '';
       setInputPublicIp(savedIp || accessDeniedState.ip || '');
@@ -1864,13 +1891,85 @@ export function AgentModals(props: any) {
               </div>
 
               <div style={styles.modalBody}>
-                <p style={{ fontSize: '0.82rem', color: 'var(--color-text)', lineHeight: 1.4, margin: '0 0 12px 0' }}>
-                  Bạn chuẩn bị cài đặt driver <strong>"{installDriverModal.driverName}"</strong> từ xa.
-                </p>
-                
+                {/* Driver Catalog Dropdown Selection */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                    📂 Chọn phiên bản Driver cần cài đặt từ Catalog:
+                  </label>
+                  {(() => {
+                    const catalogDrivers: { name: string; url: string; label: string; brand: string; model: string }[] = [];
+                    if (installDriverModal.suggestedDrivers && Array.isArray(installDriverModal.suggestedDrivers) && installDriverModal.suggestedDrivers.length > 0) {
+                      installDriverModal.suggestedDrivers.forEach((catItem: any) => {
+                        if (catItem.drivers && Array.isArray(catItem.drivers)) {
+                          catItem.drivers.forEach((drv: any) => {
+                            catalogDrivers.push({
+                              name: drv.name,
+                              url: drv.url,
+                              brand: catItem.brand,
+                              model: catItem.model,
+                              label: `[${String(catItem.brand || '').toUpperCase()} ${catItem.model}] ${drv.name}`
+                            });
+                          });
+                        }
+                      });
+                    }
+                    if (catalogDrivers.length === 0 && installDriverModal.driverName && installDriverModal.driverUrl) {
+                      catalogDrivers.push({
+                        name: installDriverModal.driverName,
+                        url: installDriverModal.driverUrl,
+                        brand: installDriverModal.brand || 'Ricoh',
+                        model: installDriverModal.model || 'Photocopy',
+                        label: installDriverModal.driverName
+                      });
+                    }
+
+                    if (catalogDrivers.length === 0) {
+                      return (
+                        <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-error)', fontStyle: 'italic', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px' }}>
+                          ⚠️ Không tìm thấy driver phù hợp nào cho thiết bị này trong Catalog.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <select
+                        value={installDriverModal.driverUrl || catalogDrivers[0]?.url || ''}
+                        onChange={(e) => {
+                          const selected = catalogDrivers.find(d => d.url === e.target.value);
+                          if (selected) {
+                            setInstallDriverModal((prev: any) => ({
+                              ...prev,
+                              driverName: selected.name,
+                              driverUrl: selected.url,
+                              brand: selected.brand || prev.brand,
+                              model: selected.model || prev.model
+                            }));
+                          }
+                        }}
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '8px 10px',
+                          background: 'var(--color-bg)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-surface-light)',
+                          borderRadius: '6px',
+                          width: '100%',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {catalogDrivers.map((drv, i) => (
+                          <option key={i} value={drv.url}>
+                            {drv.label}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                </div>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
-                    Chọn Máy đại diện (Agent) để thực hiện cài đặt:
+                    💻 Chọn Máy đại diện (Agent) để thực hiện cài đặt:
                   </label>
                   {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0) ? (
                     <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
@@ -1920,14 +2019,37 @@ export function AgentModals(props: any) {
                   }}
                   disabled={installDriverModal.selectedAgentUids.length === 0}
                   onClick={() => {
+                    const currentModal = installDriverModal;
                     setInstallDriverModal((prev) => ({ ...prev, isOpen: false }));
-                    installDriverModal.selectedAgentUids.forEach((agentUid: string) => {
+
+                    const catalogDrivers: { name: string; url: string; brand: string; model: string }[] = [];
+                    if (currentModal.suggestedDrivers && Array.isArray(currentModal.suggestedDrivers)) {
+                      currentModal.suggestedDrivers.forEach((catItem: any) => {
+                        if (catItem && catItem.drivers && Array.isArray(catItem.drivers)) {
+                          catItem.drivers.forEach((drv: any) => {
+                            catalogDrivers.push({
+                              name: drv.name,
+                              url: drv.url,
+                              brand: catItem.brand || currentModal.brand,
+                              model: catItem.model || currentModal.model
+                            });
+                          });
+                        }
+                      });
+                    }
+
+                    const activeDrvUrl = currentModal.driverUrl || catalogDrivers[0]?.url || '';
+                    const activeDrvName = currentModal.driverName || catalogDrivers[0]?.name || currentModal.model || 'Driver';
+                    const activeBrand = currentModal.brand || catalogDrivers[0]?.brand || 'Ricoh';
+                    const activeModel = currentModal.model || catalogDrivers[0]?.model || 'Photocopy';
+
+                    currentModal.selectedAgentUids.forEach((agentUid: string) => {
                       executeRemoteInstallDriver(
-                        installDriverModal.printerId,
-                        installDriverModal.brand,
-                        installDriverModal.model,
-                        installDriverModal.driverName,
-                        installDriverModal.driverUrl,
+                        currentModal.printerId,
+                        activeBrand,
+                        activeModel,
+                        activeDrvName,
+                        activeDrvUrl,
                         agentUid
                       );
                     });

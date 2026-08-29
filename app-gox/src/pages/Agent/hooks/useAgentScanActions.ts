@@ -552,29 +552,62 @@ export const useAgentScanActions = (deps: any = {}) => {
   };
 
   // ── INSTALL DRIVER ON CLIENT PC ──
-  const handleRemoteInstallDriver = (printerId: string, brand: string, model: string, drName: string, drUrl: string) => {
-    const defaultAgent = getTargetAgentUid(printerId) || (selectedLan?.agents?.find((a: any) => a.is_agent_active)?.agent_uid || '');
+  const handleRemoteInstallDriver = (printerId: string, brand: string, model: string, drName: string, drUrl: string, suggestedDrivers?: any[]) => {
+    let firstDrvName = drName;
+    let firstDrvUrl = drUrl;
+    let firstBrand = brand;
+    let firstModel = model;
+
+    const list = suggestedDrivers && Array.isArray(suggestedDrivers) ? suggestedDrivers : [];
+    if ((!firstDrvUrl || !firstDrvName) && list.length > 0) {
+      const firstCat = list[0];
+      if (firstCat && firstCat.drivers && firstCat.drivers.length > 0) {
+        firstDrvName = firstCat.drivers[0].name;
+        firstDrvUrl = firstCat.drivers[0].url;
+        firstBrand = firstCat.brand || brand;
+        firstModel = firstCat.model || model;
+      }
+    }
+
+    const activeAgents = (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
+    const targetUid = getTargetAgentUid(printerId);
+    let selectedUids: string[] = [];
+    if (targetUid && activeAgents.some((a: any) => a.agent_uid === targetUid)) {
+      selectedUids = [targetUid];
+    } else if (activeAgents.length > 0) {
+      selectedUids = activeAgents.map((a: any) => a.agent_uid);
+    }
+
     setInstallDriverModal({
       isOpen: true,
       printerId,
-      brand,
-      model,
-      driverName: drName,
-      driverUrl: drUrl,
-      selectedAgentUids: defaultAgent ? [defaultAgent] : [],
+      brand: firstBrand,
+      model: firstModel,
+      driverName: firstDrvName,
+      driverUrl: firstDrvUrl,
+      suggestedDrivers: list,
+      selectedAgentUids: selectedUids,
     });
   };
 
+  const notifyToast = (msg: string, type: 'info' | 'success' | 'error' = 'info') => {
+    if (typeof replaceToast === 'function') {
+      try { replaceToast('driver-install-progress', msg, type); return; } catch (e) {}
+    }
+    if (typeof showToast === 'function') {
+      showToast(msg, type, 5000);
+    }
+  };
+
   const executeRemoteInstallDriver = async (printerId: string, brand: string, model: string, drName: string, drUrl: string, agentUid: string) => {
-    const TOAST_ID = `driver-install-progress-${agentUid}`;
-    replaceToast(TOAST_ID, `⏳ [${agentUid}] Đang gửi lệnh cài đặt driver...`, 'info');
+    notifyToast(`⏳ [${agentUid}] Đang gửi lệnh cài đặt driver (${drName || model})...`, 'info');
     try {
       const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl, agentUid);
       if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
 
       const commandId = res.command_id;
       if (!commandId) {
-        replaceToast(TOAST_ID, `✅ [${agentUid}] Đã gửi lệnh cài đặt driver.`, 'success');
+        notifyToast(`✅ [${agentUid}] Đã gửi lệnh cài đặt driver thành công.`, 'success');
         return;
       }
 
@@ -589,29 +622,25 @@ export const useAgentScanActions = (deps: any = {}) => {
           const elapsed = Date.now() - startTime;
           if (elapsed > maxPollMs) {
             clearInterval(timer);
-            replaceToast(TOAST_ID, `⏰ [${agentUid}] Quá thời gian chờ (5 phút).`, 'info');
+            notifyToast(`⏰ [${agentUid}] Quá thời gian chờ (5 phút).`, 'info');
             return;
           }
 
           const statusRes = await getCommandStatus(commandId);
           if (statusRes.status === 'success') {
             clearInterval(timer);
-            replaceToast(TOAST_ID, `✅ [${agentUid}] Cài đặt driver thành công!`, 'success');
+            notifyToast(`✅ [${agentUid}] Cài đặt driver thành công!`, 'success');
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
-            replaceToast(TOAST_ID, `❌ [${agentUid}] Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
+            notifyToast(`❌ [${agentUid}] Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
           } else {
             const progressText = statusRes.progress_text || '';
             if (progressText && progressText !== lastProgressText) {
               lastProgressText = progressText;
-              replaceToast(TOAST_ID, `⏳ [${agentUid}] ${progressText}`, 'info');
+              notifyToast(`⏳ [${agentUid}] ${progressText}`, 'info');
             } else if (!progressText) {
               const elapsedSec = Math.round(elapsed / 1000);
-              if (statusRes.received_at) {
-                replaceToast(TOAST_ID, `⚡ [${agentUid}] Đã nhận lệnh - đang cài đặt... (${elapsedSec}s)`, 'info');
-              } else {
-                replaceToast(TOAST_ID, `⌛ [${agentUid}] Đang chuyển lệnh tới Agent... (${elapsedSec}s)`, 'info');
-              }
+              notifyToast(`⚡ [${agentUid}] Đang tiến hành cài đặt... (${elapsedSec}s)`, 'info');
             }
           }
         } catch (pollErr) {
@@ -619,7 +648,7 @@ export const useAgentScanActions = (deps: any = {}) => {
         }
       }, pollInterval);
     } catch (err: any) {
-      replaceToast(TOAST_ID, `❌ Không thể cài driver: ${err.message}`, 'error');
+      notifyToast(`❌ Lỗi cài đặt driver: ${err.message || err}`, 'error');
     }
   };
 

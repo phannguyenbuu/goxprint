@@ -44,10 +44,17 @@ class PollingIpChangeMixin:
             except Exception as report_exc:
                 LOGGER.warning("[polling_when_ip_change] Report IP change to VPS failed: %s", report_exc)
 
-            # Retrieve copiers
-            printers = self._load_printers()
+            # Retrieve copiers from VPS API (scan_points table on VPS), NOT local printers.json
+            printers = []
+            try:
+                if hasattr(self, "_api_client") and self._api_client:
+                    printers = self._api_client.get_printers()
+                    LOGGER.info("[polling_when_ip_change] Loaded %d copiers from VPS scan_points API.", len(printers))
+            except Exception as vps_err:
+                LOGGER.warning("[polling_when_ip_change] Failed to load copiers from VPS API: %s", vps_err)
+
             if not printers:
-                LOGGER.info("[polling_when_ip_change] No printers/copiers found.")
+                LOGGER.info("[polling_when_ip_change] No printers/copiers found from VPS scan_points.")
                 return
 
             ftp_user = self._config.get_string("ftp_user", "goxprint")

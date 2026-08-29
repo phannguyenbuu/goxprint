@@ -103,7 +103,74 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
     except Exception:
         pass
 
-    # 2. Fallback: Search in-memory ACTIVE_AGENTS RAM registry for RAM-only printers
+    # 1c. Try querying PostgreSQL DeviceInfor table (LAN Scanned Devices)
+    try:
+        from models import DeviceInfor
+        for ref in ref_list:
+            if not ref:
+                continue
+            normalized_mac = _normalize_mac(ref)
+            raw_ref = _to_text(ref).strip()
+            dev_row = None
+            if normalized_mac:
+                dev_row = session.execute(
+                    select(DeviceInfor)
+                    .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
+                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                    .limit(1)
+                ).scalars().first()
+            if not dev_row and raw_ref and re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_ref):
+                dev_row = session.execute(
+                    select(DeviceInfor)
+                    .where(DeviceInfor.ip == raw_ref)
+                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                    .limit(1)
+                ).scalars().first()
+            if dev_row:
+                return Printer(
+                    id=0,
+                    mac_address=dev_row.mac_id or normalized_mac or "",
+                    ip=dev_row.ip or "",
+                    printer_name=dev_row.printer_name or "Photocopy",
+                    agent_uid="",
+                    lead=dev_row.lead or "default",
+                    lan_uid=dev_row.lan_uid or "default",
+                    enabled=True,
+                    is_online=True,
+                )
+    except Exception as e:
+        LOGGER.warning("Error looking up DeviceInfor for printer target: %s", e)
+
+    # 2. Search in-memory NEW_LAN_SITES and ACTIVE_AGENTS RAM registries
+    try:
+        from active_agents_registry import NEW_LAN_SITES
+        if isinstance(NEW_LAN_SITES, dict):
+            for site in NEW_LAN_SITES.values():
+                printers = site.get("printers", []) if isinstance(site, dict) else []
+                for p_dict in printers:
+                    if not isinstance(p_dict, dict):
+                        continue
+                    p_mac = _normalize_mac(p_dict.get("mac_address") or p_dict.get("mac_id") or "")
+                    p_ip = str(p_dict.get("ip") or "").strip()
+                    for ref in ref_list:
+                        if not ref:
+                            continue
+                        n_ref = _normalize_mac(ref)
+                        if (n_ref and p_mac and n_ref == p_mac) or (_to_text(ref).strip() == p_ip):
+                            return Printer(
+                                id=0,
+                                mac_address=p_mac or n_ref or "",
+                                ip=p_ip,
+                                printer_name=p_dict.get("name") or p_dict.get("printer_name") or "Photocopy",
+                                agent_uid=p_dict.get("agent_uid") or "",
+                                lead=site.get("lead") or "default",
+                                lan_uid=site.get("lan_uid") or "default",
+                                enabled=True,
+                                is_online=True,
+                            )
+    except Exception as e:
+        LOGGER.warning("Error checking NEW_LAN_SITES for printer target: %s", e)
+
     try:
         from active_agents_registry import ACTIVE_AGENTS
         for a_uid, agent_info in ACTIVE_AGENTS.items():
@@ -150,6 +217,37 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
                     )
     except Exception as exc:
         LOGGER.warning("Error resolving printer control target from ACTIVE_AGENTS: %s", exc)
+
+    # 3. Dynamic Fallback: If device_ref or body contains a valid MAC or IP, construct virtual target!
+    for ref in ref_list:
+        if not ref:
+            continue
+        n_mac = _normalize_mac(ref)
+        if n_mac:
+            return Printer(
+                id=0,
+                mac_address=n_mac,
+                ip=_to_text(body.get("ip") or body.get("printer_ip") if body else ""),
+                printer_name=_to_text(body.get("model") or body.get("name") if body else "Photocopy"),
+                agent_uid=_to_text(body.get("agent_uid") if body else ""),
+                lead="default",
+                lan_uid="default",
+                enabled=True,
+                is_online=True,
+            )
+        raw_ref = _to_text(ref).strip()
+        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_ref):
+            return Printer(
+                id=0,
+                mac_address=_normalize_mac(body.get("mac_address") or body.get("mac_id") if body else "") or "",
+                ip=raw_ref,
+                printer_name=_to_text(body.get("model") or body.get("name") if body else "Photocopy"),
+                agent_uid=_to_text(body.get("agent_uid") if body else ""),
+                lead="default",
+                lan_uid="default",
+                enabled=True,
+                is_online=True,
+            )
 
     return None
 
