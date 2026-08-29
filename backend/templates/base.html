@@ -7,8 +7,16 @@
     {% include "_app_styles.html" %}
   </head>
   <body data-page="{{ active_tab }}">
+    <!-- Floating Round Sandwich Toggle Button (Hamburger FAB) for Mobile -->
+    <button id="mobile-menu-toggle" class="mobile-menu-fab" type="button" aria-label="Toggle Navigation Menu" title="Menu Navigation">
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+    </button>
+    <div id="mobile-backdrop" class="mobile-backdrop"></div>
+
     <div class="shell">
-      <aside class="sidebar">
+      <aside id="sidebar" class="sidebar">
         <h2>GoPrinx</h2>
         <a class="link {% if active_tab == 'lan_sites' %}active{% endif %}" href="{{ url_for('lan_sites_page') }}"><span class="link-ico">&bull;</span><span>Lan Network</span></a>
         <a class="link {% if active_tab == 'printers' %}active{% endif %}" href="{{ url_for('printers_page') }}"><span class="link-ico">&bull;</span><span>Printers</span></a>
