@@ -201,7 +201,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             p_obj.is_online = d_online
                             p_obj.last_scanned_at = utc_now
                             p_obj.updated_at = utc_now
-                        else:
+                        elif d_online:
                             p_obj = Printer(
                                 lead=lead,
                                 lan_uid=lan_uid,
@@ -246,7 +246,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         if is_collector_ok:
                             p_obj.is_online = True
                         p_obj.updated_at = utc_now
-                    else:
+                    elif is_collector_ok:
                         p_obj = Printer(
                             lead=lead,
                             lan_uid=lan_uid,

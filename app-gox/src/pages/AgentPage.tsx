@@ -189,17 +189,6 @@ function safePathToken(value: string): string {
       <div style={styles.fixedHeader}>
         <div style={styles.header}>
           <h1 style={styles.title}>🛠️ Quản lý Mạng LAN</h1>
-          <button
-            style={{ ...styles.smallBtn, borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
-            onClick={async () => {
-              if (fetchLanSitesData) await fetchLanSitesData(true);
-              if (selectedLan) {
-                triggerLanScan(selectedLan, true);
-              }
-            }}
-          >
-            🔄 Làm mới
-          </button>
         </div>
 
         {/* Public IP LAN Input filter with Enter & Plane button */}

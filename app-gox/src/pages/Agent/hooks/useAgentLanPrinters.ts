@@ -26,6 +26,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
   const [copierCredentials, setCopierCredentials] = useState<Record<string, { user: string; pass: string }>>({});
   const [saveAuthLoading, setSaveAuthLoading] = useState<Record<string, boolean>>({});
   const [selectedTargetAgents, setSelectedTargetAgents] = useState<Record<string, string>>({});
+  const [liveAddressBooks, setLiveAddressBooks] = useState<Record<string, any>>({});
 
   const [editIpModalData, setEditIpModalData] = useState<{
     isOpen: boolean;
@@ -308,7 +309,10 @@ export const useAgentLanPrinters = (deps: any = {}) => {
   const filteredPrinters = useMemo(() => {
     if (!selectedLan) return [];
     const filtered = (selectedLan.printers || []).filter((p: any) => {
-      const name = (p.printer_name || '').toLowerCase().trim();
+      const name = (p.printer_name || p.name || '').toLowerCase().trim();
+      const ip = (p.ip || '').trim();
+      const mac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
+      if (ip === '192.168.1.226' || mac === '58:38:79:79:A3:EB') return false;
       if (name.includes('unknown') || name === 'unknown printer') return false;
       if (
         name.includes('pdf') ||
@@ -337,16 +341,18 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const getTargetAgentUid = useCallback((printerId: string | number) => {
     const pId = Number(printerId);
-    const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId);
-    if (!printer || !selectedLan) return '';
+    const printer = selectedLan?.printers?.find((p: any) => Number(p.id) === pId || p.id === printerId || p.mac_id === printerId || p.ip === printerId);
+    if (!selectedLan) return '';
     const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_agent_active);
     const selected = selectedTargetAgents[pId];
     if (selected) {
       const isSelOnline = onlineAgents.some((a: any) => a.agent_uid === selected);
       if (isSelOnline) return selected;
     }
-    const matchedAgent = onlineAgents.find((a: any) => a.agent_uid === printer.agent_uid) || onlineAgents[0];
-    return matchedAgent ? matchedAgent.agent_uid : (printer.agent_uid || '');
+    const lanPublicIp = selectedLan.public_ip || selectedLan.wan_ip;
+    const sameIpAgent = onlineAgents.find((a: any) => (a.public_ip && a.public_ip === lanPublicIp) || (a.wan_ip && a.wan_ip === lanPublicIp));
+    const matchedAgent = (printer?.agent_uid ? onlineAgents.find((a: any) => a.agent_uid === printer.agent_uid) : null) || sameIpAgent;
+    return matchedAgent ? matchedAgent.agent_uid : (printer?.agent_uid || '');
   }, [selectedLan, selectedTargetAgents]);
 
   const handleCopierClick = (printerId: string) => {
@@ -359,7 +365,9 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
       selectedLan.printers.forEach((p: any) => {
         const onlineAgents = (selectedLan.agents || []).filter((a: any) => a.is_agent_active);
-        const matchedAgent = onlineAgents.find((a: any) => a.agent_uid === p.agent_uid) || onlineAgents[0];
+        const lanPublicIp = selectedLan.public_ip || selectedLan.wan_ip;
+        const sameIpAgent = onlineAgents.find((a: any) => (a.public_ip && a.public_ip === lanPublicIp) || (a.wan_ip && a.wan_ip === lanPublicIp));
+        const matchedAgent = (p.agent_uid ? onlineAgents.find((a: any) => a.agent_uid === p.agent_uid) : null) || sameIpAgent;
         defaultTargets[p.id] = matchedAgent ? matchedAgent.agent_uid : (p.agent_uid || '');
       });
 
@@ -551,6 +559,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     editIpModalData, setEditIpModalData, handleEditIP, handleSaveEditIP,
     expandedPrinters, setExpandedPrinters,
     selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick,
-    accessDeniedState, setAccessDeniedState
+    accessDeniedState, setAccessDeniedState,
+    liveAddressBooks, setLiveAddressBooks
   };
 };

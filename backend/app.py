@@ -673,17 +673,42 @@ def _resolve_scan_host_agent_for_printer(
             return epoch
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
-    same_lan_agents.sort(
+    copier_pub_ip = ""
+    if printer:
+        copier_pub_ip = getattr(printer, 'public_ip', '') or (printer_lan_uid.replace("pub_", "").replace("_", ".") if printer_lan_uid and printer_lan_uid.startswith("pub_") else "")
+
+    matching_agents = [
+        item for item in same_lan_agents
+        if bool(item.is_online) and (
+            (printer_agent_uid and _to_text(item.agent_uid) == printer_agent_uid) or
+            (copier_pub_ip and (_to_text(getattr(item, 'public_ip', None)) == copier_pub_ip or _to_text(getattr(item, 'wan_ip', None)) == copier_pub_ip)) or
+            (printer_lan_uid and _to_text(item.lan_uid) == printer_lan_uid)
+        )
+    ]
+    if not matching_agents:
+        return (
+            None,
+            [],
+            (
+                {
+                    "ok": False,
+                    "error": f"No active agent found for printer {printer_mac or _to_text(printer.printer_name if printer else '')} matching public IP '{copier_pub_ip}' or LAN '{printer_lan_uid}'",
+                    "mac_id": printer_mac,
+                    "lan_uid": printer_lan_uid,
+                },
+                409,
+            ),
+        )
+
+    matching_agents.sort(
         key=lambda item: (
-            1 if bool(item.is_online) else 0,
             1 if printer_agent_uid and _to_text(item.agent_uid) == printer_agent_uid else 0,
+            1 if copier_pub_ip and (_to_text(getattr(item, 'public_ip', None)) == copier_pub_ip or _to_text(getattr(item, 'wan_ip', None)) == copier_pub_ip) else 0,
             _sort_dt(item.last_seen_at),
-            _sort_dt(item.updated_at),
-            int(item.id or 0),
         ),
         reverse=True,
     )
-    agent = same_lan_agents[0]
+    agent = matching_agents[0]
     warning_parts: list[str] = []
     selected_agent_uid = _to_text(agent.agent_uid)
     if printer_agent_uid and selected_agent_uid and selected_agent_uid != printer_agent_uid:

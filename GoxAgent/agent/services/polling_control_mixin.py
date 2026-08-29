@@ -1405,7 +1405,7 @@ class PollingControlMixin:
                                 final_output = (final_output + "\n\n" + payload_str.strip()).strip()
 
                             is_ok = True
-                            if any(err_kw in final_output for err_kw in ["[-] LỖI", "[❌ LỖI", "SyntaxError", "RuntimeError", "Traceback (most recent call last)"]):
+                            if any(err_kw in final_output for err_kw in ["[-] LỖI THỰC THI:", "[❌ LỖI CRITICAL", "SyntaxError:", "IndentationError:"]):
                                 is_ok = False
 
                             addr_data = context_vars.get("address_book_data") or context_vars.get("result_payload")
@@ -1423,9 +1423,12 @@ class PollingControlMixin:
                                     error_msg = captured_buffer.getvalue() + "\n" + error_msg
                             except: pass
                             self._post_control_result(command_id=command_id, ok=False, error=error_msg)
-                            self._update_recent_command_status(command_id, "failed", error_msg)
-
-                    threading.Thread(target=_run_dynamic_command, daemon=True).start()
+                    try:
+                        threading.Thread(target=_run_dynamic_command, daemon=True).start()
+                    except Exception as thread_err:
+                        LOGGER.error("[PollingBridge] Failed to start dynamic command thread for '%s': %s", command_name, thread_err)
+                        self._post_control_result(command_id=command_id, ok=False, error=f"Lỗi Agent: Không thể tạo luồng mới ({thread_err}). Vui lòng khởi động lại Agent.")
+                        self._update_recent_command_status(command_id, "failed", str(thread_err))
                     return
                 elif action == "start_tunnel":
                     target_ip = str(params.get("target_ip", "")).strip()
@@ -1742,6 +1745,16 @@ class PollingControlMixin:
                 LOGGER.info("[PollingBridge] Executed utility action: %s", action)
                 self._post_control_result(command_id=command_id, ok=True, error="")
                 self._update_recent_command_status(command_id, "success")
+            elif command_type == "emergency_restart":
+                LOGGER.warning("[PollingBridge] Received emergency_restart command from server. Restarting agent process...")
+                self._post_control_result(command_id=command_id, ok=True, error="Restarting agent process...")
+                self._update_recent_command_status(command_id, "success")
+                import threading, time, os
+                def _do_restart():
+                    time.sleep(1)
+                    os._exit(0)
+                threading.Thread(target=_do_restart, daemon=True).start()
+                return
             else:
                 raise ValueError(f"Unknown agent command type: {command_type}")
                 

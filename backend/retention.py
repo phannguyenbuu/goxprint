@@ -107,6 +107,22 @@ def _run_once(session_factory) -> dict[str, int]:
             LOGGER.exception("retention: error cleaning %s", table)
             results[table] = -1
 
+    # ── Strict 200-record retention for PrinterControlCommand (Jobs) ──────
+    try:
+        with session_factory() as session:
+            r_jobs = session.execute(text('''
+                DELETE FROM "PrinterControlCommand"
+                WHERE id NOT IN (
+                    SELECT id FROM "PrinterControlCommand" ORDER BY id DESC LIMIT 200
+                )
+            ''')).rowcount
+            session.commit()
+            if r_jobs:
+                LOGGER.info("retention: PrinterControlCommand purged %d old jobs (kept top 200)", r_jobs)
+                results["PrinterControlCommand"] = r_jobs
+    except Exception:
+        LOGGER.exception("retention: error cleaning PrinterControlCommand")
+
     return results
 
 

@@ -47,16 +47,16 @@
     </table>
   </div>
   
-  <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
-    <button id="prev-page" class="filter-btn" style="margin: 0; padding: 6px 14px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&lt;</button>
-    <div id="current-page-display" style="background-color: #0284c7; color: #fff; font-weight: bold; padding: 6px 14px; border-radius: 6px;">1</div>
-    <button id="next-page" class="filter-btn" style="margin: 0; padding: 6px 14px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&gt;</button>
+  <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 6px; flex-wrap: wrap;">
+    <button id="prev-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&lt;</button>
+    <div id="page-numbers-list" style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;"></div>
+    <button id="next-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&gt;</button>
     
     <select id="page-size-select" style="margin: 0 0 0 10px; padding: 6px 10px; background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
-      <option value="20">20 / page</option>
-      <option value="50" selected>50 / page</option>
-      <option value="100">100 / page</option>
-      <option value="200">200 / page</option>
+      <option value="20">20 / trang</option>
+      <option value="50" selected>50 / trang</option>
+      <option value="100">100 / trang</option>
+      <option value="200">200 / trang</option>
     </select>
   </div>
 </section>
@@ -394,9 +394,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 target.classList.add('active');
                 const targetId = target.dataset.target;
                 const activePane = body.querySelector('#' + targetId);
-                if (activePane) activePane.style.display = 'flex';
+                if (activePane) {
+                    activePane.style.display = 'flex';
+                    activePane.querySelectorAll('textarea').forEach(ta => {
+                        setTimeout(() => { ta.scrollTop = ta.scrollHeight; }, 50);
+                    });
+                }
             });
         });
+
+        // Auto-scroll textareas to bottom on initial modal open
+        setTimeout(() => {
+            body.querySelectorAll('textarea').forEach(ta => {
+                ta.scrollTop = ta.scrollHeight;
+            });
+        }, 80);
 
         // Copy Button Handler
         body.querySelectorAll('.copy-code-btn').forEach(btn => {
@@ -488,11 +500,31 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const updatePaginationUI = () => {
-        document.getElementById('current-page-display').textContent = currentPage;
+        const totalPages = Math.ceil(totalJobs / pageSize) || 1;
         document.getElementById('prev-page').disabled = currentPage <= 1;
-        
-        const totalPages = Math.ceil(totalJobs / pageSize);
-        document.getElementById('next-page').disabled = currentPage >= totalPages || totalPages === 0;
+        document.getElementById('next-page').disabled = currentPage >= totalPages;
+
+        const pageContainer = document.getElementById('page-numbers-list');
+        if (pageContainer) {
+            pageContainer.innerHTML = '';
+            for (let i = 1; i <= totalPages; i++) {
+                const btn = document.createElement('button');
+                btn.textContent = i;
+                btn.className = 'filter-btn page-num-btn';
+                btn.style.cssText = `margin: 0; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; border: 1px solid #cbd5e1; ${
+                    i === currentPage 
+                        ? 'background-color: #0284c7; color: #fff; border-color: #0284c7;' 
+                        : 'background-color: #fff; color: #334155;'
+                }`;
+                btn.addEventListener('click', () => {
+                    if (currentPage !== i) {
+                        currentPage = i;
+                        loadJobs();
+                    }
+                });
+                pageContainer.appendChild(btn);
+            }
+        }
     };
 
     document.getElementById('prev-page').addEventListener('click', () => {

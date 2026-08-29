@@ -164,7 +164,9 @@ export const useAgentScanActions = (deps: any = {}) => {
   const handleDeleteDest = (printerId: string, entry: any) => {
     const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
     const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
-    const targetAgent = printerObj?.agent_uid || getTargetAgentUid(printerId) || selectedLan?.agents?.find((a: any) => a.is_agent_active)?.agent_uid || selectedLan?.agents?.[0]?.agent_uid || 'kythuat02';
+    const lanPublicIp = selectedLan?.public_ip || selectedLan?.wan_ip;
+    const sameIpAgent = (selectedLan?.agents || []).find((a: any) => a.is_agent_active && ((a.public_ip && a.public_ip === lanPublicIp) || (a.wan_ip && a.wan_ip === lanPublicIp)))?.agent_uid;
+    const targetAgent = getTargetAgentUid(printerId) || printerObj?.agent_uid || sameIpAgent || '';
     setDeleteScanPointModal({
       isOpen: true,
       printerId,
@@ -211,10 +213,13 @@ export const useAgentScanActions = (deps: any = {}) => {
     try {
       const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
       const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
-      const isToshiba = (printerObj?.printer_type || printerObj?.printer_name || '').toLowerCase().includes('toshiba');
+      const macStr = (printerObj?.mac_address || printerObj?.mac_id || String(printerId) || '').toUpperCase().replace(/-/g, ':');
+      const isToshiba = (printerObj?.printer_type || printerObj?.printer_name || printerObj?.brand || '').toLowerCase().includes('toshiba') || macStr.startsWith('00:80:91');
       const cmdName = isToshiba ? 'toshiba_delete_scan' : 'ricoh_delete_scan';
       const cmdObj = (utilityCommands || []).find((c: any) => c.command === cmdName);
-      const targetAgent = agentUid || printerObj?.agent_uid || selectedLan?.agents?.find((a: any) => a.is_agent_active)?.agent_uid || selectedLan?.agents?.[0]?.agent_uid || 'kythuat02';
+      const lanPublicIp = selectedLan?.public_ip || selectedLan?.wan_ip;
+      const sameIpAgent = (selectedLan?.agents || []).find((a: any) => a.is_agent_active && ((a.public_ip && a.public_ip === lanPublicIp) || (a.wan_ip && a.wan_ip === lanPublicIp)))?.agent_uid;
+      const targetAgent = agentUid || getTargetAgentUid(printerId) || printerObj?.agent_uid || sameIpAgent || '';
 
       let res;
       if (targetAgent) {
@@ -261,24 +266,45 @@ export const useAgentScanActions = (deps: any = {}) => {
         async (pollData: any) => {
           showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
           console.log('Finish delete scan point, updating address book state directly', pollData);
-          const macAddr = printerObj?.mac_address || printerObj?.mac_id || printerId;
+          const macAddr = printerObj?.mac_address || printerObj?.mac_id || (typeof printerId === 'string' && printerId.includes(':') ? printerId : '');
           const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
+          const pIdKey = printerObj?.id ? String(printerObj.id) : String(printerId);
+          const pIpKey = printerObj?.ip || printerObj?.printer_ip || (typeof printerId === 'string' && printerId.includes('.') ? printerId : '');
+
           let syncObj = pollData?.address_book_sync || pollData?.address_book_data;
           if (!syncObj && (pollData?.result || pollData?.result_payload)) {
-            const rawStr = String(pollData.result || pollData.result_payload || '');
+            const rawStr = String(pollData.result || pollData.result_payload || '').trim();
             if (rawStr.includes('__ADDRESS_BOOK_JSON_START__')) {
               try {
                 let jsonStr = rawStr.split('__ADDRESS_BOOK_JSON_START__')[1].split('__ADDRESS_BOOK_JSON_END__')[0].trim();
                 jsonStr = jsonStr.replace(/^(\n|\r|\\n|\\r)+|(\n|\r|\\n|\\r)+$/g, '').trim();
                 syncObj = JSON.parse(jsonStr);
               } catch {}
+            } else if (rawStr.startsWith('{') && rawStr.includes('"address_list"')) {
+              try {
+                syncObj = JSON.parse(rawStr);
+              } catch {}
             }
           }
-          if (normMac && syncObj) {
-            setLiveAddressBooks((prev) => ({ ...prev, [normMac]: syncObj }));
+          if (syncObj && typeof setLiveAddressBooks === 'function') {
+            setLiveAddressBooks((prev: any) => {
+              const next = { ...prev };
+              if (normMac) next[normMac] = syncObj;
+              if (pIdKey) next[pIdKey] = syncObj;
+              if (pIpKey) next[pIpKey] = syncObj;
+              return next;
+            });
           }
-          handleRefetchAddressBook(printerObj || printerId);
-          await fetchLanSitesData(true);
+          const targetRef = {
+            ...(printerObj || {}),
+            id: printerId,
+            ip: printerObj?.ip || (typeof printerId === 'string' && printerId.includes('.') ? printerId : ''),
+            mac_address: printerObj?.mac_address || (typeof printerId === 'string' && printerId.includes(':') ? printerId : ''),
+            printer_type: isToshiba ? 'toshiba' : 'ricoh',
+            brand: isToshiba ? 'toshiba' : 'ricoh',
+            agent_uid: targetAgent || printerObj?.agent_uid || agentUid || activeAgentUid || ''
+          };
+          handleRefetchAddressBook(targetRef);
         },
         (errorMsg) => {
           showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
@@ -420,13 +446,12 @@ export const useAgentScanActions = (deps: any = {}) => {
               } catch {}
             }
           }
-          if (normMac && syncObj) {
-            setLiveAddressBooks((prev) => ({ ...prev, [normMac]: syncObj }));
+          if (normMac && syncObj && typeof setLiveAddressBooks === 'function') {
+            setLiveAddressBooks((prev: any) => ({ ...prev, [normMac]: syncObj }));
           }
           if (handleRefetchAddressBook) {
             handleRefetchAddressBook(printerId);
           }
-          await fetchLanSitesData(true);
         },
         (errorMsg) => {
           showToast(`Lỗi thay đổi IP: ${errorMsg}`, 'error');
@@ -663,13 +688,18 @@ export const useAgentScanActions = (deps: any = {}) => {
 
   const handleRefetchAddressBook = async (printerId: any) => {
     let pId = String(typeof printerId === 'object' ? (printerId.id || printerId.ip || printerId.mac_address || printerId.mac_id) : printerId);
-    if (!pId || pId === '0' || pId === 'undefined') {
+    if (!pId || pId === '0' || pId === 'undefined' || pId.toLowerCase() === 'none') {
       if (typeof printerId === 'object') {
         pId = printerId.ip || printerId.mac_address || printerId.mac_id || '0';
       }
     }
     const printerObj = typeof printerId === 'object' ? printerId : null;
-    const targetAgent = getTargetAgentUid ? getTargetAgentUid(pId) : (printerObj?.agent_uid || '');
+    const resolvedAgentUid = printerObj?.agent_uid ||
+      (printerObj?.id && getTargetAgentUid ? getTargetAgentUid(printerObj.id) : '') ||
+      (getTargetAgentUid ? getTargetAgentUid(pId) : '') ||
+      agentUid ||
+      activeAgentUid ||
+      '';
     if (showToast) showToast('⌛ Đang yêu cầu Agent đọc trực tiếp danh bạ từ máy photocopy...', 'info', 3000);
     try {
       const { user: authUser, pass: authPass } = await resolveCopierCredentials(printerObj || { ip: pId, mac_address: pId });
@@ -681,8 +711,12 @@ export const useAgentScanActions = (deps: any = {}) => {
         if (printerObj.ip) extraData.printer_ip = printerObj.ip;
         if (printerObj.name || printerObj.printer_name) extraData.printer_name = printerObj.name || printerObj.printer_name;
         if (printerObj.mac_address || printerObj.mac_id) extraData.mac_id = printerObj.mac_address || printerObj.mac_id;
+        if (printerObj.printer_type || printerObj.brand) {
+          extraData.printer_type = printerObj.printer_type || printerObj.brand;
+          extraData.brand = printerObj.printer_type || printerObj.brand;
+        }
       }
-      const res = await triggerFetchAddressBook(pId, targetAgent || undefined, extraData);
+      const res = await triggerFetchAddressBook(pId, resolvedAgentUid || undefined, extraData);
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh đọc danh bạ');
       }
@@ -716,13 +750,25 @@ export const useAgentScanActions = (deps: any = {}) => {
             console.log('==================================================');
 
             if (showToast) showToast('✓ Đã cập nhật danh bạ máy in thành công!', 'success');
-            if (resultSync && deps.setCommandStatus) {
-              deps.setCommandStatus((prev: any) => ({
-                ...prev,
-                [pId]: { ...(prev[pId] || {}), address_book_sync: resultSync, isPending: false }
-              }));
+            if (resultSync) {
+              if (setLiveAddressBooks) {
+                setLiveAddressBooks((prev: any) => {
+                  const next = { ...prev };
+                  if (pId) next[pId] = resultSync;
+                  const pMac = (printerObj?.mac_address || printerObj?.mac_id || (typeof pId === 'string' && pId.includes(':') ? pId : '')).toUpperCase().replace(/-/g, ':');
+                  const pIp = printerObj?.ip || (typeof pId === 'string' && pId.includes('.') ? pId : '');
+                  if (pMac) next[pMac] = resultSync;
+                  if (pIp) next[pIp] = resultSync;
+                  return next;
+                });
+              }
+              if (deps.setCommandStatus) {
+                deps.setCommandStatus((prev: any) => ({
+                  ...prev,
+                  [pId]: { ...(prev[pId] || {}), address_book_sync: resultSync, isPending: false }
+                }));
+              }
             }
-            if (fetchLanSitesData) await fetchLanSitesData();
           },
           (errorMsg: any) => {
             console.error(`[FRONTEND LỖI ĐỒNG BỘ DANH BẠ] Command ID #${res.command_id}:`, errorMsg);

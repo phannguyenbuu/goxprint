@@ -122,13 +122,13 @@ export function CopierItem({
     (ipKey && commandStatus?.[ipKey]) ||
     (idKey && commandStatus?.[idKey]);
 
-  const hasItems = (obj: any) => obj && ((Array.isArray(obj.address_list) && obj.address_list.length > 0) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list) && obj.address_book_data.address_list.length > 0));
+  const hasValidList = (obj: any) => obj && (Array.isArray(obj.address_list) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list)));
 
   const activeSyncObj = 
-    (hasItems(localSync) ? localSync : null) ||
-    (hasItems(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
-    (hasItems(cmdStatusObj) ? cmdStatusObj : null) ||
-    (hasItems(sync) ? sync : null) ||
+    (hasValidList(localSync) ? localSync : null) ||
+    (hasValidList(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
+    (hasValidList(cmdStatusObj) ? cmdStatusObj : null) ||
+    (hasValidList(sync) ? sync : null) ||
     localSync || cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
   const detectedBrand = detectBrand(p.name || p.printer_name || p.ip || 'generic');
   const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
@@ -287,14 +287,7 @@ export function CopierItem({
                             <div style={styles.cardHeader}>
                               <div>
                                 <span style={styles.copierTitle}>
-                                  🖨️ {(() => {
-                                    if (p.printer_name && p.printer_name.trim()) return p.printer_name.trim();
-                                    const cleanMac = (p.mac_id || "").replace(/-/g, ":").toUpperCase();
-                                    if (cleanMac.startsWith("58:38:79") || cleanMac.startsWith("00:26:73")) return "Thiết bị Ricoh (Đang thám dò...)";
-                                    if (cleanMac.startsWith("00:80:91")) return "Thiết bị Toshiba (Đang thám dò...)";
-                                    if (cleanMac.startsWith("00:11:22")) return "Thiết bị HP (Đang thám dò...)";
-                                    return "Thiết bị Photocopy (Đang thám dò...)";
-                                  })()}
+                                  🖨️ {(p.printer_name && p.printer_name.trim()) || p.name || p.ip || "Thiết bị Photocopy"}
                                 </span>
                                 <div style={styles.copierSubtitle}>
                                   IP: {p.ip} · MAC: {p.mac_id || '—'}
@@ -426,7 +419,9 @@ export function CopierItem({
                                 <div style={{ display: 'flex', gap: '6px' }}>
                                   <button
                                     style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
-                                    onClick={async () => {
+                                    onClick={async (e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       handleRefetchAddressBook(p);
                                       setTimeout(fetchFreshSync, 2000);
                                       setTimeout(fetchFreshSync, 4500);

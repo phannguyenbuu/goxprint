@@ -297,18 +297,37 @@ def _resolve_target_agent_uid(session: Any, printer: Printer | None, req_agent_u
     if printer and printer.agent_uid and printer.agent_uid != "default":
         return printer.agent_uid
 
+    target_public_ip = ""
+    if printer:
+        if hasattr(printer, 'public_ip') and getattr(printer, 'public_ip', None):
+            target_public_ip = str(getattr(printer, 'public_ip')).strip()
+        elif printer.lan_uid and str(printer.lan_uid).startswith("pub_"):
+            target_public_ip = str(printer.lan_uid).replace("pub_", "").replace("_", ".")
+
     try:
         from models import AgentNode
-        online_agent = session.execute(
-            select(AgentNode)
-            .order_by(AgentNode.last_seen_at.desc())
-        ).scalars().first()
-        if online_agent and online_agent.agent_uid:
-            return online_agent.agent_uid
+        if target_public_ip:
+            same_ip_agent = session.execute(
+                select(AgentNode)
+                .where(or_(AgentNode.public_ip == target_public_ip, AgentNode.wan_ip == target_public_ip))
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc())
+            ).scalars().first()
+            if same_ip_agent and same_ip_agent.agent_uid:
+                return same_ip_agent.agent_uid
+
+        if printer and printer.lan_uid:
+            same_lan_agent = session.execute(
+                select(AgentNode)
+                .where(AgentNode.lan_uid == printer.lan_uid)
+                .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc())
+            ).scalars().first()
+            if same_lan_agent and same_lan_agent.agent_uid:
+                return same_lan_agent.agent_uid
+
     except Exception:
         pass
 
-    return "default"
+    return ""
 
 
 def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
@@ -556,7 +575,16 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                     cmd.error_message = "Máy photo đang bận xử lý một lệnh khác. Vui lòng thử lại sau."
                     cmd.responded_at = requested_at
 
-            is_toshiba = (printer and getattr(printer, 'printer_type', '') == 'toshiba') or 'toshiba' in printer_name_val.lower() or 'e-studio' in printer_name_val.lower()
+            clean_mac_str = _normalize_mac(printer_mac_value or str(device_ref)).replace(":", "").upper()
+            is_toshiba = (
+                (printer and (getattr(printer, 'printer_type', '') == 'toshiba' or 'toshiba' in (printer.printer_name or '').lower() or 'e-studio' in (printer.printer_name or '').lower())) or
+                'toshiba' in printer_name_val.lower() or
+                'e-studio' in printer_name_val.lower() or
+                str(body.get("printer_type", "")).lower() == "toshiba" or
+                str(body.get("brand", "")).lower() == "toshiba" or
+                str(body.get("type", "")).lower() == "toshiba" or
+                clean_mac_str.startswith("008091")
+            )
             list_cmd_name = "toshiba_list_scan" if is_toshiba else "ricoh_list_scan"
             cmd_content = ""
             try:
@@ -1330,83 +1358,95 @@ verify_auth()
                 if created_at and created_at.tzinfo is None:
                     created_at = created_at.replace(tzinfo=timezone.utc)
                     
-                if cmd.status == "pending" and created_at and (now - created_at).total_seconds() > 180:
+                if cmd.status in ("pending", "processing") and created_at and (now - created_at).total_seconds() > 60:
                     cmd.status = "failed"
-                    cmd.error_message = "Timeout: Agent did not respond in 180 seconds"
+                    cmd.error_message = "Lỗi: Agent quá thời gian phản hồi (Timeout 60s)"
                     session.commit()
 
-            if cmd.status == "success":
-                address_book_sync = None
-                if cmd.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify", "trigger_utility") and cmd.error_message:
-                    msg_str = str(cmd.error_message)
-                    if "__ADDRESS_BOOK_JSON_START__" in msg_str:
+                cmd_status = cmd.status
+                cmd_printer_id = int(cmd.printer_id or 0)
+                cmd_command_type = cmd.command_type
+                cmd_error_msg = cmd.error_message or ""
+                cmd_created_at = cmd.created_at.isoformat() if cmd.created_at else None
+                cmd_received_at = cmd.received_at.isoformat() if cmd.received_at else None
+                cmd_responded_at = cmd.responded_at.isoformat() if cmd.responded_at else None
+                res_text = cmd.__dict__.get("output") or cmd.__dict__.get("result_payload") or cmd_error_msg or ""
+
+                if cmd_status == "success":
+                    address_book_sync = None
+                    if cmd_command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify", "trigger_utility") and cmd_error_msg:
+                        msg_str = str(cmd_error_msg)
+                        if "__ADDRESS_BOOK_JSON_START__" in msg_str:
+                            try:
+                                import json as _json
+                                part = msg_str.split("__ADDRESS_BOOK_JSON_START__")[1].split("__ADDRESS_BOOK_JSON_END__")[0].strip()
+                                address_book_sync = _json.loads(part)
+                            except Exception:
+                                pass
+                        if not address_book_sync:
+                            try:
+                                import json as _json, re
+                                m = re.search(r'(\{[\s\S]*"address_list"[\s\S]*\})', msg_str)
+                                if m:
+                                    address_book_sync = _json.loads(m.group(1))
+                            except Exception:
+                                pass
+                        if not address_book_sync:
+                            try:
+                                import json as _json
+                                address_book_sync = _json.loads(msg_str)
+                            except Exception:
+                                pass
+                    if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
                         try:
                             import json as _json
-                            part = msg_str.split("__ADDRESS_BOOK_JSON_START__")[1].split("__ADDRESS_BOOK_JSON_END__")[0].strip()
-                            address_book_sync = _json.loads(part)
+                            decoded = _json.loads(res_text)
+                            if isinstance(decoded, str):
+                                res_text = decoded
                         except Exception:
                             pass
-                    if not address_book_sync:
-                        try:
-                            import json as _json, re
-                            m = re.search(r'(\{[\s\S]*"address_list"[\s\S]*\})', msg_str)
-                            if m:
-                                address_book_sync = _json.loads(m.group(1))
-                        except Exception:
-                            pass
-                    if not address_book_sync:
-                        try:
-                            import json as _json
-                            address_book_sync = _json.loads(msg_str)
-                        except Exception:
-                            pass
-                res_text = cmd.error_message or ""
-                if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
-                    try:
-                        import json as _json
-                        decoded = _json.loads(res_text)
-                        if isinstance(decoded, str):
-                            res_text = decoded
-                    except Exception:
-                        pass
+                    return jsonify(
+                        {
+                            "ok": True,
+                            "status": "success",
+                            "command_id": command_id,
+                            "id": cmd_printer_id,
+                            "address_book_sync": address_book_sync,
+                            "result_payload": res_text,
+                            "output": res_text,
+                            "error_message": cmd_error_msg,
+                            "created_at": cmd_created_at,
+                            "received_at": cmd_received_at,
+                            "responded_at": cmd_responded_at,
+                        }
+                    )
+                if cmd_status == "failed":
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "status": "failed",
+                                "command_id": command_id,
+                                "error": cmd_error_msg or "Command failed",
+                                "output": res_text,
+                                "created_at": cmd_created_at,
+                                "received_at": cmd_received_at,
+                                "responded_at": cmd_responded_at,
+                            }
+                        ),
+                        200,
+                    )
                 return jsonify(
                     {
                         "ok": True,
-                        "status": "success",
+                        "status": cmd_status,
                         "command_id": command_id,
-                        "id": int(cmd.printer_id),
-                        "address_book_sync": address_book_sync,
-                        "result_payload": res_text,
-                        "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
-                        "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
-                        "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
+                        "output": res_text,
+                        "created_at": cmd_created_at,
+                        "received_at": cmd_received_at,
+                        "progress_text": cmd_error_msg,
                     }
                 )
-            if cmd.status == "failed":
-                return (
-                    jsonify(
-                        {
-                            "ok": False,
-                            "status": "failed",
-                            "command_id": command_id,
-                            "error": cmd.error_message or "Command failed",
-                            "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
-                            "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
-                            "responded_at": cmd.responded_at.isoformat() if cmd.responded_at else None,
-                        }
-                    ),
-                    200,
-                )
-            return jsonify(
-                {
-                    "ok": True,
-                    "status": "pending",
-                    "command_id": command_id,
-                    "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
-                    "received_at": cmd.received_at.isoformat() if cmd.received_at else None,
-                    "progress_text": cmd.error_message or "",
-                }
-            )
         except Exception as exc:
             LOGGER.error("[GET /api/commands/%s/status ERROR] %s", command_id, exc, exc_info=True)
             return jsonify({

@@ -244,6 +244,16 @@ export function AgentModals(props: any) {
   const formatJsonText = typeof propFormatJsonText === 'function' ? propFormatJsonText : defaultFormatJsonText;
 
   React.useEffect(() => {
+    if (viewOutputModal?.isOpen) {
+      setTimeout(() => {
+        if (modalContentRef && modalContentRef.current) {
+          modalContentRef.current.scrollTop = modalContentRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  }, [viewOutputModal?.isOpen, viewOutputModal?.content]);
+
+  React.useEffect(() => {
     if (installDriverModal?.isOpen) {
       const isSuggestedEmpty = !installDriverModal.suggestedDrivers || installDriverModal.suggestedDrivers.length === 0;
       if (isSuggestedEmpty && typeof setInstallDriverModal === 'function') {
