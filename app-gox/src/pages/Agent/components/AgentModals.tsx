@@ -2045,26 +2045,10 @@ export function AgentModals(props: any) {
                     const currentModal = installDriverModal;
                     setInstallDriverModal((prev) => ({ ...prev, isOpen: false }));
 
-                    const catalogDrivers: { name: string; url: string; brand: string; model: string }[] = [];
-                    if (currentModal.suggestedDrivers && Array.isArray(currentModal.suggestedDrivers)) {
-                      currentModal.suggestedDrivers.forEach((catItem: any) => {
-                        if (catItem && catItem.drivers && Array.isArray(catItem.drivers)) {
-                          catItem.drivers.forEach((drv: any) => {
-                            catalogDrivers.push({
-                              name: drv.name,
-                              url: drv.url,
-                              brand: catItem.brand || currentModal.brand,
-                              model: catItem.model || currentModal.model
-                            });
-                          });
-                        }
-                      });
-                    }
-
-                    const activeDrvUrl = currentModal.driverUrl || catalogDrivers[0]?.url || '';
-                    const activeDrvName = currentModal.driverName || catalogDrivers[0]?.name || currentModal.model || 'Driver';
-                    const activeBrand = currentModal.brand || catalogDrivers[0]?.brand || 'Ricoh';
-                    const activeModel = currentModal.model || catalogDrivers[0]?.model || 'Photocopy';
+                    const activeDrvUrl = currentModal.driverUrl || '';
+                    const activeDrvName = currentModal.driverName || currentModal.model || 'Driver';
+                    const activeBrand = currentModal.brand || 'Ricoh';
+                    const activeModel = currentModal.model || 'Photocopy';
 
                     currentModal.selectedAgentUids.forEach((agentUid: string) => {
                       executeRemoteInstallDriver(
