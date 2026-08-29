@@ -350,6 +350,35 @@ function WimFullscreenModal({
 
         <div style={{ width: '1px', height: '18px', background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
 
+        {/* Force Refresh Tunnel / Page */}
+        <button
+          type="button"
+          onClick={() => {
+            if (previewIframeRef && previewIframeRef.current) {
+              const currentSrc = previewIframeRef.current.src;
+              const cleanUrl = currentSrc.split('#')[0].replace(/([?&])_t=\d+/, '');
+              const separator = cleanUrl.includes('?') ? '&' : '?';
+              previewIframeRef.current.src = cleanUrl + separator + `_t=${Date.now()}`;
+            }
+          }}
+          style={{
+            background: 'rgba(16, 185, 129, 0.2)',
+            border: '1px solid rgba(16, 185, 129, 0.4)',
+            color: '#34d399',
+            cursor: 'pointer',
+            fontSize: '0.76rem',
+            fontWeight: 600,
+            padding: '4px 10px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+          title="Bắt buộc nạp lại trang WIM từ máy in qua Tunnel"
+        >
+          ⚡ Nạp lại (Tunnel)
+        </button>
+
         {/* External Tab */}
         <button
           type="button"
