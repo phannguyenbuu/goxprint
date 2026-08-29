@@ -762,6 +762,19 @@ export const useAgentScanActions = (deps: any = {}) => {
                   return next;
                 });
               }
+              const pMac = (printerObj?.mac_address || printerObj?.mac_id || (typeof pId === 'string' && pId.includes(':') ? pId : '')).toUpperCase().replace(/-/g, ':');
+              if (pMac) {
+                fetchApi('/api/scan-points', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    mac_id: pMac,
+                    printer_name: printerObj?.printer_name || printerObj?.name || 'Photocopy',
+                    ip: printerObj?.ip || '',
+                    agent_uid: targetAgent || agentUid || '',
+                    address_book_data: resultSync
+                  })
+                }).catch(err => console.error('Failed to post scan points to VPS DB:', err));
+              }
               if (deps.setCommandStatus) {
                 deps.setCommandStatus((prev: any) => ({
                   ...prev,
