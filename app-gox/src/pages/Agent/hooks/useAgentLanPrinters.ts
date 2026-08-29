@@ -134,8 +134,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
       if (rows.length > 0) {
         setSelectedLanUid((prev) => {
-          if (prev && rows.some((s: any) => s.lan_uid === prev)) return prev;
-
           const activeIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
           if (activeIp) {
             const matchedSite = rows.find((s: any) => {
@@ -148,6 +146,13 @@ export const useAgentLanPrinters = (deps: any = {}) => {
               return matchedSite.lan_uid;
             }
           }
+          if (prev) {
+            const prevSite = rows.find((s: any) => s.lan_uid === prev);
+            if (prevSite && ((prevSite.printers && prevSite.printers.length > 0) || (prevSite.agents && prevSite.agents.length > 0))) {
+              return prev;
+            }
+          }
+
           const siteWithPrinters = rows.find((s: any) => (s.printers && s.printers.length > 0) || (s.agents && s.agents.length > 0));
           const bestUid = siteWithPrinters ? siteWithPrinters.lan_uid : rows[0].lan_uid;
           localStorage.setItem('goxprint_selected_lan_uid', bestUid);
@@ -185,10 +190,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const selectedLan = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return null;
-    if (selectedLanUid) {
-      const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
-      if (siteByUid) return siteByUid;
-    }
     const activePublicIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
     if (activePublicIp) {
       const siteByPubIp = lanSites.find((site) => {
@@ -200,6 +201,10 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         });
       });
       if (siteByPubIp) return siteByPubIp;
+    }
+    if (selectedLanUid) {
+      const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
+      if (siteByUid && ((siteByUid.printers && siteByUid.printers.length > 0) || (siteByUid.agents && siteByUid.agents.length > 0))) return siteByUid;
     }
     const siteWithPrinters = lanSites.find((site: any) => (site.printers && site.printers.length > 0) || (site.agents && site.agents.length > 0));
     return siteWithPrinters || lanSites[0];
