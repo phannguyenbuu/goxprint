@@ -794,20 +794,44 @@ export function AgentModals(props: any) {
                                   const agentUid = selectedUtilityAgent?.agent_uid;
                                   if (!agentUid) return;
 
-                                  // 1. Gửi lệnh mở trình duyệt local trên máy Agent (tony) tại printagentx.com
-                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("https://printagentx.com/?agent_uid=${encodeURIComponent(agentUid)}")`);
+                                  // 1. Gửi lệnh mở trình duyệt local trên máy Agent (tony) tại port 9173
+                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("http://localhost:9173")`);
 
-                                  // 2. Mở Web Preview Modal load printagentx.com mang agent_uid của tony
-                                  if (setWebPreviewModal) {
-                                    setWebPreviewModal({
-                                      isOpen: true,
-                                      title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
-                                      ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
-                                      path: `/?agent_uid=${encodeURIComponent(agentUid)}`,
-                                      html: 'DIRECT_LAN',
-                                      url: `https://printagentx.com/?agent_uid=${encodeURIComponent(agentUid)}`,
-                                      agentUid: agentUid
+                                  // 2. Khởi tạo đường hầm SSH Reverse Tunnel tới port 9173 của máy Agent đại diện (tony)
+                                  try {
+                                    const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
+                                    const res = await fetch(`${BASE_URL}/api/agents/${encodeURIComponent(agentUid)}/tunnel/start`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ printer_ip: '127.0.0.1', printer_port: 9173 })
                                     });
+                                    const data = await res.json();
+                                    const tunnelUrl = data?.url || data?.url_port || '';
+
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: tunnelUrl ? `https://printagentx.com/?tunnel_url=${encodeURIComponent(tunnelUrl)}` : `https://printagentx.com`,
+                                        agentUid: agentUid
+                                      });
+                                    }
+                                  } catch (err) {
+                                    console.error('Failed to start agent web tunnel:', err);
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: `https://printagentx.com`,
+                                        agentUid: agentUid
+                                      });
+                                    }
                                   }
                                 }}
                                 disabled={utilityActionPending !== null}
