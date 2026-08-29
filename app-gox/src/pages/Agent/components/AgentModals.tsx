@@ -779,59 +779,52 @@ export function AgentModals(props: any) {
                             </div>
                             <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
 
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
                               <div>
                                 <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>
-                                  🌐 Giao diện WIM (Web Setting Máy in qua Agent {selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid})
+                                  🌐 Giao diện WIM PrintAgentX (Trình duyệt WIM)
                                 </div>
                                 <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>
-                                  Mở trực tiếp trang Web Setting của máy in trên màn hình máy <strong>{selectedUtilityAgent?.hostname || 'Agent'}</strong> (để kiểm tra chạy offline) và xem Web Preview WIM trên hệ thống
+                                  Mở trang web printagentx.com dưới dạng WIM (Web Preview) từ máy Agent <strong>{selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}</strong> (để kiểm tra chạy offline)
                                 </div>
                               </div>
 
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
-                                {(() => {
-                                  const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
-                                  const netPrefix = selectedUtilityAgent?.local_ip ? selectedUtilityAgent.local_ip.substring(0, selectedUtilityAgent.local_ip.lastIndexOf('.')) : '';
-                                  let matchedPrinters = allPrinters.filter((p: any) => {
-                                    return (p.agent_uid === selectedUtilityAgent?.agent_uid) || (netPrefix && p.ip && p.ip.startsWith(netPrefix));
-                                  });
-                                  if (matchedPrinters.length === 0 && allPrinters.length > 0) {
-                                    matchedPrinters = allPrinters.slice(0, 3);
+                              <button
+                                onClick={() => {
+                                  // 1. Gửi lệnh mở browser trên máy Agent (VD: tony)
+                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("https://printagentx.com")`);
+                                  
+                                  // 2. Mở cửa sổ WIM Web Preview Modal tích hợp trong Goxprint
+                                  if (setWebPreviewModal) {
+                                    setWebPreviewModal({
+                                      isOpen: true,
+                                      title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}`,
+                                      ip: 'printagentx.com',
+                                      path: `/?agent_uid=${encodeURIComponent(selectedUtilityAgent?.agent_uid || '')}`,
+                                      html: 'DIRECT_LAN',
+                                      url: `https://printagentx.com/?agent_uid=${encodeURIComponent(selectedUtilityAgent?.agent_uid || '')}`,
+                                      agentUid: selectedUtilityAgent?.agent_uid || ''
+                                    });
                                   }
-                                  return matchedPrinters.map((copier: any) => (
-                                    <button
-                                      key={copier.id || copier.ip}
-                                      onClick={() => {
-                                        // 1. Gửi lệnh open_web_setting xuống máy Agent (VD: tony) để tự mở browser local trên máy đó
-                                        handleTriggerUtilityExec('open_web_setting', `import webbrowser\nwebbrowser.open("http://${copier.ip}")`);
-                                        
-                                        // 2. Mở Giao diện WIM Web Preview Modal trên màn hình hiện tại
-                                        if (fetchRemotePage) {
-                                          fetchRemotePage(copier.ip, '/');
-                                        }
-                                      }}
-                                      disabled={utilityActionPending !== null}
-                                      style={{
-                                        padding: '6px 12px',
-                                        fontSize: '0.75rem',
-                                        borderRadius: '8px',
-                                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                        border: 'none',
-                                        color: '#fff',
-                                        cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                        fontWeight: 600,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '5px',
-                                        boxShadow: '0 2px 6px rgba(16, 185, 129, 0.2)'
-                                      }}
-                                    >
-                                      🌐 Mở WIM {copier.printer_name || copier.name || 'Photocopy'} ({copier.ip}) ↗
-                                    </button>
-                                  ));
-                                })()}
-                              </div>
+                                }}
+                                disabled={utilityActionPending !== null}
+                                style={{
+                                  padding: '8px 16px',
+                                  fontSize: '0.78rem',
+                                  borderRadius: '8px',
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  border: 'none',
+                                  color: '#fff',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)'
+                                }}
+                              >
+                                🌐 Mở WIM printagentx.com ↗
+                              </button>
                             </div>
                           </>
                         )}
