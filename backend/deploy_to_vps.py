@@ -125,6 +125,11 @@ _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent
 safe_print("Update force_scan STDOUT:", out.read().decode('utf-8', errors='ignore'))
 safe_print("Update force_scan STDERR:", err.read().decode('utf-8', errors='ignore'))
 
+print("Updating UtiCommand capture_screenshot in Database...")
+_, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/update_screenshot_cmd.py')
+safe_print("Update capture_screenshot STDOUT:", out.read().decode('utf-8', errors='ignore'))
+safe_print("Update capture_screenshot STDERR:", err.read().decode('utf-8', errors='ignore'))
+
 print("Restarting printagent service on remote VPS...")
 _, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
 safe_print("Restart STDOUT:", out.read().decode('utf-8', errors='ignore'))

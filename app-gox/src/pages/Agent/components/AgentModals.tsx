@@ -2396,6 +2396,14 @@ export function AgentModals(props: any) {
                     </div>
                   )}
                 </div>
+              ) : viewOutputModal.content && (typeof viewOutputModal.content === 'string') && (viewOutputModal.content.trim().startsWith('data:image/') || viewOutputModal.content.trim().startsWith('iVBORw0KGgo')) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, minHeight: 0, overflow: 'auto', padding: '12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
+                  <img
+                    src={viewOutputModal.content.trim().startsWith('data:image/') ? viewOutputModal.content.trim() : `data:image/png;base64,${viewOutputModal.content.trim()}`}
+                    alt="Desktop Screenshot"
+                    style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: '6px', objectFit: 'contain', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}
+                  />
+                </div>
               ) : (
                 <pre
                   ref={modalContentRef}
