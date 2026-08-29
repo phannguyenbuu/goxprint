@@ -790,21 +790,48 @@ export function AgentModals(props: any) {
                               </div>
 
                               <button
-                                onClick={() => {
-                                  // 1. Gửi lệnh mở browser trên máy Agent (VD: tony)
-                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("https://printagentx.com")`);
-                                  
-                                  // 2. Mở cửa sổ WIM Web Preview Modal tích hợp trong Goxprint
-                                  if (setWebPreviewModal) {
-                                    setWebPreviewModal({
-                                      isOpen: true,
-                                      title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}`,
-                                      ip: 'printagentx.com',
-                                      path: `/?agent_uid=${encodeURIComponent(selectedUtilityAgent?.agent_uid || '')}`,
-                                      html: 'DIRECT_LAN',
-                                      url: `https://printagentx.com/?agent_uid=${encodeURIComponent(selectedUtilityAgent?.agent_uid || '')}`,
-                                      agentUid: selectedUtilityAgent?.agent_uid || ''
+                                onClick={async () => {
+                                  const agentUid = selectedUtilityAgent?.agent_uid;
+                                  if (!agentUid) return;
+
+                                  // 1. Gửi lệnh mở trình duyệt local trên máy Agent (tony) tại port 9173
+                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("http://localhost:9173")`);
+
+                                  // 2. Khởi tạo đường hầm SSH Reverse Tunnel tới port 9173 của máy Agent đại diện (tony)
+                                  try {
+                                    const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
+                                    const res = await fetch(`${BASE_URL}/api/agents/${encodeURIComponent(agentUid)}/tunnel/start`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ printer_ip: '127.0.0.1', printer_port: 9173 })
                                     });
+                                    const data = await res.json();
+                                    const tunnelUrl = data?.url || data?.url_port || '';
+
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: tunnelUrl || `https://printagentx.com/?agent_uid=${encodeURIComponent(agentUid)}`,
+                                        agentUid: agentUid
+                                      });
+                                    }
+                                  } catch (err) {
+                                    console.error('Failed to start agent web tunnel:', err);
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: `https://printagentx.com/?agent_uid=${encodeURIComponent(agentUid)}`,
+                                        agentUid: agentUid
+                                      });
+                                    }
                                   }
                                 }}
                                 disabled={utilityActionPending !== null}
@@ -823,7 +850,7 @@ export function AgentModals(props: any) {
                                   boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)'
                                 }}
                               >
-                                🌐 Mở WIM printagentx.com ↗
+                                🌐 Mở WIM printagentx.com (Agent Tunnel) ↗
                               </button>
                             </div>
                           </>
