@@ -143,13 +143,15 @@ def register_device_detail_routes(app: Flask, session_factory: Any) -> None:
                 ).scalars().first()
             active_lan_uid = active_agent.lan_uid if active_agent else printer.lan_uid
 
+            printer_ip_val = str(body.get("printer_ip") or body.get("ip") or "").strip() or printer.ip
+
             command = PrinterControlCommand(
                 printer_id=printer.id,
                 lead=printer.lead,
                 lan_uid=active_lan_uid,
                 agent_uid=resolved_agent_uid,
                 printer_name=printer.printer_name,
-                ip=printer.ip,
+                ip=printer_ip_val,
                 desired_enabled=printer.enabled,
                 command_type="install_driver",
                 driver_brand=brand,
