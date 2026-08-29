@@ -32,6 +32,187 @@ const defaultFormatJsonText = (val: any) => {
   return String(val);
 };
 
+function ImageZoomViewer({ src, alt }: { src: string; alt?: string }) {
+  const [scale, setScale] = React.useState(1);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
+
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.25, 5));
+  const handleZoomOut = () => {
+    setScale((s) => {
+      const next = Math.max(s - 0.25, 1);
+      if (next === 1) setPosition({ x: 0, y: 0 });
+      return next;
+    });
+  };
+  const handleReset = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 0.15 : -0.15;
+    setScale((prevScale) => {
+      const newScale = Math.min(Math.max(prevScale + zoomFactor, 1), 5);
+      if (newScale === 1) setPosition({ x: 0, y: 0 });
+      return newScale;
+    });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (scale <= 1) return;
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPosition({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  const handleDoubleClick = () => {
+    if (scale > 1) {
+      handleReset();
+    } else {
+      setScale(2.5);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 1,
+        minHeight: 0,
+        width: '100%',
+        position: 'relative',
+        background: '#090d16',
+        borderRadius: '8px',
+        border: '1px solid var(--color-surface-light)',
+        overflow: 'hidden',
+        userSelect: 'none'
+      }}
+      onWheel={handleWheel}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'rgba(18, 18, 26, 0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid var(--color-surface-light)',
+          borderRadius: '8px',
+          padding: '4px 8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleZoomOut}
+          disabled={scale <= 1}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: scale <= 1 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+            cursor: scale <= 1 ? 'not-allowed' : 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Thu nhỏ (-)"
+        >
+          🔍-
+        </button>
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)', minWidth: '42px', textAlign: 'center' }}>
+          {Math.round(scale * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={handleZoomIn}
+          disabled={scale >= 5}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: scale >= 5 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+            cursor: scale >= 5 ? 'not-allowed' : 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Phóng to (+)"
+        >
+          🔍+
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--color-text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Đặt lại (Reset)"
+        >
+          🔄
+        </button>
+      </div>
+
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
+      >
+        <img
+          src={src}
+          alt={alt || 'Screenshot'}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '70vh',
+            borderRadius: '6px',
+            objectFit: 'contain',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+            transformOrigin: 'center center'
+          }}
+          draggable={false}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function AgentModals(props: any) {
   const {
     AgentPage,
@@ -2397,13 +2578,10 @@ export function AgentModals(props: any) {
                   )}
                 </div>
               ) : viewOutputModal.content && (typeof viewOutputModal.content === 'string') && (viewOutputModal.content.trim().startsWith('data:image/') || viewOutputModal.content.trim().startsWith('iVBORw0KGgo')) ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, minHeight: 0, overflow: 'auto', padding: '12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
-                  <img
-                    src={viewOutputModal.content.trim().startsWith('data:image/') ? viewOutputModal.content.trim() : `data:image/png;base64,${viewOutputModal.content.trim()}`}
-                    alt="Desktop Screenshot"
-                    style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: '6px', objectFit: 'contain', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}
-                  />
-                </div>
+                <ImageZoomViewer
+                  src={viewOutputModal.content.trim().startsWith('data:image/') ? viewOutputModal.content.trim() : `data:image/png;base64,${viewOutputModal.content.trim()}`}
+                  alt={viewOutputModal.title || 'Desktop Screenshot'}
+                />
               ) : (
                 <pre
                   ref={modalContentRef}
