@@ -1977,80 +1977,17 @@ export function AgentModals(props: any) {
               </div>
 
               <div style={styles.modalBody}>
-                {/* Driver Catalog Dropdown Selection */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
-                  <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
-                    📂 Chọn phiên bản Driver cần cài đặt từ Catalog:
-                  </label>
-                  {(() => {
-                    const catalogDrivers: { name: string; url: string; label: string; brand: string; model: string }[] = [];
-                    if (installDriverModal.suggestedDrivers && Array.isArray(installDriverModal.suggestedDrivers) && installDriverModal.suggestedDrivers.length > 0) {
-                      installDriverModal.suggestedDrivers.forEach((catItem: any) => {
-                        if (catItem.drivers && Array.isArray(catItem.drivers)) {
-                          catItem.drivers.forEach((drv: any) => {
-                            catalogDrivers.push({
-                              name: drv.name,
-                              url: drv.url,
-                              brand: catItem.brand,
-                              model: catItem.model,
-                              label: `[${String(catItem.brand || '').toUpperCase()} ${catItem.model}] ${drv.name}`
-                            });
-                          });
-                        }
-                      });
-                    }
-                    if (catalogDrivers.length === 0 && installDriverModal.driverName && installDriverModal.driverUrl) {
-                      catalogDrivers.push({
-                        name: installDriverModal.driverName,
-                        url: installDriverModal.driverUrl,
-                        brand: installDriverModal.brand || 'Ricoh',
-                        model: installDriverModal.model || 'Photocopy',
-                        label: installDriverModal.driverName
-                      });
-                    }
-
-                    if (catalogDrivers.length === 0) {
-                      return (
-                        <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-error)', fontStyle: 'italic', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px' }}>
-                          ⚠️ Không tìm thấy driver phù hợp nào cho thiết bị này trong Catalog.
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <select
-                        value={installDriverModal.driverUrl || catalogDrivers[0]?.url || ''}
-                        onChange={(e) => {
-                          const selected = catalogDrivers.find(d => d.url === e.target.value);
-                          if (selected) {
-                            setInstallDriverModal((prev: any) => ({
-                              ...prev,
-                              driverName: selected.name,
-                              driverUrl: selected.url,
-                              brand: selected.brand || prev.brand,
-                              model: selected.model || prev.model
-                            }));
-                          }
-                        }}
-                        style={{
-                          fontSize: '0.82rem',
-                          padding: '8px 10px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          border: '1px solid var(--color-surface-light)',
-                          borderRadius: '6px',
-                          width: '100%',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {catalogDrivers.map((drv, i) => (
-                          <option key={i} value={drv.url}>
-                            {drv.label}
-                          </option>
-                        ))}
-                      </select>
-                    );
-                  })()}
+                {/* Selected Driver Info */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px', background: 'var(--color-inset-bg)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--color-surface-light)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                    📦 Driver chọn cài đặt:
+                  </div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+                    {installDriverModal.brand ? `${String(installDriverModal.brand).toUpperCase()} — ` : ''}{installDriverModal.model || 'Photocopy'}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text)', wordBreak: 'break-all' }}>
+                    📄 Tệp Driver: <strong>{installDriverModal.driverName || installDriverModal.model || 'Driver'}</strong>
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
