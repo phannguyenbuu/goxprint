@@ -146,10 +146,12 @@ export const useAgentLanPrinters = (deps: any = {}) => {
               return matchedSite.lan_uid;
             }
           }
-          if (prev && rows.some((s: any) => s.lan_uid === prev)) return prev;
-          const firstUid = rows[0].lan_uid;
-          localStorage.setItem('goxprint_selected_lan_uid', firstUid);
-          return firstUid;
+          if (prev && rows.some((s: any) => s.lan_uid === prev && ((s.printers && s.printers.length > 0) || (s.agents && s.agents.length > 0)))) return prev;
+
+          const siteWithPrinters = rows.find((s: any) => (s.printers && s.printers.length > 0) || (s.agents && s.agents.length > 0));
+          const bestUid = siteWithPrinters ? siteWithPrinters.lan_uid : rows[0].lan_uid;
+          localStorage.setItem('goxprint_selected_lan_uid', bestUid);
+          return bestUid;
         });
       }
       if (isUserRefresh) showToast('Đã cập nhật danh sách mạng LAN', 'success');
@@ -197,9 +199,10 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     }
     if (selectedLanUid) {
       const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
-      if (siteByUid) return siteByUid;
+      if (siteByUid && ((siteByUid.printers && siteByUid.printers.length > 0) || (siteByUid.agents && siteByUid.agents.length > 0))) return siteByUid;
     }
-    return lanSites[0];
+    const siteWithPrinters = lanSites.find((site: any) => (site.printers && site.printers.length > 0) || (site.agents && site.agents.length > 0));
+    return siteWithPrinters || lanSites[0];
   }, [lanSites, selectedLanUid, selectedPublicIp]);
 
   const triggerLanScan = useCallback((lanData: any, isManual = true) => {
