@@ -770,7 +770,7 @@ export const useAgentScanActions = (deps: any = {}) => {
                     mac_id: pMac,
                     printer_name: printerObj?.printer_name || printerObj?.name || 'Photocopy',
                     ip: printerObj?.ip || '',
-                    agent_uid: targetAgent || agentUid || '',
+                    agent_uid: resolvedAgentUid || agentUid || activeAgentUid || '',
                     address_book_data: resultSync
                   })
                 }).catch(err => console.error('Failed to post scan points to VPS DB:', err));
