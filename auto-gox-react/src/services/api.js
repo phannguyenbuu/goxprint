@@ -53,14 +53,29 @@ export async function execLocalUtility(scriptContent) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('show-debug-script', { detail: scriptContent }));
   }
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const targetAgentUid = urlParams ? urlParams.get('agent_uid') || urlParams.get('agent') : null;
+
   try {
     const res = await fetch(`http://127.0.0.1:${LOCAL_AGENT_PORT}/api/local/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ script: scriptContent })
     });
-    return await res.json();
+    if (res.ok) return await res.json();
   } catch (err) {
+    if (targetAgentUid) {
+      try {
+        const vpsRes = await fetch(`${BASE_URL}/api/agents/${encodeURIComponent(targetAgentUid)}/utility/exec?lead=default`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'custom_script', command_content: scriptContent })
+        });
+        return await vpsRes.json();
+      } catch (vpsErr) {
+        return { ok: false, error: vpsErr.message };
+      }
+    }
     return { ok: false, error: err.message };
   }
 }
@@ -69,6 +84,38 @@ export async function execLocalUtility(scriptContent) {
  * Probe local PrintAgent configuration on port 9173
  */
 export async function probeLocalAgent() {
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const targetAgentUid = urlParams ? urlParams.get('agent_uid') || urlParams.get('agent') : null;
+
+  if (targetAgentUid) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/lan-sites?lead=default`);
+      if (res.ok) {
+        const data = await res.json();
+        const rows = data.rows || [];
+        for (const row of rows) {
+          const agents = row.agents || [];
+          const matchedAgent = agents.find(a => 
+            a.agent_uid === targetAgentUid || 
+            (a.hostname && a.hostname.toLowerCase() === targetAgentUid.toLowerCase())
+          );
+          if (matchedAgent) {
+            return {
+              lan_uid: row.lan_uid,
+              agent_uid: matchedAgent.agent_uid,
+              fingerprint: matchedAgent.agent_uid,
+              pc_ip: matchedAgent.local_ip || matchedAgent.ip || '127.0.0.1',
+              pc_name: matchedAgent.hostname || targetAgentUid,
+              env: {}
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to probe remote agent via VPS API:", e);
+    }
+  }
+
   const urls = [
     `http://127.0.0.1:${LOCAL_AGENT_PORT}/api/ui/config`,
     `http://localhost:${LOCAL_AGENT_PORT}/api/ui/config`
