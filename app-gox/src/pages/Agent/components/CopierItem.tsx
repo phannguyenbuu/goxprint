@@ -385,8 +385,6 @@ export function CopierItem({
                                       e.preventDefault();
                                       e.stopPropagation();
                                       handleRefetchAddressBook(p);
-                                      setTimeout(fetchFreshSync, 2000);
-                                      setTimeout(fetchFreshSync, 4500);
                                     }}
                                     disabled={isPending || onlineAgents.length === 0}
                                   >
