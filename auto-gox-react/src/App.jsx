@@ -78,7 +78,7 @@ export default function App() {
           }
         }, 3000);
 
-        // Show modal only after 60 seconds of failing
+        // Show modal after 10 seconds of failing
         setTimeout(() => {
           setLocalAgent(prev => {
             if (!prev) setIsAgentMissing(true);
@@ -86,7 +86,7 @@ export default function App() {
           });
           setIsAppReady(true);
           setInitStatusText('');
-        }, 60000);
+        }, 10000);
       } else {
         proceedWithScan(agent);
       }
