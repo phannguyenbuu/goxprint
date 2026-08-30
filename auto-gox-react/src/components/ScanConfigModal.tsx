@@ -303,7 +303,7 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         <div className="modal-footer">
           {!isProcessing && !isFinished ? (
             <button 
-              className="btn-primary" 
+              className="btn-submit-install install-scan" 
               onClick={handleStartProcess}
               disabled={selectedPrinterIds.length === 0}
             >
@@ -311,9 +311,10 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
             </button>
           ) : (
             <button 
-              className="btn-secondary" 
+              className="btn-submit-install" 
               onClick={onClose}
               disabled={isProcessing}
+              style={{ background: '#64748b' }}
             >
               {isProcessing ? 'Đang thực thi...' : 'Đóng cửa sổ'}
             </button>
