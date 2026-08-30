@@ -212,7 +212,16 @@ export const useAgentScanActions = (deps: any = {}) => {
 
     try {
       const allPrinters = (lanSites || []).flatMap((s: any) => s.printers || []);
-      const printerObj = allPrinters.find((item: any) => String(item.id) === String(printerId) || item.mac_id === printerId || item.ip === printerId) || selectedLan?.printers?.[0];
+      const cleanTargetId = String(printerId || '').toUpperCase().replace(/[:-]/g, '');
+      const printerObj = allPrinters.find((item: any) => {
+        const iId = String(item.id || '');
+        const iIp = String(item.ip || item.printer_ip || '');
+        const iMac = String(item.mac_address || item.mac_id || item.mac || '').toUpperCase().replace(/[:-]/g, '');
+        return iId === String(printerId) || iIp === printerId || (cleanTargetId && iMac === cleanTargetId);
+      }) || (allPrinters.find((item: any) => {
+        const n = (item.printer_name || item.name || item.brand || '').toLowerCase();
+        return n.includes('ricoh') || n.includes('toshiba');
+      })) || allPrinters[0];
       const macStr = (printerObj?.mac_address || printerObj?.mac_id || String(printerId) || '').toUpperCase().replace(/-/g, ':');
       const isToshiba = (printerObj?.printer_type || printerObj?.printer_name || printerObj?.brand || '').toLowerCase().includes('toshiba') || macStr.startsWith('00:80:91');
       const cmdName = isToshiba ? 'toshiba_delete_scan' : 'ricoh_delete_scan';
