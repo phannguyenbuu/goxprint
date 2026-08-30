@@ -183,6 +183,37 @@ export async function registerNetwork(lanUid, pcName, pcIp) {
  * Fetch printers from Local Agent
  */
 export async function fetchPrintersFromAgent(agentUid) {
+  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+  
+  if (isRemote || agentUid) {
+    try {
+      const vpsRes = await vpsFetch(`/api/new-lan-sites${agentUid ? '?agent_uid=' + agentUid : ''}`);
+      if (vpsRes.ok) {
+        const data = await vpsRes.json();
+        const rows = data.rows || data.lan_sites || [];
+        let printers = [];
+        rows.forEach(site => {
+          if (site.printers && site.printers.length > 0) {
+            printers = printers.concat(site.printers);
+          }
+        });
+        if (printers.length > 0) {
+          return printers.map(p => ({
+            id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
+            name: p.printer_name || p.name || p.make_and_model || 'Unknown Printer',
+            ip: p.ip || p.printer_ip || '0.0.0.0',
+            mac: p.mac_address || p.mac_id || p.mac || '',
+            type: p.printer_type || p.brand || 'Unknown',
+            status: 'online',
+            is_online: true
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn("Fetch printers from VPS failed", err);
+    }
+  }
+
   try {
     if (navigator.onLine) {
       await syncUtiCommands();
