@@ -232,6 +232,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
     def get_new_lan_sites() -> Any:
         lead = _to_text(request.args.get("lead")) or "default"
         req_lan_uid = _to_text(request.args.get("lan_uid"))
+        req_pub_ip = _to_text(request.args.get("public_ip") or request.args.get("ip") or request.args.get("wan_ip"))
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
@@ -245,6 +246,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             except Exception:
                 pass
 
+        # Target IP filter: if requested via query parameter or lan_uid
+        target_ip_filter = req_pub_ip
+        if not target_ip_filter and req_lan_uid and req_lan_uid.startswith("pub_"):
+            target_ip_filter = req_lan_uid.replace("pub_", "").replace("_", ".")
+
         # 1. Group active agents by Public IP (or WAN IP)
         agents_by_pub_ip = defaultdict(list)
         for a_uid, a_info in ACTIVE_AGENTS.items():
@@ -252,40 +258,45 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 a_pub = (a_info.get("public_ip") or a_info.get("wan_ip") or a_info.get("ip") or "").strip()
                 a_loc = (a_info.get("local_ip") or "").strip()
                 
-                # Strict security check: if client_ip is present and NOT whitelisted in DB, ONLY include agents matching client_ip
-                if client_ip and not is_whitelisted:
+                # Strict check: if target_ip_filter is specified by user, strictly match target_ip_filter
+                if target_ip_filter:
+                    if a_pub != target_ip_filter and a_loc != target_ip_filter:
+                        continue
+                # Otherwise if client_ip is present and NOT whitelisted in DB, ONLY include agents matching client_ip
+                elif client_ip and not is_whitelisted:
                     if a_pub != client_ip and a_loc != client_ip:
                         continue
 
-                agents_by_pub_ip[a_pub].append({
-                    "agent_uid": a_uid,
-                    "hostname": a_info.get("hostname", "") or a_uid,
-                    "local_ip": a_info.get("local_ip", ""),
-                    "local_mac": a_info.get("local_mac", ""),
-                    "public_ip": a_pub,
-                    "wan_ip": a_pub,
-                    "lan_uid": a_info.get("lan_uid", "default"),
-                    "app_version": a_info.get("app_version", ""),
-                    "run_mode": a_info.get("run_mode", "web"),
-                    "web_port": a_info.get("web_port", 9173),
-                    "is_master": True,
-                    "is_agent_active": True,
-                    "is_online": True,
-                })
+                if a_pub:
+                    agents_by_pub_ip[a_pub].append({
+                        "agent_uid": a_uid,
+                        "hostname": a_info.get("hostname", "") or a_uid,
+                        "local_ip": a_info.get("local_ip", ""),
+                        "local_mac": a_info.get("local_mac", ""),
+                        "public_ip": a_pub,
+                        "wan_ip": a_pub,
+                        "lan_uid": a_info.get("lan_uid", "default"),
+                        "app_version": a_info.get("app_version", ""),
+                        "run_mode": a_info.get("run_mode", "web"),
+                        "web_port": a_info.get("web_port", 9173),
+                        "is_master": True,
+                        "is_agent_active": True,
+                        "is_online": True,
+                    })
 
         # 2. Collect printers for each Public IP
         pub_ip_keys = list(agents_by_pub_ip.keys())
+        if target_ip_filter and target_ip_filter not in pub_ip_keys:
+            pub_ip_keys = [target_ip_filter]
 
         rows = []
         for pub_ip in pub_ip_keys:
+            if not pub_ip:
+                continue
             lan_agents = agents_by_pub_ip.get(pub_ip, [])
 
-            # Get raw printers from NEW_LAN_SITES, agent's printers_json, AND PostgreSQL Printer DB table
+            # Get raw printers ONLY from agents belonging to this pub_ip (Do NOT dump all NEW_LAN_SITES!)
             raw_printers = []
-            for site_k, site_p in NEW_LAN_SITES.items():
-                if isinstance(site_p, list):
-                    raw_printers.extend(site_p)
-            
             for a_item in lan_agents:
                 a_uid = a_item["agent_uid"]
                 a_info = ACTIVE_AGENTS.get(a_uid, {})
@@ -349,19 +360,20 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 p_copy["agent_uid"] = matching_agent_uid
                 clean_lan_printers.append(p_copy)
 
-            agent_hosts = ", ".join([a["hostname"] for a in lan_agents if a.get("hostname")]) or pub_ip
-            site_key = f"pub_{pub_ip.replace('.', '_')}"
+            if lan_agents or clean_lan_printers:
+                agent_hosts = ", ".join([a["hostname"] for a in lan_agents if a.get("hostname")]) or pub_ip
+                site_key = f"pub_{pub_ip.replace('.', '_')}"
 
-            rows.append({
-                "lead": lead,
-                "lan_uid": site_key,
-                "lan_name": f"Mạng LAN ({agent_hosts})",
-                "public_ip": pub_ip,
-                "active_agents": len(lan_agents),
-                "agents": lan_agents,
-                "emails": [],
-                "printers": clean_lan_printers
-            })
+                rows.append({
+                    "lead": lead,
+                    "lan_uid": site_key,
+                    "lan_name": f"Mạng LAN ({agent_hosts})",
+                    "public_ip": pub_ip,
+                    "active_agents": len(lan_agents),
+                    "agents": lan_agents,
+                    "emails": [],
+                    "printers": clean_lan_printers
+                })
 
         from admin_public_ip_routes import get_active_public_ips
         active_ips = get_active_public_ips(session_factory)
@@ -652,7 +664,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
                 if db_a.agent_uid not in existing_uids:
                     site_obj = existing_lan_map.get(a_lan_uid)
-                    site_pub = (getattr(site_obj, "public_ip", "") if site_obj else "") or client_ip
+                    site_pub = getattr(site_obj, "public_ip", "") if site_obj else ""
                     db_pub_ip = getattr(db_a, "public_ip", "") or getattr(db_a, "wan_ip", "") or site_pub
                     agent_dict = {
                         "agent_uid": db_a.agent_uid,
