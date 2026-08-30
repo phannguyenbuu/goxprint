@@ -140,8 +140,8 @@ _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent
 safe_print("Seed Reboot PC STDOUT:", out.read().decode('utf-8', errors='ignore'))
 safe_print("Seed Reboot PC STDERR:", err.read().decode('utf-8', errors='ignore'))
 
-print("Restarting printagent service on remote VPS...")
-_, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent')
+print("Restarting printagent service and reloading nginx on remote VPS...")
+_, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent; systemctl reload nginx')
 safe_print("Restart STDOUT:", out.read().decode('utf-8', errors='ignore'))
 safe_print("Restart STDERR:", err.read().decode('utf-8', errors='ignore'))
 
