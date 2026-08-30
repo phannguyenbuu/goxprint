@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPrintersFromAgent, installDriverApi, testPrinterLoginApi, trackCommandProgressPromise } from '../services/api';
+import { fetchPrintersFromAgent, installDriverApi, testPrinterLoginApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
 import { loadDriverCatalogs, matchPrinterDrivers } from '../utils/drivers';
 
 interface DriverInstallModalProps {
@@ -161,17 +161,45 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
 
       try {
         const res = await installDriverApi(p.id, driverInfo.brand, driverInfo.model, driverInfo.name, driverInfo.url, localAgent?.agent_uid);
+        let finalStatus = 'failed';
+        let finalOutput = '';
+
         if (res.ok && res.command_id) {
            setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, detail: 'Đang tải gói cài đặt và đăng ký Driver Windows...' } : s));
            const result = await trackCommandProgressPromise(res.command_id);
            if (result.success) {
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'success', detail: result.message || 'Cài đặt Driver hoàn tất!' } : s));
+              finalStatus = 'success';
+              finalOutput = result.message || 'Cài đặt Driver hoàn tất!';
+              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'success', detail: finalOutput } : s));
            } else {
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: result.message || 'Thất bại khi cài đặt' } : s));
+              finalStatus = 'failed';
+              finalOutput = result.message || 'Thất bại khi cài đặt';
+              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
            }
         } else {
-           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: res.error || 'Lỗi gửi lệnh cài driver' } : s));
+           finalStatus = 'failed';
+           finalOutput = res.error || 'Lỗi gửi lệnh cài driver';
+           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
         }
+
+        // Record Job & Log to VPS database
+        recordJobToVpsApi({
+          agentUid: localAgent?.agent_uid,
+          printerName: p.name,
+          ip: p.ip,
+          commandType: 'install_driver',
+          commandParams: {
+            action: 'install_driver',
+            brand: driverInfo.brand,
+            model: driverInfo.model,
+            driver_name: driverInfo.name,
+            driver_url: driverInfo.url,
+            printer_ip: p.ip
+          },
+          status: finalStatus,
+          output: finalOutput,
+          errorMessage: finalStatus === 'success' ? '' : finalOutput
+        });
       } catch (err: any) {
         setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: err.message || 'Lỗi không xác định' } : s));
       }

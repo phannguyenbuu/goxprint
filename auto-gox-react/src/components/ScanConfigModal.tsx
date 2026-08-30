@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPrintersFromAgent, installScanApi, testPrinterLoginApi, addLanEmailApi, trackCommandProgressPromise } from '../services/api';
+import { fetchPrintersFromAgent, installScanApi, testPrinterLoginApi, addLanEmailApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
 
 interface ScanConfigModalProps {
   localAgent: any;
@@ -134,12 +134,32 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
 
       try {
         const res = await installScanApi(p.ip, p.type, scanName, localAgent?.agent_uid, printerUser, printerPass);
-        
+        let finalStatus = 'failed';
+        let finalOutput = '';
+
         // Check for WIM tunnel HTML non-JSON response safely
         if (res && res.error && (res.error.includes('Unexpected token') || res.error.includes('Tunnel Pro'))) {
            const safeMsg = '⚠️ Không thể gửi lệnh qua đường hầm WIM máy in. Vui lòng thực hiện trên máy có Agent local :9173.';
            setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: safeMsg } : s));
            if (showToast) showToast(safeMsg, 'warning');
+           
+           recordJobToVpsApi({
+             agentUid: localAgent?.agent_uid,
+             printerName: p.name,
+             ip: p.ip,
+             commandType: 'trigger_utility',
+             commandParams: {
+               action: 'exec_utility',
+               command: p.type?.toLowerCase() === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan',
+               printer_ip: p.ip,
+               auth_user: printerUser,
+               auth_password: printerPass,
+               target_name: scanName
+             },
+             status: 'failed',
+             output: safeMsg,
+             errorMessage: safeMsg
+           });
            continue;
         }
 
@@ -147,13 +167,38 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
            setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, detail: 'Đang khởi tạo cổng FTP local & Đăng ký danh bạ máy in...' } : s));
            const result = await trackCommandProgressPromise(res.command_id);
            if (result.success) {
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'success', detail: result.message || 'Cấu hình điểm Scan hoàn tất!' } : s));
+              finalStatus = 'success';
+              finalOutput = result.message || 'Cấu hình điểm Scan hoàn tất!';
+              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'success', detail: finalOutput } : s));
            } else {
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: result.message || 'Thất bại khi tạo điểm Scan' } : s));
+              finalStatus = 'failed';
+              finalOutput = result.message || 'Thất bại khi tạo điểm Scan';
+              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
            }
         } else {
-           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: res.error || 'Lỗi cấu hình Scan' } : s));
+           finalStatus = 'failed';
+           finalOutput = res.error || res.logs || 'Lỗi cấu hình Scan';
+           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
         }
+
+        // Record Job & Log to VPS database
+        recordJobToVpsApi({
+          agentUid: localAgent?.agent_uid,
+          printerName: p.name,
+          ip: p.ip,
+          commandType: 'trigger_utility',
+          commandParams: {
+            action: 'exec_utility',
+            command: p.type?.toLowerCase() === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan',
+            printer_ip: p.ip,
+            auth_user: printerUser,
+            auth_password: printerPass,
+            target_name: scanName
+          },
+          status: finalStatus,
+          output: finalOutput,
+          errorMessage: finalStatus === 'success' ? '' : finalOutput
+        });
       } catch (err: any) {
         setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: err.message || 'Lỗi không xác định' } : s));
       }

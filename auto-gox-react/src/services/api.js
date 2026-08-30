@@ -2,6 +2,37 @@ export const LOCAL_AGENT_PORT = 9173;
 export const BASE_URL = 'https://agentapi.quanlymay.com';
 
 /**
+ * Record job & logs to VPS database (so it appears on app-gox job history)
+ */
+export async function recordJobToVpsApi({ agentUid, printerName, ip, commandType, commandParams, status, output, errorMessage }) {
+  try {
+    const res = await fetch(`${BASE_URL}/api/jobs/record`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Token': 'change-me'
+      },
+      body: JSON.stringify({
+        agent_uid: agentUid || 'administrator',
+        printer_name: printerName || 'AgentNode',
+        ip: ip || '0.0.0.0',
+        command_type: commandType || 'trigger_utility',
+        command_params: typeof commandParams === 'object' ? JSON.stringify(commandParams) : commandParams,
+        status: status || 'success',
+        output: output || '',
+        error_message: errorMessage || ''
+      })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Failed to record job to VPS API", err);
+  }
+  return null;
+}
+
+/**
  * vpsFetch with automatic header injection
  */
 export async function vpsFetch(endpoint, options = {}) {
