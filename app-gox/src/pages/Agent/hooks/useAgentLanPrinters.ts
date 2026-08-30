@@ -69,19 +69,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       const rows = data?.rows || (Array.isArray(data) ? data : []);
       setLanSites(rows);
 
-      // Auto-fill selectedPublicIp if empty
-      const storedIp = localStorage.getItem('goxprint_selected_public_ip');
-      if (!storedIp && rows.length > 0) {
-        for (const site of rows) {
-          const pubIp = (site.public_ip || site.wan_ip || (site.agents && site.agents[0]?.public_ip) || '').trim();
-          if (pubIp && pubIp !== '127.0.0.1') {
-            setSelectedPublicIp(pubIp);
-            localStorage.setItem('goxprint_selected_public_ip', pubIp);
-            break;
-          }
-        }
-      }
-
       try {
         const clientIp = (data?.client_ip || '').trim();
         if (clientIp) setMyClientIp(clientIp);
