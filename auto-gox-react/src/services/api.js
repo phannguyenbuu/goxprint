@@ -244,18 +244,42 @@ export async function installDriverApi(printerId, brand, model, driverName, driv
       body: JSON.stringify({ ip: printerId, printer_type: brand, name: model })
     });
     if (res.ok) {
-      // Mock command_id so PrinterModal can track it
       return { ok: true, command_id: 'local_driver_' + Date.now() };
     }
-    const data = await res.json();
-    return { ok: false, error: data.error || "Lỗi khi gọi API cài đặt nội bộ" };
   } catch (err) {
-    return { ok: false, error: "PrintAgent không phản hồi." };
+    // Local agent unreachable, fallback to VPS API below
   }
+
+  if (agentUid) {
+    try {
+      const vpsRes = await vpsFetch('/api/devices/install-driver', {
+        method: 'POST',
+        body: JSON.stringify({
+          agent_uid: agentUid,
+          printer_ip: printerId,
+          brand: brand,
+          model: model,
+          driver_name: driverName,
+          driver_url: driverUrl
+        })
+      });
+      const data = await vpsRes.json();
+      if (vpsRes.ok && data.command_id) {
+        return { ok: true, command_id: data.command_id, is_vps: true };
+      }
+      if (data && data.error) {
+        return { ok: false, error: data.error };
+      }
+    } catch (e) {
+      // fallback error
+    }
+  }
+
+  return { ok: false, error: "PrintAgent không phản hồi." };
 }
 
 /**
- * Scan Configuration API (Local using Cached uticommands)
+ * Scan Configuration API (Local using Cached uticommands with VPS fallback)
  */
 export async function installScanApi(printerIp, brand, folderName, agentUid, authUser = 'admin', authPass = '') {
   const brandName = brand ? brand.toLowerCase() : 'ricoh';
@@ -266,47 +290,57 @@ export async function installScanApi(printerIp, brand, folderName, agentUid, aut
   }
   let utiCmd = getUtiCommand(cmdName);
   
-  if (!utiCmd) {
-     // Fallback to PrintAgent's built-in endpoint if cache is empty
+  if (utiCmd) {
+    let script = utiCmd.command_content;
+    script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
+    script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
+    script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
+    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
+    script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
+
+    try {
+      const res = await execLocalUtility(script);
+      if (res.ok) {
+          const out = res.result_payload || res.output || '';
+          if (out.includes('[-] LỖI') || out.includes('[-]')) {
+             return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\n').filter(l => l.includes('[-]')).join(' ') };
+          }
+          return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
+      }
+    } catch (err) {
+      // Local execution failed, fallback to VPS API below
+    }
+  }
+
+  // Fallback to VPS API if local agent is unavailable or remote WIM iframe access
+  if (agentUid) {
      try {
-       const baseUrl = getLocalAgentBaseUrl();
-       const res = await fetch(`${baseUrl}/api/local/install-scan`, {
+       const vpsRes = await vpsFetch('/api/utility/trigger', {
          method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ ip: printerIp, printer_type: brand, name: folderName, auth_user: authUser, auth_pass: authPass }) // 'name' maps to folder
+         body: JSON.stringify({
+           agent_uid: agentUid,
+           command: cmdName,
+           printer_ip: printerIp,
+           auth_user: authUser || 'admin',
+           auth_password: authPass || '',
+           target_name: folderName || 'null'
+         })
        });
-       if (res.ok) {
-         return { ok: true, command_id: 'local_scan_' + Date.now() };
+       const data = await vpsRes.json();
+       if (vpsRes.ok && data.command_id) {
+          return { ok: true, command_id: data.command_id, is_vps: true };
        }
-       const data = await res.json();
-       return { ok: false, error: data.error };
+       if (data && data.error) {
+          return { ok: false, error: data.error };
+       }
      } catch (e) {
-       return { ok: false, error: "Không tìm thấy bộ nhớ đệm uticommands và PrintAgent không phản hồi." };
+       // fallback error
      }
   }
 
-  // Execute using python template
-  let script = utiCmd.command_content;
-  script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
-  script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
-  script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
-  script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
-  script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
-
-  try {
-    const res = await execLocalUtility(script);
-    if (res.ok) {
-        const out = res.result_payload || res.output || '';
-        if (out.includes('[-] LỖI') || out.includes('[-]')) {
-           return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\\n').filter(l => l.includes('[-]')).join(' ') };
-        }
-        return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
-    }
-    return { ok: false, error: res.error || "Lỗi khi thực thi Python nội bộ" };
-  } catch (err) {
-    return { ok: false, error: "PrintAgent không phản hồi." };
-  }
+  return { ok: false, error: "PrintAgent local :9173 không phản hồi và không thể kết nối VPS API." };
 }
+
 export async function testPrinterLoginApi(printerIp, brand, user, pass) {
   const brandName = brand ? brand.toLowerCase() : 'ricoh';
   
