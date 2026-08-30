@@ -118,10 +118,10 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
 
     targets.forEach(p => {
        steps.push({
-         id: `scan_${p.id}`,
-         title: `Cấu hình Scan to Folder cho ${p.name}`,
+         stepId: `scan_${p.id}`,
+         text: `Cấu hình Scan to Folder cho ${p.name}`,
          status: 'pending',
-         detail: 'Đang chờ thực thi...'
+         subText: 'Đang chờ thực thi...'
        });
     });
     setProcessSteps(steps);
@@ -130,7 +130,7 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
       const p = targets[i];
       const stepId = `scan_${p.id}`;
 
-      setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'running', detail: 'Đang gửi lệnh tạo điểm Scan...' } : s));
+      setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'running', subText: 'Đang gửi lệnh tạo điểm Scan...' } : s));
 
       try {
         const res = await installScanApi(p.ip, p.type, scanName, localAgent?.agent_uid, printerUser, printerPass);
@@ -140,7 +140,7 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         // Check for WIM tunnel HTML non-JSON response safely
         if (res && res.error && (res.error.includes('Unexpected token') || res.error.includes('Tunnel Pro'))) {
            const safeMsg = '⚠️ Không thể gửi lệnh qua đường hầm WIM máy in. Vui lòng thực hiện trên máy có Agent local :9173.';
-           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: safeMsg } : s));
+           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: safeMsg } : s));
            if (showToast) showToast(safeMsg, 'warning');
            
            recordJobToVpsApi({
@@ -164,21 +164,21 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         }
 
         if (res.ok && res.command_id) {
-           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, detail: 'Đang khởi tạo cổng FTP local & Đăng ký danh bạ máy in...' } : s));
+           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: 'Đang khởi tạo cổng FTP local & Đăng ký danh bạ máy in...' } : s));
            const result = await trackCommandProgressPromise(res.command_id);
            if (result.success) {
               finalStatus = 'success';
               finalOutput = result.message || 'Cấu hình điểm Scan hoàn tất!';
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'success', detail: finalOutput } : s));
+              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'success', subText: finalOutput } : s));
            } else {
               finalStatus = 'failed';
               finalOutput = result.message || 'Thất bại khi tạo điểm Scan';
-              setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
+              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
            }
         } else {
            finalStatus = 'failed';
            finalOutput = res.error || res.logs || 'Lỗi cấu hình Scan';
-           setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: finalOutput } : s));
+           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
         }
 
         // Record Job & Log to VPS database
@@ -200,7 +200,7 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
           errorMessage: finalStatus === 'success' ? '' : finalOutput
         });
       } catch (err: any) {
-        setProcessSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: 'error', detail: err.message || 'Lỗi không xác định' } : s));
+        setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: err.message || 'Lỗi không xác định' } : s));
       }
 
       if (scanEmail) {
@@ -218,39 +218,54 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
 
   return (
     <div className="modal-overlay">
-      <div className="modal-container">
+      <div className="modal-card">
         <div className="modal-header">
-          <h2>Cấu hình Scan to Folder</h2>
-          <button className="btn-close" onClick={onClose}>✕</button>
+          <h3 className="modal-title">Cấu hình Scan to Folder</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
         <div className="modal-body">
           {!isProcessing && !isFinished ? (
             <>
-              <div className="printer-selection-section">
-                <label className="section-label">1. Chọn máy photocopy cần tạo điểm Scan</label>
-                {loadingPrinters ? (
-                  <div className="loading-state">Đang dò tìm danh sách máy in trong mạng LAN...</div>
-                ) : printers.length === 0 ? (
-                  <div className="empty-state">Không tìm thấy máy in tương thích.</div>
-                ) : (
-                  <div className="printer-list">
-                    {printers.map(p => (
-                      <div key={p.id} className={`printer-card ${selectedPrinterIds.includes(p.id) ? 'selected' : ''}`} onClick={() => handleTogglePrinter(p.id)}>
-                        <div className="printer-checkbox">
-                          <input type="checkbox" checked={selectedPrinterIds.includes(p.id)} onChange={() => {}} />
-                        </div>
-                        <div className="printer-info">
-                          <span className="printer-name">{p.name}</span>
-                          <span className="printer-ip">IP: {p.ip}</span>
-                        </div>
-                      </div>
-                    ))}
+              <div style={{ marginBottom: '20px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <label className="form-label" style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>1. Tài khoản WIM máy in (Để Đăng ký Danh bạ)</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    style={{ flex: 1 }} 
+                    placeholder="Tên đăng nhập (VD: admin)" 
+                    value={printerUser} 
+                    onChange={e => setPrinterUser(e.target.value)} 
+                  />
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    style={{ flex: 1 }} 
+                    placeholder="Mật khẩu" 
+                    value={printerPass} 
+                    onChange={e => setPrinterPass(e.target.value)} 
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-test-auth" 
+                    onClick={handleTestAuth} 
+                    disabled={testingAuth}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {testingAuth ? 'Đang test...' : 'Test Pass'}
+                  </button>
+                  {testAuthStatus === 'success' && <span style={{ color: 'green', fontSize: '18px', fontWeight: 'bold' }}>✅</span>}
+                  {testAuthStatus === 'error' && <span style={{ color: 'red', fontSize: '18px', fontWeight: 'bold' }}>❌</span>}
+                </div>
+                {testAuthStatus === 'error' && testAuthErrorMsg && (
+                  <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: 'bold' }}>
+                    Lỗi: {testAuthErrorMsg}
                   </div>
                 )}
               </div>
 
-              <div className="scan-config-form" style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ marginBottom: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label className="form-label" style={{ fontSize: '13px', fontWeight: 600 }}>Tên thư mục Scan</label>
                   <input 
@@ -273,72 +288,75 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
                 </div>
               </div>
 
-              <div className="auth-section" style={{ marginTop: '16px', padding: '16px', background: '#f8fafc', borderRadius: '12px' }}>
-                <label className="section-label" style={{ marginBottom: '8px', display: 'block' }}>2. Tài khoản WIM máy in (Để Đăng ký Danh bạ)</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px', alignItems: 'center' }}>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Tên đăng nhập (VD: admin)" 
-                    value={printerUser} 
-                    onChange={e => setPrinterUser(e.target.value)} 
-                  />
-                  <input 
-                    type="password" 
-                    className="form-input" 
-                    placeholder="Mật khẩu" 
-                    value={printerPass} 
-                    onChange={e => setPrinterPass(e.target.value)} 
-                  />
-                  <button 
-                    type="button" 
-                    className="btn-test-auth" 
-                    onClick={handleTestAuth} 
-                    disabled={testingAuth}
-                    style={{ background: '#475569', color: 'white', border: 'none', borderRadius: '8px', padding: '0 16px', height: '40px', fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    {testingAuth ? 'Đang test...' : 'Test Pass'}
-                  </button>
-                </div>
-                {testAuthStatus === 'success' && <div style={{ color: '#16a34a', fontSize: '13px', marginTop: '6px', fontWeight: 600 }}>✅ Đăng nhập máy in thành công!</div>}
-                {testAuthStatus === 'error' && <div style={{ color: '#dc2626', fontSize: '13px', marginTop: '6px', fontWeight: 600 }}>❌ {testAuthErrorMsg}</div>}
+              <p>
+                <strong>2. Chọn máy photocopy cần tạo điểm Scan</strong><br />
+                <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Hệ thống tự động khởi tạo cổng FTP local và chèn vị trí danh bạ máy photo.</span>
+              </p>
+
+              <div className="modal-printers-grid">
+                {loadingPrinters ? (
+                  <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>Đang quét thiết bị...</div>
+                ) : printers.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>🖨️</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Không tìm thấy máy photocopy tương thích.</div>
+                  </div>
+                ) : (
+                  printers.map(p => {
+                    const isChecked = selectedPrinterIds.includes(p.id);
+
+                    return (
+                      <label key={p.id} className={`printer-checkbox-item ${isChecked ? 'selected' : ''}`}>
+                        <input type="checkbox" className="printer-checkbox-input" checked={isChecked} onChange={() => handleTogglePrinter(p.id)} />
+                        <div style={{ flex: 1, display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <div style={{ flex: 1.5 }}>
+                            <div style={{ fontWeight: 600, fontSize: '14px', wordBreak: 'break-word' }}>{p.name}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>IP: {p.ip} {p.mac ? `• MAC: ${p.mac}` : ''}</div>
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
               </div>
             </>
           ) : (
-            <div className="progress-section">
-              <h3 style={{ marginBottom: '16px' }}>Tiến trình Cấu hình Scan</h3>
-              <div className="steps-list">
-                {processSteps.map(step => (
-                  <div key={step.id} className={`step-item ${step.status}`}>
-                    <div className="step-icon">
-                      {step.status === 'running' && '⏳'}
-                      {step.status === 'success' && '✅'}
-                      {step.status === 'error' && '❌'}
-                      {step.status === 'pending' && '⚪'}
-                    </div>
-                    <div className="step-content">
-                      <span className="step-title">{step.title}</span>
-                      <span className="step-detail">{step.detail}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {debugScript && (
-                <div style={{ marginTop: '20px', textAlign: 'left' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Log thực thi Python:</label>
-                  <pre style={{ background: '#0f172a', color: '#38bdf8', padding: '12px', borderRadius: '8px', fontSize: '11px', maxHeight: '180px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
-                    {debugScript}
-                  </pre>
+            <div className="progress-status-box">
+              {processSteps.map(step => (
+                <div key={step.stepId} style={{ marginBottom: '6px' }}>
+                  <span style={{ color: step.status === 'failed' ? '#ef4444' : (step.status === 'success' ? '#10b981' : '#38bdf8') }}>
+                    [{step.status.toUpperCase()}]
+                  </span> {step.text} - {step.subText}
                 </div>
-              )}
+              ))}
+            </div>
+          )}
+
+          {debugScript && (
+            <div style={{ marginTop: '15px', background: '#1e1e1e', borderRadius: '6px', padding: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ color: '#00ff00', fontSize: '13px', fontWeight: 'bold' }}>Debug Script</span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => { navigator.clipboard.writeText(debugScript); if(showToast) showToast('Đã copy code!', 'success'); }} style={{ background: '#007bff', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Copy</button>
+                  <button onClick={() => setDebugScript(null)} style={{ background: '#dc3545', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Đóng</button>
+                </div>
+              </div>
+              <textarea
+                readOnly
+                value={debugScript}
+                style={{
+                  width: '100%', height: '120px', background: '#000', color: '#00ff00',
+                  fontFamily: 'monospace', fontSize: '11px', padding: '8px',
+                  border: '1px solid #333', borderRadius: '4px', resize: 'vertical'
+                }}
+              />
             </div>
           )}
         </div>
 
         <div className="modal-footer">
           {!isProcessing && !isFinished ? (
-            <button className="btn-submit-install install-scan" onClick={handleStartProcess} disabled={selectedPrinterIds.length === 0}>
+            <button className="btn-submit-install install-scan" disabled={selectedPrinterIds.length === 0 || loadingPrinters} onClick={handleStartProcess}>
               Tạo điểm Scan ngay
             </button>
           ) : (
