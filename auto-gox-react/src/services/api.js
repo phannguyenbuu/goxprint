@@ -202,84 +202,74 @@ export async function registerNetwork(lanUid, pcName, pcIp) {
  * Fetch printers from Local Agent
  */
 export async function fetchPrintersFromAgent(agentUid) {
-  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-  
-  if (isRemote || agentUid) {
-    try {
-      const vpsRes = await vpsFetch(`/api/new-lan-sites${agentUid ? '?agent_uid=' + agentUid : ''}`);
-      if (vpsRes.ok) {
-        const data = await vpsRes.json();
-        const rows = data.rows || data.lan_sites || [];
-        let printers = [];
-        rows.forEach(site => {
-          if (site.printers && site.printers.length > 0) {
-            printers = printers.concat(site.printers);
-          }
-        });
-        if (printers.length > 0) {
-          return printers.map(p => ({
-            id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
-            name: p.printer_name || p.name || p.make_and_model || 'Unknown Printer',
-            ip: p.ip || p.printer_ip || '0.0.0.0',
-            mac: p.mac_address || p.mac_id || p.mac || '',
-            type: p.printer_type || p.brand || 'Unknown',
-            status: 'online',
-            is_online: true
-          }));
+  // 1. Try fetching live scanned printers from VPS API (/api/new-lan-sites)
+  try {
+    const endpoint = `/api/new-lan-sites${agentUid ? '?agent_uid=' + agentUid : ''}`;
+    const vpsRes = await vpsFetch(endpoint);
+    if (vpsRes && vpsRes.ok) {
+      const data = await vpsRes.json();
+      const rows = data.rows || data.lan_sites || [];
+      let printers = [];
+      rows.forEach(site => {
+        if (site.printers && site.printers.length > 0) {
+          printers = printers.concat(site.printers);
         }
+      });
+      if (printers.length > 0) {
+        return printers.map(p => ({
+          id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
+          name: p.printer_name || p.name || p.make_and_model || 'Unknown Printer',
+          ip: p.ip || p.printer_ip || '0.0.0.0',
+          mac: p.mac_address || p.mac_id || p.mac || '',
+          type: p.printer_type || p.brand || 'Unknown',
+          status: 'online',
+          is_online: true
+        }));
       }
-    } catch (err) {
-      console.warn("Fetch printers from VPS failed", err);
     }
+  } catch (err) {
+    console.warn("Fetch printers from VPS failed", err);
   }
 
+  // 2. Fallback to Local Agent execution on :9173 if VPS returned empty
   try {
     if (navigator.onLine) {
       await syncUtiCommands();
     }
     let utiCmd = getUtiCommand('force_subnet_scan');
-    if (!utiCmd) {
-       return [{ id: 'err_no_uti', name: '[Debug] Không tìm thấy lệnh force_subnet_scan trong cache', ip: '', type: 'error' }];
-    }
-    const pythonScript = utiCmd.command_content;
-
-    const baseUrl = getLocalAgentBaseUrl();
-    const res = await fetch(`${baseUrl}/api/local/exec`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script: pythonScript })
-    });
-    
-    if (res.ok) {
-      const execData = await res.json();
-      if (execData && execData.ok && execData.result_payload) {
-        let devices = [];
-        try { devices = JSON.parse(execData.result_payload); } catch (e) {}
-        
-        if (devices.length === 0) {
-           return [{ id: 'empty1', name: '[Debug] Deep Scan không tìm thấy máy in nào', ip: '127.0.0.1', type: 'error' }];
+    if (utiCmd) {
+      const pythonScript = utiCmd.command_content;
+      const baseUrl = getLocalAgentBaseUrl();
+      const res = await fetch(`${baseUrl}/api/local/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script: pythonScript })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const output = data.result_payload || data.output || '';
+        const jsonMatch = output.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (jsonMatch) {
+          const list = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(list) && list.length > 0) {
+            return list.map(p => ({
+              id: p.id || p.mac_address || Math.random().toString(36).substr(2, 9),
+              name: p.printer_name || p.name || 'Unknown Printer',
+              ip: p.ip || '0.0.0.0',
+              mac: p.mac_address || p.mac_id || '',
+              type: p.printer_type || p.brand || 'Unknown',
+              status: 'online',
+              is_online: true
+            }));
+          }
         }
-        
-        return devices.map(p => ({
-           id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
-           name: p.make_and_model || p.model || p.name || p.printer_name || 'Unknown Printer',
-           ip: p.ip || p.printer_ip || '0.0.0.0',
-           mac: p.mac || p.mac_address || p.id || '',
-           type: p.brand || p.printer_type || 'Unknown',
-           status: p.status || 'online',
-           is_online: p.is_online !== undefined ? p.is_online : true,
-           last_seen: p.last_seen || ''
-        }));
-      } else {
-        return [{ id: 'err3', name: '[Debug] Lỗi thực thi Python: ' + (execData.error || 'Unknown'), ip: '', type: 'error' }];
       }
-    } else {
-      return [{ id: 'err1', name: '[Debug] HTTP Error: ' + res.status, ip: '', type: 'error' }];
     }
-  } catch (e) {
-    console.warn("Local PrintAgent exec failed.", e);
-    return [{ id: 'err2', name: '[Debug] Exception: ' + e.message, ip: '', type: 'error' }];
+  } catch (err) {
+    console.warn("Local agent scan fallback failed", err);
   }
+
+  return [];
 }
 
 /**
