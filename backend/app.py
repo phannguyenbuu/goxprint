@@ -990,7 +990,7 @@ def _safe_alter_table(session: Any, table_name: str, column_name: str, sql_type:
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
     _configure_server_logging()
     cfg = ServerConfig()
     session_factory = create_session_factory(cfg)
@@ -1176,6 +1176,9 @@ def create_app() -> Flask:
 
     @app.after_request
     def _after_request_log(response: Any) -> Any:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key, X-API-Token, x-api-key, x-api-token, Cache-Control, Pragma"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         try:
             path = request.path or ""
             if path.startswith("/api/"):

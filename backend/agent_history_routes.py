@@ -347,15 +347,16 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             error_message = _to_text(body.get("error_message"))
 
             from datetime import datetime, timezone
-            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S GMT+0")
+            from models import AgentNode
 
             with session_factory() as session:
                 agent = session.execute(
-                    select(AgentHistory).where(AgentHistory.agent_uid == agent_uid)
+                    select(AgentNode).where(AgentNode.agent_uid == agent_uid)
                 ).scalars().first()
                 
                 lan_uid = agent.lan_uid if agent else f"default_{agent_uid}"
                 lead = agent.lead if agent else "default"
+                now = datetime.now(timezone.utc)
 
                 command = PrinterControlCommand(
                     printer_id=0,
@@ -368,11 +369,9 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     command_type=command_type,
                     command_params=command_params,
                     status=status,
-                    output=output,
                     error_message=error_message or output,
-                    result_payload=output,
-                    requested_at=now_str,
-                    responded_at=now_str,
+                    requested_at=now,
+                    responded_at=now,
                 )
                 session.add(command)
                 session.commit()
