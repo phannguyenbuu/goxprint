@@ -325,12 +325,55 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
     def create_job_log() -> Any:
         body = request.get_json(silent=True) or {}
         event = _to_text(body.get("event"))
-        agent_uid = _to_text(body.get("agent_uid"))
+        agent_uid = _to_text(body.get("agent_uid")) or "administrator"
         old_ip = _to_text(body.get("old_ip"))
         new_ip = _to_text(body.get("new_ip"))
         log_text = _to_text(body.get("log_text"))
         LOGGER.info("[JOB LOG - %s] Agent: %s, Old IP: %s, New IP: %s - Text: %s", 
                     event, agent_uid, old_ip, new_ip, log_text)
+
+        # Record PrinterControlCommand job entry so it appears in AppGox Job History
+        try:
+            import json
+            from datetime import datetime, timezone
+            from models import AgentNode, PrinterControlCommand
+            with session_factory() as session:
+                agent = session.execute(
+                    select(AgentNode).where(AgentNode.agent_uid == agent_uid)
+                ).scalars().first()
+                lan_uid = agent.lan_uid if agent else f"default_{agent_uid}"
+                lead = agent.lead if agent else "default"
+                now = datetime.now(timezone.utc)
+
+                msg = log_text or f"⚡ Tự động cập nhật điểm scan do IP máy PC ({agent_uid}) đổi từ {old_ip} ➔ {new_ip}"
+                cmd_params = json.dumps({
+                    "event": event or "ip_changed",
+                    "agent_uid": agent_uid,
+                    "old_ip": old_ip,
+                    "new_ip": new_ip
+                })
+
+                command = PrinterControlCommand(
+                    printer_id=0,
+                    lead=lead,
+                    lan_uid=lan_uid,
+                    agent_uid=agent_uid,
+                    printer_name=f"AgentNode ({agent_uid})",
+                    ip=new_ip or "0.0.0.0",
+                    desired_enabled=True,
+                    command_type="ip_changed",
+                    command_params=cmd_params,
+                    status="success",
+                    error_message=msg,
+                    requested_at=now,
+                    responded_at=now,
+                )
+                session.add(command)
+                session.commit()
+                LOGGER.info("[JOB LOG] Saved IP change job record #%d into DB", command.id)
+        except Exception as db_exc:
+            LOGGER.warning("[JOB LOG DB SAVE ERROR] %s", db_exc)
+
         return jsonify({"ok": True})
 
     @app.post("/api/jobs/record")
