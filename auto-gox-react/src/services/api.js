@@ -50,6 +50,24 @@ export async function vpsFetch(endpoint, options = {}) {
 }
 
 /**
+ * Fetch copier credentials map from VPS (PrinterAuthCredential)
+ */
+export async function fetchCopierCredentialsApi() {
+  try {
+    const res = await vpsFetch('/api/devices/credentials-map');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok && data.credentials) {
+        return data.credentials;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch copier credentials map", err);
+  }
+  return {};
+}
+
+/**
  * Offline Sync: uticommands Cache
  */
 export async function syncUtiCommands() {

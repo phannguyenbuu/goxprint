@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPrintersFromAgent, installScanApi, testPrinterLoginApi, addLanEmailApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
+import { fetchPrintersFromAgent, installScanApi, addLanEmailApi, trackCommandProgressPromise, recordJobToVpsApi, fetchCopierCredentialsApi } from '../services/api';
 
 interface ScanConfigModalProps {
   localAgent: any;
@@ -12,18 +12,14 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
   const [printers, setPrinters] = useState<any[]>([]);
   const [loadingPrinters, setLoadingPrinters] = useState(true);
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const [copierCredentials, setCopierCredentials] = useState<Record<string, any>>({});
   
   const [scanName, setScanName] = useState(() => `Scangox_${Math.floor(Date.now() / 1000)}`);
   const [scanEmail, setScanEmail] = useState('');
-  const [printerUser, setPrinterUser] = useState('admin');
-  const [printerPass, setPrinterPass] = useState('');
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [processSteps, setProcessSteps] = useState<any[]>([]); 
   const [isFinished, setIsFinished] = useState(false);
-  const [testingAuth, setTestingAuth] = useState(false);
-  const [testAuthStatus, setTestAuthStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [testAuthErrorMsg, setTestAuthErrorMsg] = useState('');
   const [debugScript, setDebugScript] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,6 +33,13 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
   useEffect(() => {
     const initData = async () => {
       setLoadingPrinters(true);
+      
+      // Load copier auth credentials from VPS DB (PrinterAuthCredential)
+      const credsMap = await fetchCopierCredentialsApi();
+      if (credsMap) {
+        setCopierCredentials(credsMap);
+      }
+
       if (localAgent) {
         let data = preloadedPrinters;
         if (!data || data.length === 0) {
@@ -62,39 +65,6 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
     setSelectedPrinterIds(prev => 
       prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]
     );
-  };
-
-  const handleTestAuth = async () => {
-    if (selectedPrinterIds.length === 0) {
-      if (showToast) showToast('Vui lòng chọn ít nhất 1 máy photocopy để Test Password.', 'warning');
-      return;
-    }
-    const targetId = selectedPrinterIds[0];
-    const printer = printers.find(p => p.id === targetId);
-    if (!printer) return;
-    
-    setTestingAuth(true);
-    setTestAuthStatus('idle');
-    setTestAuthErrorMsg('');
-    setDebugScript(null);
-    if (showToast) showToast(`Đang kiểm tra đăng nhập trên ${printer.name}...`, 'info');
-    try {
-      const res = await testPrinterLoginApi(printer.ip, printer.type, printerUser, printerPass);
-      if (res.ok) {
-        if (showToast) showToast(`Đã test đăng nhập thành công trên ${printer.name}!`, 'success');
-        setTestAuthStatus('success');
-      } else {
-        if (showToast) showToast(`Lỗi đăng nhập: ${res.error || 'Sai thông tin'}`, 'error');
-        setTestAuthStatus('error');
-        setTestAuthErrorMsg(res.error || 'Sai thông tin');
-      }
-    } catch (e: any) {
-      if (showToast) showToast(`Lỗi không xác định khi kết nối máy in`, 'error');
-      setTestAuthStatus('error');
-      setTestAuthErrorMsg(e.toString());
-    } finally {
-      setTestingAuth(false);
-    }
   };
 
   const handleStartProcess = async () => {
@@ -130,7 +100,15 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
       const p = targets[i];
       const stepId = `scan_${p.id}`;
 
-      setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'running', subText: 'Đang gửi lệnh tạo điểm Scan...' } : s));
+      // Resolve copier auth user/pass automatically from VPS credentials map by MAC or IP
+      const rawMac = String(p.mac || p.mac_address || p.mac_id || '').toUpperCase();
+      const colMac = rawMac.replace(/-/g, ':');
+      const normMac = colMac.replace(/:/g, '');
+      const cred = copierCredentials[colMac] || copierCredentials[normMac] || copierCredentials[p.ip] || {};
+      const printerUser = cred.user || cred.auth_user || 'admin';
+      const printerPass = cred.password || cred.auth_password || '';
+
+      setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'running', subText: `Đang gửi lệnh tạo điểm Scan (User: ${printerUser})...` } : s));
 
       try {
         const res = await installScanApi(p.ip, p.type, scanName, localAgent?.agent_uid, printerUser, printerPass);
@@ -229,44 +207,6 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         <div className="modal-body">
           {!isProcessing && !isFinished ? (
             <>
-              <div style={{ marginBottom: '20px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                <label className="form-label" style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>1. Tài khoản WIM máy in (Để Đăng ký Danh bạ)</label>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    style={{ flex: 1 }} 
-                    placeholder="Tên đăng nhập (VD: admin)" 
-                    value={printerUser} 
-                    onChange={e => setPrinterUser(e.target.value)} 
-                  />
-                  <input 
-                    type="password" 
-                    className="form-input" 
-                    style={{ flex: 1 }} 
-                    placeholder="Mật khẩu" 
-                    value={printerPass} 
-                    onChange={e => setPrinterPass(e.target.value)} 
-                  />
-                  <button 
-                    type="button" 
-                    className="btn-test-auth" 
-                    onClick={handleTestAuth} 
-                    disabled={testingAuth}
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {testingAuth ? 'Đang test...' : 'Test Pass'}
-                  </button>
-                  {testAuthStatus === 'success' && <span style={{ color: 'green', fontSize: '18px', fontWeight: 'bold' }}>✅</span>}
-                  {testAuthStatus === 'error' && <span style={{ color: 'red', fontSize: '18px', fontWeight: 'bold' }}>❌</span>}
-                </div>
-                {testAuthStatus === 'error' && testAuthErrorMsg && (
-                  <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: 'bold' }}>
-                    Lỗi: {testAuthErrorMsg}
-                  </div>
-                )}
-              </div>
-
               <div style={{ marginBottom: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label className="form-label" style={{ fontSize: '13px', fontWeight: 600 }}>Tên thư mục Scan</label>
@@ -291,8 +231,8 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
               </div>
 
               <p>
-                <strong>2. Chọn máy photocopy cần tạo điểm Scan</strong><br />
-                <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Hệ thống tự động khởi tạo cổng FTP local và chèn vị trí danh bạ máy photo.</span>
+                <strong>Chọn máy photocopy cần tạo điểm Scan</strong><br />
+                <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Tài khoản Web máy in được tự động tải từ VPS (theo MAC/IP). Hệ thống tự động khởi tạo cổng FTP local và chèn danh bạ.</span>
               </p>
 
               <div className="modal-printers-grid">
@@ -323,47 +263,59 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
               </div>
             </>
           ) : (
-            <div className="progress-status-box">
-              {processSteps.map(step => (
-                <div key={step.stepId} style={{ marginBottom: '6px' }}>
-                  <span style={{ color: step.status === 'failed' ? '#ef4444' : (step.status === 'success' ? '#10b981' : '#38bdf8') }}>
-                    [{step.status.toUpperCase()}]
-                  </span> {step.text} - {step.subText}
+            <div className="process-steps-list">
+              {processSteps.map(s => (
+                <div key={s.stepId} className={`process-step-card ${s.status}`}>
+                  <div className="step-header">
+                    <div className="step-title">{s.text}</div>
+                    <div className={`step-badge ${s.status}`}>
+                      {s.status === 'pending' && 'Đang chờ'}
+                      {s.status === 'running' && 'Đang chạy...'}
+                      {s.status === 'success' && 'Hoàn thành'}
+                      {s.status === 'failed' && 'Thất bại'}
+                    </div>
+                  </div>
+                  <div className="step-subtext">{s.subText}</div>
                 </div>
               ))}
-            </div>
-          )}
 
-          {debugScript && (
-            <div style={{ marginTop: '15px', background: '#1e1e1e', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <span style={{ color: '#00ff00', fontSize: '13px', fontWeight: 'bold' }}>Debug Script</span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => { navigator.clipboard.writeText(debugScript); if(showToast) showToast('Đã copy code!', 'success'); }} style={{ background: '#007bff', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Copy</button>
-                  <button onClick={() => setDebugScript(null)} style={{ background: '#dc3545', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Đóng</button>
+              {debugScript && (
+                <div style={{ marginTop: '16px', background: '#1e293b', borderRadius: '8px', padding: '12px', color: '#f8fafc', fontSize: '11px', fontFamily: 'monospace' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, color: '#38bdf8' }}>Debug Script</span>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(debugScript);
+                        if (showToast) showToast('Đã copy Debug Script!', 'success');
+                      }}
+                      style={{ padding: '2px 8px', fontSize: '11px', background: '#334155', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>{debugScript}</pre>
                 </div>
-              </div>
-              <textarea
-                readOnly
-                value={debugScript}
-                style={{
-                  width: '100%', height: '120px', background: '#000', color: '#00ff00',
-                  fontFamily: 'monospace', fontSize: '11px', padding: '8px',
-                  border: '1px solid #333', borderRadius: '4px', resize: 'vertical'
-                }}
-              />
+              )}
             </div>
           )}
         </div>
 
         <div className="modal-footer">
           {!isProcessing && !isFinished ? (
-            <button className="btn-submit-install install-scan" disabled={selectedPrinterIds.length === 0 || loadingPrinters} onClick={handleStartProcess}>
-              Tạo điểm Scan ngay
+            <button 
+              className="btn-primary" 
+              onClick={handleStartProcess}
+              disabled={selectedPrinterIds.length === 0}
+            >
+              Thực hiện cài đặt ngay
             </button>
           ) : (
-            <button className="btn-submit-install" onClick={onClose} style={{ background: '#64748b' }}>
-              Đóng cửa sổ
+            <button 
+              className="btn-secondary" 
+              onClick={onClose}
+              disabled={isProcessing}
+            >
+              {isProcessing ? 'Đang thực thi...' : 'Đóng cửa sổ'}
             </button>
           )}
         </div>
