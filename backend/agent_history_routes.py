@@ -477,7 +477,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             search_q = _to_text(request.args.get("q"))
             
             with session_factory() as session:
-                stmt = select(PrinterControlCommand).order_by(PrinterControlCommand.id.desc())
+                stmt = select(PrinterControlCommand).order_by(PrinterControlCommand.requested_at.desc(), PrinterControlCommand.id.desc())
                 if lead:
                     stmt = stmt.where(PrinterControlCommand.lead == lead)
                 if lan_uid:
