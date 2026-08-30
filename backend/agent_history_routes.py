@@ -467,6 +467,10 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             lead = _to_text(request.args.get("lead"))
             lan_uid = _to_text(request.args.get("lan_uid"))
             agent_uid = _to_text(request.args.get("agent_uid"))
+            printer_q = _to_text(request.args.get("printer"))
+            cmd_type_q = _to_text(request.args.get("command_type"))
+            date_q = _to_text(request.args.get("date") or request.args.get("time"))
+            
             limit = _to_int(request.args.get("limit")) or 50
             limit = max(1, min(limit, 1000))
             page = _to_int(request.args.get("page")) or 1
@@ -482,8 +486,23 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     stmt = stmt.where(PrinterControlCommand.lead == lead)
                 if lan_uid:
                     stmt = stmt.where(PrinterControlCommand.lan_uid == lan_uid)
-                if agent_uid:
-                    stmt = stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+                if agent_uid and agent_uid.lower() != 'all':
+                    stmt = stmt.where(PrinterControlCommand.agent_uid.ilike(f"%{agent_uid}%"))
+                if printer_q:
+                    stmt = stmt.where(
+                        (PrinterControlCommand.printer_name.ilike(f"%{printer_q}%")) |
+                        (PrinterControlCommand.ip.ilike(f"%{printer_q}%"))
+                    )
+                if cmd_type_q and cmd_type_q.lower() != 'all':
+                    stmt = stmt.where(PrinterControlCommand.command_type.ilike(f"%{cmd_type_q}%"))
+                if date_q:
+                    try:
+                        from datetime import timedelta
+                        d_start = datetime.strptime(date_q[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        d_end = d_start + timedelta(days=1)
+                        stmt = stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
+                    except Exception:
+                        pass
                     
                 if status_filter and status_filter != 'all':
                     if status_filter == 'failed':
@@ -528,8 +547,23 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     count_stmt = count_stmt.where(PrinterControlCommand.lead == lead)
                 if lan_uid:
                     count_stmt = count_stmt.where(PrinterControlCommand.lan_uid == lan_uid)
-                if agent_uid:
-                    count_stmt = count_stmt.where(PrinterControlCommand.agent_uid == agent_uid)
+                if agent_uid and agent_uid.lower() != 'all':
+                    count_stmt = count_stmt.where(PrinterControlCommand.agent_uid.ilike(f"%{agent_uid}%"))
+                if printer_q:
+                    count_stmt = count_stmt.where(
+                        (PrinterControlCommand.printer_name.ilike(f"%{printer_q}%")) |
+                        (PrinterControlCommand.ip.ilike(f"%{printer_q}%"))
+                    )
+                if cmd_type_q and cmd_type_q.lower() != 'all':
+                    count_stmt = count_stmt.where(PrinterControlCommand.command_type.ilike(f"%{cmd_type_q}%"))
+                if date_q:
+                    try:
+                        from datetime import timedelta
+                        d_start = datetime.strptime(date_q[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        d_end = d_start + timedelta(days=1)
+                        count_stmt = count_stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
+                    except Exception:
+                        pass
                 if status_filter and status_filter != 'all':
                     if status_filter == 'failed':
                         count_stmt = count_stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
