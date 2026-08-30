@@ -504,14 +504,10 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 return jsonify({"ok": True, "status": command.status, "id": int(command.id)})
 
             printer = None
-            if int(command.printer_id) != 0:
+            if int(command.printer_id or 0) != 0:
                 printer = session.get(Printer, int(command.printer_id))
                 if printer is None:
-                    command.status = "failed"
-                    command.error_message = "Printer not found"
-                    command.responded_at = responded_at
-                    session.commit()
-                    return jsonify({"ok": False, "error": "Printer not found"}), 404
+                    LOGGER.warning("[polling_aux_routes] Printer ID %s not found in DB table Printer for command %s, continuing...", command.printer_id, command_id)
 
             if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify"):
                 if ok_value:
