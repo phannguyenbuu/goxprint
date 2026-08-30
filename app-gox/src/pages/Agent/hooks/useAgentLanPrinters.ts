@@ -310,7 +310,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       const name = (p.printer_name || p.name || '').toLowerCase().trim();
       const ip = (p.ip || '').trim();
       const mac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
-      if (ip === '192.168.1.226' || mac === '58:38:79:79:A3:EB') return false;
       if (name.includes('unknown') || name === 'unknown printer') return false;
       if (
         name.includes('pdf') ||
