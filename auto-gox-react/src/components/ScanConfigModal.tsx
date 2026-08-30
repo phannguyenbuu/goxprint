@@ -161,24 +161,26 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
            setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
         }
 
-        // Record Job & Log to VPS database
-        recordJobToVpsApi({
-          agentUid: localAgent?.agent_uid,
-          printerName: p.name,
-          ip: p.ip,
-          commandType: 'trigger_utility',
-          commandParams: {
-            action: 'exec_utility',
-            command: p.type?.toLowerCase() === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan',
-            printer_ip: p.ip,
-            auth_user: printerUser,
-            auth_password: printerPass,
-            target_name: scanName
-          },
-          status: finalStatus,
-          output: finalOutput,
-          errorMessage: finalStatus === 'success' ? '' : finalOutput
-        });
+        // Record Job & Log to VPS database (only if local-only execution, since VPS API already recorded the job)
+        if (!res?.is_vps) {
+          recordJobToVpsApi({
+            agentUid: localAgent?.agent_uid,
+            printerName: p.name,
+            ip: p.ip,
+            commandType: 'trigger_utility',
+            commandParams: {
+              action: 'exec_utility',
+              command: p.type?.toLowerCase() === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan',
+              printer_ip: p.ip,
+              auth_user: printerUser,
+              auth_password: printerPass,
+              target_name: scanName
+            },
+            status: finalStatus,
+            output: finalOutput,
+            errorMessage: finalStatus === 'success' ? '' : finalOutput
+          });
+        }
       } catch (err: any) {
         setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: err.message || 'Lỗi không xác định' } : s));
       }

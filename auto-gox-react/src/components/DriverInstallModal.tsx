@@ -184,24 +184,26 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
            setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
         }
 
-        // Record Job & Log to VPS database
-        recordJobToVpsApi({
-          agentUid: localAgent?.agent_uid,
-          printerName: p.name,
-          ip: p.ip,
-          commandType: 'install_driver',
-          commandParams: {
-            action: 'install_driver',
-            brand: driverInfo.brand,
-            model: driverInfo.model,
-            driver_name: driverInfo.name,
-            driver_url: driverInfo.url,
-            printer_ip: p.ip
-          },
-          status: finalStatus,
-          output: finalOutput,
-          errorMessage: finalStatus === 'success' ? '' : finalOutput
-        });
+        // Record Job & Log to VPS database (only if local-only execution, since VPS API already recorded the job)
+        if (!res?.is_vps) {
+          recordJobToVpsApi({
+            agentUid: localAgent?.agent_uid,
+            printerName: p.name,
+            ip: p.ip,
+            commandType: 'install_driver',
+            commandParams: {
+              action: 'install_driver',
+              brand: driverInfo.brand,
+              model: driverInfo.model,
+              driver_name: driverInfo.name,
+              driver_url: driverInfo.url,
+              printer_ip: p.ip
+            },
+            status: finalStatus,
+            output: finalOutput,
+            errorMessage: finalStatus === 'success' ? '' : finalOutput
+          });
+        }
       } catch (err: any) {
         setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: err.message || 'Lỗi không xác định' } : s));
       }
