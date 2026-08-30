@@ -561,7 +561,7 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
     });
   }
 
-  // VPS tracking logic (fallback just in case)
+  // VPS tracking logic
   return new Promise((resolve) => {
     let checkCount = 0;
     const maxChecks = 120; // 2 minutes max
@@ -571,7 +571,7 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
       checkCount++;
       if (checkCount >= maxChecks) {
         clearInterval(intervalId);
-        resolve({ ok: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent' });
+        resolve({ ok: false, success: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent (Timeout 120s)' });
         return;
       }
 
@@ -579,22 +579,23 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
         const stRes = await vpsFetch(`/api/commands/${commandId}/status`);
         if (stRes.ok) {
           const stData = await stRes.json();
-          const cmdData = stData.command;
+          const cmdObj = stData.command || stData;
+          const status = (cmdObj.status || '').toLowerCase();
           
-          if (cmdData.status === 'completed') {
+          if (status === 'completed' || status === 'success') {
             clearInterval(intervalId);
-            onUpdate("Hoàn tất tiến trình.");
-            resolve({ ok: true });
+            if (onUpdate) onUpdate("Hoàn tất tiến trình.");
+            resolve({ ok: true, success: true, message: stData.output || stData.result || stData.result_payload || 'Hoàn tất tiến trình thành công!' });
             return;
-          } else if (cmdData.status === 'failed') {
+          } else if (status === 'failed' || status === 'error') {
             clearInterval(intervalId);
-            resolve({ ok: false, error: cmdData.error || 'Cài đặt thất bại' });
+            resolve({ ok: false, success: false, error: stData.error || stData.error_message || 'Thực thi thất bại' });
             return;
           }
 
-          const text = cmdData.progress_text || cmdData.status;
-          if (text !== lastText && text !== 'pending' && text !== 'running') {
-            onUpdate(text);
+          const text = cmdObj.progress_text || cmdObj.output || status;
+          if (text !== lastText && text !== 'pending' && text !== 'running' && text !== 'received') {
+            if (onUpdate) onUpdate(text);
             lastText = text;
           }
         }
