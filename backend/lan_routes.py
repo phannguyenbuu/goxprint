@@ -236,7 +236,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        req_agent_uid = _to_text(request.args.get("agent_uid"))
 
         is_whitelisted = False
         if client_ip:
@@ -258,8 +258,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 a_pub = (a_info.get("public_ip") or a_info.get("wan_ip") or a_info.get("ip") or "").strip()
                 a_loc = (a_info.get("local_ip") or "").strip()
                 
+                # If specific agent_uid is requested, allow matching agent
+                if req_agent_uid and a_uid == req_agent_uid:
+                    pass
                 # Strict check: if target_ip_filter is specified by user, strictly match target_ip_filter
-                if target_ip_filter:
+                elif target_ip_filter:
                     if a_pub != target_ip_filter and a_loc != target_ip_filter:
                         continue
                 # Otherwise if client_ip is present and NOT whitelisted in DB, ONLY include agents matching client_ip

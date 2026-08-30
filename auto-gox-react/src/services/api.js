@@ -216,26 +216,6 @@ export async function fetchPrintersFromAgent(agentUid) {
             printers = printers.concat(site.printers);
           }
         });
-        // Ensure machine .226 (RICOH MP 7503) is always included even if backend filtered it out
-        const has226 = printers.some(p => (p.ip || p.printer_ip || '').includes('192.168.1.226') || (p.mac_address || p.mac_id || p.mac || '').toUpperCase().includes('58:38:79:79:A3:EB'));
-        if (!has226) {
-          printers.push({
-            id: '532',
-            printer_id: 0,
-            printer_name: 'RICOH MP 7503',
-            name: 'RICOH MP 7503',
-            ip: '192.168.1.226',
-            mac_address: '58:38:79:79:A3:EB',
-            mac_id: '58:38:79:79:A3:EB',
-            mac: '58:38:79:79:A3:EB',
-            printer_type: 'ricoh',
-            brand: 'ricoh',
-            type: 'ricoh',
-            status: 'online',
-            is_online: true
-          });
-        }
-
         if (printers.length > 0) {
           return printers.map(p => ({
             id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
