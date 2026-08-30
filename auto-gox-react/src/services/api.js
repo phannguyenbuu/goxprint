@@ -38,6 +38,7 @@ export async function recordJobToVpsApi({ agentUid, printerName, ip, commandType
 export async function vpsFetch(endpoint, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set('X-Api-Key', '8A63B4895DA7E53B');
+  headers.set('X-API-Token', 'change-me');
   headers.set('X-Partner-Code', 'TEST');
   headers.set('X-Store-Code', 'C1');
   if (!headers.has('Content-Type')) {

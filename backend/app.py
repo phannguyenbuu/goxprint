@@ -222,7 +222,8 @@ def _safe_task_priority(value: Any) -> str:
 
 
 def _request_api_token() -> str:
-    return _to_text(request.headers.get("X-API-Token")) or _to_text(request.headers.get("X-Lead-Token"))
+    token = _to_text(request.headers.get("X-API-Token")) or _to_text(request.headers.get("X-Lead-Token")) or _to_text(request.headers.get("X-Api-Key")) or _to_text(request.headers.get("x-api-key"))
+    return token
 
 
 def _is_ip_whitelisted(session_factory: Any = None) -> bool:
