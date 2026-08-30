@@ -39,12 +39,15 @@ def main() -> None:
                     description="User Public IP (Full Access)",
                     enabled=True
                 ))
-            if not session.query(AllowedPublicIp).filter_by(ip_address="*").first():
+            star_rule = session.query(AllowedPublicIp).filter_by(ip_address="*").first()
+            if not star_rule:
                 session.add(AllowedPublicIp(
                     ip_address="*",
                     description="Allow all Public IPs access to all LANs",
                     enabled=True
                 ))
+            else:
+                star_rule.enabled = True
             session.commit()
             print("[OK] Seeded 116.98.0.59 and wildcard AllowedPublicIp rules into DB")
     except Exception as ip_exc:
