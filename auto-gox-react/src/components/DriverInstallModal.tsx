@@ -160,7 +160,7 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
       }
 
       try {
-        const res = await installDriverApi(p.id, driverInfo.brand, driverInfo.model, driverInfo.name, driverInfo.url, localAgent?.agent_uid);
+        const res = await installDriverApi(p.id, driverInfo.brand, driverInfo.model, driverInfo.name, driverInfo.url, localAgent?.agent_uid, p.ip, p.mac);
         let finalStatus = 'failed';
         let finalOutput = '';
 

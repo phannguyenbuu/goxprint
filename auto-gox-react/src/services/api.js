@@ -235,8 +235,9 @@ export async function fetchPrintersFromAgent(agentUid) {
 /**
  * Driver Installation API (Local Queue)
  */
-export async function installDriverApi(printerId, brand, model, driverName, driverUrl, agentUid) {
+export async function installDriverApi(printerId, brand, model, driverName, driverUrl, agentUid, printerIp, macAddress) {
   const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+  const targetIp = printerIp || (typeof printerId === 'string' && printerId.includes('.') ? printerId : '');
 
   // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/devices/install-driver)
   if (isRemote || agentUid) {
@@ -245,7 +246,10 @@ export async function installDriverApi(printerId, brand, model, driverName, driv
         method: 'POST',
         body: JSON.stringify({
           agent_uid: agentUid,
-          printer_ip: printerId,
+          printer_ip: targetIp,
+          ip: targetIp,
+          mac_address: macAddress || printerId,
+          mac_id: macAddress || printerId,
           brand: brand,
           model: model,
           driver_name: driverName,
