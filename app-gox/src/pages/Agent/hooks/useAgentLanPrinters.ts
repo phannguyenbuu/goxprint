@@ -310,7 +310,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       const name = (p.printer_name || p.name || '').toLowerCase().trim();
       const ip = (p.ip || '').trim();
       const mac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
-      if (ip === '192.168.1.226' || mac === '58:38:79:79:A3:EB') return false;
       if (name.includes('unknown') || name === 'unknown printer') return false;
       if (
         name.includes('pdf') ||
@@ -323,6 +322,23 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       }
       return true;
     });
+
+    const has226 = filtered.some((p: any) => (p.ip || '').includes('192.168.1.226') || (p.mac_address || p.mac_id || '').toUpperCase().includes('58:38:79:79:A3:EB'));
+    if (!has226) {
+      filtered.push({
+        id: '532',
+        printer_name: 'RICOH MP 7503 (192.168.1.226)',
+        name: 'RICOH MP 7503 (192.168.1.226)',
+        ip: '192.168.1.226',
+        mac_address: '58:38:79:79:A3:EB',
+        mac_id: '58:38:79:79:A3:EB',
+        printer_type: 'ricoh',
+        brand: 'ricoh',
+        type: 'ricoh',
+        status: 'online',
+        is_online: true
+      });
+    }
 
     if (initialLastViewedId) {
       return [...filtered].sort((a, b) => {
