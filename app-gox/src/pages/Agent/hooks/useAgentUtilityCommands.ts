@@ -355,7 +355,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
             : 'Nhập địa chỉ IP muốn kiểm tra xem copier nào có FTP Scan entry khớp.',
           value: currentIp,
           changeAllTo: '',
-          scanStatus: isChangeIp ? '⏳ Loading... Đang quét điểm scan FTP trên máy photo...' : '',
+          scanStatus: '',
           error: '',
           onConfirm: (targetIp: string, changeAllTo?: string) => {
             const finalContent = commandContent.replace('__TARGET_IP__', targetIp);
