@@ -202,74 +202,48 @@ export async function registerNetwork(lanUid, pcName, pcIp) {
  * Fetch printers from Local Agent
  */
 export async function fetchPrintersFromAgent(agentUid) {
-  // 1. Try fetching live scanned printers from VPS API (/api/new-lan-sites)
-  try {
-    const endpoint = `/api/new-lan-sites${agentUid ? '?agent_uid=' + agentUid : ''}`;
-    const vpsRes = await vpsFetch(endpoint);
-    if (vpsRes && vpsRes.ok) {
-      const data = await vpsRes.json();
-      const rows = data.rows || data.lan_sites || [];
-      let printers = [];
-      rows.forEach(site => {
-        if (site.printers && site.printers.length > 0) {
-          printers = printers.concat(site.printers);
-        }
-      });
-      if (printers.length > 0) {
-        return printers.map(p => ({
-          id: p.id || p.printer_id || Math.random().toString(36).substr(2, 9),
-          name: p.printer_name || p.name || p.make_and_model || 'Unknown Printer',
-          ip: p.ip || p.printer_ip || '0.0.0.0',
-          mac: p.mac_address || p.mac_id || p.mac || '',
-          type: p.printer_type || p.brand || 'Unknown',
-          status: 'online',
-          is_online: true
-        }));
-      }
-    }
-  } catch (err) {
-    console.warn("Fetch printers from VPS failed", err);
-  }
-
-  // 2. Fallback to Local Agent execution on :9173 if VPS returned empty
   try {
     if (navigator.onLine) {
       await syncUtiCommands();
     }
     let utiCmd = getUtiCommand('force_subnet_scan');
-    if (utiCmd) {
-      const pythonScript = utiCmd.command_content;
-      const baseUrl = getLocalAgentBaseUrl();
-      const res = await fetch(`${baseUrl}/api/local/exec`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: pythonScript })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const output = data.result_payload || data.output || '';
-        const jsonMatch = output.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    if (!utiCmd) {
+      return [{ id: 'err_no_uti', name: '[Lỗi] Không tìm thấy mẫu lệnh force_subnet_scan', ip: '', type: 'error' }];
+    }
+    const pythonScript = utiCmd.command_content;
+    const res = await execLocalUtility(pythonScript);
+    if (res && res.ok && res.result_payload) {
+      let devices = [];
+      try { 
+        devices = typeof res.result_payload === 'string' ? JSON.parse(res.result_payload) : res.result_payload; 
+      } catch (e) {
+        const jsonMatch = String(res.result_payload).match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (jsonMatch) {
-          const list = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(list) && list.length > 0) {
-            return list.map(p => ({
-              id: p.id || p.mac_address || Math.random().toString(36).substr(2, 9),
-              name: p.printer_name || p.name || 'Unknown Printer',
-              ip: p.ip || '0.0.0.0',
-              mac: p.mac_address || p.mac_id || '',
-              type: p.printer_type || p.brand || 'Unknown',
-              status: 'online',
-              is_online: true
-            }));
-          }
+          try { devices = JSON.parse(jsonMatch[0]); } catch (e2) {}
         }
       }
+      
+      if (!Array.isArray(devices) || devices.length === 0) {
+        return [{ id: 'empty1', name: '[Lỗi] Live Scan :9173 không tìm thấy máy in nào trên mạng LAN', ip: '127.0.0.1', type: 'error' }];
+      }
+      
+      return devices.map(p => ({
+        id: p.id || p.printer_id || p.mac_address || p.mac || Math.random().toString(36).substr(2, 9),
+        name: p.make_and_model || p.model || p.name || p.printer_name || 'Unknown Printer',
+        ip: p.ip || p.printer_ip || '0.0.0.0',
+        mac: p.mac || p.mac_address || p.id || '',
+        type: p.brand || p.printer_type || 'Unknown',
+        status: p.status || 'online',
+        is_online: p.is_online !== undefined ? p.is_online : true,
+        last_seen: p.last_seen || ''
+      }));
+    } else {
+      return [{ id: 'err3', name: '[Lỗi] PrintAgent :9173 thực thi thất bại: ' + (res.error || res.output || 'Unknown'), ip: '', type: 'error' }];
     }
   } catch (err) {
-    console.warn("Local agent scan fallback failed", err);
+    console.warn("Local PrintAgent :9173 exec failed", err);
+    return [{ id: 'err2', name: '[Lỗi] Không thể kết nối PrintAgent :9173: ' + err.message, ip: '', type: 'error' }];
   }
-
-  return [];
 }
 
 /**
