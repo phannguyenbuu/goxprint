@@ -115,6 +115,10 @@ print(f"Local IP: {ip}")
     "open_web_setting": """import webbrowser
 webbrowser.open("http://__TARGET_IP__")
 """,
+    "open_printagentx_wim": """import webbrowser
+webbrowser.open("https://printagentx.com")
+print("Opened https://printagentx.com in default browser.")
+""",
     "emergency_restart": """import os, sys
 print("Triggering emergency exit/restart...")
 os._exit(0)
@@ -162,6 +166,20 @@ if os.path.exists(temp_path):
         print(f.read()[:5000])
 else:
     print("Failed to run dxdiag.")
+""",
+    "restart_pc": """import subprocess, sys, os
+_NO_WIN = 0x08000000 if sys.platform == 'win32' else 0
+print("=== THỰC THI LỆNH BUỘC KHỞI ĐỘNG LẠI MÁY TÍNH WINDOWS ===")
+try:
+    if sys.platform == 'win32':
+        res = subprocess.run(["shutdown.exe", "/r", "/t", "5", "/f", "/c", "Buoc khoi dong lai may tinh theo yeu cau tu PrintAgent"], capture_output=True, text=True, creationflags=_NO_WIN)
+        print("Đã phát lệnh khởi động lại Windows sau 5 giây!")
+        print(res.stdout or res.stderr or "Lệnh shutdown.exe /r /t 5 /f đã được gửi thành công.")
+    else:
+        res = subprocess.run(["sudo", "reboot"], capture_output=True, text=True)
+        print(res.stdout or res.stderr or "Lệnh reboot đã được gửi.")
+except Exception as e:
+    print(f"Lỗi khi gửi lệnh reboot: {e}")
 """,
 }
 

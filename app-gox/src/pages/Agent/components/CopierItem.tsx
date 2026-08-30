@@ -9,10 +9,10 @@ import { fetchApi, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 export interface CopierItemProps {
   handleRefetchAddressBook: (pTarget: any) => void;
   expandedDrivers: Record<string, boolean>;
-  setExpandedDrivers: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setExpandedDrivers?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   expandedDriverMenus: Record<string, boolean>;
-  setExpandedDriverMenus: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  handleRemoteInstallDriver: (printerId: string, brand: string, model: string, drName: string, drUrl: string) => void;
+  setExpandedDriverMenus?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  handleRemoteInstallDriver?: (printerId: string, brand: string, model: string, drName: string, drUrl: string, suggestedDrivers?: any[]) => void;
   setPublicFtpData: React.Dispatch<React.SetStateAction<any>>;
 
   p: any;
@@ -73,45 +73,8 @@ export function CopierItem({
   handleRemoteInstallDriver,
   setPublicFtpData,
 }: CopierItemProps) {
-  const [localSync, setLocalSync] = React.useState<any>(null);
-  const wasPendingRef = React.useRef(false);
-
-  const fetchFreshSync = React.useCallback(async () => {
-    try {
-      const res = await fetchApi(`/api/lan-sites?t=${Date.now()}`);
-      if (res && res.ok && Array.isArray(res.rows)) {
-        const pMac = (p.mac_id || p.mac_address || p.mac || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-        for (const site of res.rows) {
-          for (const item of (site.printers || [])) {
-            const itemMac = (item.mac_id || item.mac_address || item.mac || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-            if (pMac && itemMac && pMac.length >= 10 && pMac === itemMac) {
-              if (item.address_book_sync) {
-                setLocalSync(item.address_book_sync);
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Ignore sync error
-    }
-  }, [p.mac_id, p.mac_address]);
-
   const isPending = commandStatus[p.id]?.isPending || false;
   const statusMsg = commandStatus[p.id]?.message || '';
-
-  React.useEffect(() => {
-    if (isPending) {
-      setLocalSync(null);
-    }
-    if (wasPendingRef.current && !isPending) {
-      fetchFreshSync();
-      const t1 = setTimeout(fetchFreshSync, 1500);
-      const t2 = setTimeout(fetchFreshSync, 3500);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
-    }
-    wasPendingRef.current = isPending;
-  }, [isPending, fetchFreshSync]);
 
   const macKey = p.mac_address || '';
   const ipKey = p.ip || '';
@@ -122,36 +85,18 @@ export function CopierItem({
     (ipKey && commandStatus?.[ipKey]) ||
     (idKey && commandStatus?.[idKey]);
 
-  const hasItems = (obj: any) => obj && ((Array.isArray(obj.address_list) && obj.address_list.length > 0) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list) && obj.address_book_data.address_list.length > 0));
+  const hasValidList = (obj: any) => obj && (Array.isArray(obj.address_list) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list)));
 
   const activeSyncObj = 
-    (hasItems(localSync) ? localSync : null) ||
-    (hasItems(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
-    (hasItems(cmdStatusObj) ? cmdStatusObj : null) ||
-    (hasItems(sync) ? sync : null) ||
-    localSync || cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
+    (hasValidList(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
+    (hasValidList(cmdStatusObj) ? cmdStatusObj : null) ||
+    (hasValidList(sync) ? sync : null) ||
+    cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
   const detectedBrand = detectBrand(p.name || p.printer_name || p.ip || 'generic');
   const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
   const modelName = p.name || p.printer_name || 'Photocopy';
 
-  const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers) && p.suggested_drivers.length > 0)
-    ? p.suggested_drivers
-    : [
-        {
-          brand: detectedBrand,
-          model: modelName,
-          drivers: [
-            {
-              name: `${brandName} ${modelName} PCL6 Universal Driver (x64)`,
-              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_pcl6.exe`
-            },
-            {
-              name: `${brandName} ${modelName} PostScript3 Driver (x64)`,
-              url: `https://agentapi.quanlymay.com/static/drivers/${detectedBrand}_ps.exe`
-            }
-          ]
-        }
-      ];
+  const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers)) ? p.suggested_drivers : [];
 
   const pKey = String(p.id !== undefined && p.id !== null ? p.id : (p.mac_id || p.mac_address || p.ip || 'copier'));
   const hasDrivers = true;
@@ -304,14 +249,7 @@ export function CopierItem({
                             <div style={styles.cardHeader}>
                               <div>
                                 <span style={styles.copierTitle}>
-                                  🖨️ {(() => {
-                                    if (p.printer_name && p.printer_name.trim()) return p.printer_name.trim();
-                                    const cleanMac = (p.mac_id || "").replace(/-/g, ":").toUpperCase();
-                                    if (cleanMac.startsWith("58:38:79") || cleanMac.startsWith("00:26:73")) return "Thiết bị Ricoh (Đang thám dò...)";
-                                    if (cleanMac.startsWith("00:80:91")) return "Thiết bị Toshiba (Đang thám dò...)";
-                                    if (cleanMac.startsWith("00:11:22")) return "Thiết bị HP (Đang thám dò...)";
-                                    return "Thiết bị Photocopy (Đang thám dò...)";
-                                  })()}
+                                  🖨️ {(p.printer_name && p.printer_name.trim()) || p.name || p.ip || "Thiết bị Photocopy"}
                                 </span>
                                 <div style={styles.copierSubtitle}>
                                   IP: {p.ip} · MAC: {p.mac_id || '—'}
@@ -443,10 +381,10 @@ export function CopierItem({
                                 <div style={{ display: 'flex', gap: '6px' }}>
                                   <button
                                     style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
-                                    onClick={async () => {
+                                    onClick={async (e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       handleRefetchAddressBook(p);
-                                      setTimeout(fetchFreshSync, 2000);
-                                      setTimeout(fetchFreshSync, 4500);
                                     }}
                                     disabled={isPending || onlineAgents.length === 0}
                                   >
@@ -469,121 +407,10 @@ export function CopierItem({
                                     handleEditIP={handleEditIP}
                                     handleDeleteDest={handleDeleteDest}
                                     handleChangeFtp={handleChangeFtp}
-                                  />
-                                </div>
-                              )}
-                            </div>
-  
-                            {/* Suggested Drivers Block */}
-                            {hasDrivers && (
-                              <div style={{ marginTop: '8px' }}>
-                                <button
-                                  style={styles.expandSubBtn}
-                                  onClick={() =>
-                                    setExpandedDrivers((prev) => ({
-                                      ...prev,
-                                      [pKey]: !driversExpanded,
-                                      [p.id]: !driversExpanded,
-                                      [p.ip]: !driversExpanded
-                                    }))
-                                  }
-                                >
-                                  {driversExpanded ? '▲ Ẩn driver đề xuất' : '▼ Xem driver đề xuất từ catalog'}
-                                </button>
-  
-                                <AnimatePresence>
-                                  {driversExpanded && (
-                                    <motion.div
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: 'auto' }}
-                                      exit={{ opacity: 0, height: 0 }}
-                                      style={{ overflow: 'hidden', marginTop: '6px' }}
-                                    >
-                                      <div style={styles.suggestedDriverBlock}>
-                                        {effectiveDrivers.map((sd: any, idx: number) => {
-                                          const brandColor =
-                                            sd.brand === 'ricoh'
-                                              ? 'var(--color-primary)'
-                                              : sd.brand === 'toshiba'
-                                              ? 'var(--color-error)'
-                                              : 'var(--color-success)';
-                                          const sdMenuKey = `${pKey}-${idx}`;
-                                          const isMenuOpen = expandedDriverMenus[sdMenuKey] !== undefined ? expandedDriverMenus[sdMenuKey] : (expandedDriverMenus[`${p.id}-${idx}`] !== undefined ? expandedDriverMenus[`${p.id}-${idx}`] : true);
-                                          return (
-                                            <div key={idx} style={styles.driverSuggestionItem}>
-                                              <div
-                                                style={styles.driverModelHeader}
-                                                onClick={() =>
-                                                  setExpandedDriverMenus((prev) => ({
-                                                    ...prev,
-                                                    [sdMenuKey]: !isMenuOpen,
-                                                    [`${p.id}-${idx}`]: !isMenuOpen,
-                                                  }))
-                                                }
-                                              >
-                                                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                                                  <span
-                                                    style={{
-                                                      display: 'inline-block',
-                                                      width: '6px',
-                                                      height: '6px',
-                                                      borderRadius: '50%',
-                                                      backgroundColor: brandColor,
-                                                      marginRight: '6px',
-                                                    }}
-                                                  />
-                                                  {String(sd.brand || '').toUpperCase()} - {sd.model}
-                                                </span>
-                                                <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)' }}>
-                                                  {isMenuOpen ? '▲' : '▼'}
-                                                </span>
-                                              </div>
-  
-                                              {isMenuOpen && (
-                                                <div style={styles.driverOptionsList}>
-                                                  {sd.drivers && sd.drivers.length > 0 ? (
-                                                    sd.drivers.map((drv: any, dIdx: number) => (
-                                                      <div key={dIdx} style={styles.driverFileRow}>
-                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                          <div style={styles.driverFileName}>{drv.name}</div>
-                                                          <div style={styles.driverFileUrl} title={drv.url}>
-                                                            {drv.url.split('/').pop()}
-                                                          </div>
-                                                        </div>
-                                                        <div style={{ display: 'flex', gap: '4px' }}>
-  
-                                                          <button
-                                                            style={{ ...styles.smallBtn, padding: '4px 8px', fontSize: '0.7rem' }}
-                                                            onClick={() =>
-                                                              handleRemoteInstallDriver(
-                                                                p.mac_id || p.mac_address || p.ip || p.id,
-                                                                sd.brand,
-                                                                sd.model,
-                                                                drv.name,
-                                                                drv.url
-                                                              )
-                                                            }
-                                                            disabled={onlineAgents.length === 0}
-                                                          >
-                                                            Cài đặt
-                                                          </button>
-                                                        </div>
-                                                      </div>
-                                                    ))
-                                                  ) : (
-                                                    <div style={styles.emptySubText}>Không tìm thấy driver nào.</div>
-                                                  )}
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            )}
+                                   />
+                                 </div>
+                               )}
+                             </div>
   
                             {/* Top Action buttons */}
                             <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -635,14 +462,17 @@ export function CopierItem({
                                       return nextState;
                                     });
                                   }
-                                  if (handleRemoteInstallDriver && effectiveDrivers[0]?.drivers?.[0]) {
-                                    const firstDrv = effectiveDrivers[0].drivers[0];
+                                  if (handleRemoteInstallDriver) {
+                                    const firstDrv = effectiveDrivers[0]?.drivers?.[0];
                                     handleRemoteInstallDriver(
                                       p.mac_id || p.mac_address || p.ip || p.id,
-                                      effectiveDrivers[0].brand || 'Ricoh',
-                                      effectiveDrivers[0].model || 'Photocopy',
-                                      firstDrv.name,
-                                      firstDrv.url
+                                      effectiveDrivers[0]?.brand || p.printer_type || 'Ricoh',
+                                      effectiveDrivers[0]?.model || p.name || p.printer_name || 'Photocopy',
+                                      firstDrv?.name || '',
+                                      firstDrv?.url || '',
+                                      effectiveDrivers || [],
+                                      p.ip || '',
+                                      p.mac_id || p.mac_address || ''
                                     );
                                   }
                                 }}

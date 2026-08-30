@@ -136,11 +136,11 @@ export function CopiersTab(props: any) {
         </div>
 
         <AnimatedList className="copiers-grid" style={styles.gridContainer}>
-          {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && (k.startsWith('scan_lan_') || c?.message?.includes('quét') || c?.message?.includes('scan') || c?.message?.includes('Agent') || c?.message?.includes('thực thi'))) ? (
+          {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && k.startsWith('scan_lan_')) ? (
             <div style={styles.loadingContainer}>
               <LoadingSpinner />
               <div style={styles.loadingText}>
-                {utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && (k.startsWith('scan_lan_') || c?.message?.includes('quét') || c?.message?.includes('scan') || c?.message?.includes('Agent') || c?.message?.includes('thực thi')))
+                {utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && k.startsWith('scan_lan_'))
                   ? '⏳ Đang dò quét mạng LAN tìm máy in & photocopy...'
                   : 'Đang tải dữ liệu thiết bị...'}
               </div>
@@ -148,9 +148,9 @@ export function CopiersTab(props: any) {
           ) : filteredPrinters.length === 0 ? (
             <div style={styles.emptyStateContainer}>
               <div style={styles.emptyIcon}>🖨️</div>
-              <div style={styles.emptyTitle}>Không tìm thấy máy photocopy nào</div>
+              <div style={styles.emptyTitle}>Chưa có danh sách máy in, hãy nhấn nút khởi tạo</div>
               <div style={styles.emptySubtitle}>
-                Vui lòng chọn mạng LAN khác hoặc nhấp "Làm mới" để quét lại thiết bị.
+                Vui lòng chọn mạng LAN khác hoặc nhấp nút khởi tạo / Dò quét mạng LAN để tìm kiếm thiết bị.
               </div>
             </div>
           ) : (
@@ -180,11 +180,19 @@ export function CopiersTab(props: any) {
               };
 
               const pMac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
-              const liveSync = parseSyncObj(pMac ? liveAddressBooks?.[pMac] : null);
+              const pIdKey = p.id !== undefined && p.id !== null ? String(p.id) : '';
+              const pIpKey = p.ip || '';
+
+              const liveSync = parseSyncObj(
+                (pMac && liveAddressBooks?.[pMac]) ||
+                (pIdKey && liveAddressBooks?.[pIdKey]) ||
+                (pIpKey && liveAddressBooks?.[pIpKey]) ||
+                null
+              );
               const dbSync = parseSyncObj(p.address_book_sync);
 
-              const liveHasList = liveSync && Array.isArray(liveSync.address_list);
-              const dbHasList = dbSync && Array.isArray(dbSync.address_list) && dbSync.address_list.length > 0;
+              const liveHasList = Boolean(liveSync && Array.isArray(liveSync.address_list));
+              const dbHasList = Boolean(dbSync && Array.isArray(dbSync.address_list));
 
               const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
               const realAddressList = Array.isArray(sync.address_list)
@@ -196,7 +204,7 @@ export function CopiersTab(props: any) {
                     return Boolean(name || entry.entry_id || (entry.registration_no && entry.registration_no !== '-') || entry.email_address || entry.email || entry.folder || entry.physical_path);
                   })
                 : [];
-              const hasAddressList = realAddressList.length > 0;
+              const hasAddressList = Boolean(liveHasList || dbHasList);
 
               const copierOnlineAgents = (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
               const copierTargetAgentUid = getTargetAgentUid ? getTargetAgentUid(p.id) : (selectedAgentUid || p.agent_uid || '');

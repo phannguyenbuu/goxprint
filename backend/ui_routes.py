@@ -173,8 +173,9 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
         from sqlalchemy import select
         with session_factory() as session:
             printer = session.execute(
-                select(Printer).where(Printer.ip == "192.168.1.226")
-            ).scalar_one_or_none()
+                select(Printer).order_by(Printer.id.desc())
+            ).scalars().first()
+            printer_ip = printer.ip if printer else ""
             printer_id = printer.id if printer else None
             lead = printer.lead if printer else None
             lan_uid = printer.lan_uid if printer else None
@@ -182,7 +183,7 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
             "printagent.html",
             active_tab="printagent",
             page_title="PrintAgent Manager",
-            printer_ip="192.168.1.226",
+            printer_ip=printer_ip,
             printer_id=printer_id,
             lead=lead,
             lan_uid=lan_uid

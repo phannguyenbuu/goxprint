@@ -143,7 +143,7 @@ export interface LanSiteInfo {
 export async function getLanSites(): Promise<any> {
   try {
     const savedIp = (localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
-    const query = savedIp ? `&override_ip=${encodeURIComponent(savedIp)}` : '';
+    const query = savedIp ? `&public_ip=${encodeURIComponent(savedIp)}` : '';
     const res = await fetchApi(`/api/new-lan-sites?lead=default${query}`);
     return res || { rows: [] };
   } catch (err) {
@@ -155,7 +155,7 @@ export async function getLanSites(): Promise<any> {
 export async function mockGetCopiers(lanUid?: string): Promise<Copier[]> {
   try {
     const savedIp = (localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
-    const query = savedIp ? `&override_ip=${encodeURIComponent(savedIp)}` : '';
+    const query = savedIp ? `&public_ip=${encodeURIComponent(savedIp)}` : '';
     const res = await fetchApi(`/api/new-lan-sites?lead=default${query}`);
     const rows = res.rows || [];
     const uniqueCopiers = new Map<string, Copier>();
@@ -278,10 +278,10 @@ export async function getScansFiles(lanUid: string, email: string): Promise<any>
   return fetchApi(`/api/scans/files?lan_uid=${encodeURIComponent(lanUid)}&email=${encodeURIComponent(email)}`);
 }
 
-export async function installDriverOnAgent(printerId: string, brand: string, model: string, driverName: string, driverUrl: string, agentUid?: string): Promise<any> {
-  return fetchApi(`/api/devices/${printerId}/install-driver`, {
+export async function installDriverOnAgent(printerId: string, brand: string, model: string, driverName: string, driverUrl: string, agentUid?: string, printerIp?: string, macId?: string): Promise<any> {
+  return fetchApi(`/api/devices/${encodeURIComponent(printerId)}/install-driver`, {
     method: 'POST',
-    body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl, agent_uid: agentUid })
+    body: JSON.stringify({ brand, model, driver_name: driverName, driver_url: driverUrl, agent_uid: agentUid, printer_ip: printerIp, mac_id: macId })
   });
 }
 

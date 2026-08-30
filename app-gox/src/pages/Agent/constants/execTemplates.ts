@@ -619,6 +619,11 @@ def logout(session: requests.Session):
 def login() -> requests.Session:
     global BASE_URL
     session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
     session.verify = False
     try:
         import urllib3
@@ -806,13 +811,13 @@ def fetch_list():
 
     finally:
         logout(sess)
-        print("  [✓] Đã hoàn tất và đăng xuất.")
 
 try:
     fetch_list()
+    print("  [✓] Đã hoàn tất thành công.")
 except Exception as err:
-    print("")
-    print(f"[-] LỖI THỰC THI QUÉT DANH BẠ: {err}")
+    print(f"\n[-] LỖI THỰC THI QUÉT DANH BẠ: {err}")
+    raise err
 print("==================================================")
 `,
 
@@ -959,12 +964,12 @@ def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, ex
         session.get(landing, verify=False, timeout=10)
     except Exception as e:
         print(f"[-] Kết nối thất bại: {e}")
-        return
+        raise RuntimeError(f"Kết nối tới máy in Toshiba thất bại: {e}")
     
     csrf = session.cookies.get("Session") or ""
     if not csrf:
         print("[-] Không lấy được Session cookie!")
-        return
+        raise RuntimeError("Không lấy được Session cookie từ máy in Toshiba TopAccess!")
     headers = {"Content-Type": "text/plain; charset=utf-8", "csrfpId": csrf}
 
     # Login
@@ -972,7 +977,7 @@ def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, ex
     r = session.post(cgi, data=login_xml.encode("utf-8"), headers=headers, verify=False, timeout=8)
     if "STATUS_OK" not in r.text and "Success" not in r.text:
         print(f"[-] Login thất bại: {r.text[:200]}")
-        return
+        raise RuntimeError(f"Đăng nhập Toshiba thất bại: {r.text[:200]}")
     print("[+] Login OK")
     csrf = session.cookies.get("Session") or csrf
     headers["csrfpId"] = csrf
@@ -1011,7 +1016,7 @@ def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, ex
         
         if not group_slot:
             print("[-] Không tìm được Group slot!")
-            return
+            raise RuntimeError("Không tìm được Group slot trống trên máy in Toshiba!")
 
     # Tạo Template
     print(f"[*] Tạo Template FTP scan...")
@@ -1042,6 +1047,7 @@ def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, ex
 
     if not success:
         print("[-] Không tạo được Template!")
+        raise RuntimeError("Không tạo được Template FTP scan trên máy in Toshiba!")
 
     # Logout
     try:
@@ -1203,16 +1209,7 @@ def reset_single_toshiba_template(ip, user, password, target_id):
         parsed_template = target_raw.zfill(3)
 
     user_name = user or "admin"
-    pws = []
-    if password: pws.append(password)
-    for p in ["123456", "1234", "12345", "admin", ""]:
-        if p not in pws: pws.append(p)
-
-    base_urls = [
-        f"http://{ip}",
-        f"https://{ip}:10443",
-        f"https://{ip}"
-    ]
+    user_pw = password if password is not None else ""
 
     session = requests.Session()
     try:
@@ -1220,49 +1217,39 @@ def reset_single_toshiba_template(ip, user, password, target_id):
     except Exception:
         pass
 
-    login_success = False
-    working_base_url = ""
-    working_pw = ""
-    user_token_id = ""
-    log_history = []
+    working_base_url = f"http://{ip}"
+    landing_url = f"{working_base_url}/?MAIN=TOPACCESS"
 
     print("")
     print(f"[2/4] Dang nhap Toshiba TopAccess ({ip})...")
+    try:
+        r_boot = session.get(landing_url, verify=False, timeout=5)
+        print(f"  -> GET Landing {landing_url}: status={r_boot.status_code}")
+    except Exception as boot_exc:
+        print(f"  [!] GET Landing {landing_url} exc: {boot_exc}")
 
-    for target_url in base_urls:
-        if login_success: break
-        
-        landing_url = f"{target_url}/?MAIN=TOPACCESS"
-        try:
-            r_boot = session.get(landing_url, verify=False, timeout=5)
-            print(f"  -> GET Landing {landing_url}: status={r_boot.status_code}, cookies={dict(session.cookies)}")
-        except Exception as boot_exc:
-            print(f"  [!] GET Landing {landing_url} exc: {boot_exc}")
+    csrf_token = session.cookies.get("Session") or session.cookies.get("session") or ""
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': '*/*',
+        'Referer': landing_url,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    }
+    if csrf_token:
+        headers['csrfpId'] = csrf_token
 
-        csrf_token = session.cookies.get("Session") or session.cookies.get("session") or ""
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        local_ip = "127.0.0.1"
 
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': '*/*',
-            'Referer': landing_url,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        }
-        if csrf_token:
-            headers['csrfpId'] = csrf_token
-
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-        except Exception:
-            local_ip = "127.0.0.1"
-
-        for pw in pws:
-            login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+    login_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <DeviceInformationModel>
 <SetValue>
     <Authentication>
         <UserCredential>
             <userName>{user_name}</userName>
-            <passwd>{pw}</passwd>
+            <passwd>{user_pw}</passwd>
             <ipaddress>{local_ip}</ipaddress>
             <applicationType>TOP_ACCESS</applicationType>
         </UserCredential>
@@ -1275,37 +1262,34 @@ def reset_single_toshiba_template(ip, user, password, target_id):
     </Login>
 </Command>
 </DeviceInformationModel>"""
-            try:
-                r_log = session.post(f"{target_url}/contentwebserver", data=login_xml.encode('utf-8'), headers=headers, verify=False, timeout=6)
-                resp_text = r_log.text.strip()
-                resp_snippet = resp_text[:180].replace(chr(10), " ").replace(chr(13), " ")
-                log_msg = f"{target_url} (pw='{pw}') => HTTP {r_log.status_code}: {resp_snippet}"
-                print(f"  -> Login: {log_msg}")
-                log_history.append(log_msg)
 
-                # Extract userTokenId from response
-                m_token = re.search(r'<userTokenId>([^<]+)</userTokenId>', resp_text)
-                if m_token:
-                    user_token_id = m_token.group(1).strip()
-                    headers['userTokenId'] = user_token_id
-                    print(f"  [✓] Extracted userTokenId: '{user_token_id}'")
+    user_token_id = ""
+    login_success = False
+    try:
+        r_log = session.post(f"{working_base_url}/contentwebserver", data=login_xml.encode('utf-8'), headers=headers, verify=False, timeout=8)
+        resp_text = r_log.text.strip()
+        print(f"  -> Login response code: {r_log.status_code}")
 
-                csrf_token = session.cookies.get("Session") or session.cookies.get("session") or csrf_token
-                if csrf_token:
-                    headers['csrfpId'] = csrf_token
+        m_token = re.search(r'<userTokenId>([^<]+)</userTokenId>', resp_text)
+        if m_token:
+            user_token_id = m_token.group(1).strip()
+            headers['userTokenId'] = user_token_id
+            print(f"  [✓] Extracted userTokenId: '{user_token_id}'")
 
-                if r_log.status_code == 200 and ("STATUS_OK" in resp_text or "<LoginResult>Success</LoginResult>" in resp_text or user_token_id):
-                    login_success = True
-                    working_base_url = target_url
-                    working_pw = pw
-                    print(f"  [OK] DANG NHAP TOPACCESS THANH CONG qua {target_url} (User: '{user_name}', PW: '{pw}')!")
-                    break
-            except Exception as log_exc:
-                print(f"  [!] POST Login {target_url} (pw='{pw}') exc: {log_exc}")
+        csrf_token = session.cookies.get("Session") or session.cookies.get("session") or csrf_token
+        if csrf_token:
+            headers['csrfpId'] = csrf_token
+
+        if r_log.status_code == 200 and ("STATUS_OK" in resp_text or "<LoginResult>Success</LoginResult>" in resp_text or user_token_id):
+            login_success = True
+            print(f"  [OK] DANG NHAP TOPACCESS THANH CONG!")
+        else:
+            print(f"  [!] Login response failed: {resp_text[:200]}")
+    except Exception as log_exc:
+        print(f"  [!] Login exception: {log_exc}")
 
     if not login_success:
-        err_details = chr(10).join(log_history[-6:])
-        raise RuntimeError(f"DANG NHAP THAT BAI: May in Toshiba {ip} tu choi dang nhap TopAccess voi tat ca mat khau/cong.{chr(10)}Nhat ky dang nhap:{chr(10)}{err_details}")
+        raise RuntimeError(f"DANG NHAP THAT BAI: May in Toshiba {ip} tu choi dang nhap TopAccess voi user='{user_name}' & password='{'*' * len(user_pw)}'.")
 
     # Step 2.5: License Settings Payload
     print("  -> Khoi tao LICENSE_SETTINGS session payload...")
@@ -1827,12 +1811,12 @@ def main():
         print(f"  -> HTTP Landing Status: {r_landing.status_code}")
     except Exception as e:
         print(f"  [!] LỖI KẾT NỐI MÁY IN {IP}: {e}")
-        return
+        raise RuntimeError(f"LỖI KẾT NỐI MÁY IN {IP}: {e}")
 
     csrf_token = session.cookies.get("Session") or ""
     if not csrf_token:
         print("  [!] LỖI: Không trích xuất được Session/CSRF cookie từ landing page!")
-        return
+        raise RuntimeError("Không trích xuất được Session/CSRF cookie từ landing page!")
     print(f"  [✓] CSRF Token Extracted: {csrf_token}")
 
     headers = {
@@ -1841,10 +1825,10 @@ def main():
     }
 
     # STEP 3: LOGIN TOPACCESS
-    print(f"\\n[STEP 3] ĐĂNG NHẬP (LOGIN) VÀO TOSHIBA TOPACCESS VỚI USER '{USER}'...")
+    print(f"\n[STEP 3] ĐĂNG NHẬP (LOGIN) VÀO TOSHIBA TOPACCESS VỚI USER '{USER}'...")
     local_client_ip = get_local_ip(IP)
     login_xml = (
-        f"<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>"
+        f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
         f"<DeviceInformationModel><SetValue><Authentication><UserCredential>"
         f"<userName>{USER}</userName><passwd>{PASSWORD}</passwd><ipaddress>{local_client_ip}</ipaddress>"
         f"<applicationType>TOP_ACCESS</applicationType></UserCredential></Authentication></SetValue>"
@@ -1859,18 +1843,18 @@ def main():
 
         if "STATUS_OK" not in r_login.text and "Success" not in r_login.text:
             print(f"  [!] ĐĂNG NHẬP THẤT BẠI: {r_login.text[:200]}")
-            return
+            raise RuntimeError(f"ĐĂNG NHẬP THẤT BẠI: {r_login.text[:200]}")
         print(f"  [✓] ĐĂNG NHẬP THÀNH CÔNG (LOGIN OK)!")
     except Exception as login_exc:
         print(f"  [!] LỖI TRONG QUÁ TRÌNH LOGIN: {login_exc}")
-        return
+        raise RuntimeError(f"LỖI TRONG QUÁ TRÌNH LOGIN: {login_exc}")
 
     # Refresh CSRF
     csrf_token = session.cookies.get("Session") or csrf_token
     headers["csrfpId"] = csrf_token
 
     # STEP 4: PREPARE AND BUILD CHANGE XML
-    print(f"\\n[STEP 4] CẬP NHẬT CẤU HÌNH TEMPLATE {target_slot} (ĐỔI SANG IP MỚI '{NEW_IP}')...")
+    print(f"\n[STEP 4] CẬP NHẬT CẤU HÌNH TEMPLATE {target_slot} (ĐỔI SANG IP MỚI '{NEW_IP}')...")
     update_xml = build_register_template_xml(
         scan_username=NAME,
         new_target_ip=NEW_IP,
@@ -1884,10 +1868,10 @@ def main():
     print(f"  -> Target Group Slot   : {group_slot}")
     print(f"  -> Target Template Slot: {template_slot}")
     print(f"  -> Target ServerName   : {NEW_IP}")
-    print(f"  -> Target Folder Path  : \\\\\\\\{NEW_IP}\\\\{NAME}\\\\")
+    print(f"  -> Target Folder Path  : \\\\{NEW_IP}\\{NAME}\\")
 
     # STEP 5: SUBMIT REGISTER / CHANGE TEMPLATE POST
-    print(f"\\n[STEP 5] GỬI LỆNH CẬP NHẬT (POST REGISTER TEMPLATE) TỚI TOSHIBA TOPACCESS...")
+    print(f"\n[STEP 5] GỬI LỆNH CẬP NHẬT (POST REGISTER TEMPLATE) TỚI TOSHIBA TOPACCESS...")
     operation_success = False
     try:
         r_update = session.post(cgi, data=update_xml.encode("utf-8"), headers=headers, verify=False, timeout=12)
@@ -1897,7 +1881,7 @@ def main():
         if "STATUS_OK" in r_update.text or "Success" in r_update.text:
             operation_success = True
             print(f"  [✓] CẬP NHẬT THÀNH CÔNG (UPDATE SUCCESSFUL)!")
-            print(f"      Đã đổi đường dẫn Scan cho ID {target_slot} từ \\\\\\\\{OLD_IP}\\\\{NAME}\\\\ ➔ \\\\\\\\{NEW_IP}\\\\{NAME}\\\\")
+            print(f"      Đã đổi đường dẫn Scan cho ID {target_slot} từ \\\\{OLD_IP}\\{NAME}\\ ➔ \\\\{NEW_IP}\\{NAME}\\")
         else:
             m = re.search(r'<statusOfOperation>([^<]+)</statusOfOperation>', r_update.text)
             err_msg = m.group(1) if m else r_update.text[:200]
@@ -1906,9 +1890,9 @@ def main():
         print(f"  [!] LỖI GỬI LỆNH UPDATE: {update_exc}")
 
     # STEP 6: LOGOUT TOPACCESS
-    print(f"\\n[STEP 6] ĐĂNG XUẤT (LOGOUT) KHỎI TOSHIBA TOPACCESS...")
+    print(f"\n[STEP 6] ĐĂNG XUẤT (LOGOUT) KHỎI TOSHIBA TOPACCESS...")
     logout_xml = (
-        f"<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>"
+        f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
         f"<DeviceInformationModel><Command><Logout><commandNode>Authentication/UserCredential</commandNode>"
         f"</Logout></Command></DeviceInformationModel>"
     )

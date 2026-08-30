@@ -18,16 +18,17 @@ def update_live_ping_ips(lan_uid: str, live_ips: list[str]) -> None:
     LAST_LIVE_PING_IPS[lan_uid] = {ip.strip() for ip in live_ips if ip and ip.strip()}
     LOGGER.info("[RAM_REGISTRY] Updated LAST_LIVE_PING_IPS for lan '%s': %s", lan_uid, LAST_LIVE_PING_IPS[lan_uid])
 
-def update_new_lan_site_devices(lan_uid: str, devices_list: list[dict[str, Any]]) -> None:
+def update_new_lan_site_devices(lan_uid: str, devices_list: list[dict[str, Any]], agent_uid: str = "") -> None:
     if not lan_uid:
         lan_uid = "default"
     NEW_LAN_SITES[lan_uid] = devices_list
 
-    # Also bind printers to real lan_uid of active agents
-    for a_uid, a_info in ACTIVE_AGENTS.items():
-        if isinstance(a_info, dict) and a_info.get("lan_uid"):
-            real_lan = a_info.get("lan_uid")
-            NEW_LAN_SITES[real_lan] = devices_list
+    # Bind active agents to the specific lan_uid
+    if lan_uid != "default":
+        for a_uid, a_info in ACTIVE_AGENTS.items():
+            if isinstance(a_info, dict):
+                if (agent_uid and a_uid == agent_uid) or (not agent_uid and a_info.get("lan_uid") == "default"):
+                    a_info["lan_uid"] = lan_uid
 
     LOGGER.info("[NEW_LAN_SITES] Updated NEW_LAN_SITES for lan '%s': %d printers", lan_uid, len(devices_list))
 

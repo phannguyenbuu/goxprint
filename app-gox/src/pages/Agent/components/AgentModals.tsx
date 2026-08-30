@@ -32,6 +32,531 @@ const defaultFormatJsonText = (val: any) => {
   return String(val);
 };
 
+function ImageZoomViewer({ src, alt }: { src: string; alt?: string }) {
+  const [scale, setScale] = React.useState(1);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
+
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.25, 5));
+  const handleZoomOut = () => {
+    setScale((s) => {
+      const next = Math.max(s - 0.25, 1);
+      if (next === 1) setPosition({ x: 0, y: 0 });
+      return next;
+    });
+  };
+  const handleReset = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 0.15 : -0.15;
+    setScale((prevScale) => {
+      const newScale = Math.min(Math.max(prevScale + zoomFactor, 1), 5);
+      if (newScale === 1) setPosition({ x: 0, y: 0 });
+      return newScale;
+    });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (scale <= 1) return;
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPosition({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  const handleDoubleClick = () => {
+    if (scale > 1) {
+      handleReset();
+    } else {
+      setScale(2.5);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 1,
+        minHeight: 0,
+        width: '100%',
+        position: 'relative',
+        background: '#090d16',
+        borderRadius: '8px',
+        border: '1px solid var(--color-surface-light)',
+        overflow: 'hidden',
+        userSelect: 'none'
+      }}
+      onWheel={handleWheel}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'rgba(18, 18, 26, 0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid var(--color-surface-light)',
+          borderRadius: '8px',
+          padding: '4px 8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleZoomOut}
+          disabled={scale <= 1}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: scale <= 1 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+            cursor: scale <= 1 ? 'not-allowed' : 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Thu nhỏ (-)"
+        >
+          🔍-
+        </button>
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)', minWidth: '42px', textAlign: 'center' }}>
+          {Math.round(scale * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={handleZoomIn}
+          disabled={scale >= 5}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: scale >= 5 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+            cursor: scale >= 5 ? 'not-allowed' : 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Phóng to (+)"
+        >
+          🔍+
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--color-text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}
+          title="Đặt lại (Reset)"
+        >
+          🔄
+        </button>
+      </div>
+
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
+      >
+        <img
+          src={src}
+          alt={alt || 'Screenshot'}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '70vh',
+            borderRadius: '6px',
+            objectFit: 'contain',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+            transformOrigin: 'center center'
+          }}
+          draggable={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+function WimFullscreenModal({
+  webPreviewModal,
+  handleCloseWebPreview,
+  directLan,
+  webPreviewLoading,
+  previewIframeRef,
+  previewBlobUrl
+}: any) {
+  const [scale, setScale] = React.useState(1);
+
+  const iframeSrc = webPreviewModal.url
+    ? webPreviewModal.url
+    : (directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl);
+
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.25, 4));
+  const handleZoomOut = () => setScale((s) => Math.max(s - 0.25, 1));
+  const handleReset = () => setScale(1);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || scale > 1) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 0.15 : -0.15;
+      setScale((prevScale) => Math.min(Math.max(prevScale + zoomFactor, 1), 4));
+    }
+  };
+
+  return (
+    <div
+      className="web-preview-modal-overlay"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 250,
+        background: '#090d16',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden'
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {/* Floating Control Bar */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          right: '16px',
+          zIndex: 999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'rgba(15, 23, 42, 0.92)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
+          borderRadius: '10px',
+          padding: '6px 12px',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+          userSelect: 'none'
+        }}
+      >
+        {/* Info Label */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: 'var(--color-text)', fontWeight: 600, paddingRight: '4px' }}>
+          <span style={{ color: '#10b981' }}>🟢</span>
+          <span>{webPreviewModal.title || 'WIM'}</span>
+          <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>
+            ({webPreviewModal.ip})
+          </span>
+        </div>
+
+        <div style={{ width: '1px', height: '18px', background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
+
+        {/* Zoom Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            disabled={scale <= 1}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: scale <= 1 ? 'rgba(255,255,255,0.3)' : 'white',
+              cursor: scale <= 1 ? 'not-allowed' : 'pointer',
+              fontSize: '0.85rem',
+              padding: '3px 8px',
+              borderRadius: '6px'
+            }}
+            title="Thu nhỏ (-)"
+          >
+            🔍-
+          </button>
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-primary)', minWidth: '42px', textAlign: 'center' }}>
+            {Math.round(scale * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            disabled={scale >= 4}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: scale >= 4 ? 'rgba(255,255,255,0.3)' : 'white',
+              cursor: scale >= 4 ? 'not-allowed' : 'pointer',
+              fontSize: '0.85rem',
+              padding: '3px 8px',
+              borderRadius: '6px'
+            }}
+            title="Phóng to (+)"
+          >
+            🔍+
+          </button>
+          <button
+            type="button"
+            onClick={handleReset}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              padding: '3px 8px',
+              borderRadius: '6px'
+            }}
+            title="Đặt lại (Reset Zoom)"
+          >
+            🔄
+          </button>
+        </div>
+
+        <div style={{ width: '1px', height: '18px', background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
+
+        {/* Force Refresh Tunnel / Page */}
+        <button
+          type="button"
+          onClick={() => {
+            if (previewIframeRef && previewIframeRef.current) {
+              const currentSrc = previewIframeRef.current.src;
+              const cleanUrl = currentSrc.split('#')[0].replace(/([?&])_t=\d+/, '');
+              const separator = cleanUrl.includes('?') ? '&' : '?';
+              previewIframeRef.current.src = cleanUrl + separator + `_t=${Date.now()}`;
+            }
+          }}
+          style={{
+            background: 'rgba(16, 185, 129, 0.2)',
+            border: '1px solid rgba(16, 185, 129, 0.4)',
+            color: '#34d399',
+            cursor: 'pointer',
+            fontSize: '0.76rem',
+            fontWeight: 600,
+            padding: '4px 10px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+          title="Bắt buộc nạp lại trang WIM từ máy in qua Tunnel"
+        >
+          ⚡ Nạp lại (Tunnel)
+        </button>
+
+        {/* External Tab */}
+        <button
+          type="button"
+          onClick={() => window.open(webPreviewModal.url || `http://${webPreviewModal.ip}/`, '_blank')}
+          style={{
+            background: 'rgba(59, 130, 246, 0.2)',
+            border: '1px solid rgba(59, 130, 246, 0.4)',
+            color: '#60a5fa',
+            cursor: 'pointer',
+            fontSize: '0.76rem',
+            fontWeight: 600,
+            padding: '4px 10px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+          title="Mở sang tab trình duyệt mới"
+        >
+          ↗️ Tab mới
+        </button>
+
+        {/* Close Button */}
+        <button
+          type="button"
+          onClick={handleCloseWebPreview}
+          style={{
+            background: '#ef4444',
+            border: 'none',
+            color: 'white',
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            padding: '4px 12px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            boxShadow: '0 2px 8px rgba(239,68,68,0.4)'
+          }}
+          title="Đóng modal WIM"
+        >
+          ✕ Đóng
+        </button>
+      </div>
+
+      {/* Body Area */}
+      <div
+        style={{
+          flex: 1,
+          width: '100vw',
+          height: '100vh',
+          overflow: scale > 1 ? 'auto' : 'hidden',
+          background: 'white',
+          position: 'relative'
+        }}
+        onWheel={handleWheel}
+      >
+        {webPreviewModal.html === 'LOADING' ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              height: '100%',
+              gap: '14px',
+              background: '#090d16',
+              color: 'white'
+            }}
+          >
+            <svg
+              style={{
+                width: '42px',
+                height: '42px',
+                color: 'var(--color-primary)',
+                animation: 'spin 1s linear infinite'
+              }}
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+              Đang kết nối đến WIM ({webPreviewModal.ip})...
+            </span>
+          </div>
+        ) : webPreviewModal.html && webPreviewModal.html.startsWith('ERROR:') ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              height: '100%',
+              gap: '14px',
+              padding: '24px',
+              background: '#090d16',
+              color: 'var(--color-error)'
+            }}
+          >
+            <span style={{ fontSize: '3rem' }}>⚠️</span>
+            <span style={{ fontSize: '1rem', fontWeight: 700 }}>
+              Lỗi kết nối Web Setting từ Agent
+            </span>
+            <pre style={{ fontSize: '0.8rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '16px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', maxWidth: '600px', width: '100%', fontFamily: 'monospace' }}>
+              {webPreviewModal.html.replace('ERROR:', '').trim()}
+            </pre>
+          </div>
+        ) : (
+          <div
+            style={{
+              width: scale > 1 ? `${100 * scale}%` : '100%',
+              height: scale > 1 ? `${100 * scale}%` : '100%',
+              transform: scale > 1 ? `scale(${scale})` : 'none',
+              transformOrigin: 'top left',
+              transition: 'transform 0.15s ease-out',
+              position: 'relative'
+            }}
+          >
+            <iframe
+              ref={previewIframeRef}
+              src={iframeSrc}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                background: 'white'
+              }}
+            />
+            {webPreviewLoading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(15, 23, 42, 0.65)',
+                  backdropFilter: 'blur(3px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  zIndex: 10
+                }}
+              >
+                <svg
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    color: 'var(--color-primary)',
+                    animation: 'spin 1s linear infinite'
+                  }}
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span style={{ fontSize: '0.85rem', color: 'white', fontWeight: 600 }}>
+                  Đang nạp dữ liệu trang...
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AgentModals(props: any) {
   const {
     AgentPage,
@@ -242,6 +767,43 @@ export function AgentModals(props: any) {
   const [isConnectingIp, setIsConnectingIp] = React.useState(false);
   const [ipErrorMsg, setIpErrorMsg] = React.useState('');
   const formatJsonText = typeof propFormatJsonText === 'function' ? propFormatJsonText : defaultFormatJsonText;
+
+  React.useEffect(() => {
+    if (viewOutputModal?.isOpen) {
+      setTimeout(() => {
+        if (modalContentRef && modalContentRef.current) {
+          modalContentRef.current.scrollTop = modalContentRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  }, [viewOutputModal?.isOpen, viewOutputModal?.content]);
+
+  React.useEffect(() => {
+    if (installDriverModal?.isOpen) {
+      const isSuggestedEmpty = !installDriverModal.suggestedDrivers || installDriverModal.suggestedDrivers.length === 0;
+      if (isSuggestedEmpty && typeof setInstallDriverModal === 'function') {
+        const query = installDriverModal.model || installDriverModal.brand || installDriverModal.printerId || '';
+        if (query) {
+          fetchApi(`/api/v1/match-drivers?name=${encodeURIComponent(query)}`)
+            .then((res: any) => {
+              if (res && res.matches && Array.isArray(res.matches) && res.matches.length > 0) {
+                const firstCat = res.matches[0];
+                const firstDrv = firstCat?.drivers?.[0];
+                setInstallDriverModal((prev: any) => ({
+                  ...prev,
+                  suggestedDrivers: res.matches,
+                  brand: prev.brand || firstCat?.brand || 'ricoh',
+                  model: prev.model || firstCat?.model || 'Photocopy',
+                  driverName: prev.driverName || firstDrv?.name || '',
+                  driverUrl: prev.driverUrl || firstDrv?.url || '',
+                }));
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+  }, [installDriverModal?.isOpen, installDriverModal?.printerId, installDriverModal?.model, installDriverModal?.brand]);
 
   React.useEffect(() => {
     if (accessDeniedState?.isOpen) {
@@ -738,6 +1300,82 @@ export function AgentModals(props: any) {
                                 }}
                               >
                                 🔗 Tạo Shortcut Desktop
+                              </button>
+                            </div>
+                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
+
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>
+                                  🌐 Giao diện WIM PrintAgentX (Trình duyệt WIM)
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>
+                                  Mở trang web printagentx.com dưới dạng WIM (Web Preview) từ máy Agent <strong>{selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}</strong> (để kiểm tra chạy offline)
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={async () => {
+                                  const agentUid = selectedUtilityAgent?.agent_uid;
+                                  if (!agentUid) return;
+
+                                  // 1. Gửi lệnh mở trình duyệt local trên máy Agent (tony) tại port 9173
+                                  handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("http://localhost:9173")`);
+
+                                  // 2. Khởi tạo đường hầm SSH Reverse Tunnel tới port 9173 của máy Agent đại diện (tony)
+                                  try {
+                                    const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
+                                    const res = await fetch(`${BASE_URL}/api/agents/${encodeURIComponent(agentUid)}/tunnel/start`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ printer_ip: '127.0.0.1', printer_port: 9173 })
+                                    });
+                                    const data = await res.json();
+                                    const tunnelUrl = data?.url || data?.url_port || '';
+
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: tunnelUrl ? `https://printagentx.com/?tunnel_url=${encodeURIComponent(tunnelUrl)}` : `https://printagentx.com`,
+                                        agentUid: agentUid
+                                      });
+                                    }
+                                  } catch (err) {
+                                    console.error('Failed to start agent web tunnel:', err);
+                                    if (setWebPreviewModal) {
+                                      setWebPreviewModal({
+                                        isOpen: true,
+                                        title: `🌐 WIM PrintAgentX — Agent ${selectedUtilityAgent?.hostname || agentUid}`,
+                                        ip: selectedUtilityAgent?.local_ip || '127.0.0.1',
+                                        path: '/',
+                                        html: 'DIRECT_LAN',
+                                        url: `https://printagentx.com`,
+                                        agentUid: agentUid
+                                      });
+                                    }
+                                  }
+                                }}
+                                disabled={utilityActionPending !== null}
+                                style={{
+                                  padding: '8px 16px',
+                                  fontSize: '0.78rem',
+                                  borderRadius: '8px',
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  border: 'none',
+                                  color: '#fff',
+                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)'
+                                }}
+                              >
+                                🌐 Mở WIM printagentx.com (Agent {selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}) ↗
                               </button>
                             </div>
                           </>
@@ -1864,13 +2502,89 @@ export function AgentModals(props: any) {
               </div>
 
               <div style={styles.modalBody}>
-                <p style={{ fontSize: '0.82rem', color: 'var(--color-text)', lineHeight: 1.4, margin: '0 0 12px 0' }}>
-                  Bạn chuẩn bị cài đặt driver <strong>"{installDriverModal.driverName}"</strong> từ xa.
-                </p>
-                
+                {/* Driver Catalog Dropdown Selection */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                    📂 chọn phiên bản Driver cần cài đặt (khớp từ Storage catalog):
+                  </label>
+                  {(() => {
+                    const catalogDrivers: { name: string; url: string; label: string; brand: string; model: string }[] = [];
+                    if (installDriverModal.suggestedDrivers && Array.isArray(installDriverModal.suggestedDrivers) && installDriverModal.suggestedDrivers.length > 0) {
+                      installDriverModal.suggestedDrivers.forEach((catItem: any) => {
+                        if (catItem.drivers && Array.isArray(catItem.drivers)) {
+                          catItem.drivers.forEach((drv: any) => {
+                            catalogDrivers.push({
+                              name: drv.name,
+                              url: drv.url,
+                              brand: catItem.brand || installDriverModal.brand,
+                              model: catItem.model || installDriverModal.model,
+                              label: `[${String(catItem.brand || installDriverModal.brand || '').toUpperCase()} ${catItem.model || installDriverModal.model}] ${drv.name}`
+                            });
+                          });
+                        }
+                      });
+                    }
+
+                    if (catalogDrivers.length === 0 && installDriverModal.driverName && installDriverModal.driverUrl) {
+                      catalogDrivers.push({
+                        name: installDriverModal.driverName,
+                        url: installDriverModal.driverUrl,
+                        brand: installDriverModal.brand || 'Ricoh',
+                        model: installDriverModal.model || 'Photocopy',
+                        label: `[${String(installDriverModal.brand || 'RICOH').toUpperCase()} ${installDriverModal.model || ''}] ${installDriverModal.driverName}`
+                      });
+                    }
+
+                    if (catalogDrivers.length === 0) {
+                      return (
+                        <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-error)', fontStyle: 'italic', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px' }}>
+                          ⚠️ Không tìm thấy phiên bản driver nào phù hợp trong Storage catalog.
+                        </div>
+                      );
+                    }
+
+                    const currentSelectedUrl = installDriverModal.driverUrl || catalogDrivers[0]?.url || '';
+
+                    return (
+                      <select
+                        value={currentSelectedUrl}
+                        onChange={(e) => {
+                          const selected = catalogDrivers.find(d => d.url === e.target.value);
+                          if (selected) {
+                            setInstallDriverModal((prev: any) => ({
+                              ...prev,
+                              driverName: selected.name,
+                              driverUrl: selected.url,
+                              brand: selected.brand || prev.brand,
+                              model: selected.model || prev.model
+                            }));
+                          }
+                        }}
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '8px 10px',
+                          background: 'var(--color-bg)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-surface-light)',
+                          borderRadius: '6px',
+                          width: '100%',
+                          cursor: 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        {catalogDrivers.map((drv, i) => (
+                          <option key={i} value={drv.url}>
+                            {drv.label}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                </div>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
-                    Chọn Máy đại diện (Agent) để thực hiện cài đặt:
+                    💻 Chọn Máy đại diện (Agent) để thực hiện cài đặt:
                   </label>
                   {(!selectedLan?.agents || selectedLan.agents.filter((a: any) => a.is_agent_active).length === 0) ? (
                     <div style={{ padding: '10px', fontSize: '0.82rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
@@ -1920,15 +2634,24 @@ export function AgentModals(props: any) {
                   }}
                   disabled={installDriverModal.selectedAgentUids.length === 0}
                   onClick={() => {
+                    const currentModal = installDriverModal;
                     setInstallDriverModal((prev) => ({ ...prev, isOpen: false }));
-                    installDriverModal.selectedAgentUids.forEach((agentUid: string) => {
+
+                    const activeDrvUrl = currentModal.driverUrl || '';
+                    const activeDrvName = currentModal.driverName || currentModal.model || 'Driver';
+                    const activeBrand = currentModal.brand || 'Ricoh';
+                    const activeModel = currentModal.model || 'Photocopy';
+
+                    currentModal.selectedAgentUids.forEach((agentUid: string) => {
                       executeRemoteInstallDriver(
-                        installDriverModal.printerId,
-                        installDriverModal.brand,
-                        installDriverModal.model,
-                        installDriverModal.driverName,
-                        installDriverModal.driverUrl,
-                        agentUid
+                        currentModal.printerId,
+                        activeBrand,
+                        activeModel,
+                        activeDrvName,
+                        activeDrvUrl,
+                        agentUid,
+                        currentModal.printerIp,
+                        currentModal.macId
                       );
                     });
                   }}
@@ -2198,6 +2921,11 @@ export function AgentModals(props: any) {
                     </div>
                   )}
                 </div>
+              ) : viewOutputModal.content && (typeof viewOutputModal.content === 'string') && (viewOutputModal.content.trim().startsWith('data:image/') || viewOutputModal.content.trim().startsWith('iVBORw0KGgo')) ? (
+                <ImageZoomViewer
+                  src={viewOutputModal.content.trim().startsWith('data:image/') ? viewOutputModal.content.trim() : `data:image/png;base64,${viewOutputModal.content.trim()}`}
+                  alt={viewOutputModal.title || 'Desktop Screenshot'}
+                />
               ) : (
                 <pre
                   ref={modalContentRef}
@@ -2270,826 +2998,18 @@ export function AgentModals(props: any) {
         )}
       </AnimatePresence>
 
-      {/* 8. WEB PREVIEW MODAL — Xem trực tiếp Web Setting */}
+      {/* 8. WEB PREVIEW MODAL — Xem trực tiếp Web Setting (WIM Fullscreen with Floating Controls) */}
       <AnimatePresence>
         {webPreviewModal && webPreviewModal.isOpen && (
-          <div
-            className="web-preview-modal-overlay"
-            style={{ ...styles.confirmOverlay, zIndex: 190, alignItems: 'flex-start', paddingTop: '5vh' }}
-            onClick={handleCloseWebPreview}
-          >
-            <style>{`
-              @keyframes spin {
-                to { transform: rotate(360deg); }
-              }
-              @media (max-width: 767px) {
-                .web-preview-modal-overlay {
-                  padding-top: 0px !important;
-                  align-items: center !important;
-                  justify-content: center !important;
-                }
-                .web-preview-modal-card {
-                  width: 100% !important;
-                  height: 100vh !important;
-                  max-height: 100vh !important;
-                  border-radius: 0px !important;
-                  padding: 12px !important;
-                  margin: 0 !important;
-                }
-              }
-            `}</style>
-            {(() => {
-              let pageTitle = 'Trang cấu hình máy in';
-              if (webPreviewModal.html && webPreviewModal.html !== 'LOADING' && !webPreviewModal.html.startsWith('ERROR:')) {
-                if (webPreviewModal.html === 'DIRECT_LAN') {
-                  pageTitle = 'Kết nối trực tiếp LAN';
-                } else {
-                  const titleMatch = webPreviewModal.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-                  if (titleMatch && titleMatch[1]) {
-                    pageTitle = titleMatch[1].trim();
-                  }
-                }
-              }
-              
-              return (
-                <motion.div
-                  className="web-preview-modal-card"
-                  style={{
-                    ...styles.confirmModalCard,
-                    maxWidth: '1200px',
-                    width: '95%',
-                    height: '85vh',
-                    maxHeight: '85vh',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '20px',
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  initial={{ scale: 0.95, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.95, opacity: 0 }}
-                >
-                  <div style={styles.modalHeader}>
-                    <h3 style={{ ...styles.modalTitle, fontSize: '0.85rem' }}>{webPreviewModal.title}</h3>
-                    <button
-                      style={styles.modalCloseBtn}
-                      onClick={handleCloseWebPreview}
-                    >
-                      &times;
-                    </button>
-                  </div>
-
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: '15px', minHeight: 0 }}>
-                    {webPreviewModal.html === 'LOADING' ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '12px', padding: '20px' }}>
-                        <svg
-                          style={{
-                            width: '36px',
-                            height: '36px',
-                            color: 'var(--color-primary)',
-                            animation: 'spin 1s linear infinite'
-                          }}
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-                          Đang đợi phản hồi từ Agent...
-                        </span>
-                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: '320px' }}>
-                          Agent đang kết nối trực tiếp đến máy in và nạp cấu hình...
-                        </span>
-                      </div>
-                    ) : webPreviewModal.html.startsWith('ERROR:') ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '12px', padding: '20px', color: 'var(--color-error)' }}>
-                        <span style={{ fontSize: '2.2rem' }}>⚠️</span>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 600, textAlign: 'center' }}>
-                          Lỗi lấy trang Web Setting từ Agent
-                        </span>
-                        <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '12px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.15)', width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}>
-                          {webPreviewModal.html.replace('ERROR:', '').trim()}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, minHeight: 0 }}>
-                        {/* Compact Connection Mode Status Row */}
-                        <div style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid var(--color-surface-light)',
-                          borderRadius: '8px',
-                          padding: '8px 12px',
-                          fontSize: '0.74rem'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text)' }}>
-                            <span>🔌 Kết nối: <strong>{directLan ? '⚡ Trực tiếp LAN' : '🌐 Qua Agent'}</strong></span>
-                          </div>
-                          <button
-                            onClick={() => setShowPreviewDetails(!showPreviewDetails)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--color-primary)',
-                              cursor: 'pointer',
-                              fontWeight: 600,
-                              fontSize: '0.72rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                          >
-                            {showPreviewDetails ? 'Thu gọn ▲' : 'Cài đặt & Chi tiết ▼'}
-                          </button>
-                        </div>
-
-                        {showPreviewDetails && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Success Status & Control Actions */}
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              gap: '12px',
-                              background: 'rgba(16, 185, 129, 0.04)',
-                              border: '1px solid rgba(16, 185, 129, 0.15)',
-                              borderRadius: '8px',
-                              padding: '10px 14px',
-                            }}>
-                              <div style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
-                                <span style={{ color: '#10b981', fontWeight: 700 }}>🟢 Kết nối Live:</span> {pageTitle} (<span style={{ fontFamily: 'monospace' }}>{webPreviewModal.ip}</span>)
-                              </div>
-                              
-                              <button
-                                onClick={() => window.open(`http://${webPreviewModal.ip}/`, '_blank')}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  background: '#10b981',
-                                  border: 'none',
-                                  borderRadius: '6px',
-                                  color: 'white',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.15)',
-                                }}
-                              >
-                                🌐 Mở trực tiếp LAN
-                              </button>
-                            </div>
-
-                            {/* Chế độ kết nối Switcher */}
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: '12px',
-                              background: 'var(--color-surface)',
-                              border: '1px solid var(--color-surface-light)',
-                              borderRadius: '8px',
-                              padding: '8px 12px',
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                                🔗 Chế độ kết nối:
-                              </div>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button
-                                  onClick={() => handleToggleDirectLan(false)}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.70rem',
-                                    fontWeight: 600,
-                                    background: !directLan ? 'var(--color-primary)' : 'rgba(255,255,255,0.05)',
-                                    color: !directLan ? 'white' : 'var(--color-text-secondary)',
-                                    border: !directLan ? '1px solid var(--color-primary)' : '1px solid var(--color-surface-light)',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s ease',
-                                  }}
-                                >
-                                  🔌 Qua Agent (Từ xa)
-                                </button>
-                                <button
-                                  onClick={() => handleToggleDirectLan(true)}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.70rem',
-                                    fontWeight: 600,
-                                    background: directLan ? '#10b981' : 'rgba(255,255,255,0.05)',
-                                    color: directLan ? 'white' : 'var(--color-text-secondary)',
-                                    border: directLan ? '1px solid #10b981' : '1px solid var(--color-surface-light)',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s ease',
-                                  }}
-                                >
-                                  ⚡ Trực tiếp LAN (Cùng Wifi)
-                                </button>
-                              </div>
-                            </div>
-
-                            {directLan && window.location.protocol === 'https:' && (
-                              <div style={{
-                                color: '#fbbf24',
-                                background: 'rgba(251, 191, 36, 0.08)',
-                                border: '1px solid rgba(251, 191, 36, 0.25)',
-                                borderRadius: '8px',
-                                padding: '10px 14px',
-                                fontSize: '0.72rem',
-                                lineHeight: 1.4
-                              }}>
-                                ⚠️ <strong>Mixed Content Block:</strong> Trình duyệt di động/máy tính sẽ chặn kết nối HTTP trực tiếp đến IP máy in từ trang web bảo mật HTTPS. Để kết nối trực tiếp thành công, hãy mở trang web quản trị qua <strong>HTTP</strong> hoặc click nút <strong>🌐 Mở trực tiếp LAN</strong> phía trên để truy cập trong tab mới.
-                              </div>
-                            )}
-
-                            {directLan && (
-                              <div style={{
-                                color: '#60a5fa',
-                                background: 'rgba(96, 165, 250, 0.08)',
-                                border: '1px solid rgba(96, 165, 250, 0.25)',
-                                borderRadius: '8px',
-                                padding: '10px 14px',
-                                fontSize: '0.72rem',
-                                lineHeight: 1.4
-                              }}>
-                                💡 <strong>Chế độ trực tiếp LAN:</strong> Thiết bị kết nối trực tiếp đến IP máy in qua mạng Wifi nội bộ.
-                                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                                  <li>Thanh địa chỉ và Lịch sử duyệt sẽ không tự động cập nhật.</li>
-                                  <li>Chức năng thu phóng (Ngang/Dọc) trong iframe không áp dụng (vui lòng zoom bằng thao tác vuốt).</li>
-                                </ul>
-                              </div>
-                            )}
-                            
-                            {!directLan && (
-                              <div style={{
-                                color: 'var(--color-text-secondary)',
-                                background: 'rgba(255, 255, 255, 0.02)',
-                                border: '1px solid var(--color-surface-light)',
-                                borderRadius: '8px',
-                                padding: '10px 14px',
-                                fontSize: '0.72rem',
-                                lineHeight: 1.4
-                              }}>
-                                <strong style={{ color: 'var(--color-primary)' }}>🛠️ Nhật ký & Thông số kết nối ngược (SSH Reverse Tunnel):</strong>
-                                <div style={{ marginTop: '6px', fontFamily: 'monospace', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <div>• <strong>Máy khách (Agent Uid):</strong> {webPreviewModal.agentUid}</div>
-                                  <div>• <strong>Địa chỉ IP Máy in:</strong> {webPreviewModal.ip}</div>
-                                  <div>• <strong>Cổng dịch vụ máy in:</strong> 80</div>
-                                  <div>• <strong>Máy chủ VPS:</strong> 31.97.76.62</div>
-                                  <div>• <strong>Cổng kết nối trên VPS (Assigned Port):</strong> {webPreviewModal.url ? webPreviewModal.url.split(':').pop() : 'Đang cấp phát...'}</div>
-                                  <div>• <strong>Phương thức xác thực:</strong> SSH Key pair (Root User)</div>
-                                  <div>• <strong>Đường dẫn kết nối:</strong> <span style={{ color: 'var(--color-text)' }}>{webPreviewModal.url || 'N/A'}</span></div>
-                                  {webPreviewModal.url && (
-                                    <div style={{ color: '#fbbf24', marginTop: '4px' }}>
-                                      ⚠️ Nếu Iframe hiển thị màn hình trắng / lỗi kết nối, có thể do trình duyệt chặn nội dung Mixed Content (HTTP trên trang HTTPS). Hãy click nút <strong>🔗 Mở tab mới ↗</strong> ở thanh điều khiển phía dưới để xem trực tiếp.
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Browser Chrome Controls (Address Bar & Nav Buttons) */}
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          background: 'var(--color-surface)',
-                          border: '1px solid var(--color-surface-light)',
-                          borderRadius: '6px',
-                          padding: '6px 12px'
-                        }}>
-                          <button
-                            onClick={handleHistoryBack}
-                            disabled={webPreviewHistoryIndex <= 0}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: webPreviewHistoryIndex <= 0 ? 'rgba(255,255,255,0.15)' : 'var(--color-text)',
-                              cursor: webPreviewHistoryIndex <= 0 ? 'not-allowed' : 'pointer',
-                              padding: '4px',
-                              fontSize: '0.8rem'
-                            }}
-                            title="Back"
-                          >
-                            ◀
-                          </button>
-                          <button
-                            onClick={handleHistoryForward}
-                            disabled={webPreviewHistoryIndex >= webPreviewHistory.length - 1}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: webPreviewHistoryIndex >= webPreviewHistory.length - 1 ? 'rgba(255,255,255,0.15)' : 'var(--color-text)',
-                              cursor: webPreviewHistoryIndex >= webPreviewHistory.length - 1 ? 'not-allowed' : 'pointer',
-                              padding: '4px',
-                              fontSize: '0.8rem'
-                            }}
-                            title="Forward"
-                          >
-                            ▶
-                          </button>
-                          <button
-                            onClick={() => fetchRemotePage(webPreviewModal.ip, webPreviewModal.path)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--color-text)',
-                              cursor: 'pointer',
-                              padding: '4px',
-                              fontSize: '0.8rem',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            title="Refresh"
-                          >
-                            🔄
-                          </button>
-                          <div style={{
-                            flex: 1,
-                            background: 'var(--color-background)',
-                            border: '1px solid var(--color-surface-light)',
-                            borderRadius: '4px',
-                            padding: '4px 10px',
-                            fontSize: '0.72rem',
-                            fontFamily: 'monospace',
-                            color: 'var(--color-text-secondary)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            http://{webPreviewModal.ip}{webPreviewModal.path || '/'}
-                          </div>
-                          {webPreviewModal.url && (
-                            <a
-                              href={webPreviewModal.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                background: 'var(--color-primary)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                padding: '4px 10px',
-                                fontSize: '0.72rem',
-                                fontWeight: 600,
-                                textDecoration: 'none',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                cursor: 'pointer',
-                                marginLeft: '8px'
-                              }}
-                              title="Mở trang quản trị Web Image Monitor trong tab mới"
-                            >
-                              🔗 Mở tab mới ↗
-                            </a>
-                          )}
-                        </div>
-
-                        {/* Tab Selector for Preview Mode */}
-                        <div style={{ display: 'flex', borderBottom: '1px solid var(--color-surface-light)', gap: '15px', paddingBottom: '4px' }}>
-                          <button
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: '8px 12px',
-                              fontSize: '0.78rem',
-                              fontWeight: webPreviewTab === 'iframe' ? 600 : 500,
-                              color: webPreviewTab === 'iframe' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                              borderBottom: webPreviewTab === 'iframe' ? '2px solid var(--color-primary)' : '2px solid transparent',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                            onClick={() => setWebPreviewTab('iframe')}
-                          >
-                            🌐 Giao diện máy in
-                          </button>
-                          <button
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: '8px 12px',
-                              fontSize: '0.78rem',
-                              fontWeight: webPreviewTab === 'html' ? 600 : 500,
-                              color: webPreviewTab === 'html' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                              borderBottom: webPreviewTab === 'html' ? '2px solid var(--color-primary)' : '2px solid transparent',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                            onClick={() => setWebPreviewTab('html')}
-                          >
-                            📄 Xem mã HTML (Text)
-                          </button>
-                        </div>
-
-                        {webPreviewTab === 'html' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0 }}>
-                            {directLan ? (
-                              <div style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flex: 1,
-                                gap: '10px',
-                                color: 'var(--color-text-secondary)',
-                                fontSize: '0.76rem',
-                                padding: '20px',
-                                textAlign: 'center'
-                              }}>
-                                <span>📄 Chế độ trực tiếp LAN không tải mã nguồn về server.</span>
-                                <span style={{ fontSize: '0.70rem', color: 'rgba(255,255,255,0.4)' }}>
-                                  Hãy chuyển sang chế độ <strong>Qua Agent (Từ xa)</strong> để phân tích và xem mã nguồn HTML của máy in.
-                                </span>
-                              </div>
-                            ) : (
-                              <>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                                    Mã nguồn HTML gốc từ máy in:
-                                  </span>
-                                  <button
-                                    style={{
-                                      border: 'none',
-                                      background: 'rgba(59, 130, 246, 0.1)',
-                                      color: '#3b82f6',
-                                      padding: '4px 10px',
-                                      borderRadius: '6px',
-                                      fontSize: '0.72rem',
-                                      cursor: 'pointer',
-                                      fontWeight: 600,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '4px'
-                                    }}
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(webPreviewModal.html);
-                                      showToast('Đã copy mã HTML vào clipboard', 'success');
-                                    }}
-                                  >
-                                    📋 Copy HTML
-                                  </button>
-                                </div>
-                                <pre style={{
-                                  flex: 1,
-                                  overflow: 'auto',
-                                  margin: 0,
-                                  padding: '12px',
-                                  background: 'var(--color-background)',
-                                  border: '1px solid var(--color-surface-light)',
-                                  borderRadius: '8px',
-                                  fontSize: '0.68rem',
-                                  lineHeight: 1.5,
-                                  fontFamily: "'Consolas', 'Monaco', monospace",
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-all',
-                                  color: 'var(--color-text)',
-                                }}>
-                                  {webPreviewModal.html}
-                                </pre>
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minHeight: 0 }}>
-                            {/* Toolbar Zoom & Scale */}
-                            <div style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: '12px',
-                              background: 'var(--color-surface)',
-                              border: '1px solid var(--color-surface-light)',
-                              borderRadius: '6px',
-                              padding: '8px 12px',
-                              fontSize: '0.74rem'
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-                                {/* Horizontal scale */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>↔️ Ngang:</span>
-                                  <button
-                                    onClick={() => {
-                                      const newVal = Math.max(0.3, parseFloat((scaleX - 0.05).toFixed(2)));
-                                      setScaleX(newVal);
-                                      if (lockAspect) setScaleY(newVal);
-                                    }}
-                                    style={{
-                                      background: 'var(--color-background)',
-                                      border: '1px solid var(--color-surface-light)',
-                                      color: 'var(--color-text)',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer'
-                                    }}
-                                  >-</button>
-                                  <input
-                                    type="range"
-                                    min="0.3"
-                                    max="2.0"
-                                    step="0.05"
-                                    value={scaleX}
-                                    onChange={(e) => {
-                                      const val = parseFloat(e.target.value);
-                                      setScaleX(val);
-                                      if (lockAspect) setScaleY(val);
-                                    }}
-                                    style={{ width: '80px', cursor: 'pointer', accentColor: 'var(--color-primary)' }}
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      const newVal = Math.min(2.0, parseFloat((scaleX + 0.05).toFixed(2)));
-                                      setScaleX(newVal);
-                                      if (lockAspect) setScaleY(newVal);
-                                    }}
-                                    style={{
-                                      background: 'var(--color-background)',
-                                      border: '1px solid var(--color-surface-light)',
-                                      color: 'var(--color-text)',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer'
-                                    }}
-                                  >+</button>
-                                  <span style={{ minWidth: '35px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text)' }}>
-                                    {Math.round(scaleX * 100)}%
-                                  </span>
-                                </div>
-
-                                {/* Vertical scale */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>↕️ Dọc:</span>
-                                  <button
-                                    onClick={() => {
-                                      const newVal = Math.max(0.3, parseFloat((scaleY - 0.05).toFixed(2)));
-                                      setScaleY(newVal);
-                                      if (lockAspect) setScaleX(newVal);
-                                    }}
-                                    style={{
-                                      background: 'var(--color-background)',
-                                      border: '1px solid var(--color-surface-light)',
-                                      color: 'var(--color-text)',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer'
-                                    }}
-                                    disabled={lockAspect}
-                                  >-</button>
-                                  <input
-                                    type="range"
-                                    min="0.3"
-                                    max="2.0"
-                                    step="0.05"
-                                    value={scaleY}
-                                    onChange={(e) => {
-                                      const val = parseFloat(e.target.value);
-                                      setScaleY(val);
-                                      if (lockAspect) setScaleX(val);
-                                    }}
-                                    style={{ width: '80px', cursor: 'pointer', accentColor: 'var(--color-primary)', opacity: lockAspect ? 0.5 : 1 }}
-                                    disabled={lockAspect}
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      const newVal = Math.min(2.0, parseFloat((scaleY + 0.05).toFixed(2)));
-                                      setScaleY(newVal);
-                                      if (lockAspect) setScaleX(newVal);
-                                    }}
-                                    style={{
-                                      background: 'var(--color-background)',
-                                      border: '1px solid var(--color-surface-light)',
-                                      color: 'var(--color-text)',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer'
-                                    }}
-                                    disabled={lockAspect}
-                                  >+</button>
-                                  <span style={{ minWidth: '35px', textAlign: 'right', fontWeight: 600, color: lockAspect ? 'var(--color-text-secondary)' : 'var(--color-text)' }}>
-                                    {Math.round(scaleY * 100)}%
-                                  </span>
-                                </div>
-
-                                {/* Lock Aspect Ratio Toggle */}
-                                <button
-                                  onClick={() => {
-                                    setLockAspect(!lockAspect);
-                                    if (!lockAspect) {
-                                      // Sync Y to X when locking
-                                      setScaleY(scaleX);
-                                    }
-                                  }}
-                                  style={{
-                                    background: lockAspect ? 'rgba(124, 106, 247, 0.15)' : 'var(--color-background)',
-                                    border: lockAspect ? '1px solid var(--color-accent, #7c6af7)' : '1px solid var(--color-surface-light)',
-                                    color: lockAspect ? 'var(--color-accent, #7c6af7)' : 'var(--color-text-secondary)',
-                                    padding: '4px 10px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontWeight: 600,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                  title={lockAspect ? "Bỏ liên kết tỷ lệ" : "Liên kết tỷ lệ Ngang & Dọc"}
-                                >
-                                  {lockAspect ? '🔗 Đồng bộ' : '🔓 Tự do'}
-                                </button>
-                              </div>
-
-                              {/* Presets and Auto-Fit */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <button
-                                  onClick={() => {
-                                    setScaleX(0.95);
-                                    setScaleY(0.95);
-                                  }}
-                                  style={{
-                                    background: 'var(--color-background)',
-                                    border: '1px solid var(--color-surface-light)',
-                                    color: 'var(--color-text)',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontWeight: 500
-                                  }}
-                                >
-                                  Mặc định
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setScaleX(1.0);
-                                    setScaleY(1.0);
-                                  }}
-                                  style={{
-                                    background: 'var(--color-background)',
-                                    border: '1px solid var(--color-surface-light)',
-                                    color: 'var(--color-text)',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontWeight: 500
-                                  }}
-                                >
-                                  100%
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    try {
-                                      const iframe = previewIframeRef.current;
-                                      if (!iframe) return;
-                                      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-                                      if (doc && doc.body) {
-                                        // temporary reset width for measurement
-                                        const origWidth = doc.body.style.width;
-                                        const origTransform = doc.body.style.transform;
-                                        doc.body.style.transform = 'none';
-                                        doc.body.style.width = 'auto';
-                                        
-                                        // Let browser reflow and measure scrollWidth
-                                        const contentWidth = doc.body.scrollWidth || doc.documentElement.scrollWidth || 1024;
-                                        const containerWidth = iframe.clientWidth || 800;
-                                        
-                                        // Restore
-                                        doc.body.style.width = origWidth;
-                                        doc.body.style.transform = origTransform;
-
-                                        if (contentWidth > 0 && containerWidth > 0) {
-                                          let fitScale = containerWidth / contentWidth;
-                                          fitScale = Math.max(0.3, Math.min(1.5, fitScale));
-                                          // Round to nearest 0.05 step
-                                          fitScale = Math.round(fitScale * 20) / 20;
-                                          setScaleX(fitScale);
-                                          if (lockAspect) {
-                                            setScaleY(fitScale);
-                                          }
-                                        }
-                                      }
-                                    } catch (e) {
-                                      console.error(e);
-                                    }
-                                  }}
-                                  style={{
-                                    background: 'rgba(16, 185, 129, 0.1)',
-                                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                                    color: '#10b981',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontWeight: 600
-                                  }}
-                                >
-                                  📐 Vừa khung
-                                </button>
-                              </div>
-                            </div>
-
-                            <div style={{ flex: 1, minHeight: 0, background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--color-surface-light)', position: 'relative' }}>
-                              <iframe
-                                ref={previewIframeRef}
-                                src={webPreviewModal.url ? webPreviewModal.url : (directLan ? `http://${webPreviewModal.ip}${webPreviewModal.path || '/'}` : previewBlobUrl)}
-                                style={{
-                                  width: '100%',
-                                  height: '100%',
-                                  border: 'none',
-                                  background: 'white'
-                                }}
-                              />
-                              {webPreviewLoading && (
-                                <div style={{
-                                  position: 'absolute',
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  background: 'rgba(15, 23, 42, 0.65)',
-                                  backdropFilter: 'blur(3px)',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  gap: '12px',
-                                  zIndex: 10
-                                }}>
-                                  <svg
-                                    style={{
-                                      width: '36px',
-                                      height: '36px',
-                                      color: 'var(--color-primary)',
-                                      animation: 'spin 1s linear infinite'
-                                    }}
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                                  <span style={{ fontSize: '0.85rem', color: 'white', fontWeight: 600 }}>
-                                    Đang đợi phản hồi từ Agent...
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ ...styles.modalFooter, marginTop: '15px', flexShrink: 0, borderTop: '1px solid var(--color-surface-light)', paddingTop: '12px' }}>
-                    {webPreviewModal.html !== 'LOADING' && !webPreviewModal.html.startsWith('ERROR:') && (
-                      <button
-                        style={{
-                          ...styles.smallBtn,
-                          padding: '8px 14px',
-                          fontSize: '0.78rem',
-                          background: 'var(--color-primary)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'white',
-                        }}
-                        onClick={() => {
-                          const blob = new Blob([webPreviewModal!.html], { type: 'text/html;charset=utf-8' });
-                          const url = URL.createObjectURL(blob);
-                          window.open(url, '_blank');
-                        }}
-                      >
-                        ↗️ Xem mã HTML gốc
-                      </button>
-                    )}
-                    <button
-                      style={{
-                        ...styles.smallBtn,
-                        padding: '8px 14px',
-                        fontSize: '0.78rem',
-                        borderColor: 'var(--color-secondary)',
-                        color: 'var(--color-secondary)',
-                        marginLeft: '8px'
-                      }}
-                      onClick={() => setWebPreviewModal((prev) => prev ? { ...prev, isOpen: false } : null)}
-                    >
-                      Đóng
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })()}
-          </div>
+          <WimFullscreenModal
+            webPreviewModal={webPreviewModal}
+            handleCloseWebPreview={handleCloseWebPreview}
+            directLan={directLan}
+            webPreviewLoading={webPreviewLoading}
+            previewIframeRef={previewIframeRef}
+            previewBlobUrl={previewBlobUrl}
+            setWebPreviewModal={setWebPreviewModal}
+          />
         )}
       </AnimatePresence>
 

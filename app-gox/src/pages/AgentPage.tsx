@@ -111,10 +111,12 @@ function safePathToken(value: string): string {
     triggerLanScan,
     filteredPrinters,
     cameras,
-    fetchLanSitesData
+    fetchLanSitesData,
+    myClientIp
   } = propsToPass as any;
 
   const [inputIpDraft, setInputIpDraft] = useState(() => selectedPublicIp || '');
+  const inputIpRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setInputIpDraft(selectedPublicIp || '');
@@ -128,18 +130,6 @@ function safePathToken(value: string): string {
     if (cleanIp) {
       localStorage.setItem('goxprint_selected_public_ip', cleanIp);
       localStorage.setItem('gox_connect_public_ip', cleanIp);
-      try {
-        await fetchApi('/api/public-ips', {
-          method: 'POST',
-          body: JSON.stringify({
-            ip_address: cleanIp,
-            description: 'Added via Enter/Plane button in App-Gox',
-            enabled: true,
-          }),
-        }).catch((e) => console.log('Allowed IP API response:', e));
-      } catch (err) {
-        console.log('Error adding public IP:', err);
-      }
     } else {
       localStorage.removeItem('goxprint_selected_public_ip');
       localStorage.removeItem('gox_connect_public_ip');
@@ -148,6 +138,10 @@ function safePathToken(value: string): string {
       await fetchLanSitesData(true);
     }
   };
+
+  const dynamicPlaceholder = myClientIp
+    ? `IP Public máy này: ${myClientIp}`
+    : 'Nhập IP Public kết nối (VD: 116.98.0.59)...';
 
   return (
     <motion.div
@@ -189,12 +183,6 @@ function safePathToken(value: string): string {
       <div style={styles.fixedHeader}>
         <div style={styles.header}>
           <h1 style={styles.title}>🛠️ Quản lý Mạng LAN</h1>
-          <button
-            style={{ ...styles.smallBtn, borderColor: 'var(--color-secondary)', color: 'var(--color-secondary)' }}
-            onClick={() => fetchLanSitesData(true)}
-          >
-            🔄 Làm mới
-          </button>
         </div>
 
         {/* Public IP LAN Input filter with Enter & Plane button */}
@@ -203,6 +191,7 @@ function safePathToken(value: string): string {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '420px' }}>
             <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
               <input
+                ref={inputIpRef}
                 type="text"
                 value={inputIpDraft}
                 onChange={(e) => setInputIpDraft(e.target.value)}
@@ -211,7 +200,7 @@ function safePathToken(value: string): string {
                     handleApplyPublicIp(inputIpDraft);
                   }
                 }}
-                placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
+                placeholder={dynamicPlaceholder}
                 style={{
                   width: '100%',
                   padding: (selectedPublicIp || inputIpDraft) ? '8px 74px 8px 12px' : '8px 42px 8px 12px',
@@ -230,18 +219,19 @@ function safePathToken(value: string): string {
                   onClick={() => {
                     setInputIpDraft('');
                     handleApplyPublicIp('');
+                    inputIpRef.current?.focus();
                   }}
                   title="Xóa IP Public"
                   style={{
                     position: 'absolute',
                     right: '40px',
-                    background: 'rgba(239, 68, 68, 0.25)',
-                    color: '#f87171',
-                    border: '1px solid rgba(239, 68, 68, 0.4)',
-                    borderRadius: '50%',
+                    background: 'transparent',
+                    color: '#ef4444',
+                    border: 'none',
+                    boxShadow: 'none',
                     width: '24px',
                     height: '24px',
-                    fontSize: '0.75rem',
+                    fontSize: '0.85rem',
                     fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
@@ -256,7 +246,16 @@ function safePathToken(value: string): string {
                 </button>
               )}
               <button
-                onClick={() => handleApplyPublicIp(inputIpDraft)}
+                onClick={async () => {
+                  if (inputIpDraft) {
+                    await handleApplyPublicIp(inputIpDraft);
+                  }
+                  if (selectedLan) {
+                    triggerLanScan(selectedLan, true);
+                  } else if (fetchLanSitesData) {
+                    fetchLanSitesData(true);
+                  }
+                }}
                 title="Gửi & Kết nối IP Public (Enter)"
                 style={{
                   position: 'absolute',
@@ -303,7 +302,6 @@ function safePathToken(value: string): string {
             }}
             onClick={() => {
               setActiveTab('copiers');
-              triggerLanScan(selectedLan);
             }}
           >
             🖨️ Photocopy ({filteredPrinters.length})

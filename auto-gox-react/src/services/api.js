@@ -2,6 +2,37 @@ export const LOCAL_AGENT_PORT = 9173;
 export const BASE_URL = 'https://agentapi.quanlymay.com';
 
 /**
+ * Record job & logs to VPS database (so it appears on app-gox job history)
+ */
+export async function recordJobToVpsApi({ agentUid, printerName, ip, commandType, commandParams, status, output, errorMessage }) {
+  try {
+    const res = await fetch(`${BASE_URL}/api/jobs/record`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Token': 'change-me'
+      },
+      body: JSON.stringify({
+        agent_uid: agentUid || 'administrator',
+        printer_name: printerName || 'AgentNode',
+        ip: ip || '0.0.0.0',
+        command_type: commandType || 'trigger_utility',
+        command_params: typeof commandParams === 'object' ? JSON.stringify(commandParams) : commandParams,
+        status: status || 'success',
+        output: output || '',
+        error_message: errorMessage || ''
+      })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Failed to record job to VPS API", err);
+  }
+  return null;
+}
+
+/**
  * vpsFetch with automatic header injection
  */
 export async function vpsFetch(endpoint, options = {}) {
@@ -49,12 +80,24 @@ export function getUtiCommand(commandName) {
   return null;
 }
 
+export function getLocalAgentBaseUrl() {
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const tunnelUrl = params.get('tunnel_url') || params.get('agent_url') || params.get('proxy_url');
+    if (tunnelUrl) {
+      return tunnelUrl.replace(/\/$/, '');
+    }
+  }
+  return `http://127.0.0.1:${LOCAL_AGENT_PORT}`;
+}
+
 export async function execLocalUtility(scriptContent) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('show-debug-script', { detail: scriptContent }));
   }
+  const baseUrl = getLocalAgentBaseUrl();
   try {
-    const res = await fetch(`http://127.0.0.1:${LOCAL_AGENT_PORT}/api/local/exec`, {
+    const res = await fetch(`${baseUrl}/api/local/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ script: scriptContent })
@@ -69,10 +112,13 @@ export async function execLocalUtility(scriptContent) {
  * Probe local PrintAgent configuration on port 9173
  */
 export async function probeLocalAgent() {
+  const baseUrl = getLocalAgentBaseUrl();
   const urls = [
-    `http://127.0.0.1:${LOCAL_AGENT_PORT}/api/ui/config`,
-    `http://localhost:${LOCAL_AGENT_PORT}/api/ui/config`
+    `${baseUrl}/api/ui/config`
   ];
+  if (baseUrl.includes('127.0.0.1')) {
+    urls.push(`http://localhost:${LOCAL_AGENT_PORT}/api/ui/config`);
+  }
 
   const promises = urls.map(async (url) => {
     try {
@@ -147,7 +193,8 @@ export async function fetchPrintersFromAgent(agentUid) {
     }
     const pythonScript = utiCmd.command_content;
 
-    const res = await fetch(`http://127.0.0.1:${LOCAL_AGENT_PORT}/api/local/exec`, {
+    const baseUrl = getLocalAgentBaseUrl();
+    const res = await fetch(`${baseUrl}/api/local/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ script: pythonScript })
@@ -188,76 +235,121 @@ export async function fetchPrintersFromAgent(agentUid) {
 /**
  * Driver Installation API (Local Queue)
  */
-export async function installDriverApi(printerId, brand, model, driverName, driverUrl, agentUid) {
+export async function installDriverApi(printerId, brand, model, driverName, driverUrl, agentUid, printerIp, macAddress) {
+  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+  const targetIp = printerIp || (typeof printerId === 'string' && printerId.includes('.') ? printerId : '');
+
+  // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/devices/install-driver)
+  if (isRemote || agentUid) {
+    try {
+      const vpsRes = await vpsFetch('/api/devices/install-driver', {
+        method: 'POST',
+        body: JSON.stringify({
+          agent_uid: agentUid,
+          printer_ip: targetIp,
+          ip: targetIp,
+          mac_address: macAddress || printerId,
+          mac_id: macAddress || printerId,
+          brand: brand,
+          model: model,
+          driver_name: driverName,
+          driver_url: driverUrl
+        })
+      });
+      const data = await vpsRes.json();
+      if (vpsRes.ok && data.command_id) {
+        return { ok: true, command_id: data.command_id, is_vps: true };
+      }
+      if (data && data.error) {
+        return { ok: false, error: data.error };
+      }
+    } catch (e) {
+      console.warn("VPS API driver install call failed", e);
+    }
+  }
+
+  // Otherwise, attempt local agent execution
   try {
-    const res = await fetch(`http://127.0.0.1:${LOCAL_AGENT_PORT}/api/local/install-driver`, {
+    const baseUrl = getLocalAgentBaseUrl();
+    const res = await fetch(`${baseUrl}/api/local/install-driver`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip: printerId, printer_type: brand, name: model })
     });
     if (res.ok) {
-      // Mock command_id so PrinterModal can track it
       return { ok: true, command_id: 'local_driver_' + Date.now() };
     }
-    const data = await res.json();
-    return { ok: false, error: data.error || "Lỗi khi gọi API cài đặt nội bộ" };
   } catch (err) {
-    return { ok: false, error: "PrintAgent không phản hồi." };
+    // ignore
   }
+
+  return { ok: false, error: "PrintAgent không phản hồi." };
 }
 
 /**
- * Scan Configuration API (Local using Cached uticommands)
+ * Scan Configuration API (Direct VPS API call when remote)
  */
 export async function installScanApi(printerIp, brand, folderName, agentUid, authUser = 'admin', authPass = '') {
   const brandName = brand ? brand.toLowerCase() : 'ricoh';
   const cmdName = brandName === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan';
-  
+  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+
+  // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/utility/trigger)
+  if (isRemote || agentUid) {
+     try {
+       const vpsRes = await vpsFetch('/api/utility/trigger', {
+         method: 'POST',
+         body: JSON.stringify({
+           agent_uid: agentUid,
+           command: cmdName,
+           printer_ip: printerIp,
+           auth_user: authUser || 'admin',
+           auth_password: authPass || '',
+           target_name: folderName || 'null'
+         })
+       });
+       const data = await vpsRes.json();
+       if (vpsRes.ok && data.command_id) {
+          return { ok: true, command_id: data.command_id, is_vps: true };
+       }
+       if (data && data.error) {
+          return { ok: false, error: data.error };
+       }
+     } catch (e) {
+       console.warn("VPS API scan trigger call failed", e);
+     }
+  }
+
+  // Otherwise, attempt local agent execution
   if (navigator.onLine) {
      await syncUtiCommands();
   }
   let utiCmd = getUtiCommand(cmdName);
-  
-  if (!utiCmd) {
-     // Fallback to PrintAgent's built-in endpoint if cache is empty
-     try {
-       const res = await fetch(`http://127.0.0.1:${LOCAL_AGENT_PORT}/api/local/install-scan`, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ ip: printerIp, printer_type: brand, name: folderName, auth_user: authUser, auth_pass: authPass }) // 'name' maps to folder
-       });
-       if (res.ok) {
-         return { ok: true, command_id: 'local_scan_' + Date.now() };
-       }
-       const data = await res.json();
-       return { ok: false, error: data.error };
-     } catch (e) {
-       return { ok: false, error: "Không tìm thấy bộ nhớ đệm uticommands và PrintAgent không phản hồi." };
-     }
-  }
+  if (utiCmd) {
+    let script = utiCmd.command_content;
+    script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
+    script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
+    script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
+    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
+    script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
 
-  // Execute using python template
-  let script = utiCmd.command_content;
-  script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
-  script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
-  script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
-  script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
-  script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
-
-  try {
-    const res = await execLocalUtility(script);
-    if (res.ok) {
-        const out = res.result_payload || res.output || '';
-        if (out.includes('[-] LỖI') || out.includes('[-]')) {
-           return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\\n').filter(l => l.includes('[-]')).join(' ') };
-        }
-        return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
+    try {
+      const res = await execLocalUtility(script);
+      if (res.ok) {
+          const out = res.result_payload || res.output || '';
+          if (out.includes('[-] LỖI') || out.includes('[-]')) {
+             return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\n').filter(l => l.includes('[-]')).join(' ') };
+          }
+          return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
+      }
+    } catch (err) {
+      // ignore
     }
-    return { ok: false, error: res.error || "Lỗi khi thực thi Python nội bộ" };
-  } catch (err) {
-    return { ok: false, error: "PrintAgent không phản hồi." };
   }
+
+  return { ok: false, error: "PrintAgent local :9173 không phản hồi và không thể kết nối VPS API." };
 }
+
 export async function testPrinterLoginApi(printerIp, brand, user, pass) {
   const brandName = brand ? brand.toLowerCase() : 'ricoh';
   
@@ -473,7 +565,7 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
     });
   }
 
-  // VPS tracking logic (fallback just in case)
+  // VPS tracking logic
   return new Promise((resolve) => {
     let checkCount = 0;
     const maxChecks = 120; // 2 minutes max
@@ -483,7 +575,7 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
       checkCount++;
       if (checkCount >= maxChecks) {
         clearInterval(intervalId);
-        resolve({ ok: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent' });
+        resolve({ ok: false, success: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent (Timeout 120s)' });
         return;
       }
 
@@ -491,22 +583,23 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
         const stRes = await vpsFetch(`/api/commands/${commandId}/status`);
         if (stRes.ok) {
           const stData = await stRes.json();
-          const cmdData = stData.command;
+          const cmdObj = stData.command || stData;
+          const status = (cmdObj.status || '').toLowerCase();
           
-          if (cmdData.status === 'completed') {
+          if (status === 'completed' || status === 'success') {
             clearInterval(intervalId);
-            onUpdate("Hoàn tất tiến trình.");
-            resolve({ ok: true });
+            if (onUpdate) onUpdate("Hoàn tất tiến trình.");
+            resolve({ ok: true, success: true, message: stData.output || stData.result || stData.result_payload || 'Hoàn tất tiến trình thành công!' });
             return;
-          } else if (cmdData.status === 'failed') {
+          } else if (status === 'failed' || status === 'error') {
             clearInterval(intervalId);
-            resolve({ ok: false, error: cmdData.error || 'Cài đặt thất bại' });
+            resolve({ ok: false, success: false, error: stData.error || stData.error_message || 'Thực thi thất bại' });
             return;
           }
 
-          const text = cmdData.progress_text || cmdData.status;
-          if (text !== lastText && text !== 'pending' && text !== 'running') {
-            onUpdate(text);
+          const text = cmdObj.progress_text || cmdObj.output || status;
+          if (text !== lastText && text !== 'pending' && text !== 'running' && text !== 'received') {
+            if (onUpdate) onUpdate(text);
             lastText = text;
           }
         }

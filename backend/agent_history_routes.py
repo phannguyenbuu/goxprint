@@ -333,6 +333,56 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     event, agent_uid, old_ip, new_ip, log_text)
         return jsonify({"ok": True})
 
+    @app.post("/api/jobs/record")
+    def record_job() -> Any:
+        try:
+            body = request.get_json(silent=True) or {}
+            agent_uid = _to_text(body.get("agent_uid")) or "administrator"
+            printer_name = _to_text(body.get("printer_name")) or "AgentNode"
+            ip = _to_text(body.get("ip")) or "0.0.0.0"
+            command_type = _to_text(body.get("command_type")) or "trigger_utility"
+            command_params = _to_text(body.get("command_params"))
+            status = _to_text(body.get("status")) or "success"
+            output = _to_text(body.get("output"))
+            error_message = _to_text(body.get("error_message"))
+
+            from datetime import datetime, timezone
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S GMT+0")
+
+            with session_factory() as session:
+                agent = session.execute(
+                    select(AgentHistory).where(AgentHistory.agent_uid == agent_uid)
+                ).scalars().first()
+                
+                lan_uid = agent.lan_uid if agent else f"default_{agent_uid}"
+                lead = agent.lead if agent else "default"
+
+                command = PrinterControlCommand(
+                    printer_id=0,
+                    lead=lead,
+                    lan_uid=lan_uid,
+                    agent_uid=agent_uid,
+                    printer_name=printer_name,
+                    ip=ip,
+                    desired_enabled=True,
+                    command_type=command_type,
+                    command_params=command_params,
+                    status=status,
+                    output=output,
+                    error_message=error_message or output,
+                    result_payload=output,
+                    requested_at=now_str,
+                    responded_at=now_str,
+                )
+                session.add(command)
+                session.commit()
+                job_id = int(command.id)
+                LOGGER.info("[JOB RECORD] Recorded job #%d for %s (Agent: %s, Status: %s)", job_id, printer_name, agent_uid, status)
+                return jsonify({"ok": True, "job_id": job_id})
+        except Exception as exc:
+            LOGGER.error("[POST /api/jobs/record ERROR] %s", exc, exc_info=True)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.post("/api/jobs/clear-pending")
     def clear_pending_jobs() -> Any:
         try:
@@ -543,6 +593,9 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "ip": row.ip,
                         "command_type": row.command_type,
                         "command_params": row.command_params,
+                        "command_content": row.__dict__.get("command_content") or row.command_params or "",
+                        "output": row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or "",
+                        "result_payload": row.__dict__.get("result_payload") or row.__dict__.get("output") or error_message or "",
                         "status": status,
                         "error_message": error_message,
                         "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",

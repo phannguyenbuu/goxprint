@@ -143,6 +143,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 devices_payload = list(devices_payload.values())
 
             from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
+            client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             update_agent_in_memory(
                 lead=lead_valid,
                 lan_uid=lan_uid,
@@ -154,6 +155,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 run_mode=agent.run_mode if agent else "web",
                 web_port=int(agent.web_port or 9173) if agent else 9173,
                 devices_list=devices_payload if isinstance(devices_payload, list) else None,
+                public_ip=client_pub_ip,
             )
 
             agent_ram = ACTIVE_AGENTS.get(agent_uid)
@@ -511,7 +513,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     session.commit()
                     return jsonify({"ok": False, "error": "Printer not found"}), 404
 
-            if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify", "trigger_utility"):
+            if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify"):
                 if ok_value:
                     command.status = "success"
                     command.error_message = ""
@@ -621,7 +623,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 else:
                                     sp_rec.address_book_data = sync_data
                                     sp_rec.updated_at = datetime.now(timezone.utc)
-                                session.commit()
+                                session.flush()
                                 LOGGER.info("[polling_control_result] Updated ScanPoint PostgreSQL table for mac_id=%s", target_mac)
                         except Exception as sp_update_err:
                             LOGGER.warning("[polling_control_result] Error updating ScanPoint DB table: %s", sp_update_err)
@@ -665,23 +667,23 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                                     p_item["address_book_sync"] = sp_rec.address_book_data
                                                 else:
                                                     session.delete(sp_rec)
-                                                    session.commit()
+                                                    session.flush()
                                             else:
                                                 p_item["address_book_sync"] = sp_rec.address_book_data
 
                                 enriched_json_str = _json.dumps(scanned_printers, ensure_ascii=False, indent=2)
                                 command.result_payload = f"[*] Đang thực thi 100% Clean Fresh Scan theo Native Built-in PrintAgent Service...\n  [✓] CLEAN SCAN SUCCESS: Đã quét xong mạng LAN (Clean Fresh Scan). Tìm thấy {len(scanned_printers)} máy in ({len(scanned_printers)} Online).\n__PRINTERS_JSON_START__\n{enriched_json_str}\n__PRINTERS_JSON_END__\n\n{enriched_json_str}"
                                 command.output = command.result_payload
-                                session.commit()
+                                session.flush()
                             except Exception as sp_merge_err:
                                 LOGGER.warning("Error attaching ScanPoint in force_subnet_scan: %s", sp_merge_err)
 
                             from active_agents_registry import update_new_lan_site_devices, update_agent_in_memory
-                            update_new_lan_site_devices(command.lan_uid or "default", scanned_printers)
-                            update_new_lan_site_devices("default", scanned_printers)
+                            target_lan = command.lan_uid or "default"
+                            update_new_lan_site_devices(target_lan, scanned_printers, agent_uid=command.agent_uid)
                             update_agent_in_memory(
                                 lead=command.lead or "default",
-                                lan_uid=command.lan_uid or "default",
+                                lan_uid=target_lan,
                                 agent_uid=command.agent_uid or "kythuat02",
                                 devices_list=scanned_printers
                             )
@@ -766,17 +768,28 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         command.error_message = error_message or "Command failed"
                         command.responded_at = responded_at
             elif command.command_type in ("trigger_utility", "force_subnet_scan") or "force_subnet_scan" in (command.command_params or ""):
-                has_error_kw = any(err in (error_message or "") for err in ["[-] LỖI", "[❌ LỖI", "SyntaxError", "RuntimeError", "Traceback (most recent call last)"])
-                if ok_value and not has_error_kw:
+                raw_payload = body.get("address_book_data") or body.get("result_payload") or body.get("printers") or error_message
+                if isinstance(raw_payload, str):
+                    if "__PRINTERS_JSON_START__" in raw_payload:
+                        try:
+                            json_str = raw_payload.split("__PRINTERS_JSON_START__")[1].split("__PRINTERS_JSON_END__")[0].strip()
+                            raw_payload = json.loads(json_str)
+                        except Exception: pass
+                    elif raw_payload.strip().startswith("[") or raw_payload.strip().startswith("{"):
+                        try: raw_payload = json.loads(raw_payload)
+                        except Exception: pass
+                    else:
+                        import re
+                        m = re.search(r'(\[\s*\{[\s\S]*\}\s*\])', raw_payload)
+                        if m:
+                            try: raw_payload = json.loads(m.group(1))
+                            except Exception: pass
+
+                has_error_kw = any(err in (error_message or "") for err in ["[-] LỖI THỰC THI:", "[❌ LỖI CRITICAL", "SyntaxError:", "IndentationError:"])
+                if isinstance(raw_payload, list) or ok_value or not has_error_kw:
                     command.status = "success"
                     command.error_message = error_message or ""
                     command.responded_at = responded_at
-                    
-                    # 1. Check for scanned printers payload
-                    raw_payload = body.get("address_book_data") or body.get("result_payload") or body.get("printers") or error_message
-                    if isinstance(raw_payload, str) and (raw_payload.strip().startswith("[") or raw_payload.strip().startswith("{")):
-                        try: raw_payload = json.loads(raw_payload)
-                        except Exception: pass
 
                     if isinstance(raw_payload, dict):
                         raw_payload = raw_payload.get("printers") or raw_payload.get("printers_list") or [raw_payload]
@@ -816,14 +829,14 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 p_rec.is_online = bool(p_item.get("is_online", True))
                                 p_rec.last_scanned_at = datetime.now(timezone.utc)
                                 if command.agent_uid: p_rec.agent_uid = command.agent_uid
-                            else:
+                            elif bool(p_item.get("is_online", True)):
                                 new_p = Printer(
                                     lead=lead,
                                     lan_uid=target_lan_uid,
                                     printer_name=p_name,
                                     ip=ip,
                                     mac_address=mac,
-                                    is_online=bool(p_item.get("is_online", True)),
+                                    is_online=True,
                                     enabled=True,
                                     agent_uid=command.agent_uid or "",
                                     last_scanned_at=datetime.now(timezone.utc)
@@ -834,7 +847,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         for mac, old_p in existing_by_mac.items():
                             if mac not in scanned_macs:
                                 session.delete(old_p)
-                        session.commit()
+                        session.flush()
                         LOGGER.info("[polling_control_result] Cleaned fresh scan: kept %d online printers for lan_uid=%s in VPS DB", len(scanned_macs), target_lan_uid)
 
                     try:
@@ -926,9 +939,47 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         except Exception: pass
 
                     if isinstance(abd, dict) and "address_list" in abd:
-                        if printer is not None:
-                            printer.address_book_sync = abd
-                            LOGGER.info("[polling_control_result] Updated Printer.address_book_sync for printer_id=%d from trigger_utility in PostgreSQL", printer.id)
+                        # Extract target MAC & IP
+                        target_ip = command.ip
+                        target_mac = ""
+                        if command.command_params:
+                            try:
+                                cp = json.loads(command.command_params)
+                                target_mac = _to_text(cp.get("mac_address") or cp.get("mac_id") or cp.get("printer_mac_id") or cp.get("mac"))
+                                if not target_ip:
+                                    target_ip = _to_text(cp.get("printer_ip") or cp.get("ip"))
+                            except Exception: pass
+
+                        norm_mac = _normalize_mac(target_mac) if target_mac else ""
+
+                        from models import DeviceInfor, ScanPoint
+                        if not norm_mac and target_ip:
+                            dev_info = session.execute(select(DeviceInfor).where(DeviceInfor.ip == target_ip)).scalars().first()
+                            if dev_info and dev_info.mac_id:
+                                norm_mac = _normalize_mac(dev_info.mac_id)
+
+                        # Update ONLY ScanPoint table in PostgreSQL DB
+                        if norm_mac:
+                            try:
+                                sp_rec = session.get(ScanPoint, norm_mac)
+                                if sp_rec is None:
+                                    sp_rec = ScanPoint(
+                                        mac_id=norm_mac,
+                                        printer_name="Photocopy",
+                                        ip=target_ip or "",
+                                        agent_uid=command.agent_uid or "",
+                                        address_book_data=abd,
+                                        status="success",
+                                        created_at=datetime.now(timezone.utc),
+                                        updated_at=datetime.now(timezone.utc)
+                                    )
+                                    session.add(sp_rec)
+                                else:
+                                    sp_rec.address_book_data = abd
+                                    sp_rec.updated_at = datetime.now(timezone.utc)
+                                LOGGER.info("[polling_control_result] Persisted ScanPoint to PostgreSQL for mac_id=%s", norm_mac)
+                            except Exception as sp_err:
+                                LOGGER.warning("[polling_control_result] Failed to persist ScanPoint: %s", sp_err)
 
                         command.error_message = json.dumps(abd, ensure_ascii=False)
                 else:
@@ -1076,12 +1127,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             if command.command_type == "trigger_utility" and command.command_params:
                 if "check_scan_ip_match" in command.command_params or '"is_auto": true' in command.command_params:
                     session.delete(command)
-                else:
-                    session.commit()
-            else:
-                session.commit()
             
-            # If deleted, command.id might not be available, so we use command_id
             session.commit()
 
         return jsonify(

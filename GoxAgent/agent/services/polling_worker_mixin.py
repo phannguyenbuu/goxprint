@@ -331,7 +331,7 @@ class PollingWorkerMixin:
             return "toshiba"
         if any(k in s for k in ("ricoh", "aficio", "mp ", "sp ", "pro ")) or clean_mac.startswith(("00:26:73", "58:38:79", "00:00:74")):
             return "ricoh"
-        if any(k in s for k in ("hp", "laserjet", "officejet", "pagewide", "deskjet", "envy", "smart tank")) or clean_mac.startswith(("00:1E:0B", "00:08:C7")):
+        if any(k in s for k in ("hp", "laserjet", "officejet", "pagewide", "deskjet", "envy", "smart tank")) or clean_mac.startswith(("00:1E:0B", "00:08:C7", "E4:E7:49", "A4:5D:36", "EC:9A:74")):
             return "hp"
         if any(k in s for k in ("canon", "imagerunner", "ir-adv", "ir ", "imageclass", "pixma", "maxify")) or clean_mac.startswith(("00:1B:A9", "00:00:85")):
             return "canon"
