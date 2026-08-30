@@ -54,6 +54,8 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     ip: ''
   });
 
+  const [myClientIp, setMyClientIp] = useState<string>('');
+
   const autoScanTriggers = useRef<Record<string, number>>({});
 
   const initialLastViewedId = useMemo(() => {
@@ -82,6 +84,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
       try {
         const clientIp = (data?.client_ip || '').trim();
+        if (clientIp) setMyClientIp(clientIp);
         const isAllowed = Boolean(data?.is_allowed);
         const activePublicIps = data?.active_public_ips || [];
         const overrideConnectIp = (localStorage.getItem('gox_connect_public_ip') || '').trim();
@@ -568,6 +571,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     expandedPrinters, setExpandedPrinters,
     selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick,
     accessDeniedState, setAccessDeniedState,
-    liveAddressBooks, setLiveAddressBooks
+    liveAddressBooks, setLiveAddressBooks,
+    myClientIp
   };
 };

@@ -111,7 +111,8 @@ function safePathToken(value: string): string {
     triggerLanScan,
     filteredPrinters,
     cameras,
-    fetchLanSitesData
+    fetchLanSitesData,
+    myClientIp
   } = propsToPass as any;
 
   const [inputIpDraft, setInputIpDraft] = useState(() => selectedPublicIp || '');
@@ -136,6 +137,10 @@ function safePathToken(value: string): string {
       await fetchLanSitesData(true);
     }
   };
+
+  const dynamicPlaceholder = myClientIp
+    ? `IP Public máy này: ${myClientIp}`
+    : 'Nhập IP Public kết nối (VD: 116.98.0.59)...';
 
   return (
     <motion.div
@@ -193,7 +198,7 @@ function safePathToken(value: string): string {
                     handleApplyPublicIp(inputIpDraft);
                   }
                 }}
-                placeholder="Nhập IP Public kết nối (VD: 116.98.0.59)..."
+                placeholder={dynamicPlaceholder}
                 style={{
                   width: '100%',
                   padding: (selectedPublicIp || inputIpDraft) ? '8px 74px 8px 12px' : '8px 42px 8px 12px',
