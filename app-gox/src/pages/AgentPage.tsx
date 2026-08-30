@@ -116,6 +116,7 @@ function safePathToken(value: string): string {
   } = propsToPass as any;
 
   const [inputIpDraft, setInputIpDraft] = useState(() => selectedPublicIp || '');
+  const inputIpRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setInputIpDraft(selectedPublicIp || '');
@@ -190,6 +191,7 @@ function safePathToken(value: string): string {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '420px' }}>
             <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
               <input
+                ref={inputIpRef}
                 type="text"
                 value={inputIpDraft}
                 onChange={(e) => setInputIpDraft(e.target.value)}
@@ -217,6 +219,7 @@ function safePathToken(value: string): string {
                   onClick={() => {
                     setInputIpDraft('');
                     handleApplyPublicIp('');
+                    inputIpRef.current?.focus();
                   }}
                   title="Xóa IP Public"
                   style={{
