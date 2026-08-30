@@ -1777,26 +1777,17 @@ class PollingControlMixin:
         INSTALL_DIR  = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "GoxDriverService"
         EXE_PATH     = INSTALL_DIR / "GoxDriverService.exe"
 
-        # Import pywin32 safely OUTSIDE try/except to avoid UnboundLocalError
-        _win32file = None
-        _pywintypes = None
-        try:
-            import win32file as _win32file
-            import pywintypes as _pywintypes
-        except ImportError:
-            LOGGER.info("[GDS] pywin32 not available — skipping GoxDriverService")
-            return False
-
         def _pipe_open() -> bool:
-            """Try to open the pipe. Returns True if service is reachable."""
+            """Try to open the pipe using ctypes. Returns True if service is reachable."""
             try:
-                h = _win32file.CreateFile(
-                    PIPE_NAME, _win32file.GENERIC_READ | _win32file.GENERIC_WRITE,
-                    0, None, _win32file.OPEN_EXISTING, 0, None,
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                h = kernel32.CreateFileW(
+                    PIPE_NAME, 0xC0000000, 0, None, 3, 0, None
                 )
-                _win32file.CloseHandle(h)
-                return True
-            except _pywintypes.error:
+                if h != -1 and h != 0 and h != 0xFFFFFFFFFFFFFFFF:
+                    kernel32.CloseHandle(h)
+                    return True
                 return False
             except Exception:
                 return False
@@ -2036,54 +2027,45 @@ Write-Output 'INSTALLED'
                 _progress("[GDS] GoxDriverService is running. Delegating driver installation to service (SYSTEM)...")
                 
                 def _call_gds(request: dict, timeout_s: float = 300.0) -> dict:
-                    import win32file
-                    import win32pipe
-                    import pywintypes
+                    import ctypes
                     import json
                     import time
 
                     PIPE_NAME = r"\\.\pipe\GoxDriverService"
                     deadline = time.time() + timeout_s
-                    pipe_handle = None
+                    pipe_handle = -1
+                    kernel32 = ctypes.windll.kernel32
 
                     while time.time() < deadline:
-                        try:
-                            pipe_handle = win32file.CreateFile(
-                                PIPE_NAME,
-                                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                                0, None,
-                                win32file.OPEN_EXISTING,
-                                0, None,
-                            )
+                        pipe_handle = kernel32.CreateFileW(
+                            PIPE_NAME,
+                            0xC0000000,
+                            0, None,
+                            3,
+                            0, None,
+                        )
+                        if pipe_handle != -1 and pipe_handle != 0 and pipe_handle != 0xFFFFFFFFFFFFFFFF:
                             break
-                        except pywintypes.error as e:
-                            if e.winerror == 2:
-                                raise RuntimeError("GoxDriverService not running") from e
-                            if e.winerror == 231:
-                                win32pipe.WaitNamedPipe(PIPE_NAME, 2000)
-                                continue
-                            raise
+                        time.sleep(0.5)
 
-                    if pipe_handle is None:
+                    if pipe_handle == -1 or pipe_handle == 0 or pipe_handle == 0xFFFFFFFFFFFFFFFF:
                         raise TimeoutError("Could not connect to GoxDriverService pipe")
 
                     try:
                         payload = json.dumps(request).encode("utf-8")
-                        win32file.WriteFile(pipe_handle, payload)
+                        bytes_written = ctypes.c_ulong(0)
+                        kernel32.WriteFile(pipe_handle, payload, len(payload), ctypes.byref(bytes_written), None)
 
+                        buffer = ctypes.create_string_buffer(65536)
+                        bytes_read = ctypes.c_ulong(0)
                         chunks = []
                         while True:
-                            try:
-                                hr, data = win32file.ReadFile(pipe_handle, 65536)
-                                if not data:
-                                    break
-                                chunks.append(data)
-                                if len(data) < 65536:
-                                    break
-                            except pywintypes.error as e:
-                                if e.winerror == 109:
-                                    break
-                                raise
+                            res = kernel32.ReadFile(pipe_handle, buffer, 65536, ctypes.byref(bytes_read), None)
+                            if not res or bytes_read.value == 0:
+                                break
+                            chunks.append(buffer.raw[:bytes_read.value])
+                            if bytes_read.value < 65536:
+                                break
                         
                         raw = b"".join(chunks)
                         if not raw:
@@ -2091,8 +2073,7 @@ Write-Output 'INSTALLED'
                         return json.loads(raw.decode("utf-8"))
                     finally:
                         try:
-                            win32file.FlushFileBuffers(pipe_handle)
-                            win32file.CloseHandle(pipe_handle)
+                            kernel32.CloseHandle(pipe_handle)
                         except Exception:
                             pass
 
