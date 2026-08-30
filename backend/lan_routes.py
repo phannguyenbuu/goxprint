@@ -338,6 +338,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 p_mac = str(p.get("mac_address") or p.get("mac_id") or "").strip().upper().replace("-", ":")
                 if not p_ip and not p_mac:
                     continue
+                if p_ip == "192.168.1.226" or p_mac == "58:38:79:79:A3:EB":
+                    continue
                 p_key = p_mac or p_ip
                 if not p_key or p_key in seen_macs:
                     continue
