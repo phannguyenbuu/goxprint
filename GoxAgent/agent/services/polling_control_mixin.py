@@ -1310,7 +1310,7 @@ class PollingControlMixin:
                     
                     from agent.utils.shares import ShareManager
                     if not ShareManager.is_admin():
-                        raise RuntimeError("Quyền Admin là bắt buộc để thay đổi IP. Vui lòng chạy PrintAgent với quyền Administrator.")
+                        raise RuntimeError("❌ Lỗi: Quyền Administrator là bắt buộc để đổi IP tĩnh trên Windows. Vui lòng chạy PrintAgent bằng 'Run as Administrator'.")
                     
                     adapter_name = str(params.get("adapter_name", "Ethernet")).strip()
                     mode = str(params.get("mode", "dhcp")).strip().lower()
@@ -1326,7 +1326,7 @@ class PollingControlMixin:
                         dns = str(params.get("dns", "")).strip()
                         
                         if not ip_address:
-                            raise ValueError("Địa chỉ IP tĩnh không được để trống")
+                            raise ValueError("Địa chỉ IP tĩnh không được để trống!")
                         
                         ip_cmd = ["netsh", "interface", "ipv4", "set", "address", f"name={adapter_name}", "static", ip_address, subnet_mask]
                         if gateway:
@@ -1338,23 +1338,21 @@ class PollingControlMixin:
                     else:
                         raise ValueError(f"Chế độ cấu hình IP không hợp lệ: {mode}")
                     
-                    # Run asynchronously with a delay to let the success response post back successfully first
-                    def _run_ip_change_delayed():
-                        time.sleep(2.0)
-                        LOGGER.info("[PollingBridge] Changing IP configuration for adapter '%s' to mode '%s'...", adapter_name, mode)
-                        for cmd in cmds:
-                            try:
-                                LOGGER.info("[PollingBridge] Running command: %s", " ".join(cmd))
-                                subprocess.run(cmd, check=True, capture_output=True, **no_window_subprocess_kwargs())
-                            except Exception as run_err:
-                                LOGGER.error("[PollingBridge] Failed to execute network config command %s: %s", cmd, run_err)
-                        time.sleep(5.0)
-                        try:
-                            self.polling_when_ip_change()
-                        except Exception as p_err:
-                            LOGGER.error("[PollingBridge] Failed to run polling_when_ip_change after network config: %s", p_err)
-                                
-                    threading.Thread(target=_run_ip_change_delayed, daemon=True).start()
+                    LOGGER.info("[PollingBridge] Changing IP configuration for adapter '%s' to mode '%s'...", adapter_name, mode)
+                    for cmd in cmds:
+                        LOGGER.info("[PollingBridge] Running command: %s", " ".join(cmd))
+                        proc = subprocess.run(cmd, capture_output=True, text=True, **no_window_subprocess_kwargs())
+                        if proc.returncode != 0:
+                            err_detail = (proc.stderr or proc.stdout or "").strip()
+                            err_msg = f"❌ Lỗi đổi IP tĩnh (Command: {' '.join(cmd)}): {err_detail or ('Exit code ' + str(proc.returncode))}"
+                            LOGGER.error("[PollingBridge] %s", err_msg)
+                            raise RuntimeError(err_msg)
+                    
+                    # If all netsh commands succeeded, trigger IP change notification
+                    try:
+                        self.polling_when_ip_change()
+                    except Exception as p_err:
+                        LOGGER.warning("[PollingBridge] Warning running polling_when_ip_change: %s", p_err)
                 elif action == "exec_utility":
                     command_content = str(params.get("command_content", "")).strip()
                     command_name = str(params.get("command", "exec_utility")).strip()
