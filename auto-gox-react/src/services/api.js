@@ -297,7 +297,8 @@ export async function installScanApi(printerIp, brand, folderName, agentUid, aut
   // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/utility/trigger)
   if (isRemote || agentUid) {
      try {
-       const vpsRes = await vpsFetch('/api/utility/trigger', {
+       const endpoint = agentUid ? `/api/agents/${agentUid}/utility/exec` : '/api/utility/trigger';
+       const vpsRes = await vpsFetch(endpoint, {
          method: 'POST',
          body: JSON.stringify({
            agent_uid: agentUid,

@@ -104,6 +104,23 @@ if dist_dir.exists():
             ensure_remote_parent_dir(target_static)
             sftp.put(str(local_path), target_static)
 
+# Upload built auto-gox-react/dist to /var/www/printagentx.com/html and /var/www/auto-gox
+auto_gox_dist = root_dir / "auto-gox-react" / "dist"
+if auto_gox_dist.exists():
+    print("Uploading built frontend (auto-gox-react/dist) to /var/www/printagentx.com/html and /var/www/auto-gox...")
+    for root_path, _, files in os.walk(auto_gox_dist):
+        for f in files:
+            local_path = Path(root_path) / f
+            rel_path = local_path.relative_to(auto_gox_dist).as_posix()
+            
+            target_px = f"/var/www/printagentx.com/html/{rel_path}"
+            ensure_remote_parent_dir(target_px)
+            sftp.put(str(local_path), target_px)
+
+            target_ag = f"/var/www/auto-gox/{rel_path}"
+            ensure_remote_parent_dir(target_ag)
+            sftp.put(str(local_path), target_ag)
+
 sftp.close()
 
 def safe_print(label, text):

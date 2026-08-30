@@ -215,6 +215,15 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         resp.headers["Expires"] = "0"
         return resp
 
+    @app.post("/api/utility/trigger")
+    def trigger_utility_alias() -> Any:
+        """Alias route for legacy frontend callers invoking POST /api/utility/trigger."""
+        body = request.get_json(silent=True) or {}
+        agent_uid = _to_text(body.get("agent_uid") or body.get("agentId") or "")
+        if not agent_uid:
+            return jsonify({"ok": False, "error": "Thiếu thông tin agent_uid"}), 400
+        return trigger_agent_utility_exec(agent_uid)
+
     @app.post("/api/agents/<agent_uid>/utility/exec")
     def trigger_agent_utility_exec(agent_uid: str) -> Any:
         """Queue a dynamic utility command to the agent for exec() execution."""
