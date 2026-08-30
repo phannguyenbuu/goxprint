@@ -128,18 +128,6 @@ function safePathToken(value: string): string {
     if (cleanIp) {
       localStorage.setItem('goxprint_selected_public_ip', cleanIp);
       localStorage.setItem('gox_connect_public_ip', cleanIp);
-      try {
-        await fetchApi('/api/public-ips', {
-          method: 'POST',
-          body: JSON.stringify({
-            ip_address: cleanIp,
-            description: 'Added via Enter/Plane button in App-Gox',
-            enabled: true,
-          }),
-        }).catch((e) => console.log('Allowed IP API response:', e));
-      } catch (err) {
-        console.log('Error adding public IP:', err);
-      }
     } else {
       localStorage.removeItem('goxprint_selected_public_ip');
       localStorage.removeItem('gox_connect_public_ip');
