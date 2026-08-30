@@ -230,12 +230,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
     @app.get("/api/new-lan-sites")
     def get_new_lan_sites() -> Any:
+        from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
         lead = _to_text(request.args.get("lead")) or "default"
         req_lan_uid = _to_text(request.args.get("lan_uid"))
         req_pub_ip = _to_text(request.args.get("public_ip") or request.args.get("ip") or request.args.get("wan_ip"))
 
-        from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
-
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
         req_agent_uid = _to_text(request.args.get("agent_uid"))
 
         is_whitelisted = False
