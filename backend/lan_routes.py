@@ -235,13 +235,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
 
-        override_ip = _to_text(request.args.get("override_ip") or request.headers.get("X-Override-IP"))
-        client_ip = (override_ip or request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0]).strip()
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
 
         is_whitelisted = False
-        if override_ip:
-            is_whitelisted = True
-        elif client_ip:
+        if client_ip:
             try:
                 from admin_public_ip_routes import is_public_ip_allowed
                 is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
@@ -253,16 +250,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         for a_uid, a_info in ACTIVE_AGENTS.items():
             if isinstance(a_info, dict):
                 a_pub = (a_info.get("public_ip") or a_info.get("wan_ip") or a_info.get("ip") or "").strip()
-                if not a_pub:
-                    a_pub = client_ip
+                a_loc = (a_info.get("local_ip") or "").strip()
                 
-                # Check access rights: only filter by client_ip if at least one active agent matches client_ip
-                if client_ip and not is_whitelisted and not override_ip:
-                    has_matching_client_ip = any(
-                        (str(info.get("public_ip", "")).strip() == client_ip or str(info.get("wan_ip", "")).strip() == client_ip or str(info.get("local_ip", "")).strip() == client_ip)
-                        for info in ACTIVE_AGENTS.values() if isinstance(info, dict)
-                    )
-                    if has_matching_client_ip and a_pub != client_ip and a_info.get("local_ip") != client_ip:
+                # Strict security check: if client_ip is present and NOT whitelisted in DB, ONLY include agents matching client_ip
+                if client_ip and not is_whitelisted:
+                    if a_pub != client_ip and a_loc != client_ip:
                         continue
 
                 agents_by_pub_ip[a_pub].append({
@@ -283,37 +275,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         # 2. Collect printers for each Public IP
         pub_ip_keys = list(agents_by_pub_ip.keys())
-        if client_ip and client_ip not in pub_ip_keys:
-            pub_ip_keys.insert(0, client_ip)
-        if not pub_ip_keys:
-            pub_ip_keys = [client_ip or "default"]
 
         rows = []
         for pub_ip in pub_ip_keys:
             lan_agents = agents_by_pub_ip.get(pub_ip, [])
-            
-            # If lan_agents is empty for this pub_ip, but we have agents in ACTIVE_AGENTS,
-            # attach agents whose public_ip matches pub_ip (or all agents if only 1 active)
-            if not lan_agents and ACTIVE_AGENTS:
-                for a_uid, a_info in ACTIVE_AGENTS.items():
-                    if isinstance(a_info, dict):
-                        a_ip = (a_info.get("public_ip") or a_info.get("wan_ip") or "").strip()
-                        if not a_ip or a_ip == pub_ip or len(ACTIVE_AGENTS) == 1:
-                            lan_agents.append({
-                                "agent_uid": a_uid,
-                                "hostname": a_info.get("hostname", "") or a_uid,
-                                "local_ip": a_info.get("local_ip", ""),
-                                "local_mac": a_info.get("local_mac", ""),
-                                "public_ip": pub_ip,
-                                "wan_ip": pub_ip,
-                                "lan_uid": a_info.get("lan_uid", "default"),
-                                "app_version": a_info.get("app_version", ""),
-                                "run_mode": a_info.get("run_mode", "web"),
-                                "web_port": a_info.get("web_port", 9173),
-                                "is_master": True,
-                                "is_agent_active": True,
-                                "is_online": True,
-                            })
 
             # Get raw printers from NEW_LAN_SITES, agent's printers_json, AND PostgreSQL Printer DB table
             raw_printers = []
@@ -634,12 +599,9 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-            override_ip = _to_text(request.args.get("override_ip") or request.headers.get("X-Override-IP"))
-            client_ip = override_ip or request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+            client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             is_whitelisted = False
-            if override_ip:
-                is_whitelisted = True
-            elif client_ip:
+            if client_ip:
                 try:
                     from admin_public_ip_routes import is_public_ip_allowed
                     is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
@@ -648,14 +610,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             
             # 1. Add active agents from RAM
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                if client_ip and not is_whitelisted and not override_ip:
-                    has_matching_client_ip = any(
-                        (str(info.get("public_ip", "")).strip() == client_ip or str(info.get("wan_ip", "")).strip() == client_ip or str(info.get("local_ip", "")).strip() == client_ip)
-                        for info in ACTIVE_AGENTS.values() if isinstance(info, dict)
-                    )
+                if client_ip and not is_whitelisted:
                     a_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
                     a_loc_ip = agent_info.get("local_ip", "")
-                    if has_matching_client_ip and a_pub_ip != client_ip and a_loc_ip != client_ip:
+                    if a_pub_ip != client_ip and a_loc_ip != client_ip:
                         continue
 
                 a_lead = agent_info.get("lead", "default")

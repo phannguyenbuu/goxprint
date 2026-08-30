@@ -675,7 +675,7 @@ def _resolve_scan_host_agent_for_printer(
 
     copier_pub_ip = ""
     if printer:
-        copier_pub_ip = getattr(printer, 'public_ip', '') or (printer_lan_uid.replace("pub_", "").replace("_", ".") if printer_lan_uid and printer_lan_uid.startswith("pub_") else "")
+        copier_pub_ip = getattr(printer, 'public_ip', '') or ""
 
     matching_agents = [
         item for item in same_lan_agents

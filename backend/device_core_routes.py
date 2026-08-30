@@ -301,8 +301,6 @@ def _resolve_target_agent_uid(session: Any, printer: Printer | None, req_agent_u
     if printer:
         if hasattr(printer, 'public_ip') and getattr(printer, 'public_ip', None):
             target_public_ip = str(getattr(printer, 'public_ip')).strip()
-        elif printer.lan_uid and str(printer.lan_uid).startswith("pub_"):
-            target_public_ip = str(printer.lan_uid).replace("pub_", "").replace("_", ".")
 
     try:
         from models import AgentNode
