@@ -165,14 +165,16 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
 
         if (res.ok && res.command_id) {
            setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: 'Đang khởi tạo cổng FTP local & Đăng ký danh bạ máy in...' } : s));
-           const result = await trackCommandProgressPromise(res.command_id);
-           if (result.success) {
+           const result = await trackCommandProgressPromise(res.command_id, (txt: string) => {
+              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: txt } : s));
+           });
+           if (result.ok || result.success) {
               finalStatus = 'success';
               finalOutput = result.message || 'Cấu hình điểm Scan hoàn tất!';
               setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'success', subText: finalOutput } : s));
            } else {
               finalStatus = 'failed';
-              finalOutput = result.message || 'Thất bại khi tạo điểm Scan';
+              finalOutput = result.error || result.message || 'Thất bại khi tạo điểm Scan';
               setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
            }
         } else {

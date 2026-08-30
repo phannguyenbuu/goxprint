@@ -166,14 +166,16 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
 
         if (res.ok && res.command_id) {
            setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: 'Đang tải gói cài đặt và đăng ký Driver Windows...' } : s));
-           const result = await trackCommandProgressPromise(res.command_id);
-           if (result.success) {
+           const result = await trackCommandProgressPromise(res.command_id, (txt: string) => {
+              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: txt } : s));
+           });
+           if (result.ok || result.success) {
               finalStatus = 'success';
               finalOutput = result.message || 'Cài đặt Driver hoàn tất!';
               setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'success', subText: finalOutput } : s));
            } else {
               finalStatus = 'failed';
-              finalOutput = result.message || 'Thất bại khi cài đặt';
+              finalOutput = result.error || result.message || 'Thất bại khi cài đặt';
               setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
            }
         } else {
