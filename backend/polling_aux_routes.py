@@ -504,14 +504,20 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 return jsonify({"ok": True, "status": command.status, "id": int(command.id)})
 
             printer = None
-            if int(command.printer_id) != 0:
-                printer = session.get(Printer, int(command.printer_id))
-                if printer is None:
-                    command.status = "failed"
-                    command.error_message = "Printer not found"
-                    command.responded_at = responded_at
-                    session.commit()
-                    return jsonify({"ok": False, "error": "Printer not found"}), 404
+            cmd_mac = getattr(command, 'mac_address', None) or getattr(command, 'mac_id', None)
+            if not cmd_mac and command.command_params:
+                try:
+                    params_dict = json.loads(command.command_params) if isinstance(command.command_params, str) else command.command_params
+                    if isinstance(params_dict, dict):
+                        cmd_mac = params_dict.get('mac_address') or params_dict.get('mac_id') or params_dict.get('mac')
+                except Exception:
+                    pass
+            if cmd_mac:
+                norm_mac = str(cmd_mac).strip().upper().replace("-", ":")
+                clean_mac = norm_mac.replace(":", "")
+                printer = session.query(Printer).filter(
+                    (Printer.mac_address == norm_mac) | (Printer.mac_address == clean_mac)
+                ).first()
 
             if command.command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify"):
                 if ok_value:
