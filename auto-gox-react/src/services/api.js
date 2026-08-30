@@ -236,21 +236,10 @@ export async function fetchPrintersFromAgent(agentUid) {
  * Driver Installation API (Local Queue)
  */
 export async function installDriverApi(printerId, brand, model, driverName, driverUrl, agentUid) {
-  try {
-    const baseUrl = getLocalAgentBaseUrl();
-    const res = await fetch(`${baseUrl}/api/local/install-driver`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: printerId, printer_type: brand, name: model })
-    });
-    if (res.ok) {
-      return { ok: true, command_id: 'local_driver_' + Date.now() };
-    }
-  } catch (err) {
-    // Local agent unreachable, fallback to VPS API below
-  }
+  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
 
-  if (agentUid) {
+  // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/devices/install-driver)
+  if (isRemote || agentUid) {
     try {
       const vpsRes = await vpsFetch('/api/devices/install-driver', {
         method: 'POST',
@@ -271,49 +260,38 @@ export async function installDriverApi(printerId, brand, model, driverName, driv
         return { ok: false, error: data.error };
       }
     } catch (e) {
-      // fallback error
+      console.warn("VPS API driver install call failed", e);
     }
+  }
+
+  // Otherwise, attempt local agent execution
+  try {
+    const baseUrl = getLocalAgentBaseUrl();
+    const res = await fetch(`${baseUrl}/api/local/install-driver`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: printerId, printer_type: brand, name: model })
+    });
+    if (res.ok) {
+      return { ok: true, command_id: 'local_driver_' + Date.now() };
+    }
+  } catch (err) {
+    // ignore
   }
 
   return { ok: false, error: "PrintAgent không phản hồi." };
 }
 
 /**
- * Scan Configuration API (Local using Cached uticommands with VPS fallback)
+ * Scan Configuration API (Direct VPS API call when remote)
  */
 export async function installScanApi(printerIp, brand, folderName, agentUid, authUser = 'admin', authPass = '') {
   const brandName = brand ? brand.toLowerCase() : 'ricoh';
   const cmdName = brandName === 'toshiba' ? 'toshiba_create_scan' : 'ricoh_create_scan';
-  
-  if (navigator.onLine) {
-     await syncUtiCommands();
-  }
-  let utiCmd = getUtiCommand(cmdName);
-  
-  if (utiCmd) {
-    let script = utiCmd.command_content;
-    script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
-    script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
-    script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
-    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
-    script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
+  const isRemote = window.location.search.includes('tunnel_url') || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
 
-    try {
-      const res = await execLocalUtility(script);
-      if (res.ok) {
-          const out = res.result_payload || res.output || '';
-          if (out.includes('[-] LỖI') || out.includes('[-]')) {
-             return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\n').filter(l => l.includes('[-]')).join(' ') };
-          }
-          return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
-      }
-    } catch (err) {
-      // Local execution failed, fallback to VPS API below
-    }
-  }
-
-  // Fallback to VPS API if local agent is unavailable or remote WIM iframe access
-  if (agentUid) {
+  // When accessed remotely via WIM tunnel or printagentx.com, directly call VPS API (POST /api/utility/trigger)
+  if (isRemote || agentUid) {
      try {
        const vpsRes = await vpsFetch('/api/utility/trigger', {
          method: 'POST',
@@ -334,8 +312,35 @@ export async function installScanApi(printerIp, brand, folderName, agentUid, aut
           return { ok: false, error: data.error };
        }
      } catch (e) {
-       // fallback error
+       console.warn("VPS API scan trigger call failed", e);
      }
+  }
+
+  // Otherwise, attempt local agent execution
+  if (navigator.onLine) {
+     await syncUtiCommands();
+  }
+  let utiCmd = getUtiCommand(cmdName);
+  if (utiCmd) {
+    let script = utiCmd.command_content;
+    script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
+    script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
+    script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
+    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
+    script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
+
+    try {
+      const res = await execLocalUtility(script);
+      if (res.ok) {
+          const out = res.result_payload || res.output || '';
+          if (out.includes('[-] LỖI') || out.includes('[-]')) {
+             return { ok: false, error: "Cấu hình thất bại. Xem chi tiết: " + out.split('\n').filter(l => l.includes('[-]')).join(' ') };
+          }
+          return { ok: true, command_id: 'local_scan_' + Date.now(), logs: out };
+      }
+    } catch (err) {
+      // ignore
+    }
   }
 
   return { ok: false, error: "PrintAgent local :9173 không phản hồi và không thể kết nối VPS API." };
