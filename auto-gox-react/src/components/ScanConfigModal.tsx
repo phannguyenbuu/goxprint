@@ -45,7 +45,7 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         
         const filtered = (data || []).filter((p: any) => {
            const n = (p.name || '').toLowerCase();
-           return !n.includes('unknown') && !n.includes('hb test');
+           return !n.includes('unknown') && !n.includes('hb test') && !n.includes('[debug]') && p.type !== 'error';
         });
         setPrinters(filtered);
         

@@ -46,7 +46,7 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
         
         const filtered = (data || []).filter((p: any) => {
            const n = (p.name || '').toLowerCase();
-           return !n.includes('unknown') && !n.includes('hb test');
+           return !n.includes('unknown') && !n.includes('hb test') && !n.includes('[debug]') && p.type !== 'error';
         });
         
         const defaultDrivers: Record<string, any> = {};

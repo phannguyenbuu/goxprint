@@ -583,7 +583,8 @@ export async function saveLocalScanConfig(config) {
  * Track command progress locally or via VPS
  */
 export async function trackCommandProgressPromise(commandId, onUpdate) {
-  if (commandId && commandId.startsWith('local_')) {
+  const strId = String(commandId || '');
+  if (strId && strId.startsWith('local_')) {
     // Mock progress for local fire-and-forget tasks
     return new Promise(resolve => {
        let progress = 0;
