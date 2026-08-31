@@ -718,6 +718,7 @@ class UtiCommand(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
     category: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
     output_modal: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_visible: Mapped[bool] = mapped_column(Boolean, default=True)
     command_content: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)

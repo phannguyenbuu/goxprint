@@ -244,6 +244,7 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
                         "icon": c.icon or "",
                         "description": c.description or "",
                         "output_modal": c.output_modal,
+                        "is_visible": bool(getattr(c, "is_visible", True) if getattr(c, "is_visible", True) is not None else True),
                         "command_content": c.command_content or ""
                     })
                 return jsonify({"ok": True, "commands": res})
@@ -256,16 +257,18 @@ def register_ui_routes(app: Flask, session_factory: Any) -> None:
         from sqlalchemy import select
         body = request.get_json(silent=True) or {}
         new_content = body.get("command_content")
-        if new_content is None:
-            return jsonify({"ok": False, "error": "Missing command_content"}), 400
+        is_vis = body.get("is_visible")
         try:
             with session_factory() as session:
                 cmd = session.execute(select(UtiCommand).where(UtiCommand.command == command_name)).scalar_one_or_none()
                 if not cmd:
                     return jsonify({"ok": False, "error": "Command not found"}), 404
-                cmd.command_content = new_content
+                if new_content is not None:
+                    cmd.command_content = new_content
+                if is_vis is not None:
+                    cmd.is_visible = bool(is_vis)
                 session.commit()
-                return jsonify({"ok": True, "message": "Updated successfully"})
+                return jsonify({"ok": True, "message": "Updated successfully", "is_visible": cmd.is_visible})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 

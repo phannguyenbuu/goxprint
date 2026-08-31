@@ -1400,7 +1400,7 @@ export function AgentModals(props: any) {
                           <>
                             {utilityCommands.length > 0 ? (
                               (() => {
-                                const filtered = utilityCommands.filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.command !== 'open_web_setting');
+                                const filtered = utilityCommands.filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.is_visible !== false);
                                 const syncIdx = filtered.findIndex((cmd: any) => cmd.command === 'sync_all_scanpoints');
                                 if (syncIdx > -1) {
                                   const [syncCmd] = filtered.splice(syncIdx, 1);
@@ -1408,6 +1408,15 @@ export function AgentModals(props: any) {
                                 }
                                 return filtered.map((cmd: any) => {
                                   const isEmergency = cmd.command === 'emergency_restart';
+                                  let labelText = cmd.label;
+                                  let iconText = cmd.icon || '🔧';
+                                  if (cmd.command === 'open_web_setting') {
+                                    labelText = 'Mở WIM';
+                                    iconText = cmd.icon || '🌐';
+                                  } else if (cmd.command === 'create_scan_shortcut') {
+                                    labelText = 'Tạo shortcut Desktop';
+                                    iconText = cmd.icon || '🔗';
+                                  }
                                   return (
                                     <button
                                       key={cmd.command}
@@ -1443,7 +1452,7 @@ export function AgentModals(props: any) {
                                       }}
                                     >
                                       <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        {utilityActionPending === cmd.command ? <LoadingSpinner size="sm" /> : (cmd.icon || '🔧')}
+                                        {utilityActionPending === cmd.command ? <LoadingSpinner size="sm" /> : iconText}
                                       </div>
                                       <div style={{
                                         fontSize: '0.72rem',
@@ -1452,7 +1461,7 @@ export function AgentModals(props: any) {
                                         lineHeight: '1.2',
                                         wordBreak: 'break-word',
                                       }}>
-                                        {cmd.label}
+                                        {labelText}
                                       </div>
                                     </button>
                                   );

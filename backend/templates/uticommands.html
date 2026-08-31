@@ -11,8 +11,13 @@
   <div class="commands-layout">
     <!-- Left column: list of commands -->
     <div class="commands-list-panel">
-      <div style="margin-bottom: 10px;">
-        <input type="text" id="command-search" placeholder="Filter commands..." style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px;">
+      <div style="margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; gap: 4px; background: #eee; padding: 3px; border-radius: 6px;">
+          <button id="tab-all" class="vis-tab-btn active" style="flex: 1; padding: 6px 4px; border: none; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; background: #fff; color: #007bff;">Tất cả</button>
+          <button id="tab-visible" class="vis-tab-btn" style="flex: 1; padding: 6px 4px; border: none; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; background: transparent; color: #555;">👁️ Đang hiện</button>
+          <button id="tab-hidden" class="vis-tab-btn" style="flex: 1; padding: 6px 4px; border: none; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; background: transparent; color: #555;">🙈 Đã ẩn</button>
+        </div>
+        <input type="text" id="command-search" placeholder="Lọc lệnh..." style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px;">
       </div>
       <div id="commands-container" style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1;">
         <!-- Filled dynamically -->
@@ -228,6 +233,48 @@ document.addEventListener('DOMContentLoaded', () => {
         'others': false
     };
 
+    let currentVisFilter = 'all'; // 'all' | 'visible' | 'hidden'
+
+    ['tab-all', 'tab-visible', 'tab-hidden'].forEach(tabId => {
+        const btn = document.getElementById(tabId);
+        if (btn) {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.vis-tab-btn').forEach(b => {
+                    b.style.background = 'transparent';
+                    b.style.color = '#555';
+                    b.classList.remove('active');
+                });
+                btn.style.background = '#fff';
+                btn.style.color = '#007bff';
+                btn.classList.add('active');
+                currentVisFilter = tabId.replace('tab-', '');
+                renderCommandsList();
+            });
+        }
+    });
+
+    const toggleCommandVisibility = async (commandObj, event) => {
+        event.stopPropagation();
+        const newVis = !commandObj.is_visible;
+        try {
+            const res = await fetch('/api/uticommands/' + commandObj.command, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_visible: newVis })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                commandObj.is_visible = newVis;
+                showToast(`Đã ${newVis ? 'hiện' : 'ẩn'} nút [${commandObj.label}] trên App!`);
+                renderCommandsList();
+            } else {
+                showToast("Lỗi: " + data.error, false);
+            }
+        } catch (err) {
+            showToast("Lỗi kết nối server", false);
+        }
+    };
+
     const renderCommandsList = () => {
         const container = document.getElementById('commands-container');
         const filterVal = document.getElementById('command-search').value.toLowerCase().trim();
@@ -235,13 +282,19 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = '';
         
         const filtered = allCommands.filter(c => {
-            return c.command.toLowerCase().includes(filterVal) ||
-                   c.label.toLowerCase().includes(filterVal) ||
-                   (c.description || '').toLowerCase().includes(filterVal);
+            const matchesSearch = c.command.toLowerCase().includes(filterVal) ||
+                                 c.label.toLowerCase().includes(filterVal) ||
+                                 (c.description || '').toLowerCase().includes(filterVal);
+            if (!matchesSearch) return false;
+            
+            const isVis = c.is_visible !== false;
+            if (currentVisFilter === 'visible') return isVis;
+            if (currentVisFilter === 'hidden') return !isVis;
+            return true;
         });
 
         if (filtered.length === 0) {
-            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666; font-size: 13px;">No commands match search</div>';
+            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666; font-size: 13px;">Không có lệnh nào phù hợp</div>';
             return;
         }
 
@@ -265,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const groupLabels = {
             'toshiba-scan': 'Toshiba Scan',
             'ricoh-scan': 'Ricoh Scan',
-            'others': 'Others'
+            'others': 'Công cụ hệ thống / Tiện ích'
         };
 
         ['toshiba-scan', 'ricoh-scan', 'others'].forEach(groupKey => {
@@ -304,15 +357,28 @@ document.addEventListener('DOMContentLoaded', () => {
                             div.className += ' active';
                         }
                         
+                        const isVis = c.is_visible !== false;
                         const isHelper = c.command.endsWith('_helper');
-                        const icon = isHelper ? '🛠️' : '⚡';
+                        const icon = c.icon || (isHelper ? '🛠️' : '⚡');
+                        const toggleBtnHtml = isVis
+                            ? `<button class="vis-toggle-btn" style="background: #e6f4ea; color: #137333; border: 1px solid #ceead6; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; cursor: pointer;">👁️ Hiện</button>`
+                            : `<button class="vis-toggle-btn" style="background: #f1f3f4; color: #5f6368; border: 1px solid #dadce0; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; cursor: pointer;">🙈 Ẩn</button>`;
+
                         div.innerHTML = `
-                            <div class="command-item-title">
-                                <span>${icon}</span>
-                                <span>${c.label}</span>
+                            <div class="command-item-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    <span>${icon}</span>
+                                    <span>${c.label}</span>
+                                </div>
+                                ${toggleBtnHtml}
                             </div>
-                            <div class="command-item-desc">${c.description || 'No description available'}</div>
+                            <div class="command-item-desc">${c.description || c.command}</div>
                         `;
+                        
+                        const tBtn = div.querySelector('.vis-toggle-btn');
+                        if (tBtn) {
+                            tBtn.addEventListener('click', (evt) => toggleCommandVisibility(c, evt));
+                        }
                         
                         div.addEventListener('click', () => selectCommand(c));
                         container.appendChild(div);

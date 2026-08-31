@@ -203,6 +203,7 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                         "description": c.description or "",
                         "category": c.category or "",
                         "output_modal": c.output_modal,
+                        "is_visible": bool(getattr(c, "is_visible", True) if getattr(c, "is_visible", True) is not None else True),
                         "command_content": c.command_content
                     })
         except Exception as exc:
