@@ -1270,59 +1270,39 @@ export function AgentModals(props: any) {
                                 <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Mở thư mục chứa file scan trong Windows Explorer (mặc định ON)</div>
                               </div>
                             </label>
+                          </>
+                        )}
+                      </div>
+                    </div>
 
-                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
 
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                              <div>
-                                <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>Lối tắt ngoài Desktop (%TEMP%/GoPrinxAgent/ftp)</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>Tạo Shortcut thư mục Scan ra màn hình Desktop cho nhân viên dễ mở</div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  const createCmd = utilityCommands.find((c: any) => c.command === 'create_scan_shortcut');
-                                  handleTriggerUtilityExec('create_scan_shortcut', createCmd?.command_content || '');
-                                }}
-                                disabled={utilityActionPending !== null}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '0.75rem',
-                                  borderRadius: '8px',
-                                  background: 'var(--color-surface-light)',
-                                  border: '1px solid var(--color-primary)',
-                                  color: 'var(--color-primary)',
-                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                  whiteSpace: 'nowrap',
-                                  fontWeight: 600,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '5px'
-                                }}
-                              >
-                                🔗 Tạo Shortcut Desktop
-                              </button>
-                            </div>
-                            <hr style={{ border: 0, borderTop: '1px solid var(--color-surface-light)', margin: '4px 0' }} />
+                    {/* Section 2: Công cụ hệ thống Windows */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        🖥️ Công cụ hệ thống Windows
+                      </h4>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                        {/* Dynamic commands from JSON — thêm lệnh mới vào utility_commands.json trên VPS là xong */}
+                        {utilityCommandsLoading ? (
+                          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '8px 0', justifyContent: 'center' }}>
+                            <LoadingSpinner size="sm" /> Đang tải danh sách lệnh...
+                          </div>
+                        ) : (
+                          <>
+                            {utilityCommands.length > 0 ? (
+                              (() => {
+                                const filtered = utilityCommands.filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.is_visible !== false);
+                                const syncIdx = filtered.findIndex((cmd: any) => cmd.command === 'sync_all_scanpoints');
+                                if (syncIdx > -1) {
+                                  const [syncCmd] = filtered.splice(syncIdx, 1);
+                                  filtered.unshift(syncCmd);
+                                }
 
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                              <div>
-                                <div style={{ fontWeight: 500, fontSize: '0.8rem', color: 'var(--color-text)' }}>
-                                  🌐 Giao diện WIM PrintAgentX (Trình duyệt WIM)
-                                </div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>
-                                  Mở trang web printagentx.com dưới dạng WIM (Web Preview) từ máy Agent <strong>{selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}</strong> (để kiểm tra chạy offline)
-                                </div>
-                              </div>
-
-                              <button
-                                onClick={async () => {
+                                const handleOpenWim = async () => {
                                   const agentUid = selectedUtilityAgent?.agent_uid;
                                   if (!agentUid) return;
-
-                                  // 1. Gửi lệnh mở trình duyệt local trên máy Agent (tony) tại port 9173
                                   handleTriggerUtilityExec('open_printagentx_wim', `import webbrowser\nwebbrowser.open("http://localhost:9173")`);
-
-                                  // 2. Khởi tạo đường hầm SSH Reverse Tunnel tới port 9173 của máy Agent đại diện (tony)
                                   try {
                                     const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
                                     const res = await fetch(`${BASE_URL}/api/agents/${encodeURIComponent(agentUid)}/tunnel/start`, {
@@ -1358,69 +1338,27 @@ export function AgentModals(props: any) {
                                       });
                                     }
                                   }
-                                }}
-                                disabled={utilityActionPending !== null}
-                                style={{
-                                  padding: '8px 16px',
-                                  fontSize: '0.78rem',
-                                  borderRadius: '8px',
-                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                  border: 'none',
-                                  color: '#fff',
-                                  cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                  fontWeight: 600,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)'
-                                }}
-                              >
-                                🌐 Mở WIM printagentx.com (Agent {selectedUtilityAgent?.hostname || selectedUtilityAgent?.agent_uid}) ↗
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                                };
 
-
-                    {/* Section 2: Công cụ hệ thống Windows */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        🖥️ Công cụ hệ thống Windows
-                      </h4>
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                        {/* Dynamic commands from JSON — thêm lệnh mới vào utility_commands.json trên VPS là xong */}
-                        {utilityCommandsLoading ? (
-                          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '8px 0', justifyContent: 'center' }}>
-                            <LoadingSpinner size="sm" /> Đang tải danh sách lệnh...
-                          </div>
-                        ) : (
-                          <>
-                            {utilityCommands.length > 0 ? (
-                              (() => {
-                                const filtered = utilityCommands.filter((cmd: any) => cmd.command !== 'dxdiag' && cmd.is_visible !== false);
-                                const syncIdx = filtered.findIndex((cmd: any) => cmd.command === 'sync_all_scanpoints');
-                                if (syncIdx > -1) {
-                                  const [syncCmd] = filtered.splice(syncIdx, 1);
-                                  filtered.unshift(syncCmd);
-                                }
                                 return filtered.map((cmd: any) => {
                                   const isEmergency = cmd.command === 'emergency_restart';
                                   let labelText = cmd.label;
                                   let iconText = cmd.icon || '🔧';
+                                  let clickHandler = () => handleTriggerUtilityExec(cmd.command, cmd.command_content);
+
                                   if (cmd.command === 'open_web_setting') {
                                     labelText = 'Mở WIM';
                                     iconText = cmd.icon || '🌐';
+                                    clickHandler = handleOpenWim;
                                   } else if (cmd.command === 'create_scan_shortcut') {
                                     labelText = 'Tạo shortcut Desktop';
                                     iconText = cmd.icon || '🔗';
                                   }
+
                                   return (
                                     <button
                                       key={cmd.command}
-                                      onClick={() => handleTriggerUtilityExec(cmd.command, cmd.command_content)}
+                                      onClick={clickHandler}
                                       disabled={utilityActionPending !== null}
                                       style={{
                                         display: 'flex',
