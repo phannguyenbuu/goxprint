@@ -421,9 +421,37 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="command-item-desc">${c.description || c.command}</div>
                         `;
                         
+                        const switchLabel = div.querySelector('.switch');
+                        if (switchLabel) {
+                            switchLabel.addEventListener('click', (evt) => evt.stopPropagation());
+                        }
+
                         const cb = div.querySelector('.vis-checkbox');
                         if (cb) {
-                            cb.addEventListener('change', (evt) => toggleCommandVisibility(c, evt));
+                            cb.addEventListener('change', async (evt) => {
+                                evt.stopPropagation();
+                                const newVis = cb.checked;
+                                c.is_visible = newVis;
+                                try {
+                                    const res = await fetch('/api/uticommands/' + c.command, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ is_visible: newVis })
+                                    });
+                                    const data = await res.json();
+                                    if (data.ok) {
+                                        showToast(`Đã ${newVis ? 'hiện' : 'ẩn'} nút [${c.label}] trên App!`);
+                                    } else {
+                                        cb.checked = !newVis;
+                                        c.is_visible = !newVis;
+                                        showToast("Lỗi: " + data.error, false);
+                                    }
+                                } catch (err) {
+                                    cb.checked = !newVis;
+                                    c.is_visible = !newVis;
+                                    showToast("Lỗi kết nối server", false);
+                                }
+                            });
                         }
                         
                         div.addEventListener('click', () => selectCommand(c));
