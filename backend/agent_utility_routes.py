@@ -310,7 +310,6 @@ print(f"Executing utility command: {command}")
                         lan_uid=lan_u,
                         agent_uid=agent_uid,
                         hostname=agent_in_ram.get("hostname", agent_uid),
-                        is_master=True,
                         is_online=True
                     )
                 else:
