@@ -73,6 +73,14 @@ export function CopierItem({
   handleRemoteInstallDriver,
   setPublicFtpData,
 }: CopierItemProps) {
+  const [showSelectAgentModal, setShowSelectAgentModal] = React.useState(false);
+  const [selectedAgentForSync, setSelectedAgentForSync] = React.useState<string>('');
+
+  React.useEffect(() => {
+    const defaultUid = p?.agent_uid || activeAgentUid || selectedAgentUid || (onlineAgents && onlineAgents[0]?.agent_uid) || '';
+    setSelectedAgentForSync(defaultUid);
+  }, [p, activeAgentUid, selectedAgentUid, onlineAgents]);
+
   const isPending = commandStatus[p.id]?.isPending || false;
   const statusMsg = commandStatus[p.id]?.message || '';
 
@@ -381,10 +389,10 @@ export function CopierItem({
                                 <div style={{ display: 'flex', gap: '6px' }}>
                                   <button
                                     style={{ ...styles.smallBtn, padding: '6px 10px', fontSize: '0.75rem', height: 'auto' }}
-                                    onClick={async (e) => {
+                                    onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
-                                      handleRefetchAddressBook(p);
+                                      setShowSelectAgentModal(true);
                                     }}
                                     disabled={isPending || onlineAgents.length === 0}
                                   >
@@ -505,6 +513,162 @@ export function CopierItem({
                             </div>
   
                           </GlowCard>
+
+                          {/* Agent Selection Modal for Address Book Refetch */}
+                          <AnimatePresence>
+                            {showSelectAgentModal && (
+                              <div
+                                style={{
+                                  position: 'fixed',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  background: 'rgba(0, 0, 0, 0.75)',
+                                  zIndex: 99999,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  padding: '16px',
+                                  backdropFilter: 'blur(4px)'
+                                }}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                }}
+                              >
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                                  style={{
+                                    background: '#121827',
+                                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                                    borderRadius: '16px',
+                                    padding: '24px',
+                                    maxWidth: '480px',
+                                    width: '100%',
+                                    boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                    <div>
+                                      <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>
+                                        📖 Chọn Agent thực thi Cập nhật danh bạ
+                                      </h3>
+                                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                                        Máy photo: <strong style={{ color: '#60a5fa' }}>{p.printer_name || p.name || p.ip}</strong> ({p.ip})
+                                      </div>
+                                    </div>
+                                    <button
+                                      style={{ background: 'transparent', border: 'none', color: '#999', fontSize: '1.4rem', cursor: 'pointer', padding: '4px 8px' }}
+                                      onClick={() => setShowSelectAgentModal(false)}
+                                    >
+                                      &times;
+                                    </button>
+                                  </div>
+
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '280px', overflowY: 'auto', marginBottom: '20px', paddingRight: '4px' }}>
+                                    {onlineAgents.length === 0 ? (
+                                      <div style={{ padding: '16px', textAlign: 'center', color: '#ef4444', fontSize: '0.85rem' }}>
+                                        ⚠️ Không có Agent nào đang Online để thực thi lệnh.
+                                      </div>
+                                    ) : (
+                                      onlineAgents.map((ag: any) => {
+                                        const currentUid = selectedAgentForSync || (onlineAgents[0]?.agent_uid || '');
+                                        const isSelected = currentUid === ag.agent_uid;
+                                        const isDefault = ag.agent_uid === p.agent_uid;
+                                        return (
+                                          <div
+                                            key={ag.agent_uid || ag.id}
+                                            onClick={() => setSelectedAgentForSync(ag.agent_uid)}
+                                            style={{
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              padding: '12px 14px',
+                                              borderRadius: '10px',
+                                              border: isSelected ? '2px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.08)',
+                                              background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                                              cursor: 'pointer',
+                                              transition: 'all 0.2s'
+                                            }}
+                                          >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                              <div style={{
+                                                width: '18px',
+                                                height: '18px',
+                                                borderRadius: '50%',
+                                                border: isSelected ? '5px solid #3b82f6' : '2px solid #666',
+                                                background: '#fff',
+                                                boxSizing: 'border-box'
+                                              }} />
+                                              <div>
+                                                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#fff' }}>
+                                                  🖥️ {ag.hostname || ag.agent_uid}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: '2px' }}>
+                                                  IP: {ag.local_ip || '127.0.0.1'} · Port: {ag.web_port || 9173}
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                              <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 600 }}>
+                                                Online
+                                              </span>
+                                              {isDefault && (
+                                                <span style={{ fontSize: '0.65rem', color: '#60a5fa', fontWeight: 600 }}>
+                                                  (Gợi ý mặc định)
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                                    <button
+                                      style={{
+                                        padding: '8px 16px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                                        background: 'transparent',
+                                        color: '#ccc',
+                                        fontSize: '0.82rem',
+                                        cursor: 'pointer'
+                                      }}
+                                      onClick={() => setShowSelectAgentModal(false)}
+                                    >
+                                      Hủy
+                                    </button>
+                                    <button
+                                      style={{
+                                        padding: '8px 18px',
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        background: '#3b82f6',
+                                        color: '#fff',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 600,
+                                        cursor: onlineAgents.length === 0 ? 'not-allowed' : 'pointer',
+                                        opacity: onlineAgents.length === 0 ? 0.5 : 1
+                                      }}
+                                      disabled={onlineAgents.length === 0}
+                                      onClick={() => {
+                                        setShowSelectAgentModal(false);
+                                        handleRefetchAddressBook(p, selectedAgentForSync);
+                                      }}
+                                    >
+                                      🚀 Thực thi Cập nhật
+                                    </button>
+                                  </div>
+                                </motion.div>
+                              </div>
+                            )}
+                          </AnimatePresence>
                         </div>
   );
 }

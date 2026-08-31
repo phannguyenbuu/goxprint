@@ -653,7 +653,7 @@ export const useAgentScanActions = (deps: any = {}) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const handleRefetchAddressBook = async (printerId: any) => {
+  const handleRefetchAddressBook = async (printerId: any, overrideAgentUid?: string) => {
     let pId = String(typeof printerId === 'object' ? (printerId.id || printerId.ip || printerId.mac_address || printerId.mac_id) : printerId);
     if (!pId || pId === '0' || pId === 'undefined' || pId.toLowerCase() === 'none') {
       if (typeof printerId === 'object') {
@@ -661,7 +661,8 @@ export const useAgentScanActions = (deps: any = {}) => {
       }
     }
     const printerObj = typeof printerId === 'object' ? printerId : null;
-    const resolvedAgentUid = printerObj?.agent_uid ||
+    const resolvedAgentUid = overrideAgentUid ||
+      printerObj?.agent_uid ||
       (printerObj?.id && getTargetAgentUid ? getTargetAgentUid(printerObj.id) : '') ||
       (getTargetAgentUid ? getTargetAgentUid(pId) : '') ||
       agentUid ||
