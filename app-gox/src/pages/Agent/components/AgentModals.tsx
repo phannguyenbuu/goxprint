@@ -1353,6 +1353,64 @@ export function AgentModals(props: any) {
                                   } else if (cmd.command === 'create_scan_shortcut') {
                                     labelText = 'Tạo shortcut Desktop';
                                     iconText = cmd.icon || '🔗';
+                                  } else if (cmd.command === 'emergency_restart') {
+                                    labelText = 'Emergency Kill';
+                                    iconText = cmd.icon || '🔌';
+                                    clickHandler = handleEmergencyRestart;
+                                  } else if (cmd.command === 'check_watchdog') {
+                                    labelText = 'Check watchdog';
+                                    iconText = cmd.icon || '🩺';
+                                    clickHandler = () => {
+                                      if (!selectedUtilityAgent) return;
+                                      setUtilityActionPending('check_watchdog');
+                                      setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
+                                      triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', cmd.command_content || '')
+                                        .then((res: any) => {
+                                          if (res.ok && res.command_id) {
+                                            const maxPollMs = 30000;
+                                            const startTime = Date.now();
+                                            const timer = setInterval(async () => {
+                                              if (Date.now() - startTime > maxPollMs) {
+                                                clearInterval(timer);
+                                                setUtilityStatusMsg({ text: '⏱️ Timeout chờ kết quả (30s)', isError: true });
+                                                setUtilityActionPending(null);
+                                                return;
+                                              }
+                                              try {
+                                                const statusRes = await getCommandStatus(res.command_id);
+                                                if (statusRes.status === 'success') {
+                                                  clearInterval(timer);
+                                                  const msg = statusRes.result_payload || statusRes.result || statusRes.error || 'Hoàn thành';
+                                                  setViewOutputModal({
+                                                    isOpen: true,
+                                                    title: '🩺 Check Watchdog',
+                                                    content: msg,
+                                                  });
+                                                  setUtilityStatusMsg(null);
+                                                  setUtilityActionPending(null);
+                                                } else if (statusRes.status === 'failed') {
+                                                  clearInterval(timer);
+                                                  const errMsg = statusRes.error || statusRes.result_payload || statusRes.result || 'Failed';
+                                                  setViewOutputModal({
+                                                    isOpen: true,
+                                                    title: '🩺 Check Watchdog',
+                                                    content: errMsg,
+                                                  });
+                                                  setUtilityStatusMsg(null);
+                                                  setUtilityActionPending(null);
+                                                }
+                                              } catch {}
+                                            }, 2000);
+                                          } else {
+                                            setUtilityStatusMsg({ text: '❌ ' + (res.error || 'Không thể gửi lệnh'), isError: true });
+                                            setUtilityActionPending(null);
+                                          }
+                                        })
+                                        .catch((err: any) => {
+                                          setUtilityStatusMsg({ text: '❌ ' + err.message, isError: true });
+                                          setUtilityActionPending(null);
+                                        });
+                                    };
                                   }
 
                                   return (
@@ -1397,7 +1455,7 @@ export function AgentModals(props: any) {
                                         fontWeight: 600,
                                         color: isEmergency ? '#ef4444' : 'var(--color-text)',
                                         lineHeight: '1.2',
-                                        wordBreak: 'break-word',
+                                        wordBreak: 'word-break',
                                       }}>
                                         {labelText}
                                       </div>
@@ -1447,7 +1505,7 @@ export function AgentModals(props: any) {
                                     fontWeight: 600,
                                     color: 'var(--color-text)',
                                     lineHeight: '1.2',
-                                    wordBreak: 'break-word',
+                                    wordBreak: 'word-break',
                                   }}>
                                     Danh sách Máy in
                                   </div>
@@ -1492,159 +1550,13 @@ export function AgentModals(props: any) {
                                     fontWeight: 600,
                                     color: 'var(--color-text)',
                                     lineHeight: '1.2',
-                                    wordBreak: 'break-word',
+                                    wordBreak: 'word-break',
                                   }}>
                                     Thư mục Scan
                                   </div>
                                 </button>
                               </>
                             )}
-
-                            {/* Static buttons: Check watchdog and Emergency Kill */}
-                            {/* Check Watchdog */}
-                            <button
-                              onClick={() => {
-                                if (!selectedUtilityAgent) return;
-                                setUtilityActionPending('check_watchdog');
-                                setUtilityStatusMsg({ text: '⌛ Đang kiểm tra watchdog...', isError: false });
-                                const checkCmdObj = utilityCommands.find((c: any) => c.command === 'check_watchdog');
-                                triggerAgentUtilityExec(selectedUtilityAgent.agent_uid, 'check_watchdog', checkCmdObj?.command_content || '')
-                                  .then((res: any) => {
-                                    if (res.ok && res.command_id) {
-                                      const maxPollMs = 30000;
-                                      const startTime = Date.now();
-                                      const timer = setInterval(async () => {
-                                        if (Date.now() - startTime > maxPollMs) {
-                                          clearInterval(timer);
-                                          setUtilityStatusMsg({ text: '⏱️ Timeout chờ kết quả (30s)', isError: true });
-                                          setUtilityActionPending(null);
-                                          return;
-                                        }
-                                        try {
-                                          const statusRes = await getCommandStatus(res.command_id);
-                                          if (statusRes.status === 'success') {
-                                            clearInterval(timer);
-                                            const msg = statusRes.result_payload || statusRes.result || statusRes.error || 'Hoàn thành';
-                                            setViewOutputModal({
-                                              isOpen: true,
-                                              title: '🩺 Check Watchdog',
-                                              content: msg,
-                                            });
-                                            setUtilityStatusMsg(null);
-                                            setUtilityActionPending(null);
-                                          } else if (statusRes.status === 'failed') {
-                                            clearInterval(timer);
-                                            const errMsg = statusRes.error || statusRes.result_payload || statusRes.result || 'Failed';
-                                            setViewOutputModal({
-                                              isOpen: true,
-                                              title: '🩺 Check Watchdog',
-                                              content: errMsg,
-                                            });
-                                            setUtilityStatusMsg(null);
-                                            setUtilityActionPending(null);
-                                          }
-                                        } catch {}
-                                      }, 2000);
-                                    } else {
-                                      setUtilityStatusMsg({ text: '❌ ' + (res.error || 'Không thể gửi lệnh'), isError: true });
-                                      setUtilityActionPending(null);
-                                    }
-                                  })
-                                  .catch((err: any) => {
-                                    setUtilityStatusMsg({ text: '❌ ' + err.message, isError: true });
-                                    setUtilityActionPending(null);
-                                  });
-                              }}
-                              disabled={utilityActionPending !== null}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '8px',
-                                background: 'var(--color-surface-light)',
-                                border: '1px solid var(--color-surface-light)',
-                                borderRadius: '12px',
-                                padding: '16px 8px',
-                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                textAlign: 'center',
-                                width: '100%',
-                                transition: 'all 0.2s',
-                                opacity: utilityActionPending !== null ? 0.6 : 1,
-                                minHeight: '108px',
-                                boxSizing: 'border-box',
-                              }}
-                              onMouseEnter={(e) => {
-                                if (utilityActionPending === null) {
-                                  e.currentTarget.style.borderColor = 'var(--color-primary)';
-                                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = 'var(--color-surface-light)';
-                                e.currentTarget.style.background = 'var(--color-surface-light)';
-                              }}
-                            >
-                              <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {utilityActionPending === 'check_watchdog' ? <LoadingSpinner size="sm" /> : '🩺'}
-                              </div>
-                              <div style={{
-                                fontSize: '0.72rem',
-                                fontWeight: 600,
-                                color: 'var(--color-text)',
-                                lineHeight: '1.2',
-                                wordBreak: 'break-word',
-                              }}>
-                                Check watchdog
-                              </div>
-                            </button>
-
-                            {/* Emergency Kill */}
-                            <button
-                              onClick={handleEmergencyRestart}
-                              disabled={utilityActionPending !== null}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '8px',
-                                background: 'var(--color-surface-light)',
-                                border: '1px solid rgba(239, 68, 68, 0.25)',
-                                borderRadius: '12px',
-                                padding: '16px 8px',
-                                cursor: utilityActionPending !== null ? 'not-allowed' : 'pointer',
-                                textAlign: 'center',
-                                width: '100%',
-                                transition: 'all 0.2s',
-                                opacity: utilityActionPending !== null ? 0.6 : 1,
-                                minHeight: '108px',
-                                boxSizing: 'border-box',
-                              }}
-                              onMouseEnter={(e) => {
-                                if (utilityActionPending === null) {
-                                  e.currentTarget.style.borderColor = '#ef4444';
-                                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.05)';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
-                                e.currentTarget.style.background = 'var(--color-surface-light)';
-                              }}
-                            >
-                              <div style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {utilityActionPending === 'emergency_restart' ? <LoadingSpinner size="sm" /> : '🔌'}
-                              </div>
-                              <div style={{
-                                fontSize: '0.72rem',
-                                fontWeight: 600,
-                                color: '#ef4444',
-                                lineHeight: '1.2',
-                                wordBreak: 'break-word',
-                              }}>
-                                Emergency Kill
-                              </div>
-                            </button>
                           </>
                         )}
 
