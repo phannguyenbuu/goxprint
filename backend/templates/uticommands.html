@@ -193,6 +193,49 @@ textarea.code-editor:focus {
     box-shadow: 0 4px 6px rgba(0,0,0,0.15);
     display: none;
 }
+
+/* Simple Circular Toggle Switch */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 18px;
+    flex-shrink: 0;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.2s ease-in-out;
+    border-radius: 20px;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: 0.2s ease-in-out;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+input:checked + .slider {
+    background-color: #28a745;
+}
+input:checked + .slider:before {
+    transform: translateX(16px);
+}
 </style>
 
 <div id="custom-toast" class="toast-msg"></div>
@@ -360,9 +403,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const isVis = c.is_visible !== false;
                         const isHelper = c.command.endsWith('_helper');
                         const icon = c.icon || (isHelper ? '🛠️' : '⚡');
-                        const toggleBtnHtml = isVis
-                            ? `<button class="vis-toggle-btn" style="background: #e6f4ea; color: #137333; border: 1px solid #ceead6; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; cursor: pointer;">👁️ Hiện</button>`
-                            : `<button class="vis-toggle-btn" style="background: #f1f3f4; color: #5f6368; border: 1px solid #dadce0; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; cursor: pointer;">🙈 Ẩn</button>`;
+                        const toggleSwitchHtml = `
+                            <label class="switch" title="${isVis ? 'Đang hiện trên App (Bấm để ẩn)' : 'Đã ẩn trên App (Bấm để hiện)'}">
+                                <input type="checkbox" ${isVis ? 'checked' : ''} class="vis-checkbox">
+                                <span class="slider"></span>
+                            </label>
+                        `;
 
                         div.innerHTML = `
                             <div class="command-item-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
@@ -370,14 +416,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span>${icon}</span>
                                     <span>${c.label}</span>
                                 </div>
-                                ${toggleBtnHtml}
+                                ${toggleSwitchHtml}
                             </div>
                             <div class="command-item-desc">${c.description || c.command}</div>
                         `;
                         
-                        const tBtn = div.querySelector('.vis-toggle-btn');
-                        if (tBtn) {
-                            tBtn.addEventListener('click', (evt) => toggleCommandVisibility(c, evt));
+                        const cb = div.querySelector('.vis-checkbox');
+                        if (cb) {
+                            cb.addEventListener('change', (evt) => toggleCommandVisibility(c, evt));
                         }
                         
                         div.addEventListener('click', () => selectCommand(c));
