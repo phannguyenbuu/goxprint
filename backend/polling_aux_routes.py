@@ -36,10 +36,63 @@ from serializers import (
     _set_printer_online_state,
 )
 from models import Printer, PrinterControlCommand, ScanEmailAlias, AgentNode, AgentPresenceLog, DeviceInfor
+from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
 
 LOGGER = logging.getLogger(__name__)
 
 SCAN_UPLOAD_ROOT = Path("storage/uploads/scans")
+
+
+def enqueue_get_agent_ip_command(session: Any, lead: str, lan_uid: str, agent_uid: str) -> None:
+    """Automatically enqueue a get_agent_ip utility command for an agent so it returns its new IP right away after change_agent_ip."""
+    try:
+        from agent_utility_routes import BUILTIN_UTILITY_COMMANDS
+        get_ip_script = BUILTIN_UTILITY_COMMANDS.get(
+            "get_agent_ip",
+            "import socket\\ndef get_local_ip():\\n    try:\\n        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\\n        s.connect(('8.8.8.8', 80))\\n        ip = s.getsockname()[0]\\n        s.close()\\n        return ip\\n    except Exception:\\n        return '127.0.0.1'\\n\\nprint(get_local_ip())\n"
+        )
+        params = {
+            "action": "exec_utility",
+            "command": "get_agent_ip",
+            "command_content": get_ip_script,
+            "is_auto": True
+        }
+
+        pending = session.execute(
+            select(PrinterControlCommand).where(
+                PrinterControlCommand.agent_uid == agent_uid,
+                PrinterControlCommand.status.in_(["pending", "processing"]),
+                PrinterControlCommand.command_type == "trigger_utility"
+            )
+        ).scalars().all()
+
+        for p_cmd in pending:
+            try:
+                p_json = json.loads(p_cmd.command_params or "{}")
+                if p_json.get("command") == "get_agent_ip":
+                    LOGGER.info("[AUTO get_agent_ip] Pending get_agent_ip command #%s already exists for agent %s", p_cmd.id, agent_uid)
+                    return
+            except Exception:
+                pass
+
+        new_cmd = PrinterControlCommand(
+            printer_id=0,
+            lead=lead or "default",
+            lan_uid=lan_uid or "default",
+            agent_uid=agent_uid,
+            printer_name="Auto Get Agent IP",
+            ip="",
+            command_type="trigger_utility",
+            command_params=json.dumps(params),
+            status="pending",
+            requested_at=datetime.now(timezone.utc),
+        )
+        session.add(new_cmd)
+        session.commit()
+        LOGGER.info("[AUTO get_agent_ip] Created automatic get_agent_ip job #%s for agent %s", new_cmd.id, agent_uid)
+    except Exception as err:
+        LOGGER.error("[AUTO get_agent_ip] Failed to enqueue get_agent_ip job for %s: %s", agent_uid, err)
+
 
 
 def parse_folder_str(folder_str: str) -> dict[str, str]:
@@ -87,6 +140,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
     def polling_controls() -> Any:
         agent_uid = _to_text(request.args.get("agent_uid"))
         sent_token = _request_api_token()
+        client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
         ok_auth, lead_valid, auth_error = _resolve_request_lead({}, lead_key_map, sent_token, request.args.get("lead"))
         if not ok_auth:
             return auth_error
@@ -98,8 +152,8 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     "lead": lead_valid,
                     "lan_uid": _to_text(request.args.get("lan_uid")),
                     "agent_uid": agent_uid,
-                    "hostname": "",
-                    "local_ip": "",
+                    "hostname": _to_text(request.args.get("hostname")),
+                    "local_ip": _to_text(request.args.get("local_ip")),
                     "gateway_ip": _to_text(request.args.get("gateway_ip")),
                     "gateway_mac": _to_text(request.args.get("gateway_mac")),
                 },
@@ -142,14 +196,54 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             if not isinstance(devices_payload, list) and isinstance(devices_payload, dict):
                 devices_payload = list(devices_payload.values())
 
-            from active_agents_registry import update_agent_in_memory, ACTIVE_AGENTS
-            client_pub_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+            incoming_local_ip = _to_text(request.args.get("local_ip")) or _to_text(req_body.get("local_ip")) or (agent.local_ip if agent else "")
+
+            # 1. Natural IP Change detection during polling controls check-in (Update DB first)
+            if incoming_local_ip:
+                try:
+                    from models import IPData
+                    ip_rec = session.execute(
+                        select(IPData).where(IPData.agent_name == agent_uid)
+                    ).scalars().first()
+                    old_ref_ip = (ip_rec.ip if ip_rec and ip_rec.ip else "") or (agent.local_ip if agent else "")
+                    if old_ref_ip and old_ref_ip != incoming_local_ip:
+                        # Dedup guard: check if pc_ip_changed event already triggered workflow in last 5 min
+                        from datetime import timedelta
+                        recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+                        existing_workflow = session.execute(
+                            select(PrinterControlCommand).where(
+                                PrinterControlCommand.agent_uid == agent_uid,
+                                PrinterControlCommand.command_type == "when_ip_change",
+                                PrinterControlCommand.requested_at >= recent_cutoff
+                            )
+                        ).scalars().first()
+
+                        if not existing_workflow:
+                            LOGGER.info("[polling_controls] Natural agent IP change detected for %s: %s -> %s. Triggering workflow...", agent_uid, old_ref_ip, incoming_local_ip)
+                            from utils import trigger_ip_change_workflow
+                            trigger_ip_change_workflow(session, lead_valid, lan_uid, agent_uid, old_ref_ip, incoming_local_ip)
+                        else:
+                            LOGGER.info("[polling_controls] Dedup: when_ip_change #%d already exists for agent %s (%s -> %s). Skipping duplicate workflow.", existing_workflow.id, agent_uid, old_ref_ip, incoming_local_ip)
+
+                        # Always update IPData and AgentNode regardless of dedup
+                        if ip_rec:
+                            ip_rec.ip = incoming_local_ip
+                            ip_rec.updated_at = datetime.now(timezone.utc)
+                        if agent:
+                            agent.local_ip = incoming_local_ip
+                            agent.updated_at = datetime.now(timezone.utc)
+                        session.commit()
+                except Exception as ip_detect_err:
+                    LOGGER.error("Error detecting natural IP change in polling_controls: %s", ip_detect_err)
+
+
+            # 2. Update RAM memory so UI endpoints get the new IP text immediately
             update_agent_in_memory(
                 lead=lead_valid,
                 lan_uid=lan_uid,
                 agent_uid=agent_uid,
                 hostname=agent.hostname if agent else "",
-                local_ip=agent.local_ip if agent else "",
+                local_ip=incoming_local_ip,
                 local_mac=agent.local_mac if agent else "",
                 app_version=agent.app_version if agent else "",
                 run_mode=agent.run_mode if agent else "web",
@@ -157,6 +251,30 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                 devices_list=devices_payload if isinstance(devices_payload, list) else None,
                 public_ip=client_pub_ip,
             )
+
+            # 3. ONLY mark change_agent_ip command as SUCCESS after RAM/DB IP text has changed!
+            try:
+                proc_cmds = session.execute(
+                    select(PrinterControlCommand).where(
+                        PrinterControlCommand.agent_uid == agent_uid,
+                        PrinterControlCommand.status == "processing",
+                        PrinterControlCommand.command_type == "trigger_utility"
+                    )
+                ).scalars().all()
+                if proc_cmds:
+                    for sc in proc_cmds:
+                        try:
+                            import json as _json
+                            cp_data = _json.loads(sc.command_params or "{}")
+                            if cp_data.get("command") == "change_agent_ip":
+                                sc.status = "success"
+                                sc.responded_at = datetime.now(timezone.utc)
+                                sc.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {incoming_local_ip}" if incoming_local_ip else "[✓] Đã kết nối lại thành công."
+                        except Exception:
+                            pass
+                    session.commit()
+            except Exception as auto_err:
+                LOGGER.error("Error auto-resolving processing commands in polling_controls: %s", auto_err)
 
             agent_ram = ACTIVE_AGENTS.get(agent_uid)
             req_push = False
@@ -263,8 +381,20 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     }
                     for r in rows
                 ],
+                "settings": (lambda: __import__('utils').get_system_settings())()
             }
         )
+
+    @app.route("/api/system-settings", methods=["GET", "POST"])
+    def system_settings_api() -> Any:
+        from utils import get_system_settings, save_system_settings
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            updated = save_system_settings(data)
+            return jsonify({"ok": True, "message": "System settings updated successfully", "settings": updated})
+        else:
+            settings = get_system_settings()
+            return jsonify({"ok": True, "settings": settings})
 
     @app.post("/api/polling/address-book-sync")
     def polling_address_book_sync() -> Any:
@@ -524,6 +654,13 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     command.status = "success"
                     command.error_message = ""
                     command.responded_at = responded_at
+                    # Auto-resolve when_ip_change parent if this address_modify is a child of one
+                    if command.command_type == "address_modify":
+                        try:
+                            from utils import try_resolve_when_ip_change_parent
+                            try_resolve_when_ip_change_parent(session, command.id)
+                        except Exception as resolve_exc:
+                            LOGGER.warning("[polling_control_result] resolve parent error: %s", resolve_exc)
                     address_book_data = body.get("address_book_data") or body.get("result_payload") or body.get("output") or body.get("error_message")
                     if isinstance(address_book_data, str):
                         raw_str = address_book_data.strip()
@@ -791,8 +928,25 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             try: raw_payload = json.loads(m.group(1))
                             except Exception: pass
 
-                has_error_kw = any(err in (error_message or "") for err in ["[-] LỖI THỰC THI:", "[❌ LỖI CRITICAL", "SyntaxError:", "IndentationError:"])
-                if isinstance(raw_payload, list) or ok_value or not has_error_kw:
+                has_error_kw = any(err in (error_message or "") for err in ["[-] LỖI THỰC THI", "[❌ LỖI CRITICAL", "SyntaxError:", "IndentationError:", "Authentication failed:", "RuntimeError:"])
+                is_payload_error = isinstance(raw_payload, dict) and raw_payload.get("status") == "error"
+                is_list_scan_cmd = "ricoh_list_scan" in (command.command_params or "") or "toshiba_list_scan" in (command.command_params or "") or command.command_type == "fetch_address_book"
+
+                # Check if __ADDRESS_BOOK_JSON_START__ or valid address_list JSON is present in output text or body
+                has_fresh_address_book_json = False
+                for text_field in (body.get("output"), body.get("result"), body.get("result_payload"), body.get("error_message"), body.get("stdout"), error_message):
+                    if text_field and isinstance(text_field, str):
+                        if "__ADDRESS_BOOK_JSON_START__" in text_field or '"address_list"' in text_field:
+                            has_fresh_address_book_json = True
+                            break
+
+                abd_in_body = body.get("address_book_data") or body.get("result_payload")
+                if isinstance(abd_in_body, dict) and "address_list" in abd_in_body:
+                    has_fresh_address_book_json = True
+
+                has_address_book_json = (isinstance(raw_payload, dict) and (raw_payload.get("status") == "success" or "address_list" in raw_payload)) or has_fresh_address_book_json
+
+                if ok_value and not has_error_kw and not is_payload_error and (not is_list_scan_cmd or has_address_book_json):
                     command.status = "success"
                     command.error_message = error_message or ""
                     command.responded_at = responded_at
@@ -813,48 +967,36 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         if command.agent_uid in ACTIVE_AGENTS:
                             ACTIVE_AGENTS[command.agent_uid]["printers_json"] = raw_payload
 
-                        # Upsert into PostgreSQL Printer table
-                        existing_printers = session.execute(
-                            select(Printer).where(Printer.lead == lead, Printer.lan_uid == target_lan_uid)
-                        ).scalars().all()
-                        existing_by_mac = { (p.mac_address or "").upper().replace("-", ":"): p for p in existing_printers if p.mac_address }
+                        # Wipe ALL old printer records for this lead/company before inserting fresh scan results
+                        from sqlalchemy import delete
+                        from models import DeviceInfor
+                        session.execute(delete(Printer).where(Printer.lead == lead))
+                        session.execute(delete(DeviceInfor).where(DeviceInfor.lead == lead))
+                        session.flush()
 
-                        scanned_macs = set()
+                        added_count = 0
                         for p_item in raw_payload:
                             if not isinstance(p_item, dict): continue
                             mac = str(p_item.get("mac_address") or p_item.get("mac_id") or "").strip().upper().replace("-", ":")
                             ip = str(p_item.get("ip") or "").strip()
                             p_name = str(p_item.get("name") or p_item.get("printer_name") or "Photocopy").strip()
                             if not mac: continue
-                            scanned_macs.add(mac)
 
-                            if mac in existing_by_mac:
-                                p_rec = existing_by_mac[mac]
-                                p_rec.ip = ip
-                                p_rec.printer_name = p_name
-                                p_rec.is_online = bool(p_item.get("is_online", True))
-                                p_rec.last_scanned_at = datetime.now(timezone.utc)
-                                if command.agent_uid: p_rec.agent_uid = command.agent_uid
-                            elif bool(p_item.get("is_online", True)):
-                                new_p = Printer(
-                                    lead=lead,
-                                    lan_uid=target_lan_uid,
-                                    printer_name=p_name,
-                                    ip=ip,
-                                    mac_address=mac,
-                                    is_online=True,
-                                    enabled=True,
-                                    agent_uid=command.agent_uid or "",
-                                    last_scanned_at=datetime.now(timezone.utc)
-                                )
-                                session.add(new_p)
-
-                        # Completely remove old un-scanned printers for this LAN site from PostgreSQL
-                        for mac, old_p in existing_by_mac.items():
-                            if mac not in scanned_macs:
-                                session.delete(old_p)
+                            new_p = Printer(
+                                lead=lead,
+                                lan_uid=target_lan_uid,
+                                printer_name=p_name,
+                                ip=ip,
+                                mac_address=mac,
+                                is_online=bool(p_item.get("is_online", True)),
+                                enabled=True,
+                                agent_uid=command.agent_uid or "",
+                                last_scanned_at=datetime.now(timezone.utc)
+                            )
+                            session.add(new_p)
+                            added_count += 1
                         session.flush()
-                        LOGGER.info("[polling_control_result] Cleaned fresh scan: kept %d online printers for lan_uid=%s in VPS DB", len(scanned_macs), target_lan_uid)
+                        LOGGER.info("[polling_control_result] Wiped old printers and saved %d fresh printers for lead=%s in VPS DB", added_count, lead)
 
                     try:
                         import json as _json
@@ -1002,11 +1144,17 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             command.responded_at = None
                         else:
                             command.status = "failed"
-                            command.error_message = f"(Đã thử lại {retry_count} lần) " + (error_message or "Agent command failed")
+                            if is_list_scan_cmd and not has_address_book_json:
+                                command.error_message = (error_message or "").strip() + "\n[-] LỖI THỰC THI QUÉT DANH BẠ: Không nhận được dữ liệu danh bạ từ máy in (Kết nối bị gián đoạn, Timeout hoặc WIM không phản hồi)!"
+                            else:
+                                command.error_message = f"(Đã thử lại {retry_count} lần) " + (error_message or "Agent command failed")
                             command.responded_at = responded_at
                     except Exception:
                         command.status = "failed"
-                        command.error_message = error_message or "Agent command failed"
+                        if is_list_scan_cmd and not has_address_book_json:
+                            command.error_message = (error_message or "").strip() + "\n[-] LỖI THỰC THI QUÉT DANH BẠ: Không nhận được dữ liệu danh bạ từ máy in (Kết nối bị gián đoạn, Timeout hoặc WIM không phản hồi)!"
+                        else:
+                            command.error_message = error_message or "Agent command failed"
                         command.responded_at = responded_at
             else:
                 if ok_value:
@@ -1049,85 +1197,63 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         command.error_message = error_message or "Agent command failed"
                         command.responded_at = responded_at
             
-            # If the command succeeded and is of type trigger_utility, run our IP update logic
+            # If the command succeeded and is of type trigger_utility (change_agent_ip or get_agent_ip), update IP & trigger workflow
             if command.status == "success" and command.command_type == "trigger_utility":
-                # Update IPData table when change_agent_ip succeeds
                 try:
                     import json as _json
                     cp = _json.loads(command.command_params or "{}")
-                    if cp.get("command") == "change_agent_ip":
-                        target_ip = cp.get("printer_ip") or cp.get("ip") or cp.get("target_ip")
-                        if target_ip:
+                    cmd_name = cp.get("command")
+                    if cmd_name in ["change_agent_ip", "get_agent_ip"]:
+                        target_ip = cp.get("target_ip") or cp.get("ip") or ""
+                        new_ip_raw = str(command.error_message or error_message or body.get("result_payload") or body.get("output") or "")
+                        import re
+                        ip_match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", new_ip_raw)
+                        parsed_ip = ip_match.group(1) if ip_match else target_ip
+
+                        if parsed_ip:
                             from models import IPData
                             ip_rec = session.execute(
-                                select(IPData).where(IPData.lan_uid == command.lan_uid, IPData.agent_name == command.agent_uid)
-                            ).scalar_one_or_none()
+                                select(IPData).where(IPData.agent_name == command.agent_uid)
+                            ).scalars().first()
+                            
+                            agent_node = session.execute(
+                                select(AgentNode).where(AgentNode.agent_uid == command.agent_uid).order_by(AgentNode.last_seen_at.desc())
+                            ).scalars().first()
+
+                            old_ip = (ip_rec.ip if ip_rec and ip_rec.ip else "") or (agent_node.local_ip if agent_node else "")
+
+                            if old_ip and old_ip != parsed_ip:
+                                LOGGER.info("[polling_control_result] IP change detected via %s for %s: %s -> %s. Triggering workflow...", cmd_name, command.agent_uid, old_ip, parsed_ip)
+                                from utils import trigger_ip_change_workflow
+                                trigger_ip_change_workflow(session, command.lead or "default", command.lan_uid or "default", command.agent_uid, old_ip, parsed_ip)
+
+                            if agent_node:
+                                agent_node.local_ip = parsed_ip
+                                agent_node.updated_at = datetime.now(timezone.utc)
+                            
                             if ip_rec is None:
                                 ip_rec = IPData(
                                     agent_uid=command.agent_uid,
-                                    lan_uid=command.lan_uid,
+                                    lan_uid=command.lan_uid or "default",
                                     agent_name=command.agent_uid,
-                                    ip=target_ip,
+                                    ip=parsed_ip,
                                     created_at=datetime.now(timezone.utc),
                                     updated_at=datetime.now(timezone.utc)
                                 )
                                 session.add(ip_rec)
                             else:
-                                ip_rec.ip = target_ip
+                                ip_rec.ip = parsed_ip
                                 ip_rec.updated_at = datetime.now(timezone.utc)
-                            
-                            # Update AgentNode local_ip in DB
-                            agent_node = session.execute(
-                                select(AgentNode).where(AgentNode.agent_uid == command.agent_uid).order_by(AgentNode.last_seen_at.desc())
-                            ).scalars().first()
-                            if agent_node:
-                                agent_node.local_ip = target_ip
-                                agent_node.updated_at = datetime.now(timezone.utc)
-                            
-                            # Update ACTIVE_AGENTS in memory
+
+                            # Update in-memory ACTIVE_AGENTS registry for real-time frontend update
                             from active_agents_registry import ACTIVE_AGENTS
                             agent_entry = ACTIVE_AGENTS.get(command.agent_uid)
                             if agent_entry:
-                                agent_entry["local_ip"] = target_ip
+                                agent_entry["local_ip"] = parsed_ip
                                 agent_entry["last_seen_at"] = datetime.now(timezone.utc)
-                            LOGGER.info("[polling_control_result] Updated IPData and AgentNode/memory for change_agent_ip: agent=%s IP=%s", command.agent_uid, target_ip)
-                except Exception as ip_err:
-                    LOGGER.error("[polling_control_result] Failed to update IPData and AgentNode/memory for change_agent_ip: %s", ip_err)
-
-                # Update AgentNode local_ip and memory registry when get_agent_ip succeeds
-                try:
-                    import json as _json
-                    cp = _json.loads(command.command_params or "{}")
-                    if cp.get("command") == "get_agent_ip":
-                        new_ip = command.error_message or error_message or body.get("result_payload") or body.get("output")
-                        if new_ip and isinstance(new_ip, str):
-                            new_ip = new_ip.strip()
-                            import re
-                            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", new_ip):
-                                agent_node = session.execute(
-                                    select(AgentNode).where(AgentNode.agent_uid == command.agent_uid).order_by(AgentNode.last_seen_at.desc())
-                                ).scalars().first()
-                                if agent_node:
-                                    agent_node.local_ip = new_ip
-                                    agent_node.updated_at = datetime.now(timezone.utc)
-                                    LOGGER.info("[polling_control_result] Updated AgentNode local_ip via get_agent_ip refresh: %s", new_ip)
-                                
-                                # Update in-memory ACTIVE_AGENTS registry for real-time frontend update
-                                from active_agents_registry import ACTIVE_AGENTS
-                                agent_entry = ACTIVE_AGENTS.get(command.agent_uid)
-                                if agent_entry:
-                                    agent_entry["local_ip"] = new_ip
-                                    agent_entry["last_seen_at"] = datetime.now(timezone.utc)
-                                    LOGGER.info("[polling_control_result] Updated ACTIVE_AGENTS local_ip via get_agent_ip refresh: %s", new_ip)
+                            LOGGER.info("[polling_control_result] Updated AgentNode/IPData/ACTIVE_AGENTS local_ip via %s: %s", cmd_name, parsed_ip)
                 except Exception as refresh_err:
-                    LOGGER.error("[polling_control_result] Failed to update AgentNode/memory local_ip on get_agent_ip refresh: %s", refresh_err)
-            else:
-                if ok_value:
-                    command.status = "success"
-                else:
-                    command.status = "failed"
-                command.error_message = error_message
-                command.responded_at = responded_at
+                    LOGGER.error("[polling_control_result] Failed to update AgentNode/memory local_ip: %s", refresh_err)
             
             # Delete check_scan_ip_match and automatic utility commands to prevent DB bloating
             if command.command_type == "trigger_utility" and command.command_params:

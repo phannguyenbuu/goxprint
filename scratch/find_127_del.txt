@@ -1,0 +1,95 @@
+Job ID: 650050 | IP: 0.0.0.0 | Status: success | CmdType: trigger_utility
+Params: {"action": "exec_utility", "command": "ricoh_delete_scan", "command_content": "import requests\nimport re\nimport base64\nimport json\nimport sys\nimport time\n\nIP = \"192.168.1.226\"\nUSER = \"admin
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] XÓA ĐIỂM SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/5] Cấu hình tham số:
+  - IP Máy in   : 192.168.1.226
+  - Đăng nhập   : admin
+  - Target ID   : 127
+  - Target Name : 
+  - Base URL    : http://192.168.1.226
+[*] Đang đăng xuất để giải phóng phiên làm việc...
+  [✓] Giải phóng phiên OK.
+
+[2/5] Tiến hành đăng nhập WIM (192.168.1.226)...
+  -> Lấy form từ: http://192.168.1.226/web/guest/en/websys/webArch/authForm.cgi
+  -> Extracted wimToken: ''
+  -> Đang gửi POST login tới http://192.168.1.226/web/guest/en/websys/webArch/login.cgi...
+  [✓] Đăng nhập thành công vào máy in Ricoh!
+
+[3/5] Tải danh sách điểm scan từ máy in...
+  -> Gọi AJAX lấy danh bạ: http://192.168.1.226/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken=127123968
+
+[4/5] Tìm kiếm điểm scan khớp (ID: '127', Tên: '')...
+  -> Tổng số điểm scan tìm thấy trên máy in: 0
+  [i] Thử Mã ĐK mặc định: 00127
+
+[5/5] Đang gửi POST xóa Mã ĐK '00127' (Entry ID: 127, Tên: '')...
+  -> Đã gửi POST form data tới http://192.168.1.226/web/entry/en/address/adrsDeleteEntries.cgi (HTTP 200)
+  -> Đang xác minh lại danh bạ máy in sau khi xóa...
+  [✓] XÁC MINH THÀNH CÔNG: Đã xóa hoàn toàn điểm scan Mã ĐK '00127' (Entry ID: 127) khỏi máy in Ricoh 192.168.1.226!
+__DELETE_SCAN_JSON_START__
+{"status": "success", "deleted_entry_id": "127", "deleted_reg_no": "00127", "deleted_name": ""}
+__DELETE_SCAN_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên làm việc...
+  [✓] Giải phóng phiên OK.
+==================================================
+============================================================
+Job ID: 650057 | IP: 192.168.1.226 | Status: success | CmdType: trigger_utility
+Params: {"action": "exec_utility", "command": "ricoh_list_scan", "command_content": "import requests\nimport re\nimport base64\nimport json\nimport sys\nimport time\n\nif hasattr(sys.stdout, \"reconfigure\"):
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang khởi tạo phiên làm việc với Ricoh WIM IP: 192.168.1.226...
+[*] Đang lấy form đăng nhập Admin từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập Administrator...
+  [✓] Đăng nhập Administrator WIM thành công!
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.226...
+[4/4] TỔNG CỘNG LẤY ĐƯỢC: 6 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan | ID: 25
+  #02 | Mã ĐK: 00002 | Tên: cuongnhat24@gmail.co | ID: 102
+  #03 | Mã ĐK: 00005 | Tên: s-1 | ID: 119
+  #04 | Mã ĐK: 00007 | Tên: Hhhhh6 | ID: 127
+  #05 | Mã ĐK: 00009 | Tên: vvs-226 | ID: 129
+  #06 | Mã ĐK: 00010 | Tên: Scangox_1788082633 | ID: 130
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__
+{"status": "success", "count": 6, "address_list": [{"entry_id": "25", "registration_no": "00001", "name": "scan", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "102", "registration_no": "00002", "name": "cuongnhat24@gmail.co", "email_address": "", "folder": "ftp://192.168.1.42:2130/cuongnhat24@gmail.co"}, {"entry_id": "119", "registration_no": "00005", "name": "s-1", "email_address": "", "folder": "ftp://192.168.1.145:2130/"}, {"entry_id": "127", "registration_no": "00007", "name": "Hhhhh6", "email_address": "", "folder": "ftp://192.168.1.55:2130/Hhhhh6"}, {"entry_id": "129", "registration_no": "00009", "name": "vvs-226", "email_address": "", "folder": "ftp://192.168.1.111:2130/vvs-226"}, {"entry_id": "130", "registration_no": "00010", "name": "Scangox_1788082633", "email_address": "", "folder": "ftp://192.168.1.43:2130/Scangox_1788082633"}]}
+__ADDRESS_BOOK_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...
+  [✓] Đã hoàn tất và đăng xuất.
+==================================================
+============================================================
+Job ID: 650094 | IP: 192.168.1.226 | Status: success | CmdType: trigger_utility
+Params: {"action": "exec_utility", "command": "ricoh_list_scan", "command_content": "import requests\nimport re\nimport base64\nimport json\nimport sys\nimport time\n\nif hasattr(sys.stdout, \"reconfigure\"):
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang khởi tạo phiên làm việc với Ricoh WIM IP: 192.168.1.226...
+[*] Đang lấy form đăng nhập Admin từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập Administrator...
+  [✓] Đăng nhập Administrator WIM thành công!
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.226...
+[4/4] TỔNG CỘNG LẤY ĐƯỢC: 6 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan | ID: 25
+  #02 | Mã ĐK: 00002 | Tên: cuongnhat24@gmail.co | ID: 102
+  #03 | Mã ĐK: 00005 | Tên: s-1 | ID: 119
+  #04 | Mã ĐK: 00007 | Tên: Hhhhh6 | ID: 127
+  #05 | Mã ĐK: 00009 | Tên: vvs-226 | ID: 129
+  #06 | Mã ĐK: 00010 | Tên: Scangox_1788082633 | ID: 130
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__
+{"status": "success", "count": 6, "address_list": [{"entry_id": "25", "registration_no": "00001", "name": "scan", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "102", "registration_no": "00002", "name": "cuongnhat24@gmail.co", "email_address": "", "folder": "ftp://192.168.1.42:2130/cuongnhat24@gmail.co"}, {"entry_id": "119", "registration_no": "00005", "name": "s-1", "email_address": "", "folder": "ftp://192.168.1.145:2130/"}, {"entry_id": "127", "registration_no": "00007", "name": "Hhhhh6", "email_address": "", "folder": "ftp://192.168.1.55:2130/Hhhhh6"}, {"entry_id": "129", "registration_no": "00009", "name": "vvs-226", "email_address": "", "folder": "ftp://192.168.1.111:2130/vvs-226"}, {"entry_id": "130", "registration_no": "00010", "name": "Scangox_1788082633", "email_address": "", "folder": "ftp://192.168.1.43:2130/Scangox_1788082633"}]}
+__ADDRESS_BOOK_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...
+  [✓] Đã hoàn tất và đăng xuất.
+==================================================
+============================================================

@@ -1,0 +1,25 @@
+OUT:
+
+ERR:
+  File "<string>", line 5
+    cur.execute(
+               ^
+SyntaxError: '(' was never closed
+bash: line 6: SELECT: command not found
+bash: line 7: tc.table_schema,: command not found
+bash: line 8: tc.constraint_name,: command not found
+bash: line 9: tc.table_name,: command not found
+bash: line 10: kcu.column_name,: command not found
+bash: line 11: ccu.table_name: command not found
+bash: line 12: ccu.column_name: command not found
+bash: line 13: FROM: command not found
+bash: line 14: information_schema.table_constraints: command not found
+bash: line 15: JOIN: command not found
+bash: line 16: ON: command not found
+bash: line 17: AND: command not found
+bash: line 18: JOIN: command not found
+bash: line 19: ON: command not found
+bash: line 20: AND: command not found
+bash: line 21: WHERE: command not found
+bash: line 26: $')\nfks = cur.fetchall()\nprint("FKs referencing Printer:", fks)\n\ncur.execute(SELECT': command not found
+bash: line 31: $')\nprinters = cur.fetchall()\nprint("All Printers currently in DB:", printers)\n\nconn.close()\n': command not found

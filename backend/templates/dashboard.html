@@ -13,6 +13,31 @@
     <div class="chart-card"><h4>Distribution</h4><canvas id="chart-distribution"></canvas></div>
   </div>
 </section>
+
+<!-- Public IP Entry History Panel -->
+<section class="panel" style="margin-top: 20px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">🌐 Lịch sử Public IPs đã nhập (Public IP Entry History)</h3>
+    <button id="refresh-dashboard-ip-hist-btn" class="filter-btn" style="padding: 6px 14px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer;">↺ Refresh</button>
+  </div>
+  <div class="table-wrap" style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+    <table class="generic-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+      <thead>
+        <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+          <th style="padding: 10px 12px; text-align: left; width: 160px; color: #475569; font-weight: 600;">Thời gian (Time)</th>
+          <th style="padding: 10px 12px; text-align: left; width: 170px; color: #475569; font-weight: 600;">Public IP đã nhập</th>
+          <th style="padding: 10px 12px; text-align: left; color: #475569; font-weight: 600;">Từ máy nào (IP Local & IP Mạng WAN)</th>
+          <th style="padding: 10px 12px; text-align: center; width: 130px; color: #475569; font-weight: 600;">Thao tác</th>
+          <th style="padding: 10px 12px; text-align: left; color: #475569; font-weight: 600;">Ghi chú / Thiết bị</th>
+        </tr>
+      </thead>
+      <tbody id="dashboard-ip-history-tbody">
+        <tr><td colspan="5" style="padding: 16px; text-align: center; color: #64748b;">Loading Public IP History...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section class="cards" id="summary-cards">
   <div class="card">Loading...</div>
 </section>
@@ -24,4 +49,59 @@
   <h3>Last Status Infor</h3>
   <div id="last-status-info" class="meta-line">Loading...</div>
 </section>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const loadDashboardIpHistory = () => {
+        const tbody = document.getElementById('dashboard-ip-history-tbody');
+        if (!tbody) return;
+        fetch('/api/public-ips/history?limit=20')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.history && data.history.length > 0) {
+                    tbody.innerHTML = '';
+                    data.history.forEach(row => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid #e2e8f0';
+
+                        let actionBadge = '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Nhập mới</span>';
+                        if (row.action === 'update') actionBadge = '<span style="background: #fef3c7; color: #b45309; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Cập nhật</span>';
+                        if (row.action === 'delete') actionBadge = '<span style="background: #fee2e2; color: #b91c1c; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Đã xóa</span>';
+                        if (row.action === 'auto_discover') actionBadge = '<span style="background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Tự phát hiện</span>';
+                        if (row.action === 'enable' || row.action === 'disable') actionBadge = `<span style="background: #f3e8ff; color: #6b21a8; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;">${row.action}</span>`;
+
+                        const timeStr = row.created_at ? row.created_at.replace('T', ' ').substring(0, 19) : '—';
+                        const localIp = row.client_local_ip || '127.0.0.1';
+                        const pubIp = row.client_public_ip || row.ip_address || 'N/A';
+                        const machineStr = row.machine_info ? row.machine_info.substring(0, 45) : 'Client Browser';
+
+                        tr.innerHTML = `
+                            <td style="padding: 10px 12px; color: #475569; font-size: 0.8rem; font-weight: 500;">${timeStr}</td>
+                            <td style="padding: 10px 12px;"><code style="font-family: monospace; font-weight: 700; color: #0284c7; font-size: 0.85rem;">${row.ip_address}</code></td>
+                            <td style="padding: 10px 12px;">
+                                <div style="font-weight: 600; color: #0f172a; font-size: 0.82rem;">IP Local: <code style="color: #0d9488; font-family: monospace;">${localIp}</code></div>
+                                <div style="font-size: 0.78rem; color: #64748b; margin-top: 2px;">IP Mạng WAN: <code style="color: #ea580c; font-family: monospace;">${pubIp}</code></div>
+                            </td>
+                            <td style="padding: 10px 12px; text-align: center;">${actionBadge}</td>
+                            <td style="padding: 10px 12px; font-size: 0.8rem; color: #334155;">
+                                <div style="font-weight: 600; color: #1e293b;">${row.description || '—'}</div>
+                                <div style="font-size: 11px; color: #94a3b8; font-family: monospace; margin-top: 2px;">${machineStr}</div>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: #64748b;">Chưa có lịch sử nhập Public IP nào.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading dashboard public ip history:', err);
+                tbody.innerHTML = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: red;">Lỗi tải lịch sử Public IP.</td></tr>';
+            });
+    };
+
+    document.getElementById('refresh-dashboard-ip-hist-btn')?.addEventListener('click', loadDashboardIpHistory);
+    loadDashboardIpHistory();
+});
+</script>
 {% endblock %}

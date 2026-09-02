@@ -149,19 +149,7 @@ def _upsert_lan_and_agent(
             )
         )
     else:
-        old_ip = agent.local_ip
-        if local_ip and old_ip and local_ip != old_ip:
-            import logging
-            logging.getLogger(__name__).warning(
-                "[IP_CHANGE_DETECTED] Agent '%s' (%s) changed IP: old=%s => new=%s",
-                agent_uid,
-                hostname or agent.hostname or "",
-                old_ip,
-                local_ip
-            )
-            print(f"[IP_CHANGE_DETECTED] Agent '{agent_uid}' ({hostname or agent.hostname or ''}) changed IP: old={old_ip} => new={local_ip}", flush=True)
         agent.hostname = hostname or agent.hostname
-        agent.local_ip = local_ip or agent.local_ip
         agent.local_mac = local_mac or agent.local_mac
         agent.app_version = app_version or agent.app_version
         agent.run_mode = run_mode or agent.run_mode or "web"
@@ -174,6 +162,45 @@ def _upsert_lan_and_agent(
         if ftp_sites is not None:
             agent.ftp_sites = ftp_sites
         agent.last_seen_at = seen_at
+
+        # Check IP change by comparing against IPData reference IP
+        if local_ip:
+            ip_rec = session.execute(
+                select(IPData).where(IPData.agent_name == agent_uid)
+            ).scalars().first()
+            old_ref_ip = ip_rec.ip if ip_rec else agent.local_ip
+            if old_ref_ip and old_ref_ip != local_ip:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[IP_CHANGE_DETECTED] Agent '%s' changed IP: old=%s => new=%s",
+                    agent_uid, old_ref_ip, local_ip
+                )
+                print(f"[IP_CHANGE_DETECTED] Agent '{agent_uid}' changed IP: old={old_ref_ip} => new={local_ip}", flush=True)
+                
+                if ip_rec:
+                    ip_rec.ip = local_ip
+                    ip_rec.updated_at = datetime.now(timezone.utc)
+                agent.local_ip = local_ip
+
+                # Auto-resolve any pending/processing change_agent_ip command for this agent after DB IP is updated
+                from models import PrinterControlCommand
+                pending_ip_cmds = session.execute(
+                    select(PrinterControlCommand).where(
+                        PrinterControlCommand.agent_uid == agent_uid,
+                        PrinterControlCommand.status.in_(["pending", "processing"])
+                    )
+                ).scalars().all()
+                for pic in pending_ip_cmds:
+                    if pic.command_type == "trigger_utility":
+                        try:
+                            import json as _json
+                            cp_data = _json.loads(pic.command_params or "{}")
+                            if cp_data.get("command") == "change_agent_ip":
+                                pic.status = "success"
+                                pic.responded_at = datetime.now(timezone.utc)
+                                pic.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {local_ip}"
+                        except Exception:
+                            pass
 
         next_online = bool(is_online)
         if bool(agent.is_online) != next_online:

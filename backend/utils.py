@@ -60,6 +60,46 @@ def _to_text_max(value: Any, max_len: int) -> str:
     return text[:max_len]
 
 
+SYSTEM_SETTINGS_FILE = Path("storage/system_settings.json")
+
+
+def get_system_settings() -> dict[str, Any]:
+    default_settings = {
+        "scan_point_retention_days": 30,
+        "control_interval_seconds": 1,
+        "device_interval_seconds": 60,
+        "ui_refresh_interval_seconds": 5,
+    }
+    try:
+        if SYSTEM_SETTINGS_FILE.exists():
+            with open(SYSTEM_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    default_settings.update(data)
+    except Exception as err:
+        logging.getLogger(__name__).warning("Failed to read system settings: %s", err)
+    return default_settings
+
+
+def save_system_settings(new_settings: dict[str, Any]) -> dict[str, Any]:
+    current = get_system_settings()
+    for k in ["scan_point_retention_days", "control_interval_seconds", "device_interval_seconds", "ui_refresh_interval_seconds"]:
+        if k in new_settings:
+            try:
+                val = int(new_settings[k])
+                if val > 0:
+                    current[k] = val
+            except (ValueError, TypeError):
+                pass
+    try:
+        SYSTEM_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SYSTEM_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2)
+    except Exception as err:
+        logging.getLogger(__name__).error("Failed to write system settings: %s", err)
+    return current
+
+
 def _to_json_value(value: Any) -> Any:
     if value is None:
         return None
@@ -99,6 +139,12 @@ def _safe_path_token(value: str) -> str:
     text = _to_text(value)
     if not text:
         return "unknown"
+    if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", text):
+        return base64.urlsafe_b64encode(text.encode("utf-8")).decode("utf-8").rstrip("=")
+    m = re.match(r"^pub_(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})$", text)
+    if m:
+        raw_ip = f"{m.group(1)}.{m.group(2)}.{m.group(3)}.{m.group(4)}"
+        return base64.urlsafe_b64encode(raw_ip.encode("utf-8")).decode("utf-8").rstrip("=")
     import unicodedata
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
     cleaned = re.sub(r'[^a-zA-Z0-9._@-]', '-', text)
@@ -440,4 +486,208 @@ def resolve_utility_command_content(session: Any, command_content: str) -> str:
         command_content = command_content.replace("# __TOSHIBA_LIST__", helper_code).replace("__TOSHIBA_LIST__", helper_code)
         
     return command_content
+
+
+def try_resolve_when_ip_change_parent(session: Any, completed_child_id: int) -> None:
+    """Auto-resolve when_ip_change parent to 'success' once all its address_modify children are done."""
+    import json as _json
+    import logging
+    from datetime import datetime, timezone
+    from models import PrinterControlCommand
+    from sqlalchemy import select
+
+    logger = logging.getLogger(__name__)
+    try:
+        # Find pending when_ip_change parents that reference this child
+        parents = session.execute(
+            select(PrinterControlCommand).where(
+                PrinterControlCommand.command_type == "when_ip_change",
+                PrinterControlCommand.status == "pending"
+            )
+        ).scalars().all()
+
+        for parent in parents:
+            try:
+                params = _json.loads(parent.command_params or "{}")
+                child_ids = params.get("child_command_ids", [])
+                if completed_child_id not in child_ids:
+                    continue
+                # Check all children have finished
+                children = session.execute(
+                    select(PrinterControlCommand).where(
+                        PrinterControlCommand.id.in_(child_ids)
+                    )
+                ).scalars().all()
+                all_done = all(c.status in ("success", "failed") for c in children)
+                if all_done:
+                    parent.status = "success"
+                    parent.responded_at = datetime.now(timezone.utc)
+                    logger.info(
+                        "[when_ip_change] Auto-resolved parent #%d to success — all %d children done.",
+                        parent.id, len(child_ids)
+                    )
+            except Exception as inner_exc:
+                logger.warning("[when_ip_change] Error checking parent #%d: %s", parent.id, inner_exc)
+    except Exception as exc:
+        logger.error("[when_ip_change] try_resolve_when_ip_change_parent error: %s", exc)
+
+
+def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid: str, old_ip: str, new_ip: str) -> None:
+    if not old_ip or not new_ip or old_ip == new_ip:
+        return
+    import json as _json
+    import logging
+    from datetime import datetime, timezone
+    from models import PrinterControlCommand, ScanPoint, Printer, IPData
+    from sqlalchemy import select
+
+    logger = logging.getLogger(__name__)
+    try:
+        ip_rec = session.execute(
+            select(IPData).where(IPData.lan_uid == lan_uid, IPData.agent_name == agent_uid)
+        ).scalar_one_or_none()
+        if ip_rec is None:
+            ip_rec = IPData(
+                agent_uid=agent_uid,
+                lan_uid=lan_uid,
+                agent_name=agent_uid,
+                ip=new_ip,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            session.add(ip_rec)
+        else:
+            ip_rec.ip = new_ip
+            ip_rec.updated_at = datetime.now(timezone.utc)
+
+        # Auto-resolve any pending or processing change_agent_ip command for this agent
+        pending_ip_cmds = session.execute(
+            select(PrinterControlCommand).where(
+                PrinterControlCommand.agent_uid == agent_uid,
+                PrinterControlCommand.status.in_(["pending", "processing"])
+            )
+        ).scalars().all()
+        for pic in pending_ip_cmds:
+            if pic.command_type == "trigger_utility":
+                pic.status = "success"
+                pic.responded_at = datetime.now(timezone.utc)
+                pic.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {new_ip}"
+
+        scan_points = session.execute(select(ScanPoint)).scalars().all()
+        matched_entries = []
+        for sp in scan_points:
+            abd = sp.address_book_data
+            if isinstance(abd, dict):
+                addr_list = abd.get("address_list") or []
+                for entry in addr_list:
+                    if not isinstance(entry, dict) or entry.get("type") == "Summary":
+                        continue
+                    folder_val = entry.get("folder") or entry.get("server_host") or entry.get("server") or ""
+                    if not folder_val or folder_val == "-":
+                        continue
+                    
+                    def clean_host(val):
+                        v = str(val or "").strip()
+                        if "://" in v: v = v.split("://", 1)[1]
+                        v = v.split("/", 1)[0]
+                        v = v.split(":", 1)[0]
+                        return v.strip()
+
+                    host = clean_host(folder_val)
+                    if host == old_ip:
+                        matched_entries.append({
+                            "printer_name": sp.printer_name or "Photocopy",
+                            "printer_mac": sp.mac_id,
+                            "printer_ip": sp.ip,
+                            "entry_name": entry.get("name") or entry.get("username") or entry.get("registration_no") or "Folder Destination",
+                            "registration_no": entry.get("registration_no") or "",
+                            "protocol": str(entry.get("protocol") or "FOLDER").upper(),
+                            "server_host": host,
+                            "path": entry.get("path_on_folder") or entry.get("folder_path") or entry.get("folder") or "",
+                        })
+
+        child_ids = []
+        if matched_entries:
+            for entry in matched_entries:
+                printer = session.execute(
+                    select(Printer).where(Printer.mac_address == entry["printer_mac"])
+                ).scalars().first()
+                p_id = printer.id if printer else 0
+                p_user = printer.auth_user if printer else ""
+                p_pass = printer.auth_password if printer else ""
+                p_lan = printer.lan_uid if printer else lan_uid
+                p_lead = printer.lead if printer else lead
+                old_folder = entry["path"]
+                new_folder = old_folder.replace(old_ip, new_ip) if old_ip in old_folder else old_folder
+
+                cmd_params_dict = {
+                    "registration_no": entry["registration_no"],
+                    "name": entry["entry_name"],
+                    "email": "",
+                    "folder": new_folder,
+                    "user_code": "",
+                    "fields": ["folder"],
+                    "printer_ip": entry["printer_ip"],
+                    "ip": entry["printer_ip"],
+                    "mac_address": entry["printer_mac"],
+                    "printer_mac_id": entry["printer_mac"],
+                    "is_auto": True,
+                }
+                modify_cmd = PrinterControlCommand(
+                    printer_id=p_id,
+                    lead=p_lead,
+                    lan_uid=p_lan,
+                    agent_uid=agent_uid or "",
+                    printer_name=entry["printer_name"],
+                    ip=entry["printer_ip"],
+                    desired_enabled=True,
+                    command_type="address_modify",
+                    auth_user=p_user,
+                    auth_password=p_pass,
+                    command_params=_json.dumps(cmd_params_dict, ensure_ascii=False),
+                    status="pending",
+                    error_message="",
+                    requested_at=datetime.now(timezone.utc),
+                )
+                session.add(modify_cmd)
+                session.flush()
+                child_ids.append(modify_cmd.id)
+
+        detail_lines = []
+        for idx, e in enumerate(matched_entries, 1):
+            detail_lines.append(
+                f"{idx}. Máy in: {e['printer_name']} ({e['printer_ip']}) | Mã: {e['registration_no']} | Tên: {e['entry_name']} | Path: {e['path']}"
+            )
+        error_msg = (
+            f"Đã phát hiện đổi IP từ {old_ip} sang {new_ip}. Tìm thấy {len(matched_entries)} điểm scan FTP trùng IP cũ:\n"
+            + "\n".join(detail_lines)
+            if matched_entries
+            else f"Đã phát hiện đổi IP từ {old_ip} sang {new_ip}. Không tìm thấy điểm scan FTP nào trùng IP cũ."
+        )
+
+        cmd_log = PrinterControlCommand(
+            lead=lead or "default",
+            lan_uid=lan_uid or "default",
+            agent_uid=agent_uid or "",
+            command_type="when_ip_change",
+            printer_id=0,
+            printer_name="",
+            ip=new_ip,
+            command_params=_json.dumps({
+                "old_ip": old_ip,
+                "new_ip": new_ip,
+                "matched_scan_points": matched_entries,
+                "child_command_ids": child_ids,
+            }, ensure_ascii=False),
+            status="pending" if child_ids else "success",
+            error_message=error_msg,
+            requested_at=datetime.now(timezone.utc),
+            responded_at=None if child_ids else datetime.now(timezone.utc),
+        )
+        session.add(cmd_log)
+        session.flush()
+        logger.info("[when_ip_change] Triggered when_ip_change command #%d with %d child address_modify commands for agent %s (%s -> %s)", cmd_log.id, len(child_ids), agent_uid, old_ip, new_ip)
+    except Exception as exc:
+        logger.error("[when_ip_change] Failed to trigger IP change workflow for agent %s: %s", agent_uid, exc)
+
 

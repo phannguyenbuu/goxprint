@@ -1,0 +1,53 @@
+STDOUT:
+Aug 31 13:28:40 Megahost.1763776822 python3[1161685]:     else:
+Aug 31 13:28:40 Megahost.1763776822 python3[1161685]:     ^^^^
+Aug 31 13:28:40 Megahost.1763776822 python3[1161685]: SyntaxError: invalid syntax
+Aug 31 13:28:40 Megahost.1763776822 systemd[1]: printagent.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 13:28:40 Megahost.1763776822 systemd[1]: printagent.service: Failed with result 'exit-code'.
+Aug 31 13:28:40 Megahost.1763776822 systemd[1]: printagent.service: Consumed 1.796s CPU time.
+Aug 31 13:28:41 Megahost.1763776822 systemd[1]: printagent.service: Scheduled restart job, restart counter is at 100.
+Aug 31 13:28:41 Megahost.1763776822 systemd[1]: Started printagent.service - PrintAgent Central Server.
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]: 2026-08-31 13:28:42,334 [WARNING] google_drive_sync: Google Drive sync enabled but missing config for mode=rclone: missing rclone binary: rclone
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]: Traceback (most recent call last):
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:   File "/opt/printagent/app.py", line 1249, in <module>
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:     app = create_app()
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:           ^^^^^^^^^^^^
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:   File "/opt/printagent/app.py", line 1209, in create_app
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:     from polling_core_routes import register_polling_core_routes
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:   File "/opt/printagent/polling_core_routes.py", line 43, in <module>
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:     from polling_aux_routes import parse_folder_str
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:   File "/opt/printagent/polling_aux_routes.py", line 997
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:     else:
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]:     ^^^^
+Aug 31 13:28:42 Megahost.1763776822 python3[1161689]: SyntaxError: invalid syntax
+Aug 31 13:28:43 Megahost.1763776822 systemd[1]: printagent.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 13:28:43 Megahost.1763776822 systemd[1]: printagent.service: Failed with result 'exit-code'.
+Aug 31 13:28:43 Megahost.1763776822 systemd[1]: printagent.service: Consumed 1.841s CPU time.
+Aug 31 13:28:43 Megahost.1763776822 systemd[1]: printagent.service: Scheduled restart job, restart counter is at 101.
+Aug 31 13:28:43 Megahost.1763776822 systemd[1]: Started printagent.service - PrintAgent Central Server.
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]: 2026-08-31 13:28:44,585 [WARNING] google_drive_sync: Google Drive sync enabled but missing config for mode=rclone: missing rclone binary: rclone
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]: Traceback (most recent call last):
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]:   File "/opt/printagent/app.py", line 1249, in <module>
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]:     app = create_app()
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]:           ^^^^^^^^^^^^
+Aug 31 13:28:44 Megahost.1763776822 python3[1161693]:   File "/opt/printagent/app.py", line 1209, in create_app
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:     from polling_core_routes import register_polling_core_routes
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:   File "/opt/printagent/polling_core_routes.py", line 43, in <module>
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:     from polling_aux_routes import parse_folder_str
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:   File "/opt/printagent/polling_aux_routes.py", line 997
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:     else:
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]:     ^^^^
+Aug 31 13:28:45 Megahost.1763776822 python3[1161693]: SyntaxError: invalid syntax
+Aug 31 13:28:45 Megahost.1763776822 systemd[1]: printagent.service: Main process exited, code=exited, status=1/FAILURE
+Aug 31 13:28:45 Megahost.1763776822 systemd[1]: printagent.service: Failed with result 'exit-code'.
+Aug 31 13:28:45 Megahost.1763776822 systemd[1]: printagent.service: Consumed 1.856s CPU time.
+Aug 31 13:28:45 Megahost.1763776822 systemd[1]: printagent.service: Scheduled restart job, restart counter is at 102.
+Aug 31 13:28:45 Megahost.1763776822 systemd[1]: Started printagent.service - PrintAgent Central Server.
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: Stopping printagent.service - PrintAgent Central Server...
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: printagent.service: Deactivated successfully.
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: Stopped printagent.service - PrintAgent Central Server.
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: printagent.service: Start request repeated too quickly.
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: printagent.service: Failed with result 'start-limit-hit'.
+Aug 31 13:28:46 Megahost.1763776822 systemd[1]: Failed to start printagent.service - PrintAgent Central Server.
+
+STDERR:

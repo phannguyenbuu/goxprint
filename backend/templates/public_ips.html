@@ -9,6 +9,30 @@
     </div>
   </div>
 
+  <!-- Public IP History Log Section (First / Top Section) -->
+  <div style="margin-bottom: 30px; border-bottom: 1px solid #333; padding-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 style="margin: 0; font-size: 16px; color: #60a5fa;">📜 Lịch sử nhập Public IP (Public IP Entry History Log)</h3>
+      <button id="refresh-ip-hist-btn" class="filter-btn" style="background-color: #17a2b8; color: #fff;">↺ Refresh Lịch sử</button>
+    </div>
+    <div class="table-wrap">
+      <table class="generic-table">
+        <thead>
+          <tr>
+            <th style="padding-left: 15px; width: 160px;">Thời gian (Time)</th>
+            <th style="width: 170px;">Public IP đã nhập</th>
+            <th>Từ máy nào (IP Local & IP Mạng WAN)</th>
+            <th style="width: 130px; text-align: center;">Hành động</th>
+            <th>Ghi chú / Thông tin thiết bị</th>
+          </tr>
+        </thead>
+        <tbody id="public-ips-history-tbody">
+          <tr><td colspan="5" class="loading">Loading Public IP History Log...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="filter-board">
     <div class="filter-group" style="flex: 1;">
       <label>Search Public IP, Ghi chú...</label>
@@ -30,16 +54,17 @@
       <thead>
         <tr>
           <th style="padding-left: 20px; width: 60px;">ID</th>
-          <th style="width: 200px;">Public IP / Subnet</th>
+          <th style="width: 170px;">Public IP / Subnet</th>
           <th>Tên đại diện / Ghi chú</th>
-          <th style="width: 130px;">Quyền truy cập</th>
-          <th style="width: 120px;">Trạng thái</th>
-          <th style="width: 160px;">Ngày tạo</th>
-          <th style="width: 160px;">Thao tác</th>
+          <th style="width: 220px;">Máy & IP Mạng (Local + WAN IP)</th>
+          <th style="width: 120px;">Quyền</th>
+          <th style="width: 110px;">Trạng thái</th>
+          <th style="width: 150px;">Thời gian tạo</th>
+          <th style="width: 140px;">Thao tác</th>
         </tr>
       </thead>
       <tbody id="public-ips-tbody">
-        <tr><td colspan="7" class="loading">Loading Public IPs...</td></tr>
+        <tr><td colspan="8" class="loading">Loading Public IPs...</td></tr>
       </tbody>
     </table>
   </div>
@@ -162,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = '';
 
         if (!publicIpsData || publicIpsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="loading">Không tìm thấy Public IP nào.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">Không tìm thấy Public IP nào.</td></tr>';
             return;
         }
 
@@ -172,11 +197,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const isEnabled = row.enabled;
             const statusClass = isEnabled ? 'status-enabled' : 'status-disabled';
             const statusText = isEnabled ? 'Active' : 'Disabled';
+            const localIp = row.client_local_ip || '127.0.0.1';
+            const pubIp = row.client_public_ip || row.ip_address || '-';
             
             tr.innerHTML = `
                 <td style="padding-left: 20px;">${row.id}</td>
                 <td><code class="font-mono" style="font-size: 14px; font-weight: bold; color: #ff9800;">${escapeHtml(row.ip_address)}</code></td>
                 <td><div style="font-size: 13px; font-weight: 500;">${escapeHtml(row.description || '-')}</div></td>
+                <td>
+                    <div style="font-size: 12px; color: #00bcd4; font-weight: 600;">Local: ${escapeHtml(localIp)}</div>
+                    <div style="font-size: 11px; color: #ff5722;">WAN: ${escapeHtml(pubIp)}</div>
+                </td>
                 <td><span style="font-size: 11px; font-weight: bold; background: rgba(40,167,69,0.15); color: #28a745; padding: 3px 8px; border-radius: 10px;">ALL LANs</span></td>
                 <td><span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></td>
                 <td><div style="font-size: 12px; color: #888;">${escapeHtml(row.created_at || '')}</div></td>
@@ -191,10 +222,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    const loadPublicIpHistoryLog = () => {
+        const tbody = document.getElementById('public-ips-history-tbody');
+        if (!tbody) return;
+        fetch('/api/public-ips/history?limit=50')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.history && data.history.length > 0) {
+                    tbody.innerHTML = '';
+                    data.history.forEach(row => {
+                        const tr = document.createElement('tr');
+                        
+                        let actionBadge = '<span class="status-badge status-enabled" style="background:#0284c7; color:#fff;">Nhập mới</span>';
+                        if (row.action === 'update') actionBadge = '<span class="status-badge" style="background:#b45309; color:#fff;">Cập nhật</span>';
+                        if (row.action === 'delete') actionBadge = '<span class="status-badge status-disabled">Đã xóa</span>';
+                        if (row.action === 'auto_discover') actionBadge = '<span class="status-badge" style="background:#15803d; color:#fff;">Tự phát hiện</span>';
+                        if (row.action === 'enable' || row.action === 'disable') actionBadge = `<span class="status-badge" style="background:#6b21a8; color:#fff;">${row.action}</span>`;
+
+                        const timeStr = row.created_at ? row.created_at.replace('T', ' ').substring(0, 19) : '—';
+                        const localIp = row.client_local_ip || '127.0.0.1';
+                        const pubIp = row.client_public_ip || row.ip_address || 'N/A';
+                        const machineStr = row.machine_info ? row.machine_info.substring(0, 45) : 'Client Browser';
+
+                        tr.innerHTML = `
+                            <td style="padding-left: 15px; color: #aaa; font-size: 12px;">${escapeHtml(timeStr)}</td>
+                            <td><code class="font-mono" style="font-weight: 700; color: #ff9800; font-size: 13px;">${escapeHtml(row.ip_address)}</code></td>
+                            <td>
+                                <div style="font-weight: 600; color: #fff; font-size: 12px;">IP Local: <code style="color: #00bcd4;">${escapeHtml(localIp)}</code></div>
+                                <div style="font-size: 11px; color: #ff5722; margin-top: 2px;">IP Mạng WAN: <code style="color: #ff5722;">${escapeHtml(pubIp)}</code></div>
+                            </td>
+                            <td style="text-align: center;">${actionBadge}</td>
+                            <td style="font-size: 12px; color: #ccc;">
+                                <div style="font-weight: 600; color: #fff;">${escapeHtml(row.description || '—')}</div>
+                                <div style="font-size: 11px; color: #777; font-family: monospace; margin-top: 2px;">${escapeHtml(machineStr)}</div>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" class="loading">Chưa có lịch sử nhập Public IP nào.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading public ip history log:', err);
+            });
+    };
+
     const loadPublicIps = (silent = false) => {
         const tbody = document.getElementById('public-ips-tbody');
         if (!silent) {
-            tbody.innerHTML = '<tr><td colspan="7" class="loading">Loading Public IPs...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading Public IPs...</td></tr>';
         }
 
         const searchVal = document.getElementById('filter-search').value.trim();
@@ -215,14 +292,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     totalItems = data.total || 0;
                     renderTable();
                     updatePaginationUI();
+                    loadPublicIpHistoryLog();
                 } else if (!silent) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="loading" style="color: red;">Không thể tải danh sách Public IP.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Không thể tải danh sách Public IP.</td></tr>';
                 }
             })
             .catch(err => {
                 console.error('Error loading public IPs:', err);
                 if (!silent) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="loading" style="color: red;">Lỗi kết nối Server.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Lỗi kết nối Server.</td></tr>';
                 }
             });
     };

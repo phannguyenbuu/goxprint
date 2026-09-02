@@ -461,6 +461,25 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 500
 
+    @app.post("/api/jobs/<int:job_id>/favorite")
+    def toggle_job_favorite(job_id: int) -> Any:
+        try:
+            with session_factory() as session:
+                cmd = session.query(PrinterControlCommand).get(job_id)
+                if not cmd:
+                    return jsonify({"ok": False, "error": "Lệnh không tồn tại"}), 404
+                
+                req_data = request.get_json(silent=True) or {}
+                if "is_favorite" in req_data:
+                    cmd.is_favorite = bool(req_data["is_favorite"])
+                else:
+                    cmd.is_favorite = not bool(cmd.is_favorite)
+                
+                session.commit()
+                return jsonify({"ok": True, "job_id": job_id, "is_favorite": bool(cmd.is_favorite)})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.get("/api/jobs")
     def list_jobs() -> Any:
         try:
@@ -470,6 +489,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             printer_q = _to_text(request.args.get("printer"))
             cmd_type_q = _to_text(request.args.get("command_type"))
             date_q = _to_text(request.args.get("date") or request.args.get("time"))
+            fav_q = _to_text(request.args.get("is_favorite") or request.args.get("favorite"))
             
             limit = _to_int(request.args.get("limit")) or 50
             limit = max(1, min(limit, 1000))
@@ -503,10 +523,15 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         stmt = stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
                     except Exception:
                         pass
+
+                if fav_q and fav_q.lower() in ("true", "1", "yes"):
+                    stmt = stmt.where(PrinterControlCommand.is_favorite == True)
                     
                 if status_filter and status_filter != 'all':
                     if status_filter == 'failed':
                         stmt = stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
+                    elif status_filter in ('favorite', 'favourite'):
+                        stmt = stmt.where(PrinterControlCommand.is_favorite == True)
                     else:
                         stmt = stmt.where(PrinterControlCommand.status == status_filter)
                         
@@ -564,9 +589,14 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         count_stmt = count_stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
                     except Exception:
                         pass
+                if fav_q and fav_q.lower() in ("true", "1", "yes"):
+                    count_stmt = count_stmt.where(PrinterControlCommand.is_favorite == True)
+
                 if status_filter and status_filter != 'all':
                     if status_filter == 'failed':
                         count_stmt = count_stmt.where(~PrinterControlCommand.status.in_(["success", "pending"]))
+                    elif status_filter in ('favorite', 'favourite'):
+                        count_stmt = count_stmt.where(PrinterControlCommand.is_favorite == True)
                     else:
                         count_stmt = count_stmt.where(PrinterControlCommand.status == status_filter)
                 if search_q:
@@ -673,6 +703,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "output": row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or "",
                         "result_payload": row.__dict__.get("result_payload") or row.__dict__.get("output") or error_message or "",
                         "status": status,
+                        "is_favorite": bool(row.is_favorite),
                         "error_message": error_message,
                         "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
                         "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",

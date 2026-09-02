@@ -1121,8 +1121,9 @@ def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, ex
                         from types import SimpleNamespace
                         p = SimpleNamespace(ip=printer_ip, mac_address=real_mac, name="ToshibaPrinter", printer_type="toshiba")
 
-                    bridge_obj._post_address_book_sync_data(p, final_result)
-                    print(f"  [✓] TỰ ĐỘNG ĐỒNG BỘ DANH BẠ MỚI NHẤT ({len(entries)} GROUPS) VỀ SERVER THANH CONG!")
+                    if hasattr(bridge_obj, '_post_address_book_sync_data'):
+                        bridge_obj._post_address_book_sync_data(p, final_result)
+                        print(f"  [✓] TỰ ĐỘNG ĐỒNG BỘ DANH BẠ MỚI NHẤT ({len(entries)} GROUPS) VỀ SERVER THANH CONG!")
                 except Exception as sync_err:
                     print(f"  [!] Sync post warning: {sync_err}")
 
@@ -1623,12 +1624,16 @@ def test_toshiba():
                         from types import SimpleNamespace
                         p = SimpleNamespace(ip=IP, mac_address=real_mac, name="ToshibaPrinter", printer_type="toshiba")
 
-                    bridge_obj._post_address_book_sync_data(p, final_result)
-                    print(f"  [✓] TỰ ĐỘNG ĐỒNG BỘ DANH BẠ MỚI NHẤT ({len(entries)} GROUPS) VỀ SERVER THANH CONG!")
+                    if hasattr(bridge_obj, '_post_address_book_sync_data'):
+                        bridge_obj._post_address_book_sync_data(p, final_result)
+                        print(f"  [✓] TỰ ĐỘNG ĐỒNG BỘ DANH BẠ MỚI NHẤT ({len(entries)} GROUPS) VỀ SERVER THANH CONG!")
                 except Exception as sync_err:
                     print(f"  [!] Sync post warning: {sync_err}")
 
             res_str = json.dumps(final_result, ensure_ascii=False)
+            print("__ADDRESS_BOOK_JSON_START__")
+            print(res_str)
+            print("__ADDRESS_BOOK_JSON_END__")
             if globals().get('context'):
                 globals()['context']['result_payload'] = res_str
                 globals()['context']['address_book_data'] = final_result

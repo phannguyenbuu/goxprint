@@ -1,0 +1,7 @@
+STDOUT:
+
+STDERR:
+  File "/tmp/test_precise.py", line 43
+    print("Output:
+          ^
+SyntaxError: unterminated string literal (detected at line 43)

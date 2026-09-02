@@ -3,6 +3,22 @@
 export function safePathToken(value: string): string {
   const text = (value || '').trim();
   if (!text) return 'unknown';
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(text)) {
+    try {
+      return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch {
+      return 'unknown';
+    }
+  }
+  const m = text.match(/^pub_(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})$/);
+  if (m) {
+    const rawIp = `${m[1]}.${m[2]}.${m[3]}.${m[4]}`;
+    try {
+      return btoa(rawIp).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch {
+      return 'unknown';
+    }
+  }
   const ascii = text
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

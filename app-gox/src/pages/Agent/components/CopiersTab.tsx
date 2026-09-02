@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { styles } from '../AgentPageStyles';
 import { AnimatedList } from '../../../components/ui/AnimatedList';
@@ -29,7 +29,6 @@ export function CopiersTab(props: any) {
     deleteCameraLoading,
     deleteScanPointModal,
     destToDelete,
-    detectBrand,
     editIpData,
     editIpModal,
     editIpNewIp,
@@ -41,7 +40,8 @@ export function CopiersTab(props: any) {
     fetchLanSitesData,
     fetchRemotePage,
     fileTypeFilter,
-    filteredPrinters,
+    filteredPrinters = [],
+    targetInternalIp = '',
     getDestinationStatus = () => ({ label: '✔ ACTIVE', type: 'success', title: '' }),
     getTargetAgentUid,
     handleCopierClick,
@@ -107,6 +107,27 @@ export function CopiersTab(props: any) {
     webPreviewTab
   } = props;
 
+  // Track printers that user clicked "Cập nhật" — show empty immediately until fresh scan arrives
+  const [pendingClear, setPendingClear] = useState<Set<string>>(new Set());
+
+  // Auto-remove from pendingClear when liveAddressBooks gets fresh data
+  const prevLiveRef = useRef<Record<string, any>>({});
+  useEffect(() => {
+    const prev = prevLiveRef.current;
+    const arrived = Object.keys(liveAddressBooks || {}).filter(k => !prev[k] && (liveAddressBooks as any)[k]);
+    if (arrived.length > 0) {
+      setPendingClear(cur => {
+        if (arrived.some(k => cur.has(k))) {
+          const next = new Set(cur);
+          arrived.forEach(k => next.delete(k));
+          return next;
+        }
+        return cur;
+      });
+    }
+    prevLiveRef.current = liveAddressBooks || {};
+  }, [liveAddressBooks]);
+
   return (
     <>
       <motion.div
@@ -135,7 +156,11 @@ export function CopiersTab(props: any) {
           </div>
         </div>
 
-        <AnimatedList className="copiers-grid" style={styles.gridContainer}>
+        <AnimatedList
+          key={`copiers_list_${selectedLan?.lan_uid || 'default'}_${targetInternalIp || 'all'}_${filteredPrinters.length}`}
+          className="copiers-grid"
+          style={styles.gridContainer}
+        >
           {lanSitesLoading || utilityActionPending === 'force_subnet_scan' || Object.entries(commandStatus || {}).some(([k, c]: [string, any]) => c?.isPending && k.startsWith('scan_lan_')) ? (
             <div style={styles.loadingContainer}>
               <LoadingSpinner />
@@ -146,11 +171,15 @@ export function CopiersTab(props: any) {
               </div>
             </div>
           ) : filteredPrinters.length === 0 ? (
-            <div style={styles.emptyStateContainer}>
+            <div style={styles.emptyStateContainer} key={`empty_${targetInternalIp || 'all'}`}>
               <div style={styles.emptyIcon}>🖨️</div>
-              <div style={styles.emptyTitle}>Chưa có danh sách máy in, hãy nhấn nút khởi tạo</div>
+              <div style={styles.emptyTitle}>
+                {targetInternalIp ? `Không tìm thấy máy photo có IP: ${targetInternalIp}` : 'Chưa có danh sách máy in, hãy nhấn nút khởi tạo'}
+              </div>
               <div style={styles.emptySubtitle}>
-                Vui lòng chọn mạng LAN khác hoặc nhấp nút khởi tạo / Dò quét mạng LAN để tìm kiếm thiết bị.
+                {targetInternalIp
+                  ? `Không tìm thấy thiết bị nào khớp với IP nội bộ ${targetInternalIp} trong mạng LAN này.`
+                  : 'Vui lòng chọn mạng LAN khác hoặc nhấp nút khởi tạo / Dò quét mạng LAN để tìm kiếm thiết bị.'}
               </div>
             </div>
           ) : (
@@ -183,18 +212,19 @@ export function CopiersTab(props: any) {
               const pIdKey = p.id !== undefined && p.id !== null ? String(p.id) : '';
               const pIpKey = p.ip || '';
 
-              const liveSync = parseSyncObj(
+              // Nếu user vừa click "Cập nhật" → hiện trống ngay, không dùng data cũ
+              const isClearing = pendingClear.has(pMac) || pendingClear.has(pIdKey) || pendingClear.has(pIpKey);
+
+              const liveSync = isClearing ? null : parseSyncObj(
                 (pMac && liveAddressBooks?.[pMac]) ||
                 (pIdKey && liveAddressBooks?.[pIdKey]) ||
                 (pIpKey && liveAddressBooks?.[pIpKey]) ||
                 null
               );
-              const dbSync = parseSyncObj(p.address_book_sync);
-
+              // Bỏ dbSync fallback — không dùng p.address_book_sync (VPS DB cũ) làm nguồn hiển thị
               const liveHasList = Boolean(liveSync && Array.isArray(liveSync.address_list));
-              const dbHasList = Boolean(dbSync && Array.isArray(dbSync.address_list));
+              const sync = liveHasList ? liveSync : (liveSync || {});
 
-              const sync = liveHasList ? liveSync : (dbHasList ? dbSync : (liveSync || dbSync || {}));
               const realAddressList = Array.isArray(sync.address_list)
                 ? sync.address_list.filter((entry: any) => {
                     if (!entry || typeof entry !== 'object') return false;
@@ -204,7 +234,7 @@ export function CopiersTab(props: any) {
                     return Boolean(name || entry.entry_id || (entry.registration_no && entry.registration_no !== '-') || entry.email_address || entry.email || entry.folder || entry.physical_path);
                   })
                 : [];
-              const hasAddressList = Boolean(liveHasList || dbHasList);
+              const hasAddressList = liveHasList;
 
               const copierOnlineAgents = (selectedLan?.agents || []).filter((a: any) => a.is_agent_active);
               const copierTargetAgentUid = getTargetAgentUid ? getTargetAgentUid(p.id) : (selectedAgentUid || p.agent_uid || '');
@@ -223,7 +253,6 @@ export function CopiersTab(props: any) {
                   isExpanded={isExpanded}
                   handleCopierClick={handleCopierClick}
                   onlineAgents={copierOnlineAgents}
-                  detectBrand={detectBrand || (() => 'generic')}
                   showToast={showToast || (() => {})}
                   fetchRemotePage={fetchRemotePage || (() => {})}
                   setRemoteLockPrinter={setRemoteLockPrinter}
@@ -236,6 +265,16 @@ export function CopiersTab(props: any) {
                   handleEditIP={handleEditIP || (() => {})}
                   handleDeleteDest={handleDeleteDest || (() => {})}
                   handleRefetchAddressBook={handleRefetchAddressBook || (() => {})}
+                  onClearCache={() => {
+                    // Đánh dấu printer là "đang xóa" → UI hiện trống ngay lập tức
+                    setPendingClear(cur => {
+                      const next = new Set(cur);
+                      if (pMac) next.add(pMac);
+                      if (pIdKey) next.add(pIdKey);
+                      if (pIpKey) next.add(pIpKey);
+                      return next;
+                    });
+                  }}
                   expandedDrivers={expandedDrivers || {}}
                   setExpandedDrivers={setExpandedDrivers}
                   expandedDriverMenus={expandedDriverMenus || {}}

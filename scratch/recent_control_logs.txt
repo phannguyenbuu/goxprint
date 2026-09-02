@@ -1,0 +1,61 @@
+ID: 649160 | Printer: RICOH MP W8140 (192.168.1.250) | Status: failed | User: 'admin' | Pass: ''
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.250
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.250, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.250...
+
+[-] LỖI THỰC THI QUÉT DANH BẠ: HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc67a0>, 'Connection to 192.168.1.250 timed out. (connect timeout=10)'))
+__ADDRESS_BOOK_JSON_START__
+{"status": "error", "error": "HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc67a0>, 'Connection to 192.168.1.250 timed out. (connect timeout=10)'))", "count": 0, "address_list": []}
+__ADDRESS_BOOK_JSON_END__
+
+1
+--------------------------------------------------
+ID: 649143 | Printer: Photocopy (192.168.1.228) | Status: failed | User: 'admin' | Pass: 'admin'
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.228
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.228, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.228...
+[*] Đang gửi thông tin đăng nhập...
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.228...
+
+[-] LỖI THỰC THI QUÉT DANH BẠ: HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc5bf0>, 'Connection to 192.168.1.250 timed out. (connect timeout=10)'))
+__ADDRESS_BOOK_JSON_START__
+{"status": "error", "error": "HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc5bf0>, 'Connection to 192.168.1.250 time
+--------------------------------------------------
+ID: 649140 | Printer: RICOH MP W8140 (192.168.1.250) | Status: failed | User: 'admin' | Pass: ''
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.250
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.250, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.250...
+
+1
+--------------------------------------------------
+ID: 649112 | Printer: Printer 192.168.1.226 (192.168.1.226) | Status: success | User: '' | Pass: ''
+Log:
+
+--------------------------------------------------
+ID: 649102 | Printer: Photocopy (192.168.1.222) | Status: success | User: 'admin' | Pass: 'admin'
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.222, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.222...
+[*] Đang gửi thông tin đăng nhập...
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.222...
+[4/4] TỔNG CỘNG LẤY ĐƯỢC: 3 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan222 | ID: 1
+  #02 | Mã ĐK: 00003 | Tên: svs-009 | ID: 3
+  #03 | Mã ĐK: 00004 | Tên: Scangox_1788068771 | ID: 4
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__
+{"status": "success", "count": 3, "address_list": [{"entry_id": "1", "registration_no": "00001", "name": "scan222", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "3", "registration_no": "00003", "name": "svs-009", "email_address": "", "folder": "ftp://192.168.1.111:2130/s
+--------------------------------------------------

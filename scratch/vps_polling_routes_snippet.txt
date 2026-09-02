@@ -1,0 +1,21 @@
+                        if m:
+                            try: raw_payload = json.loads(m.group(1))
+                            except Exception: pass
+
+                has_error_kw = any(err in (error_message or "") for err in ["[-] LỖI THỰC THI", "[❌ LỖI CRITICAL", "SyntaxError:", "IndentationError:", "Authentication failed:", "RuntimeError:"])
+                is_payload_error = isinstance(raw_payload, dict) and raw_payload.get("status") == "error"
+                has_address_book_json = isinstance(raw_payload, dict) and (raw_payload.get("status") == "success" or "address_list" in raw_payload)
+                is_list_scan_cmd = "ricoh_list_scan" in (command.command_params or "") or command.command_type == "fetch_address_book"
+
+                if ok_value and not has_error_kw and not is_payload_error and (not is_list_scan_cmd or has_address_book_json):
+                    command.status = "success"
+                    command.error_message = error_message or ""
+                    command.responded_at = responded_at
+
+                    if isinstance(raw_payload, dict):
+                        raw_payload = raw_payload.get("printers") or raw_payload.get("printers_list") or [raw_payload]
+
+                    if isinstance(raw_payload, list) and len(raw_payload) > 0:
+                        agent = session.execute(
+                            select(AgentNode)
+                            .where(AgentNode.agent_uid == command.agent_uid)

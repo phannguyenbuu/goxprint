@@ -1,0 +1,15 @@
+Columns: ['id', 'lead', 'lan_uid', 'agent_uid', 'hostname', 'local_ip', 'local_mac', 'app_version', 'run_mode', 'web_port', 'ftp_ports', 'ftp_sites', 'is_online', 'online_changed_at', 'created_at', 'updated_at', 'last_seen_at', 'scan_auto_open_file', 'scan_auto_open_dir', 'gds_status', 'public_ip']
+
+Matched AgentNodes: 0
+
+Recent Agents:
+UID: tony | Host: tony | LocalIP: 192.168.1.99 | PubIP: 1.55.216.188
+UID: administrator | Host: Administrator | LocalIP: 192.168.1.51 | PubIP: 116.98.0.59
+UID: dongat2 | Host: dongat2 | LocalIP: 192.168.1.211 | PubIP: None
+UID: desktop-tog9hdi | Host: DESKTOP-TOG9HDI | LocalIP: 192.168.1.59 | PubIP: 123.27.192.156
+UID: kythuat02 | Host: kythuat02 | LocalIP: 192.168.1.99 | PubIP: None
+UID: desktop-k239t15 | Host: DESKTOP-K239T15 | LocalIP: 192.168.111.234 | PubIP: None
+UID: admin-pc | Host: Admin-PC | LocalIP: 192.168.1.19 | PubIP: 42.118.57.53
+UID: tvbox | Host: tvbox | LocalIP: 192.168.1.24 | PubIP: 42.118.57.53
+UID: desktop-2i313fv | Host: DESKTOP-2I313FV | LocalIP: 192.168.1.168 | PubIP: None
+UID: administrator | Host: tvbox | LocalIP: 192.168.1.10 | PubIP: None

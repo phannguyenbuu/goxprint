@@ -107,18 +107,19 @@ def _run_once(session_factory) -> dict[str, int]:
             LOGGER.exception("retention: error cleaning %s", table)
             results[table] = -1
 
-    # ── Strict 200-record retention for PrinterControlCommand (Jobs) ──────
+    # ── Strict retention for PrinterControlCommand (Jobs) - NEVER delete starred jobs (is_favorite = True) ──────
     try:
         with session_factory() as session:
             r_jobs = session.execute(text('''
                 DELETE FROM "PrinterControlCommand"
-                WHERE id NOT IN (
-                    SELECT id FROM "PrinterControlCommand" ORDER BY id DESC LIMIT 200
-                )
+                WHERE (is_favorite IS NOT TRUE AND (is_favorite IS NULL OR is_favorite = FALSE))
+                  AND id NOT IN (
+                      SELECT id FROM "PrinterControlCommand" ORDER BY id DESC LIMIT 200
+                  )
             ''')).rowcount
             session.commit()
             if r_jobs:
-                LOGGER.info("retention: PrinterControlCommand purged %d old jobs (kept top 200)", r_jobs)
+                LOGGER.info("retention: PrinterControlCommand purged %d old unstarred jobs (kept starred and top 200)", r_jobs)
                 results["PrinterControlCommand"] = r_jobs
     except Exception:
         LOGGER.exception("retention: error cleaning PrinterControlCommand")

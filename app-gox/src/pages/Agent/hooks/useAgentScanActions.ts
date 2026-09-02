@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { DEFAULT_EXEC_TEMPLATES } from '../constants/execTemplates';
-import { fetchApi, addEmailDestination, addPrivateLanEmail, deleteEmailDestination, deleteLanEmail, deleteScanPoint, getAgentSettings, getAgentUtilityCommands, getCommandStatus, getJobs, getLanSites, getScansFiles, installDriverOnAgent, modifyDeviceAddress, saveCopierCredentials, triggerAgentUtility, triggerAgentUtilityExec, triggerEmergencyRestart, triggerFetchAddressBook, updateAgentSettings } from '../../../api/mockAgentApi';
+import { fetchApi, addEmailDestination, addPrivateLanEmail, deleteEmailDestination, deleteLanEmail, deleteScanPoint, getAgentSettings, getAgentUtilityCommands, getCommandStatus, getJobs, getLanSites, getScansFiles, installDriverOnAgent, modifyDeviceAddress, saveCopierCredentials, triggerAgentUtility, triggerAgentUtilityExec, triggerEmergencyRestart, triggerFetchAddressBook, updateAgentSettings, clearScanPoint } from '../../../api/mockAgentApi';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AgentApi } from '../../../api/AgentApi';
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://agentapi.quanlymay.com';
@@ -61,7 +61,7 @@ function safePathToken(value: string): string {
 }
 
 export const useAgentScanActions = (deps: any = {}) => {
-  const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [], detectBrand } = deps;
+  const { activeAgentUid, cameras, copierCredentials = {}, deleteScanPointModal, editIpModalData, fetchLanSitesData, getTargetAgentUid, isDuplicatePending, lanSites = [], pollCommandStatus, queryDuration, queryTimestamp, replaceToast, saveScanPointToDb, selectedCamera, selectedLan, setActiveModal, setDeleteScanPointModal, setEditIpModalData, setInstallDriverModal, setLiveAddressBooks, setQueriedVideoUrl, setQueryDuration, setQueryTimestamp, setQueryVideoLoading, setStorageFiles, setStorageLoading, setStorageModalData, showToast, utilityCommands = [] } = deps;
 
   const resolveCopierCredentials = async (printerObj: any): Promise<{ user: string; pass: string; mac: string }> => {
     const rawMac = String(printerObj?.mac_address || printerObj?.mac_id || printerObj?.mac || '').trim();
@@ -114,7 +114,7 @@ export const useAgentScanActions = (deps: any = {}) => {
       duration: dur
     });
     if (isDup) {
-      showToast('Yêu cầu truy xuất đoạn video này đang chờ phản hồi từ Agent!', 'info');
+      showToast('Đang chờ video...', 'info');
       return;
     }
 
@@ -132,10 +132,10 @@ export const useAgentScanActions = (deps: any = {}) => {
         const formattedTs = cleanTs.substring(0, 8) + '_' + cleanTs.substring(8, 14);
         setQueriedVideoUrl(`clip_${selectedCamera.camera_name}_${formattedTs}.mp4`);
       } else {
-        showToast('Không truy xuất được video: ' + data.error, 'error');
+        showToast('Truy xuất thất bại', 'error');
       }
     } catch (err: any) {
-      showToast('Lỗi kết nối render: ' + err.message, 'error');
+      showToast('Truy xuất thất bại', 'error');
     } finally {
       setQueryVideoLoading(false);
     }
@@ -273,7 +273,7 @@ export const useAgentScanActions = (deps: any = {}) => {
         res.command_id,
         printerId,
         async (pollData: any) => {
-          showToast(`Đã xóa đăng ký #${regNo} thành công!`, 'success');
+          showToast('Xóa điểm scan thành công', 'success');
           console.log('Finish delete scan point, updating address book state directly', pollData);
           const macAddr = printerObj?.mac_address || printerObj?.mac_id || (typeof printerId === 'string' && printerId.includes(':') ? printerId : '');
           const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
@@ -316,12 +316,12 @@ export const useAgentScanActions = (deps: any = {}) => {
           handleRefetchAddressBook(targetRef);
         },
         (errorMsg) => {
-          showToast(`Lỗi xóa điểm scan: ${errorMsg}`, 'error');
+          showToast('Xóa điểm scan thất bại', 'error');
         },
-        `⌛ Đang xóa điểm scan #${regNo}...`
+        '⏳ Xóa điểm scan...'
       );
     } catch (err: any) {
-      showToast(`Lỗi gửi lệnh xóa: ${err.message}`, 'error');
+      showToast('Xóa điểm scan thất bại', 'error');
     }
   };
 
@@ -392,7 +392,7 @@ export const useAgentScanActions = (deps: any = {}) => {
     const regNo = entry.registration_no;
 
     setActiveModal(null);
-    showToast('Gửi yêu cầu thay đổi IP của điểm scan...', 'info', 3000);
+    showToast('Đổi IP điểm scan...', 'info', 2000);
 
     let prevIp = '';
     if (ftpMatch) {
@@ -418,10 +418,10 @@ export const useAgentScanActions = (deps: any = {}) => {
       const authUser = creds.user || printer?.auth_user || printer?.username;
       const authPass = creds.pass || printer?.auth_password || printer?.password || "";
       if (!authUser) {
-        throw new Error(`Chưa cấu hình tài khoản Web cho máy in ${printer?.printer_name || printer?.name || 'Photocopy'}!`);
+        throw new Error('Chưa có Admin máy in');
       }
-      const brand = detectBrand ? detectBrand(printer?.printer_name || printer?.name || "") : 'ricoh';
-      const cmdName = brand === 'ricoh' ? 'ricoh_change_ftp' : 'toshiba_change_ftp';
+      const pType = String(printer?.printer_type || printer?.type || "").toLowerCase();
+      const cmdName = pType === 'toshiba' ? 'toshiba_change_ftp' : 'ricoh_change_ftp';
 
       const res = await triggerAgentUtilityExec(targetAgent, cmdName, "", {
         printer_ip: printer?.ip || "",
@@ -434,14 +434,14 @@ export const useAgentScanActions = (deps: any = {}) => {
       });
 
       if (!res.ok || !res.command_id) {
-        throw new Error(res.error || 'Không thể gửi lệnh thay đổi FTP');
+        throw new Error(res.error || 'Lỗi đổi IP');
       }
 
       pollCommandStatus(
         res.command_id,
         printerId,
         async (pollData: any) => {
-          showToast(`Đã thay đổi IP điểm scan #${regNo} thành công!`, 'success');
+          showToast('Đổi IP điểm scan', 'success');
           const macAddr = printer?.mac_address || printer?.mac_id || printerId;
           const normMac = macAddr ? String(macAddr).toUpperCase().replace(/-/g, ':') : '';
           let syncObj = pollData?.address_book_sync || pollData?.address_book_data;
@@ -463,12 +463,12 @@ export const useAgentScanActions = (deps: any = {}) => {
           }
         },
         (errorMsg) => {
-          showToast(`Lỗi thay đổi IP: ${errorMsg}`, 'error');
+          showToast('Đổi IP thất bại', 'error');
         },
-        `⌛ Đang cập nhật IP điểm scan #${regNo}...`
+        '⏳ Đổi IP điểm scan...'
       );
     } catch (err: any) {
-      showToast(`Lỗi gửi lệnh thay đổi IP: ${err.message}`, 'error');
+      showToast('Đổi IP thất bại', 'error');
     }
   };
 
@@ -668,7 +668,37 @@ export const useAgentScanActions = (deps: any = {}) => {
       agentUid ||
       activeAgentUid ||
       '';
-    if (showToast) showToast('⌛ Đang yêu cầu Agent đọc trực tiếp danh bạ từ máy photocopy...', 'info', 3000);
+    if (showToast) showToast('Đọc danh bạ...', 'info', 2000);
+
+    // ── Bước 1: Xóa sạch frontend cache NGAY LẬP TỨC (trước mọi async call) ──
+    const pMacNorm = (printerObj?.mac_address || printerObj?.mac_id || (typeof pId === 'string' && pId.includes(':') ? pId : '')).toUpperCase().replace(/-/g, ':');
+    const pIp = printerObj?.ip || (typeof pId === 'string' && pId.includes('.') ? pId : '');
+    if (typeof setLiveAddressBooks === 'function') {
+      setLiveAddressBooks((prev: any) => {
+        const next = { ...prev };
+        if (pId) delete next[pId];
+        if (pMacNorm) delete next[pMacNorm];
+        if (pIp) delete next[pIp];
+        return next;
+      });
+    }
+    if (deps.setCommandStatus) {
+      deps.setCommandStatus((prev: any) => {
+        const next = { ...prev };
+        if (pId) delete next[pId];
+        if (pMacNorm) delete next[pMacNorm];
+        if (pIp) delete next[pIp];
+        return next;
+      });
+    }
+
+    // ── Bước 2: Xóa ScanPoint trên VPS DB (fire-and-forget, không block UX) ──
+    if (pMacNorm) {
+      clearScanPoint(pMacNorm).catch(err =>
+        console.warn('[handleRefetchAddressBook] clearScanPoint error (non-fatal):', err)
+      );
+    }
+
     try {
       const { user: authUser, pass: authPass } = await resolveCopierCredentials(printerObj || { ip: pId, mac_address: pId });
       const extraData: any = {
@@ -684,7 +714,10 @@ export const useAgentScanActions = (deps: any = {}) => {
           extraData.brand = printerObj.printer_type || printerObj.brand;
         }
       }
+
+      // ── Bước 3: Gửi lệnh quét mới tới Agent ─────────────────────────────────
       const res = await triggerFetchAddressBook(pId, resolvedAgentUid || undefined, extraData);
+
       if (!res.ok || !res.command_id) {
         throw new Error(res.error || 'Không thể tạo lệnh đọc danh bạ');
       }
@@ -717,7 +750,11 @@ export const useAgentScanActions = (deps: any = {}) => {
             console.log(`[FRONTEND] CHI TIẾT DANH BẠ (Count: ${resultSync?.count || 0}):`, resultSync?.address_list || resultSync);
             console.log('==================================================');
 
-            if (showToast) showToast('✓ Đã cập nhật danh bạ máy in thành công!', 'success');
+            if (resultSync?.status === 'error') {
+              if (showToast) showToast('Đọc danh bạ thất bại', 'error');
+              return;
+            }
+            if (showToast) showToast('Đọc danh bạ', 'success');
             if (resultSync) {
               if (setLiveAddressBooks) {
                 setLiveAddressBooks((prev: any) => {
@@ -794,26 +831,26 @@ export const useAgentScanActions = (deps: any = {}) => {
           res.command_id,
           printerId,
           async (_pollData: any) => {
-            if (showToast) showToast(`Đã tạo điểm scan "${name.trim()}" thành công!`, 'success');
+            if (showToast) showToast('Tạo điểm scan', 'success');
             handleRefetchAddressBook(printerId);
             if (fetchLanSitesData) await fetchLanSitesData();
           },
           (errorMsg: any) => {
-            if (showToast) showToast(`Thêm điểm scan thất bại: ${errorMsg}`, 'error');
+            if (showToast) showToast('Tạo điểm scan thất bại', 'error');
           },
-          `⌛ Đang tạo điểm scan "${name.trim()}"...`
+          '⏳ Tạo điểm scan...'
         );
       }
     } catch (err: any) {
       if (deps.setPublicFtpLoading) deps.setPublicFtpLoading(false);
-      if (showToast) showToast(`Lỗi: ${err.message}`, 'error');
+      if (showToast) showToast('Tạo điểm scan thất bại', 'error');
     }
   };
 
   const handleAddPrivateFtp = async () => {
     const { lanUid, agentUid, email } = deps.privateFtpData || {};
     if (!email || !email.includes('@')) {
-      if (showToast) showToast('Địa chỉ email không hợp lệ', 'error');
+      if (showToast) showToast('Email không hợp lệ', 'error');
       return;
     }
     if (deps.setPrivateFtpLoading) deps.setPrivateFtpLoading(true);
@@ -823,33 +860,33 @@ export const useAgentScanActions = (deps: any = {}) => {
       if (setActiveModal) setActiveModal(null);
 
       if (res.ok) {
-        if (showToast) showToast('Đã thêm Private FTP thành công', 'success');
+        if (showToast) showToast('Thêm Private FTP', 'success');
         if (fetchLanSitesData) await fetchLanSitesData();
       } else {
         throw new Error(res.error || 'Lỗi server');
       }
     } catch (err: any) {
       if (deps.setPrivateFtpLoading) deps.setPrivateFtpLoading(false);
-      if (showToast) showToast(`Lỗi thêm FTP riêng: ${err.message}`, 'error');
+      if (showToast) showToast('Thêm Private FTP thất bại', 'error');
     }
   };
 
   const handleEmergencyRestart = async () => {
     if (!activeAgentUid) {
-      if (showToast) showToast('Chưa chọn Agent để khởi động lại', 'error');
+      if (showToast) showToast('Chưa chọn Agent', 'error');
       return;
     }
-    if (showToast) showToast(`Đang gửi lệnh khởi động lại Agent (${activeAgentUid})...`, 'info', 4000);
+    if (showToast) showToast('Khởi động lại Agent...', 'info', 2000);
     try {
       const res = await triggerEmergencyRestart(activeAgentUid);
       if (res.ok) {
-        if (showToast) showToast('Đã gửi lệnh khởi động lại Agent khẩn cấp!', 'success');
+        if (showToast) showToast('Khởi động lại Agent', 'success');
         if (setActiveModal) setActiveModal(null);
       } else {
         throw new Error(res.error || 'Thất bại');
       }
     } catch (err: any) {
-      if (showToast) showToast(`Lỗi khởi động lại: ${err.message}`, 'error');
+      if (showToast) showToast('Khởi động lại thất bại', 'error');
     }
   };
 

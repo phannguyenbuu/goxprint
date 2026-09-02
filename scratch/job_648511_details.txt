@@ -1,0 +1,23 @@
+id: 648511
+printer_id: 1306
+lead: default
+lan_uid: default_84_93_B2_7C_EE_78_192_168_1_1
+agent_uid: dongat2
+printer_name: RICOH MP 7503
+ip: 192.168.1.226
+desired_enabled: True
+auth_user: 
+auth_password: 
+status: success
+error_message: 
+requested_at: 2026-08-31 13:11:13.547461+07:00
+responded_at: 2026-08-31 13:11:17.266821+07:00
+created_at: 2026-08-31 13:11:13.552637+07:00
+updated_at: 2026-08-31 13:11:17.270120+07:00
+command_type: trigger_utility
+driver_brand: 
+driver_model: 
+driver_name: 
+driver_url: 
+command_params: {"action": "start_tunnel", "target_ip": "192.168.1.226", "target_port": 80, "vps_ip": "agentapi.quanlymay.com", "remote_port": 8102, "vps_user": "root"}
+received_at: 2026-08-31 13:11:14.584944+07:00

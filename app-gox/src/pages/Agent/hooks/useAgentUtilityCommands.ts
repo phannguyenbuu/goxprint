@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useCallback, useEffect } from 'react';
-import { getAgentUtilityCommands, getCommandStatus, getJobs, triggerAgentUtility, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
+import { getAgentUtilityCommands, getCommandStatus, getJobs, purgeLanPrinters, triggerAgentUtility, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 
 const VIEW_COMMANDS = new Set([
   'get_agent_ip',
@@ -216,7 +216,7 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
         () => {
           setSettingsSaveStatus('✅ Đã lưu và nạp lại cấu hình settings.json thành công!');
           setIsSavingSettings(false);
-          if (showToast) showToast('Đã lưu cấu hình Agent thành công', 'success');
+          if (showToast) showToast('Lưu cấu hình', 'success');
         },
         (errMs: any) => {
           setSettingsSaveStatus(`❌ Lỗi lưu cấu hình: ${errMs}`);
@@ -334,12 +334,12 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
       command: command
     });
     if (isDup) {
-      if (showToast) showToast('Yêu cầu chạy script/lệnh này đang chờ phản hồi từ Agent!', 'info');
+      if (showToast) showToast('Lệnh đang chờ xử lý...', 'info');
       return;
     }
 
     const cmdObj = utilityCommands.find((c: any) => c.command === command);
-    const isOutputModal = cmdObj?.output_modal || VIEW_COMMANDS.has(command);
+    const isOutputModal = cmdObj?.output_modal !== false || VIEW_COMMANDS.has(command);
     const displayTitle = cmdObj?.label || VIEW_COMMAND_TITLES[command] || command;
 
     if (command === 'change_agent_ip' || command === 'check_scan_ip_match') {
@@ -385,19 +385,35 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
                     if (statusRes.status === 'success') {
                       clearInterval(timer);
                       if (isOutputModal && setViewOutputModal) {
+                        const outVal = (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.error || statusRes.result || '(không có nội dung)');
                         setViewOutputModal({
                           isOpen: true,
                           title: displayTitle,
-                          content: (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.error || statusRes.result || '(không có nội dung)'),
-                          rawPayload: statusRes.result_payload || statusRes.result || ''
+                          content: outVal,
+                          rawPayload: statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || ''
                         });
                       } else {
                         setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
                       }
                       setUtilityActionPending(null);
+                      if (deps.fetchLanSitesData) {
+                        deps.fetchLanSitesData(true);
+                        setTimeout(() => deps.fetchLanSitesData && deps.fetchLanSitesData(true), 2000);
+                        setTimeout(() => deps.fetchLanSitesData && deps.fetchLanSitesData(true), 5000);
+                      }
                     } else if (statusRes.status === 'failed' || !statusRes.ok) {
                       clearInterval(timer);
-                      setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                      if (setViewOutputModal) {
+                        const outErr = statusRes.error || (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || '(không có nội dung)');
+                        setViewOutputModal({
+                          isOpen: true,
+                          title: displayTitle,
+                          content: outErr,
+                          rawPayload: statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || ''
+                        });
+                      } else {
+                        setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+                      }
                       setUtilityActionPending(null);
                     } else {
                       const elapsedSec = Math.round(elapsed / 1000);
@@ -420,6 +436,48 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
 
     setUtilityActionPending(command);
     setUtilityStatusMsg({ text: '⌛ Đang gửi lệnh thực thi tới Agent...', isError: false });
+
+    // ── Nếu là force_subnet_scan: lấy IP Agent mới trước, rồi xóa DB cũ ────────
+    if (command === 'force_subnet_scan') {
+      const lanUid = targetAgent?.lan_uid || selectedUtilityAgent?.lan_uid || 'default';
+      // Xóa DB cũ (fire-and-forget)
+      purgeLanPrinters(lanUid).catch(err =>
+        console.warn('[handleTriggerUtilityExec] purgeLanPrinters error (non-fatal):', err)
+      );
+      // Lấy IP mới nhất của Agent, cập nhật UI ngay (không cache, không chờ fetchLanSitesData)
+      triggerAgentUtilityExec(targetAgent.agent_uid, 'get_agent_ip', '')
+        .then(async (ipRes: any) => {
+          if (!ipRes.ok || !ipRes.command_id) return;
+          const cmdId = ipRes.command_id;
+          const start = Date.now();
+          await new Promise<void>(resolve => {
+            const t = setInterval(async () => {
+              try {
+                if (Date.now() - start > 10_000) { clearInterval(t); resolve(); return; }
+                const s = await getCommandStatus(cmdId);
+                if (s.status === 'success' || s.status === 'failed') {
+                  clearInterval(t);
+                  if (s.status === 'success' && deps.setLanSites) {
+                    const raw = String(s.result_payload || s.output || s.result || '');
+                    const m = raw.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
+                    const newIp = m ? m[1] : '';
+                    if (newIp) {
+                      deps.setLanSites((prev: any[]) => prev.map((site: any) => ({
+                        ...site,
+                        agents: (site.agents || []).map((ag: any) =>
+                          ag.agent_uid === targetAgent.agent_uid ? { ...ag, local_ip: newIp } : ag
+                        )
+                      })));
+                    }
+                  }
+                  resolve();
+                }
+              } catch { clearInterval(t); resolve(); }
+            }, 800);
+          });
+        })
+        .catch(err => console.warn('[handleTriggerUtilityExec] get_agent_ip error:', err));
+    }
 
     try {
       const res = await triggerAgentUtilityExec(targetAgent.agent_uid, command, commandContent);
@@ -446,27 +504,33 @@ export const useAgentUtilityCommands = (deps: any = {}) => {
           if (statusRes.status === 'success') {
             clearInterval(timer);
             if (isOutputModal && setViewOutputModal) {
+              const outVal = (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.error || statusRes.result || '(không có nội dung)');
               setViewOutputModal({
                 isOpen: true,
                 title: displayTitle,
-                content: (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.error || statusRes.result || '(không có nội dung)'),
-                rawPayload: statusRes.result_payload || statusRes.result || ''
+                content: outVal,
+                rawPayload: statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || ''
               });
             } else {
               setUtilityStatusMsg({ text: '⚡ Thực hiện lệnh thành công!', isError: false });
             }
             setUtilityActionPending(null);
+            if (deps.fetchLanSitesData) {
+              deps.fetchLanSitesData(true);
+              setTimeout(() => deps.fetchLanSitesData && deps.fetchLanSitesData(true), 2000);
+            }
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
             if (isOutputModal && setViewOutputModal) {
+              const outErr = statusRes.error || (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || '(không có nội dung)');
               setViewOutputModal({
                 isOpen: true,
                 title: displayTitle,
-                content: statusRes.error || (typeof statusRes.result_payload === 'object' && statusRes.result_payload) ? JSON.stringify(statusRes.result_payload, null, 2) : (statusRes.result_payload || statusRes.result || '(không có nội dung)'),
-                rawPayload: statusRes.result_payload || statusRes.result || ''
+                content: outErr,
+                rawPayload: statusRes.result_payload || statusRes.output || statusRes.error_message || statusRes.result || ''
               });
             } else {
-              setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || 'Lệnh thất bại từ Agent'}`, isError: true });
+              setUtilityStatusMsg({ text: `❌ Thất bại: ${statusRes.error || statusRes.error_message || 'Lệnh thất bại từ Agent'}`, isError: true });
             }
             setUtilityActionPending(null);
           } else {

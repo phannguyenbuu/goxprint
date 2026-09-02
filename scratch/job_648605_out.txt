@@ -1,0 +1,9 @@
+STDOUT:
+ID: 648640 | Printer:  | IP:  | Status: pending | User: '' | Pass: ''
+Err/Output: ''
+--------------------------------------------------
+ID: 648605 | Printer: RICOH MP 7503 | IP: 192.168.1.226 | Status: success | User: 'admin' | Pass: 'admin'
+Err/Output: '==================================================\n  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226\n==================================================\n[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin\n[*] Đang lấy form đăng nhập từ 192.168.1.226...\n[*] Đang gửi thông tin đăng nhập...\n\n1'
+--------------------------------------------------
+
+STDERR:

@@ -60,6 +60,50 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
             LOGGER.warning("polling: unauthorized lead=%s ip=%s", lead, request.remote_addr)
             return auth_error
 
+        # ── Handle explicit IP change event from Agent ───────────────────────────
+        event_type = _to_text(body.get("event"))
+        if event_type == "pc_ip_changed":
+            old_ip_ev = _to_text(body.get("old_ip", "")).strip()
+            new_ip_ev = _to_text(body.get("new_ip", "")).strip()
+            agent_uid_ev = _to_text(body.get("agent_uid")) or "legacy-agent"
+            with session_factory() as session:
+                lan_uid_ev, _ = _resolve_lan_uid_with_session(session, lead, body)
+            if old_ip_ev and new_ip_ev and old_ip_ev != new_ip_ev:
+                with session_factory() as session:
+                    try:
+                        from models import IPData
+                        ip_rec_ev = session.execute(
+                            select(IPData).where(IPData.agent_name == agent_uid_ev)
+                        ).scalars().first()
+                        if ip_rec_ev and (ip_rec_ev.ip or "").strip() == old_ip_ev:
+                            # Reference still on old_ip — workflow not yet triggered
+                            from utils import trigger_ip_change_workflow
+                            trigger_ip_change_workflow(
+                                session, lead, lan_uid_ev, agent_uid_ev, old_ip_ev, new_ip_ev
+                            )
+                            # trigger_ip_change_workflow updates IPData.ip internally
+                            LOGGER.info(
+                                "[pc_ip_changed] Agent %s IP change %s → %s. Workflow triggered (Path A primary).",
+                                agent_uid_ev, old_ip_ev, new_ip_ev
+                            )
+                        elif ip_rec_ev and (ip_rec_ev.ip or "").strip() == new_ip_ev:
+                            LOGGER.info(
+                                "[pc_ip_changed] Agent %s: IPData already at %s — dedup skip.",
+                                agent_uid_ev, new_ip_ev
+                            )
+                        else:
+                            LOGGER.warning(
+                                "[pc_ip_changed] Agent %s: IPData.ip=%s, event old_ip=%s — mismatch, skip.",
+                                agent_uid_ev, ip_rec_ev.ip if ip_rec_ev else "N/A", old_ip_ev
+                            )
+                        session.commit()
+                    except Exception as ev_exc:
+                        LOGGER.error("[pc_ip_changed] Error handling event for %s: %s", agent_uid_ev, ev_exc)
+            else:
+                LOGGER.warning("[pc_ip_changed] Invalid ip pair: old=%s new=%s", old_ip_ev, new_ip_ev)
+            return jsonify({"ok": True, "event": "pc_ip_changed", "processed": True})
+        # ── End event handler ────────────────────────────────────────────────────
+
         printer_name = _to_text(body.get("printer_name"))
         ip = _to_text(body.get("ip"))
         with session_factory() as session:
@@ -432,11 +476,28 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             select(AllowedPublicIp).where(AllowedPublicIp.ip_address == client_pub_ip)
                         ).scalars().first()
                         if not ip_rule:
+                            desc = f"Auto-registered from Agent {hostname or agent_uid} ({lan_uid})"
                             session.add(AllowedPublicIp(
                                 ip_address=client_pub_ip,
-                                description=f"Auto-registered from Agent {hostname or agent_uid} ({lan_uid})",
-                                enabled=True
+                                description=desc,
+                                enabled=True,
+                                client_local_ip=local_ip or "",
+                                client_public_ip=client_pub_ip,
+                                machine_info=f"Agent: {agent_uid} ({hostname or ''})"
                             ))
+                            try:
+                                from admin_public_ip_routes import record_public_ip_history
+                                record_public_ip_history(
+                                    session,
+                                    ip_address=client_pub_ip,
+                                    action="auto_discover",
+                                    description=desc,
+                                    client_local_ip=local_ip or "",
+                                    client_public_ip=client_pub_ip,
+                                    machine_info=f"Agent: {agent_uid} ({hostname or ''})"
+                                )
+                            except Exception as h_exc:
+                                LOGGER.warning("[ingest_polling] History log error: %s", h_exc)
 
                 session.commit()
             except Exception as p_exc:  # noqa: BLE001

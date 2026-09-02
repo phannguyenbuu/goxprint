@@ -1,0 +1,49 @@
+OUT:
+ID: 649112 | Status: success | User: '' | Pass: ''
+Log:
+
+--------------------------------------------------
+ID: 648912 | Status: success | User: 'admin' | Pass: ''
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+--------------------------------------------------
+ID: 648852 | Status: success | User: 'admin' | Pass: ''
+Log:
+Xác thực đăng nhập và lưu thành công.
+
+Xác thực đăng nhập và lưu thành công.
+--------------------------------------------------
+ID: 648721 | Status: failed | User: 'admin' | Pass: 'admin'
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+  [!] WIM Login HTTP Status: 200
+  [!] WIM Login Response Snippet: <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Frameset//EN">
+<html lang="en">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>Login</title>
+    <meta http-equiv="content-type" content="tex
+--------------------------------------------------
+ID: 648605 | Status: success | User: 'admin' | Pass: 'admin'
+Log:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+
+1
+--------------------------------------------------
+
+ERR:

@@ -772,11 +772,11 @@ export function AgentModals(props: any) {
     if (viewOutputModal?.isOpen) {
       setTimeout(() => {
         if (modalContentRef && modalContentRef.current) {
-          modalContentRef.current.scrollTop = modalContentRef.current.scrollHeight;
+          modalContentRef.current.scrollTop = 0;
         }
       }, 100);
     }
-  }, [viewOutputModal?.isOpen, viewOutputModal?.content]);
+  }, [viewOutputModal?.isOpen]);
 
   React.useEffect(() => {
     if (installDriverModal?.isOpen) {
@@ -1824,7 +1824,7 @@ export function AgentModals(props: any) {
                         }}
                         onClick={() => {
                           setActiveModal(null);
-                          showToast(`Đang gửi lệnh khóa máy ${remoteLockPrinter.name}...`, 'info', 3000);
+                          showToast('Khóa máy...', 'info', 2000);
                           modifyDeviceAddressss({
                             ip: remoteLockPrinter.ip,
                             action: 'lock_machine',
@@ -1832,13 +1832,13 @@ export function AgentModals(props: any) {
                           })
                             .then((res: any) => {
                               if (res.ok) {
-                                showToast(`Đã gửi lệnh khóa máy ${remoteLockPrinter.name} thành công!`, 'success');
+                                showToast('Khóa máy', 'success');
                               } else {
-                                showToast('Lỗi: ' + (res.error || 'Failed'), 'error');
+                                showToast('Khóa máy thất bại', 'error');
                               }
                             })
                             .catch((err: any) => {
-                              showToast('Lỗi: ' + err.message, 'error');
+                              showToast('Khóa máy thất bại', 'error');
                             });
                         }}
                       >
@@ -1857,7 +1857,7 @@ export function AgentModals(props: any) {
                         }}
                         onClick={() => {
                           setActiveModal(null);
-                          showToast(`Đang gửi lệnh mở khóa máy ${remoteLockPrinter.name}...`, 'info', 3000);
+                          showToast('Mở khóa máy...', 'info', 2000);
                           modifyDeviceAddressss({
                             ip: remoteLockPrinter.ip,
                             action: 'enable_machine',
@@ -1865,13 +1865,13 @@ export function AgentModals(props: any) {
                           })
                             .then((res: any) => {
                               if (res.ok) {
-                                showToast(`Đã gửi lệnh mở khóa máy ${remoteLockPrinter.name} thành công!`, 'success');
+                                showToast('Mở khóa máy', 'success');
                               } else {
-                                showToast('Lỗi: ' + (res.error || 'Failed'), 'error');
+                                showToast('Mở khóa thất bại', 'error');
                               }
                             })
                             .catch((err: any) => {
-                              showToast('Lỗi: ' + err.message, 'error');
+                              showToast('Mở khóa thất bại', 'error');
                             });
                         }}
                       >

@@ -1,0 +1,64 @@
+ID: 649160 | Name: RICOH MP W8140 | IP: 192.168.1.250 | Status: failed | User: 'admin' | Pass: ''
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.250
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.250, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.250...
+
+[-] LỖI THỰC THI QUÉT DANH BẠ: H
+--------------------------------------------------
+ID: 649143 | Name: Photocopy | IP: 192.168.1.228 | Status: failed | User: 'admin' | Pass: 'admin'
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.228
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.228, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.228...
+[*] Đang gửi thông tin đăng nhập.
+--------------------------------------------------
+ID: 649140 | Name: RICOH MP W8140 | IP: 192.168.1.250 | Status: failed | User: 'admin' | Pass: ''
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.250
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.250, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.250...
+
+1
+--------------------------------------------------
+ID: 649112 | Name: Printer 192.168.1.226 | IP: 192.168.1.226 | Status: success | User: '' | Pass: ''
+Log: 
+--------------------------------------------------
+ID: 649102 | Name: Photocopy | IP: 192.168.1.222 | Status: success | User: 'admin' | Pass: 'admin'
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.222, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.222...
+[*] Đang gửi thông tin đăng nhập.
+--------------------------------------------------
+ID: 648948 | Name:  | IP:  | Status: processing | User: '' | Pass: ''
+Log: 
+--------------------------------------------------
+ID: 648912 | Name: RICOH MP 7503 | IP: 192.168.1.226 | Status: success | User: 'admin' | Pass: ''
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập.
+--------------------------------------------------
+ID: 648852 | Name:  | IP: 192.168.1.226 | Status: success | User: 'admin' | Pass: ''
+Log: Xác thực đăng nhập và lưu thành công.
+
+Xác thực đăng nhập và lưu thành công.
+--------------------------------------------------
+ID: 648721 | Name: RICOH MP 7503 | IP: 192.168.1.226 | Status: failed | User: 'admin' | Pass: 'admin'
+Log: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập.
+--------------------------------------------------
+ID: 648700 | Name:  | IP:  | Status: processing | User: '' | Pass: ''
+Log: 
+--------------------------------------------------

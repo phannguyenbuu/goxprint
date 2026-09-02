@@ -1,0 +1,11 @@
+=== JOB 648912 ===
+ID: 648912 | Name: RICOH MP 7503 | IP: 192.168.1.226 | Status: success | User: 'admin' | Pass: '' | Time: 2026-08-31 13:44:46.361864+07:00
+Err/Output:
+ ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+Params:
+ {"action": "exec_utility", "command": "ricoh_list_scan", "command_content": "import requests\nimport re\nimport base64\nimport json\nimport sys\nimport time\n\nif hasattr(sys.stdout, \"reconfigure\"):\n    sys.stdout.reconfigure(encoding=\"utf-8\")\n\nIP = \"192.168.1.226\"\nUSER = \"admin\"\nPASSWORD = \"\"\nBASE_URL = f\"http://{IP}\"\n\nprint(\"==================================================\")\nprint(f\"  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: {IP}\")\nprint(\"==================================================\")\nprint(f\"[1/4] Khởi tạo cấu hình: IP={IP}, USER={USER}\")\n\ndef format_ricoh_folder(val: str) -> str:\n    if not val:\n        return \"\"\n    val = val.strip()\n    bs = chr(92)\n    if \":/\" in val and not val.lower().startswith(\"ftp\") and bs not in val:\n        parts = val.split(\":/\", 1)\n        host = parts[0].strip()\n        path = parts[1].strip()\n        if not path.startswith(\"/\"):\n            path = \"/\" + path\n        return f\"ftp://{host}:2130{path}\"\n    return val\n\n\ndef extract_wim_token(html: str) -> str:\n    if not html: return \"\"\n    m = re.search(r'wimToken\\s*[:=]\\s*[\"\\']?([^\"\\'\\s;>]+)[\"\\']?', html, re.IGNORECASE)\n    if m and m.group(1): return m.group(1)\n    m = re.search(r'name\\s*=\\s*[\"\\']?wimToken[\"\\']?[^>]*?value\\s*=\\s*[\"\\']?([^\"\\'\\s>]+)[\"\\']?', html, re.IGNORECASE)\n    if m and m.group(1): return m.group(1)\n    m = re.search(r'value\\s*=\\s*[\"\\']?([^\"\\'\\s>]+)[\"\\'].*?na

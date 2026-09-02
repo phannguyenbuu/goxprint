@@ -1,0 +1,69 @@
+Job ID: 650757 | Status: pending | CmdType: trigger_utility
+LOG / ERROR:
+
+============================================================
+Job ID: 650725 | Status: success | CmdType: trigger_utility
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.222, USER=admin
+[*] Đang khởi tạo phiên làm việc với Ricoh WIM IP: 192.168.1.222...
+[*] Đang lấy form đăng nhập Admin từ 192.168.1.222...
+============================================================
+Job ID: 650700 | Status: failed | CmdType: trigger_utility
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] XÓA ĐIỂM SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/5] Cấu hình tham số:
+  - IP Máy in   : 192.168.1.222
+  - Đăng nhập   : admin
+  - Target ID   : 4
+  - Target Name : 
+  - Base URL    : http://192.168.1.222
+[*] Đang đăng xuất để giải phóng phiên làm việc...
+  [✓] Giải phóng phiên OK.
+
+[2/5] Tiến hành đăng nhập WIM (192.168.1.222)...
+  [✓] Đăng nhập thành công vào máy in Ricoh!
+
+[3/5] Tải danh sách điểm scan từ máy in...
+  -> Tổng số điểm scan tìm thấy trên máy in: 3
+
+[4/5] Tìm kiếm điểm scan khớp (ID: '4', Tên: '')...
+
+[-] LỖI THỰC THI XÓA DANH BẠ: KHÔNG tìm thấy điểm scan nào phù hợp (ID: '4', Tên: '') trên máy in Ricoh để xóa!
+__DELETE_SCAN_JSON_START__
+{"status": "error", "error": "KH\u00d4NG t\u00ecm th\u1ea5y \u0111i\u1ec3m scan n\u00e0o ph\u00f9 h\u1ee3p (ID: '4', T\u00ean: '') tr\u00ean m\u00e1y in Ricoh \u0111\u1ec3 x\u00f3a!"}
+__DELETE_SCAN_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên làm việc...
+  [✓] Giải phóng phiên OK.
+
+1
+============================================================
+Job ID: 650679 | Status: failed | CmdType: trigger_utility
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] XÓA ĐIỂM SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/5] Cấu hình tham số:
+  - IP Máy in   : 192.168.1.222
+  - Đăng nhập   : admin
+  - Target ID   : 4
+  - Target Name : 
+  - Base URL    : http://192.168.1.222
+[*] Đang đăng xuất để giải phóng phiên làm việc...
+  [✓] Giải phóng phiên OK.
+
+1
+============================================================
+Job ID: 650603 | Status: success | CmdType: trigger_utility
+LOG / ERROR:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.222, USER=admin
+[*] Đang khởi tạo phiên làm việc với Ricoh WIM IP: 192.168.1.222...
+[*] Đang lấy form đăng nhập Admin từ 192.168.1.222...
+============================================================

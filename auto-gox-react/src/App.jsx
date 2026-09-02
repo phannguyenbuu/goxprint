@@ -189,7 +189,32 @@ export default function App() {
           <div className="logo">
             <img src="/printagx.com.png" alt="GoxPrint Logo" style={{height: '40px', width: 'auto', display: 'block'}} />
           </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap'}}>
+            <button
+              className="btn-header-download"
+              title="Tải về PrintAgent Cục Bộ (Windows)"
+              onClick={() => setIsAgentMissing(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: 'white',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '14px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                transition: 'all 0.2s'
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+              </svg>
+              <span>Tải PrintAgent 📥</span>
+            </button>
             <button className="btn-header-support" title="Gửi yêu cầu hỗ trợ bảo hành" onClick={handleScrollToSupport}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>

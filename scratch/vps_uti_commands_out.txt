@@ -1,0 +1,361 @@
+=== COMMAND: ricoh_login_helper ===
+def extract_wim_token(html: str) -> str:
+    if not html: return ""
+    m = re.search(r'wimToken\s*[:=]\s*["\']?([^"\'\s;>]+)["\']?', html, re.IGNORECASE)
+    if m and m.group(1): return m.group(1)
+    m = re.search(r'name\s*=\s*["\']?wimToken["\']?[^>]*?value\s*=\s*["\']?([^"\'\s>]+)["\']?', html, re.IGNORECASE)
+    if m and m.group(1): return m.group(1)
+    m = re.search(r'value\s*=\s*["\']?([^"\'\s>]+)["\'].*?name\s*=\s*["\']?wimToken["\']?', html, re.IGNORECASE)
+    if m and m.group(1): return m.group(1)
+    return ""
+
+def logout(session: requests.Session):
+    print("[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...")
+    try:
+        session.get(f"{BASE_URL}/web/entry/en/websys/webArch/logout.cgi", timeout=5)
+        session.get(f"{BASE_URL}/web/guest/en/websys/webArch/logout.cgi", timeout=5)
+        session.cookies.clear()
+    except:
+        pass
+
+def login() -> requests.Session:
+    session = requests.Session()
+    print(f"[*] Đang lấy form đăng nhập từ {IP}...")
+    form_url = f"{BASE_URL}/web/guest/en/websys/webArch/authForm.cgi"
+    resp = session.get(form_url, timeout=10)
+    wim_token = extract_wim_token(resp.text)
+    
+    login_url = f"{BASE_URL}/web/guest/en/websys/webArch/login.cgi"
+    encoded_user = base64.b64encode(USER.encode()).decode()
+    encoded_pass = base64.b64encode(PASSWORD.encode()).decode()
+    
+    data = {
+        "userid": encoded_user,
+        "username": encoded_user,
+        "password": encoded_pass,
+        "wimToken": wim_token,
+        "open": "websys/webArch/authForm.cgi"
+    }
+    print("[*] Đang gửi thông tin đăng nhập...")
+    r_login = session.post(login_url, data=data, headers={"Referer": form_url}, timeout=10)
+    
+    r_text = r_login.text or ""
+    fail_keywords = ["Authentication has failed", "not correct", "loginFailed", "Authentication failed", "Login failed"]
+    if any(kw.lower() in r_text.lower() for kw in fail_keywords):
+        print(f"  [!] WIM Login HTTP Status: {r_login.status_code}")
+        print(f"  [!] WIM Login Response Snippet: {r_text[:300].strip()}")
+        raise RuntimeError(f"Authentication failed: Đăng nhập Ricoh WIM thất bại (IP={IP}, User={USER}). Sai tài khoản hoặc mật khẩu!")
+    
+    verify_url = f"{BASE_URL}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+    verify_resp = session.get(verify_url, timeout=10)
+    v_text = verify_resp.text or ""
+    if "modeIn=login" in v_text or ("authForm.cgi" in v_text and "modeIn=LIST_ALL" not in v_text):
+        print(f"  [!] WIM Session Verification Failed for IP={IP}")
+        raise RuntimeError(f"Authentication failed: Đăng nhập Ricoh WIM thất bại (IP={IP}, User={USER}). Sai tài khoản hoặc mật khẩu!")
+        
+    return session
+==================================================
+=== COMMAND: ricoh_list_scan ===
+import requests
+import re
+import base64
+import json
+import sys
+import time
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+IP = "__TARGET_IP__"
+USER = "__TARGET_USER__"
+PASSWORD = "__TARGET_PASS__"
+BASE_URL = f"http://{IP}"
+
+print("==================================================")
+print(f"  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: {IP}")
+print("==================================================")
+print(f"[1/4] Khởi tạo cấu hình: IP={IP}, USER={USER}")
+
+def format_ricoh_folder(val: str) -> str:
+    if not val:
+        return ""
+    val = val.strip()
+    bs = chr(92)
+    if ":/" in val and not val.lower().startswith("ftp") and bs not in val:
+        parts = val.split(":/", 1)
+        host = parts[0].strip()
+        path = parts[1].strip()
+        if not path.startswith("/"):
+            path = "/" + path
+        return f"ftp://{host}:2130{path}"
+    return val
+
+
+# __RICOH_LOGIN__
+# __RICOH_LIST__
+
+def fetch_list():
+    sess = login()
+    try:
+        print(f"[3/4] Truy cập danh mục 'To Address List' từ Ricoh {IP}...")
+        list_url = f"{BASE_URL}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+        resp = sess.get(list_url, timeout=10)
+        html_text = resp.text
+        wim_token = extract_wim_token(html_text)
+        
+        if not wim_token or "authForm.cgi" in html_text:
+            print("  [i] Thử lại đăng nhập...")
+            sess = login()
+            resp = sess.get(list_url, timeout=10)
+            html_text = resp.text
+            wim_token = extract_wim_token(html_text)
+
+        if not wim_token or "authForm.cgi" in html_text:
+            raise RuntimeError(f"Phiên đăng nhập Ricoh WIM hết hạn hoặc không có quyền xem danh bạ (IP={IP})!")
+
+        entries = []
+        if wim_token:
+            ajax_url = f"{BASE_URL}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={wim_token}"
+            ajax_resp = sess.get(ajax_url, timeout=10)
+            if ajax_resp.status_code == 200 and "[" in ajax_resp.text:
+                entries = parse_ajax_address_list(ajax_resp.text)
+
+        if not entries and html_text:
+            print("  [i] Parse danh bạ từ HTML table...")
+            entries = parse_html_address_list(html_text)
+            
+        for entry in entries:
+            if "folder" in entry:
+                entry["folder"] = format_ricoh_folder(entry["folder"])
+
+        print(f"[4/4] TỔNG CỘNG LẤY ĐƯỢC: {len(entries)} MỤC TRÊN MÁY PHOTOCOPY RICOH:")
+        print("--------------------------------------------------")
+        for idx, item in enumerate(entries, 1):
+            print(f"  #{idx:02d} | Mã ĐK: {item['registration_no']} | Tên: {item['name']} | ID: {item['entry_id']}")
+        print("--------------------------------------------------")
+
+        output_payload = {
+            "status": "success",
+            "count": len(entries),
+            "address_list": entries
+        }
+        print(f"__ADDRESS_BOOK_JSON_START__\n{json.dumps(output_payload, ensure_ascii=False)}\n__ADDRESS_BOOK_JSON_END__")
+
+    finally:
+        logout(sess)
+        print("  [✓] Đã hoàn tất và đăng xuất.")
+
+
+try:
+    fetch_list()
+except Exception as err:
+    print("")
+    print(f"[-] LỖI THỰC THI QUÉT DANH BẠ: {err}")
+    output_payload = {
+        "status": "error",
+        "error": str(err),
+        "count": 0,
+        "address_list": []
+    }
+    print(f"__ADDRESS_BOOK_JSON_START__\n{json.dumps(output_payload, ensure_ascii=False)}\n__ADDRESS_BOOK_JSON_END__")
+    sys.exit(1)
+print("==================================================")
+==================================================
+=== COMMAND: ricoh_list_helper ===
+def strip_html(text: str) -> str:
+    if not text: return ""
+    result = []
+    in_tag = False
+    for char in text:
+        if char == '<':
+            in_tag = True
+        elif char == '>':
+            in_tag = False
+        elif not in_tag:
+            result.append(char)
+    clean = "".join(result)
+    return clean.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').strip()
+
+def parse_javascript_array_fields(data: str) -> list:
+    fields = []
+    current = []
+    in_quotes = False
+    quote_char = ""
+    escaped = False
+    bs = chr(92)
+    for char in data:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == bs:
+            current.append(char)
+            escaped = True
+            continue
+        if char in {"'", '"'}:
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+            elif char == quote_char:
+                in_quotes = False
+            else:
+                current.append(char)
+            continue
+        if char == "," and not in_quotes:
+            fields.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    fields.append("".join(current).strip())
+    return fields
+
+def parse_ajax_address_list(data: str) -> list:
+    entries = []
+    raw = str(data or "").strip()
+    if not raw: return entries
+    first = raw.find("[[")
+    last = raw.rfind("]]")
+    if first < 0 or last <= first:
+        first = raw.find("[")
+        last = raw.rfind("]")
+        if first < 0 or last <= first: return entries
+        inner = raw[first+1 : last]
+    else:
+        inner = raw[first+2 : last]
+    
+    rows = inner.split("],[")
+    for raw_row in rows:
+        raw_row = raw_row.strip("[]")
+        fields = parse_javascript_array_fields(raw_row)
+        if len(fields) < 4:
+            continue
+        raw_entry_id = fields[0].strip().strip("'\"")
+        reg_no = fields[2].strip("'\"") if len(fields) > 2 else ""
+        name = fields[3].strip("'\"") if len(fields) > 3 else ""
+        email = fields[6].strip("'\"") if len(fields) > 6 else ""
+        folder = fields[7].strip("'\"") if len(fields) > 7 else ""
+        if name or reg_no:
+            entries.append({
+                "entry_id": raw_entry_id,
+                "registration_no": reg_no,
+                "name": name,
+                "email_address": email,
+                "folder": folder
+            })
+    return entries
+
+def parse_html_address_list(html: str) -> list:
+    entries = []
+    start_tbody = html.find('<tbody id="ReportListArea_TableBody">')
+    if start_tbody < 0:
+        return entries
+    end_tbody = html.find('</tbody>', start_tbody)
+    if end_tbody < 0:
+        return entries
+    tbody = html[start_tbody : end_tbody]
+    
+    bs = chr(92)
+    rows = tbody.split('<tr')
+    for row in rows:
+        if 'reportListDummyRow' in row or 'reportListHeader' in row:
+            continue
+        entry_id = ""
+        idx = row.find('entryIndex')
+        if idx >= 0:
+            val_idx = row.find('value=', idx)
+            if val_idx >= 0:
+                q = row[val_idx+6]
+                if q in ('"', "'"):
+                    end_q = row.find(q, val_idx+7)
+                    if end_q >= 0:
+                        entry_id = row[val_idx+7 : end_q]
+        
+        cells = []
+        td_idx = 0
+        while True:
+            td_start = row.find('<td', td_idx)
+            if td_start < 0:
+                break
+            content_start = row.find('>', td_start) + 1
+            td_end = row.find('</td>', content_start)
+            if td_end < 0:
+                break
+            cells.append(strip_html(row[content_start : td_end]))
+            td_idx = td_end + 5
+            
+        if len(cells) < 2:
+            continue
+            
+        reg_no = ""
+        p_name = ""
+        email = ""
+        folder = ""
+        for c in cells:
+            if not reg_no and (c.isdigit() or (len(c) <= 4 and c != "-")):
+                reg_no = c
+            elif "@" in c and not email:
+                email = c
+            elif ("/" in c or bs in c) and not folder:
+                folder = c
+            elif c and c != "-" and not p_name and c not in ("User", "Group", "Summary"):
+                p_name = c
+        if p_name or reg_no:
+            entries.append({
+                "entry_id": entry_id,
+                "registration_no": reg_no or "001",
+                "name": p_name or "ScanUser",
+                "email_address": email,
+                "folder": folder
+            })
+    return entries
+
+def auto_sync_address_book(session: requests.Session):
+    try:
+        print("[*] Đang tự động quét lại danh bạ máy in...")
+        list_url = f"{BASE_URL}/web/entry/en/address/adrsList.cgi?modeIn=LIST_ALL"
+        resp = session.get(list_url, timeout=10)
+        html_text = resp.text
+        wim_token = extract_wim_token(html_text)
+        
+        if not wim_token or "authForm.cgi" in html_text:
+            print("  [i] Phiên làm việc hết hạn, thử đăng nhập lại để quét...")
+            session = requests.Session()
+            session.get(f"{BASE_URL}/web/guest/en/websys/webArch/logout.cgi", timeout=5)
+            time.sleep(1.0)
+            form_url = f"{BASE_URL}/web/guest/en/websys/webArch/authForm.cgi"
+            r_form = session.get(form_url, timeout=10)
+            wt = extract_wim_token(r_form.text)
+            encoded_user = base64.b64encode(USER.encode()).decode()
+            encoded_pass = base64.b64encode(PASSWORD.encode()).decode()
+            data = {"userid": encoded_user, "username": encoded_user, "password": encoded_pass, "wimToken": wt, "open": "websys/webArch/authForm.cgi"}
+            session.post(f"{BASE_URL}/web/guest/en/websys/webArch/login.cgi", data=data, headers={"Referer": form_url}, timeout=10)
+            
+            resp = session.get(list_url, timeout=10)
+            html_text = resp.text
+            wim_token = extract_wim_token(html_text)
+
+        entries = []
+        if wim_token:
+            ajax_url = f"{BASE_URL}/web/entry/en/address/adrsListLoadEntry.cgi?listCountIn=200&getCountIn=1&wimToken={wim_token}"
+            ajax_resp = session.get(ajax_url, timeout=10)
+            if ajax_resp.status_code == 200 and "[" in ajax_resp.text:
+                entries = parse_ajax_address_list(ajax_resp.text)
+
+        if not entries and html_text:
+            entries = parse_html_address_list(html_text)
+
+        print(f"[*] TỔNG CỘNG LẤY ĐƯỢC: {len(entries)} MỤC TRÊN MÁY PHOTOCOPY RICOH:")
+        print("--------------------------------------------------")
+        for idx, item in enumerate(entries, 1):
+            print(f"  #{idx:02d} | Mã ĐK: {item['registration_no']} | Tên: {item['name']} | ID: {item['entry_id']}")
+        print("--------------------------------------------------")
+
+        output_payload = {
+            "status": "success",
+            "count": len(entries),
+            "address_list": entries
+        }
+        print(f"__ADDRESS_BOOK_JSON_START__\n{json.dumps(output_payload, ensure_ascii=False)}\n__ADDRESS_BOOK_JSON_END__")
+    except Exception as list_err:
+        print(f"[-] Lỗi quét danh bạ tự động: {list_err}")
+==================================================

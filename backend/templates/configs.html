@@ -1,34 +1,232 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel">
-  <h3>Display Configuration</h3>
-  <div class="config-grid">
-    <label>Chart Columns
-      <input id="cfg-chart-columns" type="number" min="1" max="4" value="2" />
-    </label>
-    <label>Timelapse Card Columns
-      <input id="cfg-card-columns" type="number" min="1" max="8" value="5" />
-    </label>
-    <label>Timelapse Card Rows
-      <input id="cfg-card-rows" type="number" min="1" max="20" value="4" />
-    </label>
-    <label>Pages Window
-      <input id="cfg-pages-window" type="number" min="1" max="365" value="30" />
-    </label>
-    <label>Paging Per Day
-      <select id="cfg-paging-per-day">
-        <option value="1" selected>enabled</option>
-        <option value="0">disabled</option>
-      </select>
-    </label>
-    <label>Auto Refresh Seconds
-      <input id="cfg-auto-refresh" type="number" min="5" max="600" value="60" />
-    </label>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  .settings-container {
+    max-width: 900px;
+    margin: 0 auto;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .settings-card {
+    background: rgba(22, 27, 34, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  }
+  .settings-card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #60a5fa;
+    margin: 0 0 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 10px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-label {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #e5e7eb;
+  }
+  .form-desc {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    line-height: 1.4;
+  }
+  .form-input {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  }
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .btn-save {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 28px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-save:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+  }
+  .toast-alert {
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .toast-success {
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+  }
+  .toast-error {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+  }
+</style>
+
+<div class="settings-container">
+  <h2 style="font-size: 1.5rem; font-weight: 800; color: #ffffff; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+    ⚙️ System Settings (Cấu hình hệ thống Server, Agent & UI)
+  </h2>
+
+  <div id="settings-toast" class="toast-alert"></div>
+
+  <!-- VPS Server Settings -->
+  <div class="settings-card">
+    <h3 class="settings-card-title">🖥️ VPS Server Settings (Cấu hình lưu trữ dữ liệu Server)</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label" for="scan_point_retention_days">Thời hạn lưu giữ danh bạ ScanPoint (ngày)</label>
+        <input type="number" id="scan_point_retention_days" class="form-input" min="1" max="365" value="30">
+        <span class="form-desc">Số ngày tối đa lưu giữ các bản ghi danh bạ máy in <code>ScanPoint</code> trên PostgreSQL VPS trước khi tự động dọn dẹp (Mặc định: 30 ngày).</span>
+      </div>
+    </div>
   </div>
-  <div class="config-actions">
-    <button id="cfg-save" class="filter-btn" type="button">Save</button>
-    <button id="cfg-reset" class="filter-btn ghost" type="button">Reset Default</button>
+
+  <!-- Agent Polling Intervals -->
+  <div class="settings-card">
+    <h3 class="settings-card-title">📡 Agent Polling Intervals (Cấu hình 2 Vòng Polling của Agent)</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label" for="control_interval_seconds">1. Vòng Polling Lệnh / Control (giây)</label>
+        <input type="number" id="control_interval_seconds" class="form-input" min="1" max="60" value="1" step="0.5">
+        <span class="form-desc">Tần suất Agent kết nối về VPS để nhận và xử lý ngay lập tức các lệnh điều khiển khẩn cấp (Mặc định: 1 giây).</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="device_interval_seconds">2. Vòng Polling Thiết bị / Máy in (giây)</label>
+        <input type="number" id="device_interval_seconds" class="form-input" min="5" max="3600" value="60">
+        <span class="form-desc">Tần suất Agent quét mạng LAN, kiểm tra trạng thái máy photocopy và cập nhật danh bạ (Mặc định: 60 giây).</span>
+      </div>
+    </div>
   </div>
-  <div id="cfg-note" class="meta-line">No changes yet.</div>
-</section>
+
+  <!-- Frontend UI Refresh Polling -->
+  <div class="settings-card">
+    <h3 class="settings-card-title">💻 Frontend UI Refresh Polling (Cấu hình Vòng Polling Làm mới Màn hình)</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label" for="ui_refresh_interval_seconds">3. Vòng Polling UI Refresh (giây)</label>
+        <input type="number" id="ui_refresh_interval_seconds" class="form-input" min="1" max="300" value="5">
+        <span class="form-desc">Tần suất màn hình Giao diện Web / App tự động làm mới dữ liệu và vẽ lại địa chỉ IP, trạng thái máy in (Mặc định: 5 giây).</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-actions">
+    <button type="button" id="btn-save-settings" class="btn-save">
+      💾 Lưu cấu hình hệ thống
+    </button>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const toast = document.getElementById('settings-toast');
+  const btnSave = document.getElementById('btn-save-settings');
+
+  function showToast(msg, isError = false) {
+    toast.textContent = msg;
+    toast.className = 'toast-alert ' + (isError ? 'toast-error' : 'toast-success');
+    toast.style.display = 'block';
+    setTimeout(() => {
+      toast.style.display = 'none';
+    }, 4000);
+  }
+
+  // Load current settings from VPS API
+  fetch('/api/system-settings')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok && data.settings) {
+        const s = data.settings;
+        if (s.scan_point_retention_days) document.getElementById('scan_point_retention_days').value = s.scan_point_retention_days;
+        if (s.control_interval_seconds) document.getElementById('control_interval_seconds').value = s.control_interval_seconds;
+        if (s.device_interval_seconds) document.getElementById('device_interval_seconds').value = s.device_interval_seconds;
+        if (s.ui_refresh_interval_seconds) document.getElementById('ui_refresh_interval_seconds').value = s.ui_refresh_interval_seconds;
+      }
+    })
+    .catch(err => console.error('Failed to load settings:', err));
+
+  // Save settings via POST
+  btnSave.addEventListener('click', function() {
+    const payload = {
+      scan_point_retention_days: parseInt(document.getElementById('scan_point_retention_days').value) || 30,
+      control_interval_seconds: parseFloat(document.getElementById('control_interval_seconds').value) || 1,
+      device_interval_seconds: parseInt(document.getElementById('device_interval_seconds').value) || 60,
+      ui_refresh_interval_seconds: parseInt(document.getElementById('ui_refresh_interval_seconds').value) || 5,
+    };
+
+    btnSave.disabled = true;
+    btnSave.textContent = '⏳ Đang lưu...';
+
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+      btnSave.disabled = false;
+      btnSave.textContent = '💾 Lưu cấu hình hệ thống';
+      if (data.ok) {
+        showToast('✅ Đã lưu toàn bộ cấu hình hệ thống (3 Vòng Polling & VPS) thành công!');
+      } else {
+        showToast('❌ Lỗi lưu cấu hình: ' + (data.error || 'Thất bại'), true);
+      }
+    })
+    .catch(err => {
+      btnSave.disabled = false;
+      btnSave.textContent = '💾 Lưu cấu hình hệ thống';
+      showToast('❌ Lỗi kết nối: ' + err.message, true);
+    });
+  });
+});
+</script>
 {% endblock %}

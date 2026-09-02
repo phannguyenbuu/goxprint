@@ -1,0 +1,9 @@
+ID: 648605 | Status: success
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+
+1

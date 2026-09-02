@@ -17,6 +17,9 @@ printagent/vps_journal_dump.txt
 *.log
 __pycache__/
 .claude/
+*.bak
+*.tar.gz
+gitlog.txt
 
 GoxAgent/.build-venv/
 GoxAgent/build/

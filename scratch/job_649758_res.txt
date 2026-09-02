@@ -1,0 +1,13 @@
+ID: 649758 | Name: AgentNode | IP: 0.0.0.0 | Status: success | CmdType: trigger_utility
+Requested: 2026-08-31 14:47:16.675752+07:00 | Responded: 2026-08-31 14:47:40.149045+07:00
+LOG / ERROR OUTPUT:
+==================================================
+  [RICOH EXEC] XÓA ĐIỂM SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/5] Cấu hình tham số:
+  - IP Máy in   : 192.168.1.226
+  - Đăng nhập   : admin
+  - Target ID   : 126
+  - Target Name : 
+  - Base URL    : http://192.168.1.226
+[*] Đang đăng xuất để giải phóng phiên làm việc...

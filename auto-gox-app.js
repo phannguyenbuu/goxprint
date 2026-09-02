@@ -49,12 +49,19 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Download Agent Card Button & Modal Handler
     const btnDownloadBigCta = document.getElementById('btn-download-agent-big-cta');
+    const btnHeaderDownload = document.getElementById('btn-header-download');
     const btnCopyLan = document.getElementById('btn-copy-lan');
     const warningModal = document.getElementById('download-warning-modal');
     const btnCloseWarning = document.getElementById('btn-close-warning-modal');
 
     if (btnDownloadBigCta && warningModal) {
       btnDownloadBigCta.addEventListener('click', () => {
+        warningModal.style.display = 'flex';
+      });
+    }
+
+    if (btnHeaderDownload && warningModal) {
+      btnHeaderDownload.addEventListener('click', () => {
         warningModal.style.display = 'flex';
       });
     }

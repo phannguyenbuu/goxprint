@@ -1,0 +1,136 @@
+=== JOB 648721 ===
+ID: 648721 | Name: RICOH MP 7503 | IP: 192.168.1.226 | Status: failed | User: 'admin' | Pass: 'admin' | Time: 2026-08-31 13:31:04.958656+07:00
+Err/Output:
+ ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+  [!] WIM Login HTTP Status: 200
+  [!] WIM Login Response Snippet: <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Frameset//EN">
+<html lang="en">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>Login</title>
+    <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+    <style type="text/css">
+body{
+	font: normal
+
+[-] LỖI THỰC THI QUÉT DANH BẠ: Authentication failed: Đăng nhập Ricoh WIM thất bại (IP=192.168.1.226, User=admin). Sai tài khoản hoặc mật khẩu!
+__ADDRESS_BOOK_JSON_START__
+{"status": "error", "error": "Authentication failed: Đăng nhập Ricoh WIM thất bại (IP=192.168.1.226, User=admin). Sai tài khoản hoặc mật khẩu!", "count": 0, "address_list": []}
+__ADDRESS_BOOK_JSON_END__
+
+1
+Params:
+ {"action": "exec_utility", "command": "ricoh_list_scan", "command_content": "import requests\nimport re\nimport base64\nimport json\nimport sys\nimport time\n\nif hasattr(sys.stdout, \"reconfigure\"):\n    sys.stdout.reconfigure(encoding=\"utf-8\")\n\nIP = \"192.168.1.226\"\nUSER = \"admin\"\nPASSWORD = \"admin\"\nBASE_URL = f\"http://{IP}\"\n\nprint(\"==================================================\")\nprint(f\"  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: {IP}\")\nprint(\"==================================================\")\nprint(f\"[1/4] Khởi tạo cấu hình: IP={IP}, USER={USER}\")\n\ndef format_ricoh_folder(val: str) -> str:\n    if not val:\n        return \"\"\n    val = val.strip()\n    bs = chr(92)\n    if \":/\" in val and not val.lower().startswith(\"ftp\") and bs not in val:\n        parts = val.split(\":/\", 1)\n        host = parts[0].strip()\n        path = parts[1].strip()\n        if not path.startswith(\"/\"):\n            path = \"/\" + path\n        return f\"ftp://{host}:2130{path}\"\n    return val\n\n\ndef extract_wim_token(html: str) -> str:\n    if not html: return \"\"\n    m = re.search(r'wimToken\\s*[:=]\\s*[\"\\']?([^\"\\'\\s;>]+)[\"\\']?', html, re.IGNORECASE)\n    if m and m.group(1): return m.group(1)\n    m = re.search(r'name\\s*=\\s*[\"\\']?wimToken[\"\\']?[^>]*?value\\s*=\\s*[\"\\']?([^\"\\'\\s>]+)[\"\\']?', html, re.IGNORECASE)\n    if m and m.group(1): return m.group(1)\n    m = re.search(r'value\\s*=\\s*[\"\\']?([^\"\\'\\s>]+)[\"\\']
+
+==================================================
+
+=== SEARCHING FOR 64676 OR SIMILAR ===
+ID: 646767 | Name: AgentNode | IP: 0.0.0.0 | Status: success | User: '' | Pass: '' | Time: ==================================================
+  [QUÉT MẠNG LAN 3 BƯỚC FULL 254 IP] 2026-08-31 11:00:30
+==================================================
+[*] Dải subnet mục tiêu: 192.168.111.1 -> 192.168.111.254 (Bảng ARP có 9 MAC)
+[*] Đang quét đồng thời 254 IP (192.168.111.1 -> 254)...
+[Bước 1 OK] IP 192.168.111.1: Phản hồi kết nối thành công (ARP/Socket).
+[Bước 2 OK] IP 192.168.111.1: Cổng 9100=False, Cổng 80=True.
+[-] IP 192.168.111.1: Cổng 9100 đóng và không truy cập được WIM/Web UI máy in hợp lệ -> Bỏ qua.
+[Bước 1 OK] IP 192.168.111.34: Phản hồi kết nối thành công (ARP/Socket).
+[Bước 2 OK] IP 192.168.111.34: Cổng 9100=False, Cổng 80=True.
+[✓] [Bước 3 Thành Công] IP 192.168.111.34 -> Tên máy in: 'CasaOS' (GENERIC) | MAC: 02:3D:5F:C5:E3:EF
+[Bước 1 OK] IP 192.168.111.87: Phản hồi kết nối thành công (ARP/Socket).
+[Bước 2 FAIL] IP 192.168.111.87: Cổng 9100 & 80 đều đóng -> Bỏ qua.
+[Bước 1 OK] IP 192.168.111.223: Phản hồi kết nối thành công (ARP/Socket).
+[Bước 2 FAIL] IP 192.168.111.223: Cổng 9100 & 80 đều đóng -> Bỏ qua.
+==================================================
+[✓] HOÀN TẤT QUÉT 254 IP. TÌM THẤY 1 MÁY IN HỢP LỆ!
+==================================================
+__PRINTERS_JSON_START__
+[
+  {
+    "name": "CasaOS",
+    "printer_name": "CasaOS",
+    "ip": "192.168.111.34",
+    "mac_address": "02:3D:5F:C5:E3:EF",
+    "printer_type": "generic",
+    "is_online": true,
+    "status": "online",
+    "probed": true,
+    "port_9100_open": false,
+    "port_80_open": true,
+    "user": "admin",
+    "password": "",
+    "auth_user": "admin",
+    "auth_password": "",
+    "updated_at": "2026-08-31 11:00:31"
+  }
+]
+__PRINTERS_JSON_END__
+
+[
+  {
+    "name": "CasaOS",
+    "printer_name": "CasaOS",
+    "ip": "192.168.111.34",
+    "mac_address": "02:3D:5F:C5:E3:EF",
+    "printer_type": "generic",
+    "is_online": true,
+    "status": "online",
+    "probed": true,
+    "port_9100_open": false,
+    "port_80_open": true,
+    "user": "admin",
+    "password": "",
+    "auth_user": "admin",
+    "auth_password": "",
+    "updated_at": "2026-08-31 11:00:31"
+  }
+]
+ID: 646766 | Name: RICOH MP 6503 | IP: 192.168.1.222 | Status: success | User: 'admin' | Pass: 'admin' | Time: ==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.222, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.222...
+[*] Đang gửi thông tin đăng nhập...
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.222...
+[4/4] TỔNG CỘNG LẤY ĐƯỢC: 3 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan222 | ID: 1
+  #02 | Mã ĐK: 00003 | Tên: svs-009 | ID: 3
+  #03 | Mã ĐK: 00004 | Tên: Scangox_1788068771 | ID: 4
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__\n{"status": "success", "count": 3, "address_list": [{"entry_id": "1", "registration_no": "00001", "name": "scan222", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "3", "registration_no": "00003", "name": "svs-009", "email_address": "", "folder": "ftp://192.168.1.111:2130/svs-009"}, {"entry_id": "4", "registration_no": "00004", "name": "Scangox_1788068771", "email_address": "", "folder": "ftp://192.168.1.111:2130/Scangox_1788068771"}]}\n__ADDRESS_BOOK_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...
+  [✓] Đã hoàn tất và đăng xuất.
+==================================================
+ID: 646764 | Name: RICOH MP 6503 | IP: 192.168.1.222 | Status: success | User: 'admin' | Pass: 'admin' | Time: ==================================================
+  [RICOH EXEC] TẠO ĐIỂM SCAN PHOTOCOPY - IP: 192.168.1.222
+==================================================
+[*] Đã nhận cấu hình từ Agent Bridge: FTP=192.168.1.99:2130
+[*] Đang lấy form đăng nhập từ 192.168.1.222...
+[*] Đang gửi thông tin đăng nhập...
+[*] Đang chuẩn bị tạo điểm scan FOLDER (FTP)...
+[*] Đang tính toán mã ĐK tiếp theo...
+[*] Mã ĐK tiếp theo sẽ là: 00005
+[*] Đang khởi tạo phiên giao dịch Wizard...
+[*] Đang gửi yêu cầu Bước 1 (BASE) với ID 00005...
+[*] Đang gửi yêu cầu Bước 2 (FOLDER - FTP)...
+[*] Đang gửi yêu cầu Bước 3 (CONFIRM)...
+[*] Đang đóng quá trình để lưu (Simulate Back)...
+[+] Yêu cầu Đã được lưu (CONFIRM) thành công! Hãy kiểm tra lại máy in.
+[*] Chờ 3 giây để máy photo cập nhật bộ nhớ đệm trước khi đồng bộ...
+[*] Đang tự động quét lại danh bạ máy in...
+[*] TỔNG CỘNG LẤY ĐƯỢC: 3 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan222 | ID: 1
+  #02 | Mã ĐK: 00003 | Tên: svs-009 | ID: 3
+  #03 | Mã ĐK: 00004 | Tên: Scangox_1788068771 | ID: 4
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__
+{"status": "success", "count": 3, "address_list": [{"entry_id": "1", "registration_no": "00001", "name": "scan222", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "3", "registration_no": "00003", "name": "svs-009", "email_address": "", "folder": "192.168.1.111:/svs-009"}, {"entry_id": "4", "registration_no": "00004", "name": "Scangox_1788068771", "email_address": "", "folder": "192.168.1.111:/Scangox_1788068771"}]}
+__ADDRESS_BOOK_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...
+==================================================

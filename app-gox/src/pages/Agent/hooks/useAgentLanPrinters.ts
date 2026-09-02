@@ -1,16 +1,19 @@
 // @ts-nocheck
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { fetchApi, getLanSites, saveCopierCredentials, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
+import { fetchApi, getCommandStatus, getLanSites, purgeLanPrinters, saveCopierCredentials, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 
 export const useAgentLanPrinters = (deps: any = {}) => {
-  const { showToast, pollCommandStatus, utilityCommands } = deps;
+  const { showToast, pollCommandStatus, utilityCommands, activeTab } = deps;
 
   const [lanSites, setLanSites] = useState<any[]>([]);
   const [selectedPublicIp, setSelectedPublicIp] = useState<string>(() => {
+    // Preference: restore IP user đã nhập lần trước (không phải IoT data)
     return localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '';
   });
-  const [selectedLanUid, setSelectedLanUid] = useState<string>(() => {
-    return localStorage.getItem('goxprint_selected_lan_uid') || '';
+  // Fix B: không init từ localStorage — luôn auto-detect từ data mới sau fetch
+  const [selectedLanUid, setSelectedLanUid] = useState<string>('');
+  const [targetInternalIp, setTargetInternalIp] = useState<string>(() => {
+    return localStorage.getItem('goxprint_target_internal_ip') || '';
   });
   const [lanSitesLoading, setLanSitesLoading] = useState(false);
 
@@ -58,14 +61,21 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
   const autoScanTriggers = useRef<Record<string, number>>({});
 
-  const initialLastViewedId = useMemo(() => {
-    return localStorage.getItem('goxprint_last_viewed_copier_id');
-  }, []);
+  // Fix F: useState thay useMemo(deps=[]) — rõ ràng hơn về việc chỉ capture một lần khi mount
+  const [lastViewedId] = useState<string | null>(() =>
+    localStorage.getItem('goxprint_last_viewed_copier_id')
+  );
+
+  // Fix C: ref để fetchLanSitesData luôn đọc selectedPublicIp hiện tại mà không cần deps
+  const selectedPublicIpRef = useRef(selectedPublicIp);
+  useEffect(() => { selectedPublicIpRef.current = selectedPublicIp; }, [selectedPublicIp]);
+
 
   const fetchLanSitesData = useCallback(async (isUserRefresh = false) => {
     if (isUserRefresh) setLanSitesLoading(true);
     try {
-      const data = await getLanSites();
+      // Fix C: truyền IP từ ref (không đọc localStorage) — VPS filter theo IP state hiện tại
+      const data = await getLanSites(selectedPublicIpRef.current || undefined);
       const rows = data?.rows || (Array.isArray(data) ? data : []);
       setLanSites(rows);
 
@@ -74,8 +84,8 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         if (clientIp) setMyClientIp(clientIp);
         const isAllowed = Boolean(data?.is_allowed);
         const activePublicIps = data?.active_public_ips || [];
-        const overrideConnectIp = (localStorage.getItem('gox_connect_public_ip') || '').trim();
-        const effectiveIp = overrideConnectIp || clientIp;
+        // Fix C: dùng ref thay vì localStorage
+        const effectiveIp = selectedPublicIpRef.current || clientIp;
 
         const matchedAgents: any[] = [];
         rows.forEach((site: any) => {
@@ -89,14 +99,14 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         });
 
         const isSameNetwork = matchedAgents.length > 0;
-        const hasAccess = Boolean(overrideConnectIp) || isAllowed || isSameNetwork;
+        const hasAccess = Boolean(selectedPublicIpRef.current) || isAllowed || isSameNetwork;
 
         console.log('==================================================');
         console.log('🌐 [PUBLIC IP ACCESS CONTROL CHECK]');
         console.log('📌 IP Public hiện tại của trình duyệt:', clientIp);
-        if (overrideConnectIp) console.log('⚡ IP Public do người dùng chỉ định kết nối:', overrideConnectIp);
+        if (selectedPublicIpRef.current) console.log('⚡ IP Public do người dùng chỉ định kết nối:', selectedPublicIpRef.current);
         console.log('🛡️ Danh sách Public IP đang Active trên Server:', activePublicIps);
-        console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', (isAllowed || overrideConnectIp) ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
+        console.log('✅ Quyền truy cập toàn bộ LAN (Is Whitelisted/Allowed):', (isAllowed || selectedPublicIpRef.current) ? 'CÓ (FULL ACCESS)' : 'KHÔNG (LIMITED BY AGENT PUBLIC IP)');
         console.log('💻 Danh sách Agent có cùng Public IP:', matchedAgents.length > 0 ? matchedAgents : (hasAccess ? 'Đang mở Full LAN (Tất cả Agent)' : 'Không tìm thấy Agent cùng IP'));
         console.log('==================================================');
 
@@ -123,8 +133,8 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       }
 
       if (rows.length > 0) {
-        setSelectedLanUid((prev) => {
-          const activeIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+        setSelectedLanUid(() => {
+          const activeIp = selectedPublicIpRef.current.trim();
           if (activeIp) {
             const matchedSite = rows.find((s: any) => {
               const pubIp = (s.public_ip || s.wan_ip || '').trim();
@@ -135,38 +145,45 @@ export const useAgentLanPrinters = (deps: any = {}) => {
               localStorage.setItem('goxprint_selected_lan_uid', matchedSite.lan_uid);
               return matchedSite.lan_uid;
             }
+            // IP user nhập nhưng không match site nào — giữ IP làm LAN UID tạm
+            return activeIp;
           }
-          if (prev) {
-            const prevSite = rows.find((s: any) => s.lan_uid === prev);
-            if (prevSite && ((prevSite.printers && prevSite.printers.length > 0) || (prevSite.agents && prevSite.agents.length > 0))) {
-              return prev;
-            }
-          }
-
+          // Fix C: bỏ "keep prev" — luôn auto-pick site tốt nhất từ data mới
           const siteWithPrinters = rows.find((s: any) => (s.printers && s.printers.length > 0) || (s.agents && s.agents.length > 0));
           const bestUid = siteWithPrinters ? siteWithPrinters.lan_uid : rows[0].lan_uid;
           localStorage.setItem('goxprint_selected_lan_uid', bestUid);
           return bestUid;
         });
       }
-      if (isUserRefresh) showToast('Đã cập nhật danh sách mạng LAN', 'success');
+      if (isUserRefresh) showToast('Tải mạng LAN', 'success');
     } catch (err: any) {
       console.error('Failed to fetch LAN sites:', err);
-      if (isUserRefresh) showToast(`Không thể tải dữ liệu LAN: ${err.message}`, 'error');
+      if (isUserRefresh) showToast('Tải mạng LAN thất bại', 'error');
     } finally {
       setLanSitesLoading(false);
     }
   }, [showToast]);
 
+  // Fetch lần đầu khi mount
   useEffect(() => {
     fetchLanSitesData();
   }, [fetchLanSitesData]);
 
+  // Auto-refresh mỗi 60 giây — đảm bảo local_ip, trạng thái Agent, dữ liệu máy in
+  // luôn cập nhật mà không cần user thao tác thủ công
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchLanSitesData(); // silent: isUserRefresh=false → không hiện loading/toast
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchLanSitesData]);
+
   const filteredLanSites = useMemo(() => {
     if (!lanSites || lanSites.length === 0) return [];
-    const activePublicIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    // Fix D: chỉ dùng state — không đọc localStorage trong useMemo
+    const activePublicIp = selectedPublicIp.trim();
     if (activePublicIp) {
-      return lanSites.filter((site) => {
+      const filtered = lanSites.filter((site) => {
         const sitePub = (site.public_ip || site.wan_ip || '').trim();
         if (sitePub === activePublicIp) return true;
         return (site.agents || []).some((ag: any) => {
@@ -174,31 +191,133 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           return agPub === activePublicIp;
         });
       });
+      if (filtered.length > 0) return filtered;
+      // Fix D: trả về rỗng thay vì fake placeholder — UI sẽ hiện "Không tìm thấy LAN"
+      return [];
     }
     return lanSites;
   }, [lanSites, selectedPublicIp]);
 
   const selectedLan = useMemo(() => {
-    if (!lanSites || lanSites.length === 0) return null;
-    const activePublicIp = (selectedPublicIp || localStorage.getItem('goxprint_selected_public_ip') || localStorage.getItem('gox_connect_public_ip') || '').trim();
+    // Fix E: chỉ dùng state — không đọc localStorage trong useMemo
+    const activePublicIp = selectedPublicIp.trim();
     if (activePublicIp) {
-      const siteByPubIp = lanSites.find((site) => {
-        const sitePub = (site.public_ip || site.wan_ip || '').trim();
-        if (sitePub === activePublicIp) return true;
-        return (site.agents || []).some((ag: any) => {
-          const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
-          return agPub === activePublicIp;
+      if (lanSites && lanSites.length > 0) {
+        const siteByPubIp = lanSites.find((site) => {
+          const sitePub = (site.public_ip || site.wan_ip || site.lan_uid || '').trim();
+          if (sitePub === activePublicIp) return true;
+          return (site.agents || []).some((ag: any) => {
+            const agPub = (ag.public_ip || ag.wan_ip || ag.ip || '').trim();
+            return agPub === activePublicIp;
+          });
         });
-      });
-      if (siteByPubIp) return siteByPubIp;
+        if (siteByPubIp) return siteByPubIp;
+      }
+      return {
+        lead: 'default',
+        lan_uid: activePublicIp,
+        lan_name: `IP Public ${activePublicIp}`,
+        public_ip: activePublicIp,
+        wan_ip: activePublicIp,
+        active_agents: 0,
+        agents: [],
+        emails: [],
+        printers: [],
+      };
     }
+    if (!lanSites || lanSites.length === 0) return null;
     if (selectedLanUid) {
       const siteByUid = lanSites.find((site) => site.lan_uid === selectedLanUid);
-      if (siteByUid && ((siteByUid.printers && siteByUid.printers.length > 0) || (siteByUid.agents && siteByUid.agents.length > 0))) return siteByUid;
+      if (siteByUid) return siteByUid;
     }
     const siteWithPrinters = lanSites.find((site: any) => (site.printers && site.printers.length > 0) || (site.agents && site.agents.length > 0));
     return siteWithPrinters || lanSites[0];
-  }, [lanSites, selectedLanUid, selectedPublicIp]);
+  }, [lanSites, selectedPublicIp, selectedLanUid]);
+
+
+  // Helper: lấy IP của agent và cập nhật ngay vào lanSites state (không cache)
+  const fetchAndApplyAgentIp = useCallback(async (agentUid: string) => {
+    try {
+      const res = await triggerAgentUtilityExec(agentUid, 'get_agent_ip', '');
+      if (!res.ok || !res.command_id) return;
+      const cmdId = res.command_id;
+      const start = Date.now();
+      await new Promise<void>(resolve => {
+        const timer = setInterval(async () => {
+          try {
+            if (Date.now() - start > 10_000) { clearInterval(timer); resolve(); return; }
+            const status = await getCommandStatus(cmdId);
+            if (status.status === 'success' || status.status === 'failed') {
+              clearInterval(timer);
+              if (status.status === 'success') {
+                const raw = typeof status.result_payload === 'string'
+                  ? status.result_payload
+                  : JSON.stringify(status.result_payload || status.output || status.result || status);
+                const matches = raw.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g);
+                const newIp = matches ? (matches.find(ip => !ip.startsWith('127.') && ip !== '0.0.0.0') || matches[0]) : '';
+                if (newIp) {
+                  // Cập nhật UI ngay — gán lại giá trị cho IP cục bộ
+                  setLanSites((prev: any[]) => prev.map((site: any) => ({
+                    ...site,
+                    agents: (site.agents || []).map((ag: any) =>
+                      ag.agent_uid === agentUid ? { ...ag, local_ip: newIp } : ag
+                    )
+                  })));
+                }
+              }
+              resolve();
+            }
+          } catch { clearInterval(timer); resolve(); }
+        }, 800);
+      });
+    } catch (err) {
+      console.warn('[fetchAndApplyAgentIp] error:', err);
+    }
+  }, [setLanSites]);
+
+  // Ref giữ selectedLan mới nhất để tránh restart polling interval khi state thay đổi
+  const selectedLanRef = useRef(selectedLan);
+  useEffect(() => {
+    selectedLanRef.current = selectedLan;
+  }, [selectedLan]);
+
+  const activePollingAgentsRef = useRef<Set<string>>(new Set());
+
+  // Polling 5s: Khi tab "Máy tính" (activeTab === 'agents') đang active,
+  // tự động chạy get_agent_ip cho các agent đang hoạt động và gán lại giá trị cho IP cục bộ.
+  useEffect(() => {
+    if (activeTab !== 'agents') return;
+
+    let isMounted = true;
+
+    const pollAllActiveAgents = async () => {
+      if (!isMounted) return;
+      const currentAgents = selectedLanRef.current?.agents || [];
+      const activeAgents = currentAgents.filter((a: any) => a.is_agent_active && a.agent_uid);
+
+      for (const ag of activeAgents) {
+        if (!isMounted) break;
+        const uid = ag.agent_uid;
+        if (activePollingAgentsRef.current.has(uid)) continue;
+
+        activePollingAgentsRef.current.add(uid);
+        fetchAndApplyAgentIp(uid).finally(() => {
+          activePollingAgentsRef.current.delete(uid);
+        });
+      }
+    };
+
+    // Chạy 1 lần ngay khi vào tab Máy tính
+    pollAllActiveAgents();
+
+    // Lặp lại định kỳ mỗi 5 giây
+    const interval = setInterval(pollAllActiveAgents, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeTab, fetchAndApplyAgentIp]);
 
   const triggerLanScan = useCallback((lanData: any, isManual = true) => {
     if (!lanData) return;
@@ -207,7 +326,13 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
     if (isManual || !autoScanTriggers.current[currentLanUid] || now - autoScanTriggers.current[currentLanUid] > 30 * 1000) {
       autoScanTriggers.current[currentLanUid] = now;
-      
+
+      // ── Xóa sạch Printer + DeviceInfor cũ trên VPS trước khi quét ───────────
+      // Fire-and-forget: không block scan, lỗi không ảnh hưởng UX
+      purgeLanPrinters(currentLanUid).catch(err =>
+        console.warn('[triggerLanScan] purgeLanPrinters error (non-fatal):', err)
+      );
+
       const activeAgentsList = (lanData.agents || []).filter((a: any) => a.is_agent_active);
       if (activeAgentsList.length > 0) {
         activeAgentsList.sort((a: any, b: any) => {
@@ -218,12 +343,16 @@ export const useAgentLanPrinters = (deps: any = {}) => {
 
         const targetAgent = activeAgentsList[0];
         if (targetAgent && pollCommandStatus) {
-          showToast(`⏳ Agent (${targetAgent.agent_uid}) đang thực hiện quét ngầm mạng LAN...`, 'info', 6000);
+          showToast('Quét mạng LAN...', 'info', 3000);
           deps.setCommandStatus?.((prev: any) => ({
             ...prev,
-            [`scan_lan_${currentLanUid}`]: { message: '⏳ Agent đang quét ngầm mạng LAN...', isPending: true }
+            [`scan_lan_${currentLanUid}`]: { message: '⏳ Quét mạng LAN...', isPending: true }
           }));
           const a = targetAgent;
+
+          // ── Bước 0: Lấy IP mới nhất của Agent, cập nhật UI ngay (không cache) ─
+          // get_agent_ip xử lý trước force_subnet_scan (FIFO queue Agent)
+          fetchAndApplyAgentIp(a.agent_uid);
 
           const payload = {
             command: 'force_subnet_scan',
@@ -258,9 +387,14 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                         if (rawRes.includes('__PRINTERS_JSON_START__')) {
                           jsonStr = rawRes.split('__PRINTERS_JSON_START__')[1].split('__PRINTERS_JSON_END__')[0].trim();
                         } else {
-                          const jsonArrayMatch = rawRes.match(/(\[\s*\{[\s\S]*\}\s*\])/);
-                          if (jsonArrayMatch) {
-                            jsonStr = jsonArrayMatch[1];
+                          const cleanMatch = rawRes.match(/(?:^|\n)\s*(\[\s*\{[\s\S]*\}\s*\])/);
+                          if (cleanMatch) {
+                            jsonStr = cleanMatch[1];
+                          } else {
+                            const jsonArrayMatch = rawRes.match(/(\[\s*\{[\s\S]*\}\s*\])/);
+                            if (jsonArrayMatch) {
+                              jsonStr = jsonArrayMatch[1];
+                            }
                           }
                         }
                         if (jsonStr) {
@@ -274,7 +408,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                   }
                   
                   if (freshPrinters.length > 0) {
-                    showToast(`✓ Quét mạng LAN hoàn tất, tìm thấy ${freshPrinters.length} máy in!`, 'success', 4000);
+                    showToast('Lan scan done!', 'success', 4000);
                     try {
                       await fetchApi('/api/new-devices', {
                         method: 'POST',
@@ -286,13 +420,13 @@ export const useAgentLanPrinters = (deps: any = {}) => {
                     } catch (err) {}
                     fetchLanSitesData();
                   } else {
-                    showToast('✓ Quét mạng LAN hoàn tất', 'success', 4000);
+                    showToast('Lan scan done!', 'success', 4000);
                   }
                 },
                 async (_err: any) => {
-                  showToast('[-] Quét mạng LAN có lỗi', 'error', 4000);
+                  showToast('Quét mạng LAN thất bại', 'error', 4000);
                 },
-                '⏳ Đang chờ Agent hoàn tất quét ngầm mạng LAN...'
+                '⏳ Quét mạng LAN...'
               );
             }
           })
@@ -302,14 +436,14 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         }
       }
     }
-  }, [showToast, pollCommandStatus, utilityCommands]);
+  }, [showToast, pollCommandStatus, utilityCommands, fetchAndApplyAgentIp]);
 
   const filteredPrinters = useMemo(() => {
     if (!selectedLan) return [];
+    const cleanTargetIp = (targetInternalIp || '').trim().toLowerCase();
     const filtered = (selectedLan.printers || []).filter((p: any) => {
       const name = (p.printer_name || p.name || '').toLowerCase().trim();
-      const ip = (p.ip || '').trim();
-      const mac = (p.mac_address || p.mac_id || '').toUpperCase().replace(/-/g, ':');
+      const ip = (p.ip || p.printer_ip || '').toLowerCase().trim();
       if (name.includes('unknown') || name === 'unknown printer') return false;
       if (
         name.includes('pdf') ||
@@ -320,13 +454,17 @@ export const useAgentLanPrinters = (deps: any = {}) => {
       ) {
         return false;
       }
+      if (cleanTargetIp) {
+        const isMatch = ip === cleanTargetIp || ip.includes(cleanTargetIp) || (cleanTargetIp.includes('.') && ip.endsWith(cleanTargetIp));
+        if (!isMatch) return false;
+      }
       return true;
     });
 
-    if (initialLastViewedId) {
+    if (lastViewedId) {
       return [...filtered].sort((a, b) => {
-        const aMatch = String(a.id) === initialLastViewedId;
-        const bMatch = String(b.id) === initialLastViewedId;
+        const aMatch = String(a.id) === lastViewedId;
+        const bMatch = String(b.id) === lastViewedId;
         if (aMatch && !bMatch) return -1;
         if (!aMatch && bMatch) return 1;
         return 0;
@@ -334,7 +472,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     }
 
     return filtered;
-  }, [selectedLan, initialLastViewedId]);
+  }, [selectedLan, targetInternalIp, lastViewedId]);
 
   const getTargetAgentUid = useCallback((printerId: string | number) => {
     const pId = Number(printerId);
@@ -376,27 +514,9 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           const agentPushUser = p.auth_user || p.user || '';
           const agentPushPass = p.auth_password || p.password || '';
 
-          const savedLocal = (() => {
-            try {
-              const raw = localStorage.getItem(`copier_auth_${p.id}`) || (p.mac_id ? localStorage.getItem(`copier_auth_${p.mac_id}`) : null);
-              return raw ? JSON.parse(raw) : null;
-            } catch (e) {
-              return null;
-            }
-          })();
-
           const existing = next[p.id];
-          const user = (existing?.user !== undefined)
-            ? existing.user
-            : (agentPushUser !== '')
-              ? agentPushUser
-              : (savedLocal?.user !== undefined ? savedLocal.user : '');
-
-          const pass = (existing?.pass !== undefined)
-            ? existing.pass
-            : (agentPushPass !== '')
-              ? agentPushPass
-              : (savedLocal?.pass !== undefined ? savedLocal.pass : '');
+          const user = (existing?.user !== undefined) ? existing.user : agentPushUser;
+          const pass = (existing?.pass !== undefined) ? existing.pass : agentPushPass;
 
           next[p.id] = { user, pass };
         });
@@ -410,11 +530,6 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     const macId = typeof p === 'object' ? (p.mac_id || p.mac_address || '') : printerId;
     const pType = typeof p === 'object' ? (p.printer_type || p.type || '') : '';
     const creds = copierCredentials[printerId] || { user: '', pass: '' };
-
-    try {
-      localStorage.setItem(`copier_auth_${printerId}`, JSON.stringify(creds));
-      if (macId) localStorage.setItem(`copier_auth_${macId}`, JSON.stringify(creds));
-    } catch (e) {}
 
     setSaveAuthLoading((prev) => ({ ...prev, [printerId]: true }));
     try {
@@ -465,7 +580,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
         throw new Error(res.error || 'Lỗi lưu thông tin đăng nhập');
       }
     } catch (err: any) {
-      showToast(`Lỗi lưu Auth: ${err.message}`, 'error');
+      showToast('Lưu tài khoản thất bại', 'error');
       setSaveAuthLoading((prev) => ({ ...prev, [printerId]: false }));
     }
   };
@@ -496,7 +611,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     }
 
     setEditIpModalData((p) => ({ ...p, status: '⌛ Đang gửi lệnh đổi IP tới Agent...', error: '' }));
-    showToast(`Đang gửi lệnh đổi IP từ ${oldIp} ➔ ${newIp}...`, 'info', 3000);
+    showToast('Đổi IP...', 'info', 2000);
 
     try {
       const isToshiba = (copier.printer_type || copier.printer_name || '').toLowerCase().includes('toshiba');
@@ -519,7 +634,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
           res.command_id,
           `edit_ip_${copier.id}`,
           (_pollData: any) => {
-            showToast(`✓ Đã đổi IP thành công từ ${oldIp} ➔ ${newIp}!`, 'success', 5000);
+            showToast('Đổi IP', 'success', 3000);
             setLanSites((prevSites) =>
               prevSites.map((site) => ({
                 ...site,
@@ -533,21 +648,22 @@ export const useAgentLanPrinters = (deps: any = {}) => {
             setEditIpModalData((p) => ({ ...p, isOpen: false, status: '', error: '' }));
           },
           (errorMsg: any) => {
-            showToast(`[-] Lỗi đổi IP: ${errorMsg}`, 'error');
+            showToast('Đổi IP thất bại', 'error');
             setEditIpModalData((p) => ({ ...p, status: '', error: errorMsg }));
           },
-          '⏳ Agent đang cập nhật địa chỉ IP trên máy photo...'
+          '⏳ Đang cập nhật IP...'
         );
       }
     } catch (err: any) {
       setEditIpModalData((p) => ({ ...p, status: '', error: err.message || 'Lỗi không xác định' }));
-      showToast(`Lỗi gửi lệnh đổi IP: ${err.message}`, 'error');
+      showToast('Đổi IP thất bại', 'error');
     }
   };
 
   return {
     lanSites, setLanSites,
     selectedPublicIp, setSelectedPublicIp, filteredLanSites,
+    targetInternalIp, setTargetInternalIp,
     selectedLanUid, setSelectedLanUid,
     selectedLan, lanSitesLoading, setLanSitesLoading,
     fetchLanSitesData, triggerLanScan, filteredPrinters,
@@ -558,6 +674,7 @@ export const useAgentLanPrinters = (deps: any = {}) => {
     selectedTargetAgents, setSelectedTargetAgents, getTargetAgentUid, handleCopierClick,
     accessDeniedState, setAccessDeniedState,
     liveAddressBooks, setLiveAddressBooks,
+    fetchAndApplyAgentIp,
     myClientIp
   };
 };

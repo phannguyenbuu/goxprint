@@ -8,6 +8,7 @@ import { fetchApi, triggerAgentUtilityExec } from '../../../api/mockAgentApi';
 
 export interface CopierItemProps {
   handleRefetchAddressBook: (pTarget: any) => void;
+  onClearCache?: () => void;
   expandedDrivers: Record<string, boolean>;
   setExpandedDrivers?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   expandedDriverMenus: Record<string, boolean>;
@@ -26,7 +27,6 @@ export interface CopierItemProps {
   isExpanded: boolean;
   handleCopierClick: (id: string) => void;
   onlineAgents: any[];
-  detectBrand: (name: string) => string;
   showToast: (msg: string, type: 'info' | 'success' | 'error' | 'pending', dur?: number) => void;
   fetchRemotePage: (ip: string, path: string, method: string, body: any, force: boolean, agentUid: string, port: number) => void;
   setRemoteLockPrinter: React.Dispatch<React.SetStateAction<any>>;
@@ -52,7 +52,6 @@ export function CopierItem({
   isExpanded,
   handleCopierClick,
   onlineAgents,
-  detectBrand,
   showToast,
   fetchRemotePage,
   setRemoteLockPrinter,
@@ -66,6 +65,7 @@ export function CopierItem({
   handleDeleteDest,
 
   handleRefetchAddressBook,
+  onClearCache,
   expandedDrivers,
   setExpandedDrivers,
   expandedDriverMenus,
@@ -74,6 +74,7 @@ export function CopierItem({
   setPublicFtpData,
 }: CopierItemProps) {
   const [showSelectAgentModal, setShowSelectAgentModal] = React.useState(false);
+  const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [selectedAgentForSync, setSelectedAgentForSync] = React.useState<string>('');
 
   React.useEffect(() => {
@@ -94,14 +95,24 @@ export function CopierItem({
     (idKey && commandStatus?.[idKey]);
 
   const hasValidList = (obj: any) => obj && (Array.isArray(obj.address_list) || (obj.address_book_data && Array.isArray(obj.address_book_data.address_list)));
+  const getObjTime = (obj: any) => {
+    if (!obj) return 0;
+    const ts = obj.timestamp || obj.updated_at || obj.last_seen || 0;
+    const t = new Date(ts).getTime();
+    return isNaN(t) ? 0 : t;
+  };
 
-  const activeSyncObj = 
-    (hasValidList(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : null) ||
-    (hasValidList(cmdStatusObj) ? cmdStatusObj : null) ||
-    (hasValidList(sync) ? sync : null) ||
-    cmdStatusObj?.address_book_sync || cmdStatusObj || sync || {};
-  const detectedBrand = detectBrand(p.name || p.printer_name || p.ip || 'generic');
-  const brandName = detectedBrand === 'ricoh' ? 'Ricoh' : (detectedBrand === 'toshiba' ? 'Toshiba' : (detectedBrand === 'fujifilm' ? 'Fuji Xerox' : 'Generic'));
+  const dbSyncObj = hasValidList(sync) ? sync : null;
+  const cmdSyncObj = hasValidList(cmdStatusObj?.address_book_sync) ? cmdStatusObj.address_book_sync : (hasValidList(cmdStatusObj) ? cmdStatusObj : null);
+
+  const activeSyncObj = (() => {
+    if (dbSyncObj && cmdSyncObj) {
+      return getObjTime(cmdSyncObj) >= getObjTime(dbSyncObj) ? cmdSyncObj : dbSyncObj;
+    }
+    return cmdSyncObj || dbSyncObj || {};
+  })();
+  const pType = String(p.printer_type || p.type || p.name || p.printer_name || '').toLowerCase();
+  const brandName = pType.includes('ricoh') ? 'Ricoh' : (pType.includes('toshiba') ? 'Toshiba' : (pType.includes('fujifilm') ? 'Fuji Xerox' : 'Generic'));
   const modelName = p.name || p.printer_name || 'Photocopy';
 
   const effectiveDrivers = (p.suggested_drivers && Array.isArray(p.suggested_drivers)) ? p.suggested_drivers : [];
@@ -112,16 +123,13 @@ export function CopierItem({
   const rawAddressList = (() => {
     if (Array.isArray(activeSyncObj?.address_list) && activeSyncObj.address_list.length > 0) return activeSyncObj.address_list;
     if (activeSyncObj?.address_book_data && Array.isArray(activeSyncObj.address_book_data.address_list)) return activeSyncObj.address_book_data.address_list;
+    if (Array.isArray(sync?.address_list) && sync.address_list.length > 0) return sync.address_list;
+    if (sync?.address_book_data && Array.isArray(sync.address_book_data.address_list)) return sync.address_book_data.address_list;
 
     const candidates = [
-      activeSyncObj,
       activeSyncObj?.result,
       activeSyncObj?.result_payload,
       activeSyncObj?.raw,
-      cmdStatusObj?.result,
-      cmdStatusObj?.result_payload,
-      cmdStatusObj?.address_list,
-      cmdStatusObj?.address_book_sync?.address_list,
     ];
 
     for (const cand of candidates) {
@@ -143,7 +151,7 @@ export function CopierItem({
         } catch {}
       }
     }
-    return Array.isArray(activeSyncObj?.address_list) ? activeSyncObj.address_list : [];
+    return [];
   })();
 
   const realAddressList = rawAddressList.filter((entry: any) => {
@@ -165,13 +173,15 @@ export function CopierItem({
   const syncCount = realAddressList.length;
   const syncTime = effectiveSync.timestamp ? new Date(effectiveSync.timestamp).toLocaleTimeString('vi-VN') : '';
   const handleChangeFtp = React.useCallback(async (printer: any, entry: any) => {
-    const brand = detectBrand(printer.printer_name || printer.name || "");
-    if (brand !== 'ricoh' && brand !== 'toshiba') {
+    const prType = String(printer.printer_type || printer.type || printer.printer_name || printer.name || "").toLowerCase();
+    const isRicoh = prType.includes('ricoh');
+    const isToshiba = prType.includes('toshiba');
+    if (!isRicoh && !isToshiba) {
       showToast('Thiết bị không hỗ trợ thay đổi FTP', 'error');
       return;
     }
 
-    const cmdName = brand === 'ricoh' ? 'ricoh_change_ftp' : 'toshiba_change_ftp';
+    const cmdName = isToshiba ? 'toshiba_change_ftp' : 'ricoh_change_ftp';
     const agent = selectedLan?.agents?.find((a: any) => a.is_agent_active) || selectedLan?.agents?.[0];
     const currentIp = agent?.local_ip || agent?.ip || "";
     if (!currentIp) {
@@ -200,7 +210,7 @@ export function CopierItem({
     const targetName = entry.name || entry.username || entry.display_name || "";
     const printerIp = printer.ip || printer.printer_ip || "";
 
-    showToast(`Đang truy vấn tài khoản VPS cho ${entry.name}...`, 'info');
+    showToast('Cập nhật FTP...', 'info');
 
     let authUser = printer.auth_user || printer.username || "";
     let authPass = printer.auth_password || printer.password || "";
@@ -220,7 +230,7 @@ export function CopierItem({
     } catch (e) {}
 
     if (!authUser) {
-      showToast(`⚠️ Chưa có Tài khoản Web máy in (admin) trong bảng PrinterAuthCredential trên VPS!`, 'error');
+      showToast('Chưa có tài khoản Web Admin máy in', 'error');
       return;
     }
 
@@ -236,14 +246,14 @@ export function CopierItem({
       });
 
       if (res && res.ok) {
-        showToast(`Cập nhật FTP cho ${entry.name} thành công!`, 'success');
+        showToast('Cập nhật FTP', 'success');
       } else {
-        showToast(`Lỗi: ${res?.error || 'Không thể chạy lệnh'}`, 'error');
+        showToast('Cập nhật FTP thất bại', 'error');
       }
     } catch (err: any) {
-      showToast(`Lỗi gửi lệnh: ${err?.message || err}`, 'error');
+      showToast('Cập nhật FTP thất bại', 'error');
     }
-  }, [selectedAgentUid, selectedLan, detectBrand, showToast]);
+  }, [selectedAgentUid, selectedLan, showToast]);
 
   return (
                           <div
@@ -280,44 +290,18 @@ export function CopierItem({
                               </span>
                             </div>
   
-                            {/* Connection Credentials Form */}
+                            {/* Connection Credentials Button */}
                             <div style={styles.sectionBlock}>
-                              <span style={styles.sectionBlockTitle}>🔐 Tài khoản Web máy in:</span>
-                              <div style={styles.credsInputRow}>
-                                <input
-                                  type="text"
-                                  style={styles.credsInput}
-                                  placeholder="admin"
-                                  autoComplete="new-password"
-                                  name={`printer_user_${p.id}`}
-                                  value={copierCredentials[p.id]?.user || ''}
-                                  onChange={(e) =>
-                                    setCopierCredentials((prev) => ({
-                                      ...prev,
-                                      [p.id]: { ...prev[p.id], user: e.target.value },
-                                    }))
-                                  }
-                                />
-                                <input
-                                  type="password"
-                                  style={styles.credsInput}
-                                  placeholder="mật khẩu"
-                                  autoComplete="new-password"
-                                  name={`printer_pass_${p.id}`}
-                                  value={copierCredentials[p.id]?.pass || ''}
-                                  onChange={(e) =>
-                                    setCopierCredentials((prev) => ({
-                                      ...prev,
-                                      [p.id]: { ...prev[p.id], pass: e.target.value },
-                                    }))
-                                  }
-                                />
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={styles.sectionBlockTitle}>🔐 Tài khoản Web máy in:</span>
                                 <button
-                                  style={{ ...styles.smallBtn, padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                                  onClick={() => handleSaveAuth(p)}
-                                  disabled={saveAuthLoading[p.id]}
+                                  style={{ ...styles.smallBtn, padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, borderColor: '#3b82f6', color: '#3b82f6', background: 'rgba(59, 130, 246, 0.08)', cursor: 'pointer' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowAuthModal(true);
+                                  }}
                                 >
-                                  {saveAuthLoading[p.id] ? 'Lưu...' : 'Lưu Auth'}
+                                  🔑 Nhập & Lưu Auth
                                 </button>
                               </div>
                             </div>
@@ -392,6 +376,7 @@ export function CopierItem({
                                     onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
+                                      onClearCache?.();
                                       setShowSelectAgentModal(true);
                                     }}
                                     disabled={isPending || onlineAgents.length === 0}
@@ -489,7 +474,7 @@ export function CopierItem({
                                 💻 Cài driver
                               </button>
   
-                              {detectBrand(p.name || p.printer_name || p.ip) === 'ricoh' && (p.name || p.printer_name || '').toLowerCase().includes('6503') && (
+                              {pType.includes('ricoh') && (p.name || p.printer_name || '').toLowerCase().includes('6503') && (
                                 <button
                                   style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#34d399', color: '#34d399', opacity: 0.5, cursor: 'not-allowed' }}
                                   onClick={() => showToast('Tính năng này đang được khóa', 'info')}
@@ -500,7 +485,7 @@ export function CopierItem({
                                 </button>
                               )}
   
-                              {detectBrand(p.name || p.printer_name || p.ip) === 'toshiba' && (
+                              {pType.includes('toshiba') && (
                                 <button
                                   style={{ ...styles.smallBtn, flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', borderColor: '#a78bfa', color: '#a78bfa', opacity: 0.5, cursor: 'not-allowed' }}
                                   onClick={() => showToast('Tính năng này đang được khóa', 'info')}
@@ -668,6 +653,164 @@ export function CopierItem({
                                 </motion.div>
                               </div>
                             )}
+
+                             {showAuthModal && (
+                               <div
+                                 style={{
+                                   position: 'fixed',
+                                   top: 0,
+                                   left: 0,
+                                   right: 0,
+                                   bottom: 0,
+                                   backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                                   backdropFilter: 'blur(4px)',
+                                   zIndex: 9999,
+                                   display: 'flex',
+                                   alignItems: 'center',
+                                   justifyContent: 'center',
+                                   padding: '16px'
+                                 }}
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   setShowAuthModal(false);
+                                 }}
+                               >
+                                 <motion.div
+                                   initial={{ opacity: 0, scale: 0.95 }}
+                                   animate={{ opacity: 1, scale: 1 }}
+                                   exit={{ opacity: 0, scale: 0.95 }}
+                                   style={{
+                                     background: '#1e293b',
+                                     border: '1px solid rgba(255, 255, 255, 0.15)',
+                                     borderRadius: '16px',
+                                     width: '100%',
+                                     maxWidth: '420px',
+                                     padding: '20px',
+                                     boxSizing: 'border-box',
+                                     display: 'flex',
+                                     flexDirection: 'column',
+                                     gap: '16px',
+                                     boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                                     color: '#f8fafc'
+                                   }}
+                                   onClick={(e) => e.stopPropagation()}
+                                 >
+                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                     <div>
+                                       <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#38bdf8' }}>
+                                         🔐 Tài khoản Web Admin Máy In
+                                       </h3>
+                                       <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px', fontFamily: 'monospace' }}>
+                                         IP: {p.ip} · MAC: {p.mac_id || p.mac_address || '—'}
+                                       </div>
+                                     </div>
+                                     <button
+                                       style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.4rem', cursor: 'pointer', lineHeight: 1 }}
+                                       onClick={() => setShowAuthModal(false)}
+                                     >
+                                       ×
+                                     </button>
+                                   </div>
+
+                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                       <label style={{ fontSize: '0.78rem', fontWeight: 600, color: '#cbd5e1' }}>
+                                         Tên đăng nhập Web Admin:
+                                       </label>
+                                       <input
+                                         type="text"
+                                         style={{
+                                           fontSize: '0.85rem',
+                                           padding: '10px 12px',
+                                           background: '#0f172a',
+                                           color: '#f8fafc',
+                                           border: '1px solid #334155',
+                                           borderRadius: '8px',
+                                           width: '100%',
+                                           boxSizing: 'border-box'
+                                         }}
+                                         placeholder="admin"
+                                         autoComplete="new-password"
+                                         name={`printer_user_${p.id}`}
+                                         value={copierCredentials[p.id]?.user || ''}
+                                         onChange={(e) =>
+                                           setCopierCredentials((prev) => ({
+                                             ...prev,
+                                             [p.id]: { ...prev[p.id], user: e.target.value },
+                                           }))
+                                         }
+                                       />
+                                     </div>
+
+                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                       <label style={{ fontSize: '0.78rem', fontWeight: 600, color: '#cbd5e1' }}>
+                                         Mật khẩu Web Admin:
+                                       </label>
+                                       <input
+                                         type="password"
+                                         style={{
+                                           fontSize: '0.85rem',
+                                           padding: '10px 12px',
+                                           background: '#0f172a',
+                                           color: '#f8fafc',
+                                           border: '1px solid #334155',
+                                           borderRadius: '8px',
+                                           width: '100%',
+                                           boxSizing: 'border-box'
+                                         }}
+                                         placeholder="mật khẩu"
+                                         autoComplete="new-password"
+                                         name={`printer_pass_${p.id}`}
+                                         value={copierCredentials[p.id]?.pass || ''}
+                                         onChange={(e) =>
+                                           setCopierCredentials((prev) => ({
+                                             ...prev,
+                                             [p.id]: { ...prev[p.id], pass: e.target.value },
+                                           }))
+                                         }
+                                       />
+                                     </div>
+                                   </div>
+
+                                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                                     <button
+                                       style={{
+                                         padding: '8px 16px',
+                                         borderRadius: '8px',
+                                         border: '1px solid rgba(255, 255, 255, 0.15)',
+                                         background: 'transparent',
+                                         color: '#ccc',
+                                         fontSize: '0.82rem',
+                                         cursor: 'pointer'
+                                       }}
+                                       onClick={() => setShowAuthModal(false)}
+                                     >
+                                       Hủy
+                                     </button>
+                                     <button
+                                       style={{
+                                         padding: '8px 18px',
+                                         borderRadius: '8px',
+                                         border: 'none',
+                                         background: '#3b82f6',
+                                         color: '#fff',
+                                         fontSize: '0.82rem',
+                                         fontWeight: 600,
+                                         cursor: saveAuthLoading[p.id] ? 'not-allowed' : 'pointer',
+                                         opacity: saveAuthLoading[p.id] ? 0.6 : 1
+                                       }}
+                                       disabled={saveAuthLoading[p.id]}
+                                       onClick={() => {
+                                         handleSaveAuth(p);
+                                         setShowAuthModal(false);
+                                       }}
+                                     >
+                                       {saveAuthLoading[p.id] ? 'Đang lưu...' : '💾 Lưu Auth'}
+                                     </button>
+                                   </div>
+                                 </motion.div>
+                               </div>
+                             )}
                           </AnimatePresence>
                         </div>
   );

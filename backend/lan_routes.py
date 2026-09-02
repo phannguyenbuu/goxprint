@@ -20,6 +20,46 @@ LOGGER = logging.getLogger(__name__)
 
 _DRIVERS_CACHE: dict[str, list[dict[str, Any]]] = {}
 
+def _auto_record_client_public_ip(session: Any, req: Any) -> None:
+    """Check if the requesting client's WAN public IP is already recorded in public_ip_history or allowed_public_ips.
+    If not recorded yet, insert a new auto_discover record into public_ip_history."""
+    try:
+        raw_x_forwarded = req.headers.get("X-Forwarded-For", "")
+        c_pub_ip = raw_x_forwarded.split(",")[0].strip() if raw_x_forwarded else (req.headers.get("X-Real-IP", "").strip() or req.remote_addr or "")
+        if not c_pub_ip or c_pub_ip in ("127.0.0.1", "localhost", "::1"):
+            return
+
+        from models import PublicIpHistory, AllowedPublicIp
+        from sqlalchemy import select
+        existing_hist = session.execute(
+            select(PublicIpHistory).where(
+                (PublicIpHistory.ip_address == c_pub_ip) | (PublicIpHistory.client_public_ip == c_pub_ip)
+            )
+        ).scalars().first()
+
+        existing_allowed = session.execute(
+            select(AllowedPublicIp).where(
+                (AllowedPublicIp.ip_address == c_pub_ip) | (AllowedPublicIp.client_public_ip == c_pub_ip)
+            )
+        ).scalars().first()
+
+        if not existing_hist and not existing_allowed:
+            m_info = (req.headers.get("User-Agent") or "")[:250]
+            new_hist = PublicIpHistory(
+                ip_address=c_pub_ip,
+                action="auto_discover",
+                description="Tự động phát hiện khi bấm nút quét mạng LAN (App Gox)",
+                client_local_ip="",
+                client_public_ip=c_pub_ip,
+                machine_info=m_info,
+                created_at=datetime.now(timezone.utc)
+            )
+            session.add(new_hist)
+            session.flush()
+            LOGGER.info("[_auto_record_client_public_ip] Auto-saved new client Public IP to history: %s", c_pub_ip)
+    except Exception as exc:
+        LOGGER.warning("[_auto_record_client_public_ip] Warning: %s", exc)
+
 def _clean_tokens(name: str) -> list[str]:
     return re.findall(r'[a-zA-Z0-9]+', name.lower())
 
@@ -228,162 +268,6 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             "matches": matches
         })
 
-    @app.get("/api/new-lan-sites")
-    def get_new_lan_sites() -> Any:
-        from active_agents_registry import NEW_LAN_SITES, ACTIVE_AGENTS
-        lead = _to_text(request.args.get("lead")) or "default"
-        req_lan_uid = _to_text(request.args.get("lan_uid"))
-        req_pub_ip = _to_text(request.args.get("public_ip") or request.args.get("ip") or request.args.get("wan_ip"))
-
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
-        req_agent_uid = _to_text(request.args.get("agent_uid"))
-
-        is_whitelisted = False
-        if client_ip:
-            try:
-                from admin_public_ip_routes import is_public_ip_allowed
-                is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
-            except Exception:
-                pass
-
-        # Target IP filter: if requested via query parameter or lan_uid
-        target_ip_filter = req_pub_ip
-        if not target_ip_filter and req_lan_uid and req_lan_uid.startswith("pub_"):
-            target_ip_filter = req_lan_uid.replace("pub_", "").replace("_", ".")
-
-        # 1. Group active agents by Public IP (or WAN IP)
-        agents_by_pub_ip = defaultdict(list)
-        for a_uid, a_info in ACTIVE_AGENTS.items():
-            if isinstance(a_info, dict):
-                a_pub = (a_info.get("public_ip") or a_info.get("wan_ip") or a_info.get("ip") or "").strip()
-                a_loc = (a_info.get("local_ip") or "").strip()
-                
-                # If specific agent_uid is requested, allow matching agent
-                if req_agent_uid and a_uid == req_agent_uid:
-                    pass
-                # Strict check: if target_ip_filter is specified by user, strictly match target_ip_filter
-                elif target_ip_filter:
-                    if a_pub != target_ip_filter and a_loc != target_ip_filter:
-                        continue
-                # Otherwise if client_ip is present and NOT whitelisted in DB, ONLY include agents matching client_ip
-                elif client_ip and not is_whitelisted:
-                    if a_pub != client_ip and a_loc != client_ip:
-                        continue
-
-                if a_pub:
-                    agents_by_pub_ip[a_pub].append({
-                        "agent_uid": a_uid,
-                        "hostname": a_info.get("hostname", "") or a_uid,
-                        "local_ip": a_info.get("local_ip", ""),
-                        "local_mac": a_info.get("local_mac", ""),
-                        "public_ip": a_pub,
-                        "wan_ip": a_pub,
-                        "lan_uid": a_info.get("lan_uid", "default"),
-                        "app_version": a_info.get("app_version", ""),
-                        "run_mode": a_info.get("run_mode", "web"),
-                        "web_port": a_info.get("web_port", 9173),
-                        "is_master": True,
-                        "is_agent_active": True,
-                        "is_online": True,
-                    })
-
-        # 2. Collect printers for each Public IP
-        pub_ip_keys = list(agents_by_pub_ip.keys())
-        if target_ip_filter and target_ip_filter not in pub_ip_keys:
-            pub_ip_keys = [target_ip_filter]
-
-        rows = []
-        for pub_ip in pub_ip_keys:
-            if not pub_ip:
-                continue
-            lan_agents = agents_by_pub_ip.get(pub_ip, [])
-
-            # Get raw printers ONLY from agents belonging to this pub_ip (Do NOT dump all NEW_LAN_SITES!)
-            raw_printers = []
-            for a_item in lan_agents:
-                a_uid = a_item["agent_uid"]
-                a_info = ACTIVE_AGENTS.get(a_uid, {})
-                p_json = a_info.get("printers_json") or []
-                if isinstance(p_json, list):
-                    raw_printers.extend(p_json)
-
-            try:
-                with session_factory() as session:
-                    db_printers = session.execute(
-                        select(Printer).where(
-                            or_(
-                                Printer.public_ip == pub_ip,
-                                Printer.lan_uid == f"pub_{pub_ip.replace('.', '_')}"
-                            )
-                        )
-                    ).scalars().all()
-                    for db_p in db_printers:
-                        raw_printers.append({
-                            "id": db_p.id,
-                            "name": db_p.printer_name,
-                            "printer_name": db_p.printer_name,
-                            "ip": db_p.ip,
-                            "mac_address": db_p.mac_address,
-                            "mac_id": db_p.mac_address,
-                            "is_online": db_p.is_online if db_p.is_online is not None else True,
-                            "agent_uid": db_p.agent_uid,
-                            "address_book_sync": db_p.address_book_sync
-                        })
-            except Exception as db_p_err:
-                LOGGER.warning("Error querying DB printers for pub_ip %s: %s", pub_ip, db_p_err)
-
-            clean_lan_printers = []
-            seen_macs = set()
-            for idx, p in enumerate(raw_printers):
-                if not isinstance(p, dict):
-                    continue
-                p_ip = str(p.get("ip") or "").strip()
-                p_mac = str(p.get("mac_address") or p.get("mac_id") or "").strip().upper().replace("-", ":")
-                if not p_ip and not p_mac:
-                    continue
-                p_key = p_mac or p_ip
-                if not p_key or p_key in seen_macs:
-                    continue
-                seen_macs.add(p_key)
-
-                p_copy = dict(p)
-                real_id = p.get("id")
-                if real_id is None or str(real_id).lower() == "none":
-                    real_id = p_key or (idx + 1)
-                p_copy["id"] = real_id
-                p_copy["printer_name"] = p.get("printer_name") or p.get("name") or "Photocopy"
-                p_copy["ip"] = p_ip
-                p_copy["mac_id"] = p_mac
-                matching_agent_uid = p.get("agent_uid")
-                if not matching_agent_uid:
-                    pub_agent = next((a["agent_uid"] for a in lan_agents if a.get("is_agent_active") and (a.get("public_ip") == pub_ip or a.get("wan_ip") == pub_ip)), None)
-                    matching_agent_uid = pub_agent or ""
-                p_copy["agent_uid"] = matching_agent_uid
-                clean_lan_printers.append(p_copy)
-
-            if lan_agents or clean_lan_printers:
-                agent_hosts = ", ".join([a["hostname"] for a in lan_agents if a.get("hostname")]) or pub_ip
-                site_key = f"pub_{pub_ip.replace('.', '_')}"
-
-                rows.append({
-                    "lead": lead,
-                    "lan_uid": site_key,
-                    "lan_name": f"Mạng LAN ({agent_hosts})",
-                    "public_ip": pub_ip,
-                    "active_agents": len(lan_agents),
-                    "agents": lan_agents,
-                    "emails": [],
-                    "printers": clean_lan_printers
-                })
-
-        from admin_public_ip_routes import get_active_public_ips
-        active_ips = get_active_public_ips(session_factory)
-        return jsonify({
-            "rows": rows,
-            "client_ip": client_ip,
-            "is_allowed": is_whitelisted,
-            "active_public_ips": active_ips
-        })
 
     @app.post("/api/new-devices")
     def post_new_devices() -> Any:
@@ -409,6 +293,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         # require_online is parsed but not currently applied in the filter below based on monolith
         # require_online = _to_text(request.args.get("require_online")).lower() == "true"
         with session_factory() as session:
+            _auto_record_client_public_ip(session, request)
             _refresh_stale_agent_offline(session=session, lead=lead)
             _refresh_stale_offline(session=session, lead=lead)
             session.commit()
@@ -459,22 +344,26 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if norm_mac:
                         ram_printers_lookup[norm_mac] = dev
                         ram_printers_lookup[norm_mac]["_agent_uid"] = agent_uid
-                        ram_printers_lookup[norm_mac]["_lan_uid"] = agent_info["lan_uid"] if "lan_uid" in agent_info else "default"
+                        ag_pub = agent_info.get("public_ip") or agent_info.get("wan_ip", "")
+                        ram_printers_lookup[norm_mac]["_lan_uid"] = ag_pub or agent_info.get("lan_uid", "default")
 
 
-            # Sweep & hard-delete all ScanPoint records in PostgreSQL DB older than 3 days (72 hours)
+            # Sweep & hard-delete all ScanPoint records in PostgreSQL DB older than retention_days (default 30 days)
             from models import ScanPoint
             from sqlalchemy import delete
-            three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+            from utils import get_system_settings
+            sys_cfg = get_system_settings()
+            retention_days = int(sys_cfg.get("scan_point_retention_days", 30))
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
             try:
                 deleted_count = session.execute(
-                    delete(ScanPoint).where(ScanPoint.updated_at < three_days_ago)
+                    delete(ScanPoint).where(ScanPoint.updated_at < cutoff_date)
                 ).rowcount
                 if deleted_count > 0:
                     session.commit()
-                    LOGGER.info("[ScanPoint Cleanup] Hard deleted %d ScanPoint DB rows older than 3 days from VPS DB", deleted_count)
+                    LOGGER.info("[ScanPoint Cleanup] Hard deleted %d ScanPoint DB rows older than %d days from VPS DB", deleted_count, retention_days)
             except Exception as sweep_err:
-                LOGGER.warning("Error running ScanPoint 3-day hard delete sweep: %s", sweep_err)
+                LOGGER.warning("Error running ScanPoint retention hard delete sweep: %s", sweep_err)
 
             for p_mac, dev in ram_printers_lookup.items():
                 p_ip = str(dev.get("ip", "")).strip()
@@ -504,10 +393,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                 if updated_at_utc.tzinfo is None:
                                     updated_at_utc = updated_at_utc.replace(tzinfo=timezone.utc)
                                 age_seconds = (now_utc - updated_at_utc).total_seconds()
-                                if age_seconds < (3 * 86400):  # Less than 3 days (< 72h)
+                                if age_seconds < (retention_days * 86400):  # Less than retention_days (< N days)
                                     sync_data = sp_rec.address_book_data or {}
                                 else:
-                                    # 3 days or older: Hard delete the actual ScanPoint row from DB!
+                                    # Hard delete the actual ScanPoint row from DB if older than retention_days
                                     session.delete(sp_rec)
                                     session.flush()
                                     LOGGER.info("[ScanPoint] Hard deleted ScanPoint DB row for mac_id=%s (age=%.1f days)", p_mac, age_seconds / 86400.0)
@@ -541,31 +430,22 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "agent_uid": dev.get("_agent_uid", ""),
                 })
 
-            # Load copiers from DeviceInfor DB table so no printer/copier/LAN is lost
-            from models import DeviceInfor
-            dev_stmt = select(DeviceInfor)
-            if lead:
-                dev_stmt = dev_stmt.where(DeviceInfor.lead == lead)
-            dev_db_rows = session.execute(dev_stmt).scalars().all()
-
-            for dev in dev_db_rows:
-                p_mac = _normalize_mac(dev.mac_id)
-                p_ip = str(dev.ip or "").strip()
-                p_lan = dev.lan_uid or "default"
-                p_name = dev.printer_name or "Photocopy"
-
-                if not p_mac and not p_ip:
-                    continue
-
-                p_name_str = str(p_name or "").lower()
-                if any(kw in p_name_str for kw in ["[unk", "unk dom", "[error]"]):
-                    continue
-
+            # 2. Include DB Printer table records mapped by agent public IP
+            for pr in printer_rows:
+                p_mac = (pr.mac_address or pr.mac_id or "").upper().replace("-", ":")
+                p_ip = str(pr.ip or "").strip()
+                p_name = pr.printer_name or "Photocopy"
+                ag_uid = pr.agent_uid or ""
+                
+                ag_info = ACTIVE_AGENTS.get(ag_uid, {})
+                ag_pub = ag_info.get("public_ip") if isinstance(ag_info, dict) else ""
+                p_lan = ag_pub or pr.lan_uid or "default"
+                
                 dedupe_key = (p_lan, p_mac or p_ip)
                 if dedupe_key in seen_printers:
                     continue
                 seen_printers.add(dedupe_key)
-
+                
                 cred = creds_map.get(p_mac) or creds_map.get(p_ip) or {}
                 sync_data = {}
                 if p_mac:
@@ -575,31 +455,31 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                             sync_data = sp_rec.address_book_data
                     except Exception:
                         pass
-
+                
                 printers_by_lan[p_lan].append({
-                    "id": dev.id,
+                    "id": pr.id,
                     "name": p_name,
                     "printer_name": p_name,
                     "ip": p_ip,
                     "mac_address": p_mac,
                     "mac_id": p_mac,
-                    "printer_type": "ricoh" if "ricoh" in p_name_str else ("toshiba" if "toshiba" in p_name_str or "e-studio" in p_name_str else "generic"),
-                    "is_online": True,
-                    "status": "online",
+                    "printer_type": "ricoh" if "ricoh" in p_name.lower() else ("toshiba" if "toshiba" in p_name.lower() or "e-studio" in p_name.lower() else "generic"),
+                    "is_online": bool(pr.is_online),
+                    "status": "online" if pr.is_online else "offline",
                     "probed": True,
                     "user": cred.get("user", ""),
                     "password": cred.get("password", ""),
                     "auth_user": cred.get("user", ""),
                     "auth_password": cred.get("password", ""),
-                    "updated_at": dev.updated_at.isoformat() if dev.updated_at else "",
-                    "last_scanned_at": dev.updated_at.isoformat() if dev.updated_at else "",
+                    "updated_at": pr.updated_at.isoformat() if getattr(pr, "updated_at", None) else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "last_scanned_at": "",
                     "enabled": True,
                     "address_book_sync": sync_data,
                     "suggested_drivers": _match_printer_drivers(p_name),
-                    "agent_uid": dev.agent_uid or "",
-                    "counter_data": dev.counter_data or {},
-                    "status_data": dev.status_data or {},
+                    "agent_uid": ag_uid,
                 })
+
+
 
             agent_stmt = select(AgentNode)
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
@@ -613,6 +493,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             active_agents_by_lan: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
             client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+            override_connect_ip = (request.args.get("connect_ip") or request.args.get("public_ip") or request.args.get("ip") or "").strip()
             is_whitelisted = False
             if client_ip:
                 try:
@@ -620,17 +501,25 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     is_whitelisted = is_public_ip_allowed(client_ip, session_factory)
                 except Exception:
                     pass
+            if override_connect_ip and not is_whitelisted:
+                try:
+                    from admin_public_ip_routes import is_public_ip_allowed
+                    is_whitelisted = is_public_ip_allowed(override_connect_ip, session_factory)
+                except Exception:
+                    pass
             
             # 1. Add active agents from RAM
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
-                if client_ip and not is_whitelisted:
+                if (client_ip or override_connect_ip) and not is_whitelisted:
                     a_pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
                     a_loc_ip = agent_info.get("local_ip", "")
-                    if a_pub_ip != client_ip and a_loc_ip != client_ip:
+                    effective_check_ip = override_connect_ip or client_ip
+                    if a_pub_ip != effective_check_ip and a_loc_ip != effective_check_ip and a_pub_ip != client_ip and a_loc_ip != client_ip:
                         continue
 
                 a_lead = agent_info.get("lead", "default")
-                a_lan_uid = agent_info.get("lan_uid", "default")
+                pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
+                a_lan_uid = pub_ip or agent_info.get("lan_uid", "default")
                 if lead and a_lead != lead:
                     continue
                 
@@ -639,7 +528,6 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 db_mac = db_a.local_mac if db_a else ""
                 db_host = db_a.hostname if db_a else ""
                 
-                pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
                 agent_dict = {
                     "agent_uid": agent_uid,
                     "hostname": db_host or agent_info.get("hostname", ""),
@@ -661,7 +549,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             # 2. Add fallback agents from DB (AgentNode)
             db_agents = session.execute(select(AgentNode)).scalars().all()
             for db_a in db_agents:
-                a_lan_uid = db_a.lan_uid or "default"
+                db_pub_ip = getattr(db_a, "public_ip", "") or getattr(db_a, "wan_ip", "") or ""
+                a_lan_uid = db_pub_ip or db_a.lan_uid or "default"
                 existing_uids = {a["agent_uid"] for a in agents_by_lan[a_lan_uid]}
                 if db_a.agent_uid not in existing_uids:
                     site_obj = existing_lan_map.get(a_lan_uid)
@@ -824,10 +713,54 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     **_serialize_audit_payload_iso(r.created_at, r.updated_at),
                 })
 
+            # Group out_rows strictly by public_ip as the PRIMARY KEY
+            pub_ip_map: dict[str, dict] = {}
+            for row in out_rows:
+                pub_ip = (row.get("public_ip") or "").strip()
+                if not pub_ip:
+                    pub_ip = row.get("lan_uid") or "default"
+                
+                if pub_ip not in pub_ip_map:
+                    pub_ip_map[pub_ip] = {
+                        "lead": row.get("lead", "default"),
+                        "lan_uid": pub_ip,
+                        "lan_name": f"IP Public {pub_ip}" if pub_ip != "default" else "Mạng mặc định",
+                        "address": row.get("address") or "",
+                        "subnet_cidr": row.get("subnet_cidr") or "",
+                        "gateway_ip": row.get("gateway_ip") or "",
+                        "gateway_mac": row.get("gateway_mac") or "",
+                        "public_ip": pub_ip,
+                        "wan_ip": pub_ip,
+                        "active_agents": 0,
+                        "agents": [],
+                        "emails": [],
+                        "printers": [],
+                        "created_at": row.get("created_at"),
+                        "updated_at": row.get("updated_at"),
+                    }
+                
+                group = pub_ip_map[pub_ip]
+                existing_agent_uids = {a.get("agent_uid") for a in group["agents"]}
+                for ag in row.get("agents", []):
+                    if ag.get("agent_uid") not in existing_agent_uids:
+                        group["agents"].append(ag)
+                        existing_agent_uids.add(ag.get("agent_uid"))
+                        if ag.get("is_agent_active"):
+                            group["active_agents"] += 1
+                
+                existing_printer_keys = {(p.get("mac_id") or p.get("ip")) for p in group["printers"]}
+                for pr in row.get("printers", []):
+                    pkey = pr.get("mac_id") or pr.get("ip")
+                    if pkey not in existing_printer_keys:
+                        group["printers"].append(pr)
+                        existing_printer_keys.add(pkey)
+
+            final_rows = list(pub_ip_map.values())
+
             from admin_public_ip_routes import get_active_public_ips
             active_ips = get_active_public_ips(session_factory)
             return jsonify({
-                "rows": out_rows,
+                "rows": final_rows,
                 "client_ip": client_ip,
                 "is_allowed": is_whitelisted,
                 "active_public_ips": active_ips
@@ -874,6 +807,36 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 "lan_name": lan.lan_name,
                 "address": lan.address or ""
             })
+
+    @app.delete("/api/lan-sites/<string:lan_uid>/printers")
+    def purge_lan_printers(lan_uid: str) -> Any:
+        """Xóa toàn bộ Printer + DeviceInfor cũ cho lan_uid và clear RAM cache.
+        Gọi trước force_subnet_scan để đảm bảo kết quả quét hoàn toàn sạch."""
+        from models import Printer, DeviceInfor
+        from sqlalchemy import delete as sql_delete
+
+        with session_factory() as session:
+            try:
+                del_p = session.execute(sql_delete(Printer).where(Printer.lan_uid == lan_uid))
+                del_d = session.execute(sql_delete(DeviceInfor).where(DeviceInfor.lan_uid == lan_uid))
+                session.commit()
+                deleted = del_p.rowcount + del_d.rowcount
+
+                # Clear RAM cache (ACTIVE_AGENTS)
+                try:
+                    from active_agents_registry import ACTIVE_AGENTS
+                    for ag_data in ACTIVE_AGENTS.values():
+                        if isinstance(ag_data, dict) and ag_data.get("lan_uid") == lan_uid:
+                            ag_data["devices"] = {}
+                except Exception as ram_err:
+                    LOGGER.warning("[purge_lan_printers] RAM clear error: %s", ram_err)
+
+                LOGGER.info("[purge_lan_printers] Purged %d rows for lan_uid=%s", deleted, lan_uid)
+                return jsonify({"ok": True, "lan_uid": lan_uid, "deleted_rows": deleted})
+            except Exception as e:
+                session.rollback()
+                LOGGER.error("[purge_lan_printers] Error: %s", e)
+                return jsonify({"ok": False, "error": str(e)}), 500
 
     SYNC_LOCKS: dict[str, dict[str, Any]] = {}
 
@@ -977,6 +940,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         LOGGER.info("[VPS Route] Purging DB Printers for lan_uid=%s and queuing force_subnet_scan", lan_uid)
         with session_factory() as session:
+            _auto_record_client_public_ip(session, request)
             try:
                 session.execute(delete(Printer).where(Printer.lan_uid == lan_uid))
                 session.execute(delete(DeviceInfor).where(DeviceInfor.lan_uid == lan_uid))
@@ -1072,6 +1036,32 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             except Exception as e:
                 session.rollback()
                 LOGGER.error("Failed to save scan point: %s", e)
+                return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.delete("/api/scan-points/<string:mac_id>")
+    def delete_scan_point_by_mac(mac_id: str) -> Any:
+        """Xóa toàn bộ ScanPoint record cho một máy in theo MAC.
+        Được gọi từ frontend trước khi đồng bộ danh bạ để đảm bảo data hoàn toàn sạch."""
+        from models import ScanPoint
+        from sqlalchemy import delete as sql_delete
+        from utils import _normalize_mac
+
+        norm_mac = _normalize_mac(mac_id)
+        if not norm_mac:
+            return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
+
+        with session_factory() as session:
+            try:
+                result = session.execute(
+                    sql_delete(ScanPoint).where(ScanPoint.mac_id == norm_mac)
+                )
+                session.commit()
+                deleted = result.rowcount
+                LOGGER.info("[delete_scan_point] Cleared ScanPoint for mac=%s (%d rows deleted)", norm_mac, deleted)
+                return jsonify({"ok": True, "mac_id": norm_mac, "deleted_rows": deleted})
+            except Exception as e:
+                session.rollback()
+                LOGGER.error("[delete_scan_point] Error clearing ScanPoint mac=%s: %s", norm_mac, e)
                 return jsonify({"ok": False, "error": str(e)}), 500
 
     @app.get("/api/agent-ips")

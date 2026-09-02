@@ -25,14 +25,14 @@ export function useAgentDriverInstall({ showToast, replaceToast }: any = {}) {
     printerIp?: string,
     macId?: string
   ) => {
-    notifyToast(`⏳ [${agentUid}] Đang gửi lệnh cài đặt driver (${drName || model})...`, 'info');
+    notifyToast('Cài driver...', 'info');
     try {
       const res = await installDriverOnAgent(printerId, brand, model, drName, drUrl, agentUid, printerIp, macId);
-      if (!res.ok) throw new Error(res.error || 'Server trả về lỗi');
+      if (!res.ok) throw new Error(res.error || 'Lỗi server');
 
       const commandId = res.command_id;
       if (!commandId) {
-        notifyToast(`✅ [${agentUid}] Đã gửi lệnh cài đặt driver thành công.`, 'success');
+        notifyToast('Cài driver', 'success');
         return;
       }
 
@@ -47,25 +47,25 @@ export function useAgentDriverInstall({ showToast, replaceToast }: any = {}) {
           const elapsed = Date.now() - startTime;
           if (elapsed > maxPollMs) {
             clearInterval(timer);
-            notifyToast(`⏰ [${agentUid}] Quá thời gian chờ (5 phút).`, 'info');
+            notifyToast('Cài driver: Hết giờ', 'info');
             return;
           }
 
           const statusRes = await getCommandStatus(commandId);
           if (statusRes.status === 'success') {
             clearInterval(timer);
-            notifyToast(`✅ [${agentUid}] Cài đặt driver thành công!`, 'success');
+            notifyToast('Cài driver', 'success');
           } else if (statusRes.status === 'failed' || !statusRes.ok) {
             clearInterval(timer);
-            notifyToast(`❌ [${agentUid}] Cài driver thất bại: ${statusRes.error || 'Lỗi không xác định'}`, 'error');
+            notifyToast(`Cài driver thất bại: ${statusRes.error || 'Lỗi'}`, 'error');
           } else {
             const progressText = statusRes.progress_text || '';
             if (progressText && progressText !== lastProgressText) {
               lastProgressText = progressText;
-              notifyToast(`⏳ [${agentUid}] ${progressText}`, 'info');
+              notifyToast(progressText, 'info');
             } else if (!progressText) {
               const elapsedSec = Math.round(elapsed / 1000);
-              notifyToast(`⚡ [${agentUid}] Đang tiến hành cài đặt... (${elapsedSec}s)`, 'info');
+              notifyToast(`Cài driver (${elapsedSec}s)...`, 'info');
             }
           }
         } catch (pollErr) {
@@ -73,7 +73,7 @@ export function useAgentDriverInstall({ showToast, replaceToast }: any = {}) {
         }
       }, pollInterval);
     } catch (err: any) {
-      notifyToast(`❌ Lỗi cài đặt driver: ${err.message || err}`, 'error');
+      notifyToast(`Cài driver thất bại: ${err.message || err}`, 'error');
     }
   }, [notifyToast]);
 

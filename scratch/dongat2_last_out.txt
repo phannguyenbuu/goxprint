@@ -1,0 +1,14 @@
+ID: 649160 | Name: RICOH MP W8140 | IP: 192.168.1.250 | Status: failed | User: 'admin' | Pass: ''
+LOG:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.250
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.250, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.250...
+
+[-] LỖI THỰC THI QUÉT DANH BẠ: HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc67a0>, 'Connection to 192.168.1.250 timed out. (connect timeout=10)'))
+__ADDRESS_BOOK_JSON_START__
+{"status": "error", "error": "HTTPConnectionPool(host='192.168.1.250', port=80): Max retries exceeded with url: /web/guest/en/websys/webArch/authForm.cgi (Caused by ConnectTimeoutError(<HTTPConnection(host='192.168.1.250', port=80) at 0x1cec4bc67a0>, 'Connection to 192.168.1.250 timed out. (connect timeout=10)'))", "count": 0, "address_list": []}
+__ADDRESS_BOOK_JSON_END__
+
+1

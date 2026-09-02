@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useAgentLanPrinters } from './useAgentLanPrinters';
 import { useAgentUtilityCommands } from './useAgentUtilityCommands';
 import { useAgentWebPreview } from './useAgentWebPreview';
@@ -7,9 +7,32 @@ import { useAgentStorageViewer } from './useAgentStorageViewer';
 
 export const useAgentCoreLogic = (deps: any = {}) => {
   const [toasts, setToasts] = useState<any[]>([]);
+
+  const formatShortMessage = (msg: string) => {
+    const words = String(msg || '').trim().split(/\s+/);
+    return words.length > 15 ? words.slice(0, 15).join(' ') + '…' : String(msg || '').trim();
+  };
+
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info', duration = 3000) => {
     const id = Date.now().toString() + Math.random().toString().slice(2, 6);
-    setToasts((prev) => [...prev, { id, message, type }]);
+    const shortMsg = formatShortMessage(message);
+    setToasts((prev) => [...prev, { id, message: shortMsg, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  }, []);
+
+  const replaceToast = useCallback((id: string, message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info', duration = 5000) => {
+    const shortMsg = formatShortMessage(message);
+    setToasts((prev) => {
+      const idx = prev.findIndex((t) => t.id === id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = { id, message: shortMsg, type };
+        return next;
+      }
+      return [...prev, { id, message: shortMsg, type }];
+    });
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, duration);
@@ -92,18 +115,29 @@ export const useAgentCoreLogic = (deps: any = {}) => {
 
   const [ftpDetailData, setFtpDetailData] = useState<any>(null);
 
+  // Dùng ref để break circular dependency:
+  // lanPrinters cần pollCommandStatus từ utility, nhưng utility được khai báo sau lanPrinters
+  // Ref giữ stable reference — không vi phạm Rules of Hooks
+  const pollCommandStatusRef = useRef<((...args: any[]) => any) | null>(null);
+
+  const lanPrinters = useAgentLanPrinters({
+    showToast,
+    pollCommandStatus: (...args: any[]) => pollCommandStatusRef.current?.(...args),
+    utilityCommands: [],
+    activeTab
+  });
+
   const utility = useAgentUtilityCommands({
     showToast,
     setViewOutputModal,
     setIpInputModal,
-    setCommandStatus
+    setCommandStatus,
+    fetchLanSitesData: lanPrinters.fetchLanSitesData,
+    setLanSites: lanPrinters.setLanSites
   });
 
-  const lanPrinters = useAgentLanPrinters({
-    showToast,
-    pollCommandStatus: utility.pollCommandStatus,
-    utilityCommands: utility.utilityCommands
-  });
+  // Cập nhật ref sau khi utility đã được khởi tạo
+  pollCommandStatusRef.current = utility.pollCommandStatus;
 
   const webPreview = useAgentWebPreview({
     showToast,
@@ -118,7 +152,9 @@ export const useAgentCoreLogic = (deps: any = {}) => {
 
   return {
     toasts,
+    setToasts,
     showToast,
+    replaceToast,
     activeTab,
     setActiveTab,
     commandStatus,

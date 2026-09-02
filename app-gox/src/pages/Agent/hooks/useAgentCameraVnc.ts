@@ -37,14 +37,14 @@ export const useAgentCameraVnc = (deps: any = {}) => {
       });
       const data = await response.json();
       if (data.ok) {
-        showToast('Đã lưu cấu hình camera thành công!', 'success');
+        showToast('Lưu camera', 'success');
         fetchCameras(agentUid);
         setSelectedCamera(null);
       } else {
-        showToast('Lỗi lưu cấu hình: ' + data.error, 'error');
+        showToast('Lưu camera thất bại', 'error');
       }
     } catch (err: any) {
-      showToast('Lỗi hệ thống: ' + err.message, 'error');
+      showToast('Lưu camera thất bại', 'error');
     }
   };
 
@@ -54,14 +54,14 @@ export const useAgentCameraVnc = (deps: any = {}) => {
       const response = await fetch(`${BASE_URL}/api/agents/${agentUid}/cameras/${cameraId}/delete`, { method: 'POST' });
       const data = await response.json();
       if (data.ok) {
-        showToast('Đã xóa camera thành công!', 'success');
+        showToast('Xóa camera', 'success');
         fetchCameras(agentUid);
         setSelectedCamera(null);
       } else {
-        showToast('Lỗi xóa camera: ' + data.error, 'error');
+        showToast('Xóa camera thất bại', 'error');
       }
     } catch (err: any) {
-      showToast('Lỗi hệ thống: ' + err.message, 'error');
+      showToast('Xóa camera thất bại', 'error');
     }
   };
 
@@ -74,7 +74,7 @@ export const useAgentCameraVnc = (deps: any = {}) => {
     const macAddress = camera?.mac_address || '';
     
     if (!macAddress) {
-      showToast('Camera không có thông tin MAC ID để điều khiển!', 'error');
+      showToast('Không có MAC ID', 'error');
       return;
     }
 
@@ -92,7 +92,7 @@ export const useAgentCameraVnc = (deps: any = {}) => {
     }, 1000);
 
     try {
-      showToast(`Đang gửi yêu cầu ghi hình ${customRecordDuration}s...`, 'info');
+      showToast(`Ghi hình ${customRecordDuration}s...`, 'info', 2000);
       const response = await fetch(`${BASE_URL}/api/cameras/record-control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -106,13 +106,13 @@ export const useAgentCameraVnc = (deps: any = {}) => {
       clearInterval(interval);
       
       if (data.ok) {
-        showToast(data.message || `Ghi hình ${customRecordDuration}s hoàn tất!`, 'success');
+        showToast(`Ghi hình ${customRecordDuration}s`, 'success');
       } else {
-        showToast('Lỗi ghi hình: ' + data.error, 'error');
+        showToast('Ghi hình thất bại', 'error');
       }
     } catch (err: any) {
       clearInterval(interval);
-      showToast('Lỗi kết nối ghi hình: ' + err.message, 'error');
+      showToast('Ghi hình thất bại', 'error');
     } finally {
       setIsRecording30s(false);
       setTimeout(() => {

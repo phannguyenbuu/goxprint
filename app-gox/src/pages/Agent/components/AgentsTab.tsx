@@ -254,7 +254,7 @@ export function AgentsTab(props: any) {
                                       const res = await triggerAgentUtilityExec(agent.agent_uid, 'get_agent_ip', '');
                                       if (res.ok && res.command_id) {
                                         if (props.showToast) {
-                                          props.showToast('Đang yêu cầu lấy lại IP cục bộ...', 'info');
+                                          props.showToast('Lấy IP cục bộ...', 'info');
                                         }
                                         const commandId = res.command_id;
                                         const startTime = Date.now();
@@ -271,12 +271,12 @@ export function AgentsTab(props: any) {
                                                 await props.fetchLanSitesData(true);
                                               }
                                               if (props.showToast) {
-                                                props.showToast('Đã cập nhật IP cục bộ mới nhất!', 'success');
+                                                props.showToast('Lấy IP cục bộ', 'success');
                                               }
                                             } else if (statusRes.status === 'failed') {
                                               clearInterval(timer);
                                               if (props.showToast) {
-                                                props.showToast('Không thể lấy lại IP cục bộ: ' + (statusRes.error || 'Thất bại'), 'error');
+                                                props.showToast('Lấy IP thất bại', 'error');
                                               }
                                             }
                                           } catch (pollErr) {
@@ -286,12 +286,12 @@ export function AgentsTab(props: any) {
                                         }, 1000);
                                       } else {
                                         if (props.showToast) {
-                                          props.showToast('Gửi yêu cầu thất bại: ' + (res.error || 'Lỗi kết nối'), 'error');
+                                          props.showToast('Lấy IP thất bại', 'error');
                                         }
                                       }
                                     } catch (err: any) {
                                       if (props.showToast) {
-                                        props.showToast('Lỗi: ' + err.message, 'error');
+                                        props.showToast('Lấy IP thất bại', 'error');
                                       }
                                     }
                                   }}

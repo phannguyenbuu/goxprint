@@ -1,0 +1,23 @@
+ID: 646555 | STATUS: success
+LOG:
+==================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+[3/4] Truy cập danh mục 'To Address List' từ Ricoh 192.168.1.226...
+[4/4] TỔNG CỘNG LẤY ĐƯỢC: 7 MỤC TRÊN MÁY PHOTOCOPY RICOH:
+--------------------------------------------------
+  #01 | Mã ĐK: 00001 | Tên: scan | ID: 25
+  #02 | Mã ĐK: 00002 | Tên: cuongnhat24@gmail.co | ID: 102
+  #03 | Mã ĐK: 00005 | Tên: s-1 | ID: 119
+  #04 | Mã ĐK: 00006 | Tên: Test-scan-x5 | ID: 126
+  #05 | Mã ĐK: 00007 | Tên: Hhhhh6 | ID: 127
+  #06 | Mã ĐK: 00009 | Tên: vvs-226 | ID: 129
+  #07 | Mã ĐK: 00010 | Tên: Scangox_1788082633 | ID: 130
+--------------------------------------------------
+__ADDRESS_BOOK_JSON_START__\n{"status": "success", "count": 7, "address_list": [{"entry_id": "25", "registration_no": "00001", "name": "scan", "email_address": "", "folder": "\\\\\\\\dongasv\\\\scan"}, {"entry_id": "102", "registration_no": "00002", "name": "cuongnhat24@gmail.co", "email_address": "", "folder": "ftp://192.168.1.42:2130/cuongnhat24@gmail.co"}, {"entry_id": "119", "registration_no": "00005", "name": "s-1", "email_address": "", "folder": "ftp://192.168.1.145:2130/"}, {"entry_id": "126", "registration_no": "00006", "name": "Test-scan-x5", "email_address": "", "folder": "ftp://192.168.1.111:2130/Test-scan-x5"}, {"entry_id": "127", "registration_no": "00007", "name": "Hhhhh6", "email_address": "", "folder": "ftp://192.168.1.55:2130/Hhhhh6"}, {"entry_id": "129", "registration_no": "00009", "name": "vvs-226", "email_address": "", "folder": "ftp://192.168.1.111:2130/vvs-226"}, {"entry_id": "130", "registration_no": "00010", "name": "Scangox_1788082633", "email_address": "", "folder": "ftp://192.168.1.43:2130/Scangox_1788082633"}]}\n__ADDRESS_BOOK_JSON_END__
+[*] Đang đăng xuất để giải phóng phiên (Tránh lỗi đầy Session)...
+  [✓] Đã hoàn tất và đăng xuất.
+==================================================

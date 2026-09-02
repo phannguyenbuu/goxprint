@@ -18,7 +18,7 @@
     <div class="shell">
       <aside id="sidebar" class="sidebar">
         <h2>GoPrinx</h2>
-        <a class="link {% if active_tab == 'lan_sites' %}active{% endif %}" href="{{ url_for('lan_sites_page') }}"><span class="link-ico">&bull;</span><span>Lan Network</span></a>
+        <a class="link {% if active_tab == 'configs' %}active{% endif %}" href="{{ url_for('configs_page') }}"><span class="link-ico">⚙️</span><span>Settings</span></a>
         <a class="link {% if active_tab == 'printers' %}active{% endif %}" href="{{ url_for('printers_page') }}"><span class="link-ico">&bull;</span><span>Printers</span></a>
         <a class="link {% if active_tab == 'infor' %}active{% endif %}" href="{{ url_for('infor_page') }}"><span class="link-ico">&bull;</span><span>Infor</span></a>
         <a class="link {% if active_tab == 'agents' %}active{% endif %}" href="{{ url_for('agents_page') }}"><span class="link-ico">&bull;</span><span>Agents</span></a>
@@ -32,7 +32,6 @@
         <a class="link {% if active_tab == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span class="link-ico">&bull;</span><span>Dashboard</span></a>
         <a class="link {% if active_tab == 'api_docs' %}active{% endif %}" href="{{ url_for('api_docs_page') }}"><span class="link-ico">&bull;</span><span>API</span></a>
         <a class="link {% if active_tab == 'heatmap' %}active{% endif %}" href="{{ url_for('heatmap_page') }}"><span class="link-ico">&bull;</span><span>Heatmap</span></a>
-        <a class="link {% if active_tab == 'configs' %}active{% endif %}" href="{{ url_for('configs_page') }}"><span class="link-ico">&bull;</span><span>Configs</span></a>
         <div class="sidebar-sep"></div>
         <a class="link {% if active_tab == 'leads' %}active{% endif %}" href="{{ url_for('leads_page') }}"><span class="link-ico">&bull;</span><span>Companies (Leads)</span></a>
         <a class="link {% if active_tab == 'workspaces' %}active{% endif %}" href="{{ url_for('workspaces_page') }}"><span class="link-ico">&bull;</span><span>Workspaces</span></a>

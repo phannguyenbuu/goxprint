@@ -352,20 +352,45 @@ export default function DownloadPage() {
                         })()}
 
                         {/* Terminal Response Details */}
-                        {(job.status === 'pending' || job.status === 'processing') ? (
-                          <div>
-                            <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>Trạng thái thực thi:</div>
-                            <div style={{
-                              padding: 8, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)',
-                              borderRadius: 6, color: '#fde047', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6
-                            }}>
-                              <span>⏳</span>
-                              <span>Lệnh đã được gửi đến hàng đợi. Đang chờ Agent tại máy trạm tiếp nhận và thực thi trên máy photocopy...</span>
-                            </div>
-                          </div>
-                        ) : (() => {
+                        {(() => {
                           const isRealError = job.status === 'failed' || (job.error_message && (job.error_message.includes('[-] LỖI') || job.error_message.includes('LỖI:') || job.error_message.includes('SyntaxError') || job.error_message.includes('RuntimeError') || job.error_message.includes('Traceback')));
                           const isSuperseded = job.status === 'superseded' || (job.error_message && (job.error_message.includes('thay thế') || job.error_message.includes('thử lại sau')));
+                          
+                          if (job.error_message && job.error_message.trim()) {
+                            return (
+                              <div>
+                                <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>
+                                  {job.status === 'processing' ? '⏳ Nhật ký tiến trình đang thực thi:' : 'Kết quả phản hồi từ máy trạm:'}
+                                </div>
+                                <pre style={{
+                                  margin: 0, padding: 8,
+                                  background: isSuperseded ? 'rgba(148,163,184,0.06)' : isRealError ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
+                                  border: `1px solid ${isSuperseded ? 'rgba(148,163,184,0.2)' : isRealError ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.15)'}`,
+                                  borderRadius: 6,
+                                  color: isSuperseded ? '#cbd5e1' : isRealError ? '#fca5a5' : '#86efac',
+                                  fontFamily: 'monospace', overflowX: 'auto', fontSize: 11, whiteSpace: 'pre-wrap'
+                                }}>
+                                  {job.error_message}
+                                </pre>
+                              </div>
+                            );
+                          }
+
+                          if (job.status === 'pending' || job.status === 'processing') {
+                            return (
+                              <div>
+                                <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>Trạng thái thực thi:</div>
+                                <div style={{
+                                  padding: 8, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)',
+                                  borderRadius: 6, color: '#fde047', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6
+                                }}>
+                                  <span>⏳</span>
+                                  <span>Lệnh đã được gửi đến hàng đợi. Đang chờ Agent tại máy trạm tiếp nhận và thực thi trên máy photocopy...</span>
+                                </div>
+                              </div>
+                            );
+                          }
+
                           return (
                             <div>
                               <div style={{ color: 'var(--color-text-secondary)', fontWeight: 600, marginBottom: 4 }}>Kết quả phản hồi từ máy trạm:</div>
@@ -377,7 +402,7 @@ export default function DownloadPage() {
                                 color: isSuperseded ? '#cbd5e1' : isRealError ? '#fca5a5' : '#86efac',
                                 fontFamily: 'monospace', overflowX: 'auto', fontSize: 11, whiteSpace: 'pre-wrap'
                               }}>
-                                {job.error_message || (job.status === 'success' ? 'Thực hiện thành công không có thông báo.' : isSuperseded ? 'Lệnh đã được thay thế bởi lệnh mới hơn.' : 'Lệnh thất bại từ máy trạm hoặc không nhận me được phản hồi từ Agent.')}
+                                {job.status === 'success' ? 'Thực hiện thành công không có thông báo.' : isSuperseded ? 'Lệnh đã được thay thế bởi lệnh mới hơn.' : 'Lệnh thất bại từ máy trạm hoặc không nhận được phản hồi từ Agent.'}
                               </pre>
                             </div>
                           );

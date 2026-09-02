@@ -347,6 +347,7 @@ class PrinterControlCommand(Base):
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
 
@@ -748,7 +749,25 @@ class AllowedPublicIp(Base):
     ip_address: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     description: Mapped[str] = mapped_column(String(255), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    client_local_ip: Mapped[str] = mapped_column(String(64), default="", index=True)
+    client_public_ip: Mapped[str] = mapped_column(String(64), default="", index=True)
+    machine_info: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+
+
+class PublicIpHistory(Base):
+    """Audit log of all public IPs entered, updated, auto-discovered or deleted."""
+    __tablename__ = "public_ip_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip_address: Mapped[str] = mapped_column(String(64), index=True)
+    description: Mapped[str] = mapped_column(String(255), default="")
+    action: Mapped[str] = mapped_column(String(64), default="input", index=True)
+    client_local_ip: Mapped[str] = mapped_column(String(64), default="")
+    client_public_ip: Mapped[str] = mapped_column(String(64), default="")
+    machine_info: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
 
 

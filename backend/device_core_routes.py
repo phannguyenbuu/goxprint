@@ -557,6 +557,45 @@ def register_device_core_routes(app: Flask, session_factory: Any, lead_key_map: 
 
             target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid, mac_address=printer_mac_value)
 
+            # Immediately wipe old scanpoints and address_book_sync for this copier on VPS DB
+            try:
+                from models import ScanPoint
+                from sqlalchemy import delete, or_
+                if printer:
+                    printer.address_book_sync = None
+                    session.add(printer)
+
+                target_macs = set()
+                if printer and printer.mac_address:
+                    target_macs.add(str(printer.mac_address).strip().upper())
+                if printer_mac_value:
+                    target_macs.add(str(printer_mac_value).strip().upper())
+                if device_ref and ":" in str(device_ref):
+                    target_macs.add(str(device_ref).strip().upper())
+
+                for m in list(target_macs):
+                    clean_m = m.replace(":", "").replace("-", "")
+                    norm_m = m.replace("-", ":")
+                    session.execute(delete(ScanPoint).where(
+                        or_(
+                            ScanPoint.mac_address == norm_m,
+                            ScanPoint.mac_address == clean_m,
+                            ScanPoint.mac_id == norm_m,
+                            ScanPoint.mac_id == clean_m
+                        )
+                    ))
+
+                if printer and printer.id:
+                    session.execute(delete(ScanPoint).where(ScanPoint.printer_id == printer.id))
+
+                if printer_ip_val and printer_ip_val != "0.0.0.0":
+                    session.execute(delete(ScanPoint).where(ScanPoint.printer_ip == printer_ip_val))
+
+                session.flush()
+                LOGGER.info("[fetch_address_book] Wiped old VPS DB ScanPoints & address_book_sync for device_ref=%s mac=%s ip=%s", device_ref, printer_mac_value, printer_ip_val)
+            except Exception as wipe_err:
+                LOGGER.warning("Failed to wipe old scanpoints on VPS DB before list scan: %s", wipe_err)
+
             if printer:
                 pending = session.execute(
                     select(PrinterControlCommand).where(

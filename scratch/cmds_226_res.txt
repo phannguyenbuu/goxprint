@@ -1,0 +1,37 @@
+ID: 649668 | Status: success | CmdType: trigger_utility
+Requested: 2026-08-31 14:41:12.449995+07:00 | Responded: 2026-08-31 14:41:12.441486+07:00
+LOG SNIPPET: OPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang khởi tạo phiên làm việc với Ricoh WIM IP: 192.168.1.226...
+[*] Đang lấy form đăng nhập Admin từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập Administrator...
+----------------------------------------
+ID: 649112 | Status: success | CmdType: trigger_utility
+Requested: 2026-08-31 13:59:47.697299+07:00 | Responded: 2026-08-31 13:59:51.467834+07:00
+LOG SNIPPET: 
+----------------------------------------
+ID: 648912 | Status: success | CmdType: trigger_utility
+Requested: 2026-08-31 13:44:46.342433+07:00 | Responded: 2026-08-31 13:44:56.709582+07:00
+LOG SNIPPET: ================================================
+  [RICOH EXEC] QUÉT DANH BẠ SCAN PHOTOCOPY - IP: 192.168.1.226
+==================================================
+[1/4] Khởi tạo cấu hình: IP=192.168.1.226, USER=admin
+[*] Đang lấy form đăng nhập từ 192.168.1.226...
+[*] Đang gửi thông tin đăng nhập...
+----------------------------------------
+ID: 648852 | Status: success | CmdType: trigger_utility
+Requested: 2026-08-31 13:40:59.610448+07:00 | Responded: 2026-08-31 13:41:15.176152+07:00
+LOG SNIPPET: Xác thực đăng nhập và lưu thành công.
+
+Xác thực đăng nhập và lưu thành công.
+----------------------------------------
+ID: 648721 | Status: failed | CmdType: trigger_utility
+Requested: 2026-08-31 13:31:08.299608+07:00 | Responded: 2026-08-31 13:31:08.289995+07:00
+LOG SNIPPET: t bại (IP=192.168.1.226, User=admin). Sai tài khoản hoặc mật khẩu!
+__ADDRESS_BOOK_JSON_START__
+{"status": "error", "error": "Authentication failed: Đăng nhập Ricoh WIM thất bại (IP=192.168.1.226, User=admin). Sai tài khoản hoặc mật khẩu!", "count": 0, "address_list": []}
+__ADDRESS_BOOK_JSON_END__
+
+1
+----------------------------------------

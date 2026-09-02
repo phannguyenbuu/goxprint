@@ -20,18 +20,17 @@
     <table class="generic-table">
       <thead>
         <tr>
-          <th style="padding-left: 20px; width: 80px;">ID</th>
+          <th style="padding-left: 20px; width: 70px;">ID</th>
           <th>Copier Name</th>
-          <th style="width: 140px;">IP Address</th>
-          <th style="width: 160px;">MAC Address</th>
-          <th style="width: 180px;">LAN Site / Agent</th>
+          <th style="width: 180px;">IP / MAC Address</th>
           <th style="width: 180px;">Web Username</th>
           <th style="width: 180px;">Web Password</th>
           <th style="width: 100px; text-align: center;">Actions</th>
+          <th style="width: 200px;">LAN Site / Agent</th>
         </tr>
       </thead>
       <tbody id="copiers-tbody">
-        <tr><td colspan="8" class="loading">Loading Copiers...</td></tr>
+        <tr><td colspan="7" class="loading">Loading Copiers...</td></tr>
       </tbody>
     </table>
   </div>
@@ -130,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="loading">No matching copiers found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">No matching copiers found.</td></tr>';
             return;
         }
 
@@ -140,11 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td style="padding-left: 20px;">${row.id}</td>
                 <td><strong>${escapeHtml(row.printer_name || 'Generic Copier')}</strong></td>
-                <td><code class="font-mono">${escapeHtml(row.ip || 'N/A')}</code></td>
-                <td><code class="font-mono">${escapeHtml(row.mac_id || 'N/A')}</code></td>
                 <td>
-                    <div style="font-size: 12px; color: #666;">Site: ${escapeHtml(row.lan_uid || 'N/A')}</div>
-                    <div style="font-size: 11px; color: #999;">Agent: ${escapeHtml(row.agent_uid || 'N/A')}</div>
+                    <div><code class="font-mono" style="font-weight: 600;">${escapeHtml(row.ip || 'N/A')}</code></div>
+                    <div style="font-size: 11px; color: #888; font-family: monospace; margin-top: 2px;">MAC: ${escapeHtml(row.mac_id || 'N/A')}</div>
                 </td>
                 <td>
                     <input type="text" id="user-${row.id}" value="${escapeHtml(row.user || '')}" placeholder="admin">
@@ -154,6 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td style="text-align: center;">
                     <button class="action-btn-save" data-id="${row.id}" data-ref="${escapeHtml(row.mac_id || row.ip || String(row.id))}">Save</button>
+                </td>
+                <td>
+                    <div style="font-size: 12px; color: #555; font-weight: 600;">Site: ${escapeHtml(row.lan_uid || 'N/A')}</div>
+                    <div style="font-size: 11px; color: #888;">Agent: ${escapeHtml(row.agent_uid || 'N/A')}</div>
                 </td>
             `;
 
@@ -210,7 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const loadCopiers = () => {
         const tbody = document.getElementById('copiers-tbody');
-        tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading Copiers...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">Loading Copiers...</td></tr>';
 
         fetch('/api/copier-auths')
             .then(res => res.json())
@@ -219,12 +220,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     copiersData = data.rows;
                     renderTable();
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Failed to parse copiers data.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading" style="color: red;">Failed to parse copiers data.</td></tr>';
                 }
             })
             .catch(err => {
                 console.error('Error loading copiers:', err);
-                tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color: red;">Error loading copiers from server.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="loading" style="color: red;">Error loading copiers from server.</td></tr>';
             });
     };
 
