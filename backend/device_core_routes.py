@@ -274,8 +274,11 @@ def _resolve_copier_auth(session, printer, body: dict = None) -> tuple[str, str]
     if printer and printer.auth_user:
         return (printer.auth_user.strip(), (printer.auth_password or "").strip())
 
-    user = str(body.get("auth_user") or body.get("user") or "admin").strip()
+    user = str(body.get("auth_user") or body.get("user") or "").strip()
     pwd = str(body.get("auth_password") or body.get("password") or "").strip()
+    if not user:
+        mac_or_ip = mac or ip or "unknown"
+        LOGGER.warning("[_resolve_copier_auth] No credentials found for device %s — auth_user is empty", mac_or_ip)
     return (user, pwd)
 
 
@@ -1035,7 +1038,9 @@ verify_auth()
             frontend_ip = str(body.get("printer_ip") or body.get("ip") or "").strip()
             if frontend_ip == "0.0.0.0":
                 frontend_ip = ""
-            printer_ip_val = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or "0.0.0.0"
+            printer_ip_val = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or ""
+            if not printer_ip_val or printer_ip_val == "0.0.0.0":
+                return jsonify({"ok": False, "error": "Không xác định được IP máy in — vui lòng kiểm tra lại thông tin máy"}), 400
             printer_enabled_val = printer.enabled if printer else True
             printer_auth_user_val, printer_auth_pass_val = _resolve_copier_auth(session, printer, body)
 
@@ -1184,7 +1189,9 @@ verify_auth()
             frontend_ip = str(body.get("printer_ip") or body.get("ip") or "").strip()
             if frontend_ip == "0.0.0.0":
                 frontend_ip = ""
-            effective_ip = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or "0.0.0.0"
+            effective_ip = (printer.ip if printer and printer.ip and printer.ip != "0.0.0.0" else "") or frontend_ip or ""
+            if not effective_ip or effective_ip == "0.0.0.0":
+                return jsonify({"ok": False, "error": "Không xác định được IP máy in — vui lòng kiểm tra lại thông tin máy"}), 400
             printer_user_val, printer_pass_val = _resolve_copier_auth(session, printer, body)
 
             is_toshiba = (
@@ -1378,6 +1385,7 @@ verify_auth()
         return jsonify({"ok": False, "error": f"Unsupported action: {action}"}), 400
 
     @app.get("/api/commands/<int:command_id>/status")
+    @app.get("/api/commands/<int:command_id>")
     def get_command_status(command_id: int) -> Any:
         try:
             with session_factory() as session:
@@ -1400,6 +1408,42 @@ verify_auth()
                     cmd.error_message = "Lỗi: Agent quá thời gian phản hồi (Timeout 60s)"
                     session.commit()
 
+                # Handle child commands if this is a batch command (e.g. multi-driver install)
+                progress_text = ""
+                if cmd.command_params:
+                    try:
+                        import json as _json
+                        params = _json.loads(cmd.command_params)
+                        child_ids = params.get("child_command_ids")
+                        if child_ids and isinstance(child_ids, list) and cmd.status in ("pending", "processing"):
+                            from models import PrinterControlCommand as PCCommand
+                            from sqlalchemy import select
+                            child_cmds = session.execute(
+                                select(PCCommand).where(PCCommand.id.in_(child_ids))
+                            ).scalars().all()
+                            
+                            total = len(child_ids)
+                            done = sum(1 for c in child_cmds if c.status not in ("pending", "processing", "received"))
+                            
+                            if done < total:
+                                progress_text = f"Đang xử lý ({done}/{total}) lệnh..."
+                                details = []
+                                for c in child_cmds:
+                                    status_desc = "Chờ xử lý" if c.status == "pending" else "Đang chạy" if c.status in ("processing", "received") else "Thành công" if c.status == "success" else f"Thất bại ({c.error_message or 'Lỗi'})"
+                                    details.append(f"- {c.printer_name or c.ip} ({c.ip}): {status_desc}")
+                                cmd.error_message = (cmd.error_message or "") + "\n\n⌛ Tiến độ chi tiết:\n" + "\n".join(details)
+                            else:
+                                cmd.status = "success"
+                                details = []
+                                for c in child_cmds:
+                                    status_label = "Thành công" if c.status == "success" else f"Thất bại ({c.error_message or 'Lỗi'})"
+                                    details.append(f"- {c.printer_name or c.ip} ({c.ip}): {status_label}")
+                                cmd.error_message = (cmd.error_message or "") + "\n\n✅ Đã hoàn tất tất cả các lệnh! Chi tiết:\n" + "\n".join(details)
+                                cmd.responded_at = datetime.now(timezone.utc)
+                                session.commit()
+                    except Exception as parse_err:
+                        LOGGER.warning("Failed to check child command status for command %s: %s", command_id, parse_err)
+
                 cmd_status = cmd.status
                 cmd_printer_id = int(cmd.printer_id or 0)
                 cmd_command_type = cmd.command_type
@@ -1409,8 +1453,8 @@ verify_auth()
                 cmd_responded_at = cmd.responded_at.isoformat() if cmd.responded_at else None
                 res_text = cmd.__dict__.get("output") or cmd.__dict__.get("result_payload") or cmd_error_msg or ""
 
+                address_book_sync = None
                 if cmd_status == "success":
-                    address_book_sync = None
                     if cmd_command_type in ("fetch_address_book", "add_scan_email_dest", "delete_scan_email_dest", "address_modify", "trigger_utility") and cmd_error_msg:
                         msg_str = str(cmd_error_msg)
                         if "__ADDRESS_BOOK_JSON_START__" in msg_str:
@@ -1434,56 +1478,46 @@ verify_auth()
                                 address_book_sync = _json.loads(msg_str)
                             except Exception:
                                 pass
-                    if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
-                        try:
-                            import json as _json
-                            decoded = _json.loads(res_text)
-                            if isinstance(decoded, str):
-                                res_text = decoded
-                        except Exception:
-                            pass
-                    return jsonify(
-                        {
-                            "ok": True,
-                            "status": "success",
-                            "command_id": command_id,
-                            "id": cmd_printer_id,
-                            "address_book_sync": address_book_sync,
-                            "result_payload": res_text,
-                            "output": res_text,
-                            "error_message": cmd_error_msg,
-                            "created_at": cmd_created_at,
-                            "received_at": cmd_received_at,
-                            "responded_at": cmd_responded_at,
-                        }
-                    )
-                if cmd_status == "failed":
-                    return (
-                        jsonify(
-                            {
-                                "ok": False,
-                                "status": "failed",
-                                "command_id": command_id,
-                                "error": cmd_error_msg or "Command failed",
-                                "output": res_text,
-                                "created_at": cmd_created_at,
-                                "received_at": cmd_received_at,
-                                "responded_at": cmd_responded_at,
-                            }
-                        ),
-                        200,
-                    )
-                return jsonify(
-                    {
-                        "ok": True,
-                        "status": cmd_status,
-                        "command_id": command_id,
-                        "output": res_text,
-                        "created_at": cmd_created_at,
-                        "received_at": cmd_received_at,
-                        "progress_text": cmd_error_msg,
-                    }
-                )
+
+                # Fallback to printer's stored address_book_sync
+                if not address_book_sync and cmd_printer_id:
+                    try:
+                        from models import Printer
+                        printer_item = session.get(Printer, cmd_printer_id)
+                        if printer_item and printer_item.address_book_sync:
+                            address_book_sync = printer_item.address_book_sync
+                    except Exception:
+                        pass
+
+                if isinstance(res_text, str) and res_text.startswith('"') and res_text.endswith('"'):
+                    try:
+                        import json as _json
+                        decoded = _json.loads(res_text)
+                        if isinstance(decoded, str):
+                            res_text = decoded
+                    except Exception:
+                        pass
+
+                return jsonify({
+                    "ok": cmd_status != "failed",
+                    "status": cmd_status,
+                    "command_id": command_id,
+                    "id": command_id,
+                    "printer_id": cmd_printer_id,
+                    "command_type": cmd_command_type,
+                    "error": cmd_error_msg if cmd_status == "failed" else "",
+                    "error_message": cmd_error_msg,
+                    "result": res_text,
+                    "output": res_text,
+                    "result_payload": res_text,
+                    "result_text": res_text,
+                    "progress_text": progress_text or (cmd_error_msg if cmd_status == "pending" else ""),
+                    "address_book": address_book_sync,
+                    "address_book_sync": address_book_sync,
+                    "created_at": cmd_created_at,
+                    "received_at": cmd_received_at,
+                    "responded_at": cmd_responded_at,
+                })
         except Exception as exc:
             LOGGER.error("[GET /api/commands/%s/status ERROR] %s", command_id, exc, exc_info=True)
             return jsonify({
@@ -1492,3 +1526,90 @@ verify_auth()
                 "error": str(exc),
                 "error_message": str(exc)
             }), 200
+
+    @app.get("/api/copier-auths")
+    def get_all_copier_auths() -> Any:
+        from active_agents_registry import ACTIVE_AGENTS
+        from models import Printer, PrinterAuthCredential
+        from sqlalchemy import select
+        
+        # 1. Fetch credentials map from PrinterAuthCredential
+        creds_map = {}
+        with session_factory() as session:
+            db_creds = session.execute(select(PrinterAuthCredential)).scalars().all()
+            for c in db_creds:
+                mac = str(c.mac_address or "").strip().replace("-", ":").upper()
+                if mac:
+                    creds_map[mac] = {
+                        "user": c.auth_user or "",
+                        "password": c.auth_password or ""
+                    }
+                    
+            # 2. Fetch printers from Printer database table
+            db_printers = session.execute(select(Printer)).scalars().all()
+            
+        printers_dict = {}
+        
+        # Add DB printers
+        for p in db_printers:
+            mac = str(p.mac_address or "").strip().replace("-", ":").upper()
+            if not mac:
+                mac = f"ID:{p.id}"
+            
+            # Use credentials from credentials map, fallback to Printer table auth
+            cred = creds_map.get(mac) or {}
+            user = cred.get("user") or p.auth_user or ""
+            password = cred.get("password") or p.auth_password or ""
+            
+            printers_dict[mac] = {
+                "id": p.id,
+                "printer_name": p.printer_name or "Generic Copier",
+                "ip": p.ip or "",
+                "mac_id": p.mac_address or "",
+                "lan_uid": p.lan_uid or "",
+                "agent_uid": p.agent_uid or "",
+                "user": user,
+                "password": password
+            }
+            
+        # 3. Add / merge RAM printers from ACTIVE_AGENTS
+        for agent_uid, agent_info in ACTIVE_AGENTS.items():
+            ag_devs = agent_info.get("devices", {}) if isinstance(agent_info, dict) else {}
+            lan_uid = agent_info.get("lan_uid") or ""
+            for dev_mac, dev_data in ag_devs.items():
+                mac = str(dev_mac or "").strip().replace("-", ":").upper()
+                if not mac:
+                    continue
+                
+                # Fetch credentials
+                cred = creds_map.get(mac) or {}
+                user = cred.get("user") or ""
+                password = cred.get("password") or ""
+                
+                if mac in printers_dict:
+                    # Update existing record if details are fresher or empty in DB
+                    p_data = printers_dict[mac]
+                    if not p_data["ip"] and dev_data.get("ip"):
+                        p_data["ip"] = dev_data.get("ip")
+                    if (not p_data["printer_name"] or p_data["printer_name"] == "Generic Copier") and dev_data.get("printer_name"):
+                        p_data["printer_name"] = dev_data.get("printer_name")
+                    if not p_data["user"] and user:
+                        p_data["user"] = user
+                    if not p_data["password"] and password:
+                        p_data["password"] = password
+                else:
+                    # Create new entry for RAM printer
+                    printers_dict[mac] = {
+                        "id": len(printers_dict) + 10000,  # Temp ID for UI mapping
+                        "printer_name": dev_data.get("printer_name") or "Generic Copier",
+                        "ip": dev_data.get("ip") or "",
+                        "mac_id": mac,
+                        "lan_uid": lan_uid,
+                        "agent_uid": agent_uid,
+                        "user": user,
+                        "password": password
+                    }
+                    
+        # Sort rows by lan_uid, then name, then ip
+        rows = sorted(printers_dict.values(), key=lambda x: (x["lan_uid"], x["printer_name"], x["ip"]))
+        return jsonify({"ok": True, "rows": rows})

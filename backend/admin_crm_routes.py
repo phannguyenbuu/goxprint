@@ -83,6 +83,20 @@ def _user_rows_for_ids(session: Any, user_ids: list[int]) -> list[UserAccount]:
 
 def register_admin_crm_routes(app: Flask, session_factory: Any) -> None:
 
+    @app.get("/api/leads")
+    def list_leads() -> Any:
+        from models import LanSite, CounterInfor, StatusInfor, AgentNode, Printer
+        from sqlalchemy import select, func
+        with session_factory() as session:
+            leads: set[str] = set()
+            for model in (LanSite, CounterInfor, StatusInfor, AgentNode, Printer):
+                values = session.execute(select(func.distinct(model.lead))).scalars().all()
+                for value in values:
+                    text = _to_text(value)
+                    if text:
+                        leads.add(text)
+        return jsonify({"leads": sorted(leads, key=str.lower)})
+
     @app.get("/api/leads/list")
     def list_leads_crud() -> Any:
         name = _to_text(request.args.get("name"))

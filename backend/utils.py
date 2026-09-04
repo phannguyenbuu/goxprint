@@ -69,6 +69,7 @@ def get_system_settings() -> dict[str, Any]:
         "control_interval_seconds": 1,
         "device_interval_seconds": 60,
         "ui_refresh_interval_seconds": 5,
+        "crm_webhook_url": "",
     }
     try:
         if SYSTEM_SETTINGS_FILE.exists():
@@ -91,6 +92,9 @@ def save_system_settings(new_settings: dict[str, Any]) -> dict[str, Any]:
                     current[k] = val
             except (ValueError, TypeError):
                 pass
+    if "crm_webhook_url" in new_settings:
+        current["crm_webhook_url"] = str(new_settings["crm_webhook_url"] or "").strip()
+
     try:
         SYSTEM_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SYSTEM_SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -464,26 +468,30 @@ def resolve_utility_command_content(session: Any, command_content: str) -> str:
     if "# __RICOH_LOGIN__" in command_content or "__RICOH_LOGIN__" in command_content:
         stmt = select(UtiCommand).where(UtiCommand.command == "ricoh_login_helper")
         helper = session.execute(stmt).scalar_one_or_none()
-        helper_code = helper.command_content if helper else ""
-        command_content = command_content.replace("# __RICOH_LOGIN__", helper_code).replace("__RICOH_LOGIN__", helper_code)
+        if not helper or not helper.command_content:
+            raise RuntimeError("Thiếu helper 'ricoh_login_helper' trong DB — không thể build script Ricoh")
+        command_content = command_content.replace("# __RICOH_LOGIN__", helper.command_content).replace("__RICOH_LOGIN__", helper.command_content)
         
     if "# __RICOH_LIST__" in command_content or "__RICOH_LIST__" in command_content:
         stmt = select(UtiCommand).where(UtiCommand.command == "ricoh_list_helper")
         helper = session.execute(stmt).scalar_one_or_none()
-        helper_code = helper.command_content if helper else ""
-        command_content = command_content.replace("# __RICOH_LIST__", helper_code).replace("__RICOH_LIST__", helper_code)
+        if not helper or not helper.command_content:
+            raise RuntimeError("Thiếu helper 'ricoh_list_helper' trong DB — không thể build script Ricoh")
+        command_content = command_content.replace("# __RICOH_LIST__", helper.command_content).replace("__RICOH_LIST__", helper.command_content)
         
     if "# __TOSHIBA_LOGIN__" in command_content or "__TOSHIBA_LOGIN__" in command_content:
         stmt = select(UtiCommand).where(UtiCommand.command == "toshiba_login_helper")
         helper = session.execute(stmt).scalar_one_or_none()
-        helper_code = helper.command_content if helper else ""
-        command_content = command_content.replace("# __TOSHIBA_LOGIN__", helper_code).replace("__TOSHIBA_LOGIN__", helper_code)
+        if not helper or not helper.command_content:
+            raise RuntimeError("Thiếu helper 'toshiba_login_helper' trong DB — không thể build script Toshiba")
+        command_content = command_content.replace("# __TOSHIBA_LOGIN__", helper.command_content).replace("__TOSHIBA_LOGIN__", helper.command_content)
         
     if "# __TOSHIBA_LIST__" in command_content or "__TOSHIBA_LIST__" in command_content:
         stmt = select(UtiCommand).where(UtiCommand.command == "toshiba_list_helper")
         helper = session.execute(stmt).scalar_one_or_none()
-        helper_code = helper.command_content if helper else ""
-        command_content = command_content.replace("# __TOSHIBA_LIST__", helper_code).replace("__TOSHIBA_LIST__", helper_code)
+        if not helper or not helper.command_content:
+            raise RuntimeError("Thiếu helper 'toshiba_list_helper' trong DB — không thể build script Toshiba")
+        command_content = command_content.replace("# __TOSHIBA_LIST__", helper.command_content).replace("__TOSHIBA_LIST__", helper.command_content)
         
     return command_content
 
@@ -543,9 +551,11 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
 
     logger = logging.getLogger(__name__)
     try:
+        # Bug fix 1: use .first() instead of scalar_one_or_none() to survive duplicate IPDatas rows
         ip_rec = session.execute(
-            select(IPData).where(IPData.lan_uid == lan_uid, IPData.agent_name == agent_uid)
-        ).scalar_one_or_none()
+            select(IPData).where(IPData.agent_name == agent_uid)
+            .order_by(IPData.updated_at.desc())
+        ).scalars().first()
         if ip_rec is None:
             ip_rec = IPData(
                 agent_uid=agent_uid,
@@ -558,6 +568,7 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
             session.add(ip_rec)
         else:
             ip_rec.ip = new_ip
+            ip_rec.lan_uid = lan_uid
             ip_rec.updated_at = datetime.now(timezone.utc)
 
         # Auto-resolve any pending or processing change_agent_ip command for this agent
@@ -573,7 +584,10 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
                 pic.responded_at = datetime.now(timezone.utc)
                 pic.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {new_ip}"
 
-        scan_points = session.execute(select(ScanPoint)).scalars().all()
+        # Bug fix 2: filter scan_points by agent_uid — only this agent's copiers, not all globally
+        scan_points = session.execute(
+            select(ScanPoint).where(ScanPoint.agent_uid == agent_uid)
+        ).scalars().all()
         matched_entries = []
         for sp in scan_points:
             abd = sp.address_book_data
@@ -608,17 +622,41 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
 
         child_ids = []
         if matched_entries:
+            from models import PrinterAuthCredential
+            from sqlalchemy import func as _func
             for entry in matched_entries:
                 printer = session.execute(
                     select(Printer).where(Printer.mac_address == entry["printer_mac"])
                 ).scalars().first()
                 p_id = printer.id if printer else 0
-                p_user = printer.auth_user if printer else ""
-                p_pass = printer.auth_password if printer else ""
                 p_lan = printer.lan_uid if printer else lan_uid
                 p_lead = printer.lead if printer else lead
+                
+                # Bug fix 3: look up PrinterAuthCredential — no silent empty fallback
+                norm_mac = entry["printer_mac"].upper().replace(":", "").replace("-", "")
+                cred = session.execute(
+                    select(PrinterAuthCredential).where(
+                        _func.upper(_func.replace(_func.replace(PrinterAuthCredential.mac_address, ":", ""), "-", "")) == norm_mac
+                    )
+                ).scalars().first()
+                
+                if cred and cred.auth_user:
+                    p_user = cred.auth_user.strip()
+                    p_pass = (cred.auth_password or "").strip()
+                elif printer and printer.auth_user:
+                    p_user = printer.auth_user.strip()
+                    p_pass = (printer.auth_password or "").strip()
+                else:
+                    p_user = ""
+                    p_pass = ""
+                    logger.warning("[when_ip_change] No credentials found for printer %s (mac=%s) — address_modify sent with empty auth", entry["printer_ip"], entry["printer_mac"])
+                
                 old_folder = entry["path"]
                 new_folder = old_folder.replace(old_ip, new_ip) if old_ip in old_folder else old_folder
+
+                # Infer printer brand from printer_name (Printer table has no printer_type column)
+                _pname_low = (entry["printer_name"] or "").lower()
+                p_type = "toshiba" if ("toshiba" in _pname_low or "e-studio" in _pname_low) else "ricoh"
 
                 cmd_params_dict = {
                     "registration_no": entry["registration_no"],
@@ -626,7 +664,8 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
                     "email": "",
                     "folder": new_folder,
                     "user_code": "",
-                    "fields": ["folder"],
+                    "fields": {},
+                    "printer_type": p_type,
                     "printer_ip": entry["printer_ip"],
                     "ip": entry["printer_ip"],
                     "mac_address": entry["printer_mac"],

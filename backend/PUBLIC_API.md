@@ -155,6 +155,179 @@ Notes:
 
 Response: Same format as `/api/public/device/by-mac` but with real-time data.
 
+## 4c) Get batch device infor by MAC IDs (Up to 100 devices)
+- Method: `POST` (or `GET`)
+- Path: `/api/public/device/by-macs`
+- Headers:
+  - `Content-Type: application/json`
+- Request Body (POST):
+  ```json
+  {
+    "mac_ids": [
+      "58:38:79:79:A3:EB",
+      "58:38:79:41:80:7C",
+      "00:26:73:7D:78:F9"
+    ]
+  }
+  ```
+- Alternatively (GET with query param):
+  `/api/public/device/by-macs?mac_ids=58:38:79:79:A3:EB,58:38:79:41:80:7C`
+
+Example:
+```bash
+curl -s -X POST "https://agentapi.quanlymay.com/api/public/device/by-macs" \
+  -H "Content-Type: application/json" \
+  -d '{"mac_ids": ["58:38:79:79:A3:EB", "58:38:79:41:80:7C"]}'
+```
+
+Notes:
+- High-performance batch endpoint optimized for CRM and external sync. Reads directly from PostgreSQL DB/Memory in 2–5 ms.
+- Accepts up to 100 MAC addresses per batch. Any format (`AA:BB:CC:DD:EE:FF`, `AA-BB-CC-DD-EE-FF`, or `AABBCCDDEEFF`) is automatically normalized.
+- Returns a Map of devices keyed by normalized MAC address.
+- Missing devices are omitted from the `devices` dictionary, but total counts are provided.
+
+Response:
+```json
+{
+  "ok": true,
+  "count": 2,
+  "total_requested": 2,
+  "devices": {
+    "58:38:79:79:A3:EB": {
+      "printer_name": "Ricoh MP 5054",
+      "ip": "192.168.1.226",
+      "lead": "default",
+      "lan_uid": "default_84_93_B2_7C_EE_78_192_168_1_1",
+      "agent_uid": "kythuat02",
+      "counter": {
+        "total": "57393",
+        "copier_bw": "13421",
+        "printer_bw": "43972"
+      },
+      "status": {
+        "toner_black": "Status OK",
+        "printer_status": "Energy Saver Mode"
+      },
+      "last_seen_at": "2026-09-04T08:52:37+00:00"
+    },
+    "58:38:79:41:80:7C": {
+      "printer_name": "Ricoh MP 3054",
+      "ip": "192.168.1.228",
+      "lead": "default",
+      "lan_uid": "default_84_93_B2_7C_EE_78_192_168_1_1",
+      "agent_uid": "kythuat02",
+      "counter": {
+        "total": "120500"
+      },
+      "status": {
+        "toner_black": "Status OK"
+      },
+      "last_seen_at": "2026-09-04T08:52:37+00:00"
+    }
+  }
+}
+```
+
+## 4d) CRM Real-time Event Webhook (Fire-and-Forget)
+- Destination: User-configured CRM Webhook URL (configured at `/configs` or via `/webhook/infor`).
+- Trigger: Automatically dispatched when any device's `counter_data` or `status_data` changes compared to previous state.
+- Delivery Model: **Fire-and-Forget** (2.0s timeout). If the CRM server is offline or fails, the payload is immediately dropped to prevent VPS thread and memory starvation.
+- Method: `POST`
+- Headers:
+  - `Content-Type: application/json`
+  - `User-Agent: Goxprint-Webhook/1.0`
+
+Payload format sent to CRM:
+```json
+{
+  "event": "device_data_changed",
+  "timestamp": "2026-09-04T08:53:22.942829+00:00",
+  "mac_id": "58:38:79:79:A3:EB",
+  "printer_name": "Ricoh MP 5054",
+  "ip": "192.168.1.226",
+  "agent_uid": "kythuat02",
+  "lead": "default",
+  "lan_uid": "default_84_93_B2_7C_EE_78_192_168_1_1",
+  "counter": {
+    "total": "57393",
+    "copier_bw": "13421",
+    "printer_bw": "43972"
+  },
+  "status": {
+    "toner_black": "Status OK",
+    "printer_status": "Energy Saver Mode"
+  }
+}
+```
+
+## 4e) Webhook URL Configuration (/webhook/infor)
+- Primary Path: `/webhook/infor` (aliases: `/api/webhook/infor`, `/api/admin/crm/webhook-url`)
+- Description: Retrieve or update the destination webhook URL.
+- Paths:
+  - `GET /webhook/infor` – Retrieve current configured CRM webhook destination.
+  - `POST /webhook/infor` – Update CRM webhook destination URL (pass `{"url": "https://your-crm.com/webhook/infor"}`).
+  - Also supported directly in UI at `/configs` (System Settings -> 🔔 CRM Webhook Settings).
+
+Example (Read):
+```bash
+curl -s "https://agentapi.quanlymay.com/webhook/infor"
+```
+Response:
+```json
+{
+  "ok": true,
+  "configured": true,
+  "endpoint": "/webhook/infor",
+  "webhook_url": "https://crm.yourdomain.com/webhook/infor"
+}
+```
+
+Example (Update):
+```bash
+curl -s -X POST "https://agentapi.quanlymay.com/webhook/infor" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://crm.yourdomain.com/webhook/infor"}'
+```
+
+## 4f) Test Webhook Dispatch (/webhook/infor/test)
+- Primary Path: `POST /webhook/infor/test` (aliases: `/webhook/test`, `/api/admin/crm/test-webhook`)
+- Description: Sends a simulated sample device change event to the configured CRM webhook URL and returns the delivery result, HTTP response code, and response text.
+
+Example:
+```bash
+curl -s -X POST "https://agentapi.quanlymay.com/api/admin/crm/test-webhook" \
+  -H "Content-Type: application/json"
+```
+Response:
+```json
+{
+  "ok": true,
+  "target_url": "https://crm.yourdomain.com/webhook/infor",
+  "status_code": 200,
+  "response_text": "{\"ok\":true}",
+  "payload_sent": {
+    "event": "device_data_changed",
+    "test": true,
+    "timestamp": "2026-09-04T02:26:53.723531+00:00",
+    "mac_id": "58:38:79:41:80:7C",
+    "printer_name": "RICOH MP 6503 (Test Webhook)",
+    "ip": "192.168.1.222",
+    "agent_uid": "test-agent",
+    "lead": "default",
+    "lan_uid": "default_84_93_B2_7C_EE_78_192_168_1_1",
+    "counter": {
+      "total": "57393",
+      "copier_bw": "13421",
+      "printer_bw": "43972"
+    },
+    "status": {
+      "copier_status": "Ready",
+      "printer_status": "Ready"
+    }
+  }
+}
+```
+
 ## 5) Check online status by MAC ID
 - Method: `GET`
 - Path: `/api/public/device/online-status`

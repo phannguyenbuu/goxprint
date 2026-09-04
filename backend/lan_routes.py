@@ -933,7 +933,6 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
     @app.post("/api/lan-sites/<lan_uid>/scan")
     def trigger_lan_site_scan(lan_uid: str) -> Any:
-        from session import session_factory
         from models import Printer, DeviceInfor, AgentNode, PrinterControlCommand
         from sqlalchemy import select, delete
         from datetime import datetime, timezone
@@ -962,14 +961,34 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             ).scalars().all()
 
             if not agents:
-                # Fallback to any online agent
-                agents = session.execute(
-                    select(AgentNode).where(AgentNode.is_online == True)
-                ).scalars().all()
+                # Tuyệt đối không fallback chọn bừa Agent khác từ LAN khác
+                return jsonify({
+                    "ok": False,
+                    "error": f"Không có Agent nào đang hoạt động trong mạng LAN '{lan_uid}' để thực hiện quét."
+                }), 404
 
+            from datetime import timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
             queued_ids = []
             import json
             for ag in agents:
+                # Kiểm tra xem agent này đã có lệnh scan đang pending hoặc processing hay chưa
+                existing = session.execute(
+                    select(PrinterControlCommand).where(
+                        PrinterControlCommand.agent_uid == ag.agent_uid,
+                        PrinterControlCommand.command_type == "trigger_utility",
+                        PrinterControlCommand.status.in_(["pending", "processing"]),
+                        PrinterControlCommand.requested_at >= cutoff,
+                        PrinterControlCommand.command_params.like('%"force_subnet_scan"%')
+                    ).order_by(PrinterControlCommand.id.desc())
+                ).scalars().first()
+
+                if existing:
+                    LOGGER.info("[trigger_lan_site_scan] Agent %s đã có lệnh force_subnet_scan đang chạy (ID: %s, trạng thái: %s), bỏ qua không tạo trùng",
+                                ag.agent_uid, existing.id, existing.status)
+                    queued_ids.append(existing.id)
+                    continue
+
                 cmd_params = json.dumps({"action": "exec_utility", "command": "force_subnet_scan", "command_content": "force_subnet_scan"})
                 cmd = PrinterControlCommand(
                     printer_id=0,
@@ -990,6 +1009,38 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             session.commit()
 
             return jsonify({"ok": True, "lan_uid": lan_uid, "queued_commands": queued_ids, "message": "Purged DB & queued subnet scan"})
+
+    @app.get("/api/scan-points")
+    def get_all_scan_points() -> Any:
+        q = _to_text(request.args.get("q", "")).strip()
+        with session_factory() as session:
+            from models import ScanPoint
+            from sqlalchemy import select
+            stmt = select(ScanPoint).order_by(ScanPoint.updated_at.desc())
+            if q:
+                stmt = stmt.where(
+                    (ScanPoint.printer_name.ilike(f"%{q}%")) |
+                    (ScanPoint.mac_id.ilike(f"%{q}%")) |
+                    (ScanPoint.ip.ilike(f"%{q}%")) |
+                    (ScanPoint.agent_uid.ilike(f"%{q}%"))
+                )
+            rows = session.execute(stmt).scalars().all()
+            
+            res = []
+            for r in rows:
+                ab_data = r.address_book_data or {}
+                dest_count = len(ab_data) if isinstance(ab_data, dict) else (len(ab_data) if isinstance(ab_data, list) else 0)
+                res.append({
+                    "mac_id": r.mac_id,
+                    "printer_name": r.printer_name or "",
+                    "ip": r.ip or "",
+                    "agent_uid": r.agent_uid or "",
+                    "status": r.status or "success",
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else "",
+                    "destination_count": dest_count,
+                    "address_book_data": ab_data
+                })
+            return jsonify({"ok": True, "rows": res})
 
     @app.post("/api/scan-points")
     @app.post("/api/scan-points/save")

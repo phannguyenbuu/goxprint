@@ -24,3 +24,8 @@ gitlog.txt
 GoxAgent/.build-venv/
 GoxAgent/build/
 GoxAgent/dist/
+scratch/
+scratch_*
+current_force_subnet_scan.py
+user_force_scan_raw.py
+

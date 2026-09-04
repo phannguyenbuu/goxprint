@@ -1237,8 +1237,9 @@ def create_app() -> Flask:
     register_ui_routes(app, session_factory)
 
     # Start daily data-retention background job
-    from retention import start_retention_scheduler
-    start_retention_scheduler(session_factory, run_at_startup=True)
+    if os.getenv("ENABLE_RETENTION_SCHEDULER", "true").lower() == "true":
+        from retention import start_retention_scheduler
+        start_retention_scheduler(session_factory, run_at_startup=True)
 
     return app
 

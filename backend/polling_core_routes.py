@@ -331,6 +331,14 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         dev_counter = dev.get("counter") if isinstance(dev.get("counter"), dict) and dev.get("counter") else (dev.get("counter_data") if isinstance(dev.get("counter_data"), dict) else {})
                         dev_status = dev.get("status") if isinstance(dev.get("status"), dict) and dev.get("status") else (dev.get("status_data") if isinstance(dev.get("status_data"), dict) else {})
 
+                        # If this device matches the polled target in root payload, link root counter/status
+                        if not dev_counter and ((d_mac and mac_id and d_mac == mac_id) or (d_ip and ip and d_ip == ip)):
+                            if counter_data and isinstance(counter_data, dict):
+                                dev_counter = counter_data
+                        if not dev_status and ((d_mac and mac_id and d_mac == mac_id) or (d_ip and ip and d_ip == ip)):
+                            if status_data and isinstance(status_data, dict):
+                                dev_status = status_data
+
                         if not dev_counter:
                             try:
                                 c_hist_stmt = select(CounterInfor).where(CounterInfor.lead == lead)
@@ -380,7 +388,12 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                         else:
                             d_stmt = d_stmt.where(DeviceInfor.ip == d_ip)
                         d_obj = session.execute(d_stmt).scalars().first()
+                        data_changed = False
                         if d_obj:
+                            if dev_counter and dev_counter != d_obj.counter_data:
+                                data_changed = True
+                            if dev_status and dev_status != d_obj.status_data:
+                                data_changed = True
                             if d_ip:
                                 d_obj.ip = d_ip
                             if d_mac:
@@ -397,6 +410,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 d_obj.status_data = dev_status
                                 d_obj.last_status_at = utc_now
                         else:
+                            if dev_counter or dev_status:
+                                data_changed = True
                             d_obj = DeviceInfor(
                                 lead=lead,
                                 lan_uid=lan_uid,
@@ -408,9 +423,30 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 status_data=dev_status or {},
                                 last_counter_at=utc_now if dev_counter else None,
                                 last_status_at=utc_now if dev_status else None,
+                                created_at=utc_now,
                                 updated_at=utc_now,
                             )
                             session.add(d_obj)
+
+                        if data_changed and (d_mac or d_ip):
+                            try:
+                                from webhook_dispatcher import dispatch_device_change
+                                webhook_payload = {
+                                    "event": "device_data_changed",
+                                    "timestamp": utc_now.isoformat(),
+                                    "mac_id": d_mac or "",
+                                    "printer_name": d_name or (d_obj.printer_name if d_obj else ""),
+                                    "ip": d_ip or (d_obj.ip if d_obj else ""),
+                                    "agent_uid": agent_uid,
+                                    "lead": lead,
+                                    "lan_uid": lan_uid,
+                                    "counter": dev_counter or (d_obj.counter_data if d_obj else {}),
+                                    "status": dev_status or (d_obj.status_data if d_obj else {}),
+                                }
+                                dispatch_device_change(session_factory, webhook_payload)
+                            except Exception as wh_err:
+                                LOGGER.debug("[WebhookDispatch] Trigger error: %s", wh_err)
+
 
                         # Write history snapshot if counter_data or status_data is available
                         if dev_counter or dev_status:
@@ -427,6 +463,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 status_data=dev_status,
                                 last_counter_at=utc_now if dev_counter else None,
                                 last_status_at=utc_now if dev_status else None,
+                                created_at=utc_now,
                                 updated_at=utc_now,
                             )
                             session.add(dh_obj)

@@ -894,8 +894,10 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         import json as _json
                         cmd_params = _json.loads(command.command_params) if command.command_params else {}
                         retry_count = int(cmd_params.get("retry_count", 0))
-                        
-                        if retry_count < 2:
+                        # address_modify / delete_scan_email_dest are stateful wizard operations —
+                        # retrying mid-flow can corrupt or delete the copier entry. Never auto-retry.
+                        no_retry_types = {"address_modify", "delete_scan_email_dest"}
+                        if retry_count < 3 and command.command_type not in no_retry_types:
                             cmd_params["retry_count"] = retry_count + 1
                             command.command_params = _json.dumps(cmd_params, ensure_ascii=False)
                             command.status = "pending"
@@ -951,10 +953,24 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     command.error_message = error_message or ""
                     command.responded_at = responded_at
 
+                    printers_to_process = []
+                    is_subnet_scan = (
+                        command.command_type == "force_subnet_scan"
+                        or "force_subnet_scan" in (command.command_params or "")
+                    )
                     if isinstance(raw_payload, dict):
-                        raw_payload = raw_payload.get("printers") or raw_payload.get("printers_list") or [raw_payload]
+                        if "printers" in raw_payload and isinstance(raw_payload["printers"], list):
+                            printers_to_process = [p for p in raw_payload["printers"] if isinstance(p, dict)]
+                            is_subnet_scan = True
+                        elif "printers_list" in raw_payload and isinstance(raw_payload["printers_list"], list):
+                            printers_to_process = [p for p in raw_payload["printers_list"] if isinstance(p, dict)]
+                            is_subnet_scan = True
+                        elif raw_payload.get("mac_address") or raw_payload.get("mac_id") or raw_payload.get("ip"):
+                            printers_to_process = [raw_payload]
+                    elif isinstance(raw_payload, list):
+                        printers_to_process = [p for p in raw_payload if isinstance(p, dict)]
 
-                    if isinstance(raw_payload, list) and len(raw_payload) > 0:
+                    if printers_to_process:
                         agent = session.execute(
                             select(AgentNode)
                             .where(AgentNode.agent_uid == command.agent_uid)
@@ -962,41 +978,38 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         ).scalars().first()
                         target_lan_uid = agent.lan_uid if agent and agent.lan_uid else "default"
 
-                        # Update ACTIVE_AGENTS RAM registry
+                        # Update ACTIVE_AGENTS RAM registry only if this is a subnet scan or discovery
                         from active_agents_registry import ACTIVE_AGENTS
-                        if command.agent_uid in ACTIVE_AGENTS:
-                            ACTIVE_AGENTS[command.agent_uid]["printers_json"] = raw_payload
+                        if is_subnet_scan and command.agent_uid in ACTIVE_AGENTS:
+                            ACTIVE_AGENTS[command.agent_uid]["printers_json"] = printers_to_process
 
-                        # Wipe ALL old printer records for this lead/company before inserting fresh scan results
-                        from sqlalchemy import delete
-                        from models import DeviceInfor
-                        session.execute(delete(Printer).where(Printer.lead == lead))
-                        session.execute(delete(DeviceInfor).where(DeviceInfor.lead == lead))
-                        session.flush()
-
+                        # Upsert printers safely WITHOUT wiping all printers or DeviceInfor from database
                         added_count = 0
-                        for p_item in raw_payload:
-                            if not isinstance(p_item, dict): continue
+                        now_ts = datetime.now(timezone.utc)
+                        for p_item in printers_to_process:
                             mac = str(p_item.get("mac_address") or p_item.get("mac_id") or "").strip().upper().replace("-", ":")
                             ip = str(p_item.get("ip") or "").strip()
                             p_name = str(p_item.get("name") or p_item.get("printer_name") or "Photocopy").strip()
-                            if not mac: continue
+                            if not mac and not ip:
+                                continue
 
-                            new_p = Printer(
+                            _upsert_printer_from_polling(
+                                session=session,
                                 lead=lead,
                                 lan_uid=target_lan_uid,
+                                agent_uid=command.agent_uid or "",
                                 printer_name=p_name,
                                 ip=ip,
+                                event_time=now_ts,
+                                touch_seen=True,
+                                mark_online_on_create=bool(p_item.get("is_online", True)),
                                 mac_address=mac,
-                                is_online=bool(p_item.get("is_online", True)),
-                                enabled=True,
-                                agent_uid=command.agent_uid or "",
-                                last_scanned_at=datetime.now(timezone.utc)
+                                auth_user=str(p_item.get("auth_user") or p_item.get("user") or ""),
+                                auth_password=str(p_item.get("auth_password") or p_item.get("pass") or ""),
                             )
-                            session.add(new_p)
                             added_count += 1
                         session.flush()
-                        LOGGER.info("[polling_control_result] Wiped old printers and saved %d fresh printers for lead=%s in VPS DB", added_count, lead)
+                        LOGGER.info("[polling_control_result] Upserted %d printers for lead=%s agent=%s (is_scan=%s) in VPS DB", added_count, lead, command.agent_uid, is_subnet_scan)
 
                     try:
                         import json as _json
@@ -1135,7 +1148,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         import json as _json
                         cmd_params = _json.loads(command.command_params) if command.command_params else {}
                         retry_count = int(cmd_params.get("retry_count", 0))
-                        if retry_count < 2:
+                        if retry_count < 3:
                             cmd_params["retry_count"] = retry_count + 1
                             command.command_params = _json.dumps(cmd_params, ensure_ascii=False)
                             command.status = "pending"
@@ -1181,7 +1194,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         import json as _json
                         cmd_params = _json.loads(command.command_params) if command.command_params else {}
                         retry_count = int(cmd_params.get("retry_count", 0))
-                        if retry_count < 2:
+                        if retry_count < 3:
                             cmd_params["retry_count"] = retry_count + 1
                             command.command_params = _json.dumps(cmd_params, ensure_ascii=False)
                             command.status = "pending"
@@ -1426,6 +1439,46 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     auth_user=_to_text(item.get("auth_user") or item.get("user")),
                     auth_password=_to_text(item.get("auth_password") or item.get("password")),
                 )
+
+                # Also upsert DeviceInfor table to keep in sync
+                try:
+                    d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead)
+                    if mac_address:
+                        from sqlalchemy import func
+                        d_stmt = d_stmt.where(func.upper(DeviceInfor.mac_id) == mac_address.upper())
+                    elif ip:
+                        d_stmt = d_stmt.where(DeviceInfor.ip == ip)
+                    else:
+                        d_stmt = None
+                    if d_stmt is not None:
+                        d_obj = session.execute(d_stmt).scalars().first()
+                        if d_obj:
+                            if ip:
+                                d_obj.ip = ip
+                            if mac_address:
+                                d_obj.mac_id = mac_address
+                            if printer_name:
+                                d_obj.printer_name = printer_name
+                            d_obj.agent_uid = agent_uid
+                            if lan_uid:
+                                d_obj.lan_uid = lan_uid
+                            d_obj.updated_at = timestamp
+                        else:
+                            d_obj = DeviceInfor(
+                                lead=lead,
+                                lan_uid=lan_uid,
+                                agent_uid=agent_uid,
+                                mac_id=mac_address,
+                                ip=ip,
+                                printer_name=printer_name or "Unknown Printer",
+                                counter_data={},
+                                status_data={},
+                                updated_at=timestamp,
+                            )
+                            session.add(d_obj)
+                except Exception as d_err:
+                    LOGGER.debug("DeviceInfor upsert error: %s", d_err)
+
                 updated += 1
             # Mark printers not in the new inventory as offline
             pushed_macs = {_normalize_mac(_to_text(item.get("mac_address") or item.get("mac_id"))) for item in devices if isinstance(item, dict)}
@@ -1463,6 +1516,12 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     json.dump(payload_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 LOGGER.error("Failed to save live cameras JSON: %s", e)
+
+            try:
+                session.commit()
+            except Exception as commit_err:
+                session.rollback()
+                LOGGER.error("Failed to commit inventory session: %s", commit_err)
 
         LOGGER.info(
             "inventory: lead=%s lan=%s agent=%s devices=%s inserted=%s updated=%s",
@@ -1666,139 +1725,4 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             }
         )
 
-    @app.post("/api/polling/inventory")
-    def ingest_polling_inventory() -> Any:
-        body = request.get_json(silent=True) or {}
-        if not isinstance(body, dict):
-            return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
 
-        sent_token = _request_api_token()
-        ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token)
-        if not ok_auth:
-            return auth_error
-
-        lan_uid = _to_text(body.get("lan_uid"))
-        agent_uid = _to_text(body.get("agent_uid")) or "legacy-agent"
-        devices_list = body.get("devices")
-        if not isinstance(devices_list, list):
-            devices_list = []
-
-        LOGGER.info("[INVENTORY INGEST] Received %d devices from agent '%s' (lan_uid: %s)", len(devices_list), agent_uid, lan_uid)
-
-        from active_agents_registry import update_agent_in_memory
-        update_agent_in_memory(
-            lead=lead_valid,
-            lan_uid=lan_uid,
-            agent_uid=agent_uid,
-            hostname=_to_text(body.get("hostname")),
-            local_ip=_to_text(body.get("local_ip")),
-            devices_list=devices_list,
-        )
-
-        utc_now = datetime.now(timezone.utc)
-        active_macs = set()
-        active_ips = set()
-        count = 0
-
-        with session_factory() as session:
-            try:
-                for dev in devices_list:
-                    if not isinstance(dev, dict):
-                        continue
-                    d_ip = str(dev.get("ip") or "").strip()
-                    d_mac = str(dev.get("mac_address") or dev.get("mac_id") or "").strip().replace("-", ":").upper()
-                    d_name = str(dev.get("printer_name") or dev.get("name") or "").strip()
-                    if not d_ip and not d_mac:
-                        continue
-
-                    if d_mac:
-                        active_macs.add(d_mac)
-                    if d_ip:
-                        active_ips.add(d_ip)
-
-                    # 1. Upsert Printer table
-                    p_stmt = select(Printer).where(Printer.lead == lead_valid)
-                    if d_mac:
-                        p_stmt = p_stmt.where(func.upper(Printer.mac_address) == d_mac)
-                    else:
-                        p_stmt = p_stmt.where(Printer.ip == d_ip)
-                    p_obj = session.execute(p_stmt).scalars().first()
-                    if p_obj:
-                        if d_ip:
-                            p_obj.ip = d_ip
-                        if d_mac:
-                            p_obj.mac_address = d_mac
-                        if d_name:
-                            p_obj.printer_name = d_name
-                        p_obj.agent_uid = agent_uid
-                        if lan_uid:
-                            p_obj.lan_uid = lan_uid
-                        p_obj.is_online = True
-                        p_obj.updated_at = utc_now
-                    else:
-                        p_obj = Printer(
-                            lead=lead_valid,
-                            lan_uid=lan_uid,
-                            agent_uid=agent_uid,
-                            printer_name=d_name or "Unknown Printer",
-                            ip=d_ip,
-                            mac_address=d_mac,
-                            enabled=True,
-                            is_online=True,
-                            updated_at=utc_now,
-                            auth_user="",
-                            auth_password="",
-                            address_book_sync={},
-                        )
-                        session.add(p_obj)
-
-                    # 2. Upsert DeviceInfor table
-                    d_stmt = select(DeviceInfor).where(DeviceInfor.lead == lead_valid)
-                    if d_mac:
-                        d_stmt = d_stmt.where(func.upper(DeviceInfor.mac_id) == d_mac)
-                    else:
-                        d_stmt = d_stmt.where(DeviceInfor.ip == d_ip)
-                    d_obj = session.execute(d_stmt).scalars().first()
-                    if d_obj:
-                        if d_ip:
-                            d_obj.ip = d_ip
-                        if d_mac:
-                            d_obj.mac_id = d_mac
-                        if d_name:
-                            d_obj.printer_name = d_name
-                        d_obj.agent_uid = agent_uid
-                        if lan_uid:
-                            d_obj.lan_uid = lan_uid
-                        d_obj.updated_at = utc_now
-                    else:
-                        d_obj = DeviceInfor(
-                            lead=lead_valid,
-                            lan_uid=lan_uid,
-                            agent_uid=agent_uid,
-                            mac_id=d_mac,
-                            ip=d_ip,
-                            printer_name=d_name or "Unknown Printer",
-                            counter_data={},
-                            status_data={},
-                            updated_at=utc_now,
-                        )
-                        session.add(d_obj)
-                    count += 1
-
-                # Purge stale Printer records for this lead not in agent printers.json
-                if len(devices_list) > 0 and (active_macs or active_ips):
-                    existing_printers = session.execute(select(Printer).where(Printer.lead == lead_valid)).scalars().all()
-                    for ep in existing_printers:
-                        ep_mac = (ep.mac_address or "").strip().upper()
-                        ep_ip = (ep.ip or "").strip()
-                        if not (ep_mac and ep_mac in active_macs) and not (ep_ip and ep_ip in active_ips):
-                            session.delete(ep)
-                            LOGGER.info("[inventory] Deleted stale Printer ID %s (%s, IP %s) for lead %s", ep.id, ep.printer_name, ep.ip, lead_valid)
-
-                session.commit()
-                LOGGER.info("[inventory] Ingested %d devices for lead=%s lan_uid=%s agent_uid=%s", count, lead_valid, lan_uid, agent_uid)
-            except Exception as exc:
-                session.rollback()
-                LOGGER.warning("[inventory] Ingest inventory failed: %s", exc)
-
-        return jsonify({"ok": True, "lead": lead_valid, "lan_uid": lan_uid, "agent_uid": agent_uid, "count": count})

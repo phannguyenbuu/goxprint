@@ -159,6 +159,18 @@
     </div>
   </div>
 
+  <!-- CRM Webhook Settings -->
+  <div class="settings-card">
+    <h3 class="settings-card-title">🔔 CRM Webhook Settings (Bắn thông báo Realtime sang CRM)</h3>
+    <div class="form-grid">
+      <div class="form-group" style="grid-column: 1 / -1;">
+        <label class="form-label" for="crm_webhook_url">CRM Webhook Endpoint URL (Ví dụ: https://crm.yourdomain.com/webhook/infor)</label>
+        <input type="url" id="crm_webhook_url" class="form-input" placeholder="https://crm.yourdomain.com/webhook/infor" value="">
+        <span class="form-desc">Địa chỉ URL mà server sẽ tự động bắn Webhook (Fire-and-Forget) sang CRM ngay khi phát hiện máy in có biến động Counter hoặc Status (đường dẫn tiếp nhận: <code>/webhook/infor</code>). Để trống nếu muốn tắt Webhook.</span>
+      </div>
+    </div>
+  </div>
+
   <div class="settings-actions">
     <button type="button" id="btn-save-settings" class="btn-save">
       💾 Lưu cấu hình hệ thống
@@ -190,6 +202,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (s.control_interval_seconds) document.getElementById('control_interval_seconds').value = s.control_interval_seconds;
         if (s.device_interval_seconds) document.getElementById('device_interval_seconds').value = s.device_interval_seconds;
         if (s.ui_refresh_interval_seconds) document.getElementById('ui_refresh_interval_seconds').value = s.ui_refresh_interval_seconds;
+        if (s.crm_webhook_url !== undefined) document.getElementById('crm_webhook_url').value = s.crm_webhook_url || '';
       }
     })
     .catch(err => console.error('Failed to load settings:', err));
@@ -201,6 +214,7 @@ document.addEventListener('DOMContentLoaded', function() {
       control_interval_seconds: parseFloat(document.getElementById('control_interval_seconds').value) || 1,
       device_interval_seconds: parseInt(document.getElementById('device_interval_seconds').value) || 60,
       ui_refresh_interval_seconds: parseInt(document.getElementById('ui_refresh_interval_seconds').value) || 5,
+      crm_webhook_url: (document.getElementById('crm_webhook_url').value || '').trim(),
     };
 
     btnSave.disabled = true;
@@ -211,6 +225,7 @@ document.addEventListener('DOMContentLoaded', function() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
+
     .then(r => r.json())
     .then(data => {
       btnSave.disabled = false;

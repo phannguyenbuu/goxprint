@@ -548,7 +548,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (closeOk) closeOk.onclick = closeModal;
     };
 
+    let isLoadingJobs = false;
     const loadJobs = (silent = false) => {
+        if (isLoadingJobs) return;
+        isLoadingJobs = true;
+
         const tbody = document.getElementById('jobs-tbody');
         if (!silent) {
             tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: #64748b;">Loading Jobs...</td></tr>';
@@ -589,6 +593,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!silent) {
                     tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: red;">Error loading jobs from server.</td></tr>';
                 }
+            })
+            .finally(() => {
+                isLoadingJobs = false;
             });
     };
 
@@ -754,7 +761,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadJobs();
-    setInterval(() => loadJobs(true), 3000);
+    setInterval(() => {
+        if (document.hidden) return;
+        loadJobs(true);
+    }, 30000);
 });
 </script>
 {% endblock %}

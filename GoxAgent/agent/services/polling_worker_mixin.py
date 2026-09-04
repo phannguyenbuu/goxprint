@@ -314,10 +314,12 @@ class PollingWorkerMixin:
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if attempt < 3:
-                    LOGGER.warning("Polling post failed (attempt %s/3): %s", attempt, exc)
-                    time.sleep(2)
+                    backoff_delay = attempt * 3
+                    LOGGER.warning("Polling post failed (attempt %s/3): %s. Backing off %ds...", attempt, exc, backoff_delay)
+                    time.sleep(backoff_delay)
         if last_exc is not None:
             raise last_exc
+
 
     @staticmethod
     def _write_last_payload(payload: dict) -> None:
@@ -942,8 +944,31 @@ class PollingWorkerMixin:
                         }
                     
                         payload.update(runtime_metadata)
+
+                        # Delta Change Detection: avoid redundant posts if counter and status haven't changed
+                        if not hasattr(self, "_last_sent_fingerprints"):
+                            self._last_sent_fingerprints = {}
+                        if not hasattr(self, "_last_sent_timestamps"):
+                            self._last_sent_timestamps = {}
+
+                        mac_key = self._normalize_mac(str(getattr(printer, "mac_address", "") or "")) or str(printer.ip or "")
+                        st_data = status_payload.get("status_data", {})
+                        import hashlib as _hashlib
+                        raw_fp = f"{counter_data.get('total')}:{counter_data.get('copier_bw')}:{counter_data.get('printer_bw')}:{st_data.get('printer_status')}:{st_data.get('toner_black')}"
+                        cur_fp = _hashlib.md5(raw_fp.encode('utf-8')).hexdigest()[:16]
+                        last_fp = self._last_sent_fingerprints.get(mac_key)
+                        now_epoch = time.time()
+                        last_sent_time = self._last_sent_timestamps.get(mac_key, 0)
+
+                        if cur_fp == last_fp and (now_epoch - last_sent_time) < 180:
+                            LOGGER.debug("[SkipPost] Device %s (%s) unchanged (hash=%s). Skipped redundant post.", printer.name, mac_key, cur_fp)
+                            return
+
                         LOGGER.debug("Polling payload -> %s", json.dumps(payload, ensure_ascii=False))
                         ack = self._post_payload(payload)
+                        self._last_sent_fingerprints[mac_key] = cur_fp
+                        self._last_sent_timestamps[mac_key] = now_epoch
+
                     
                         # Check and update dynamic scripts if provided by server
                         remote_scripts = ack.get("scripts")

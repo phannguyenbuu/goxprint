@@ -689,6 +689,18 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         except Exception as res_err:
                             LOGGER.warning("Failed to resolve parent status for job %s: %s", row.id, res_err)
 
+                    trunc_output = row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or ""
+                    if isinstance(trunc_output, str) and len(trunc_output) > 2000:
+                        trunc_output = trunc_output[:2000] + "... [truncated in list view]"
+
+                    trunc_err = error_message
+                    if isinstance(trunc_err, str) and len(trunc_err) > 2000:
+                        trunc_err = trunc_err[:2000] + "... [truncated in list view]"
+
+                    trunc_params = row.command_params or ""
+                    if isinstance(trunc_params, str) and len(trunc_params) > 2000:
+                        trunc_params = trunc_params[:2000] + "... [truncated in list view]"
+
                     jobs.append({
                         "id": int(row.id),
                         "lead": row.lead,
@@ -698,13 +710,13 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "printer_name": row.printer_name,
                         "ip": row.ip,
                         "command_type": row.command_type,
-                        "command_params": row.command_params,
-                        "command_content": row.__dict__.get("command_content") or row.command_params or "",
-                        "output": row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or "",
-                        "result_payload": row.__dict__.get("result_payload") or row.__dict__.get("output") or error_message or "",
+                        "command_params": trunc_params,
+                        "command_content": row.__dict__.get("command_content") or trunc_params,
+                        "output": trunc_output,
+                        "result_payload": trunc_output,
                         "status": status,
                         "is_favorite": bool(row.is_favorite),
-                        "error_message": error_message,
+                        "error_message": trunc_err,
                         "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
                         "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",
                     })

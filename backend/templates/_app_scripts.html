@@ -1236,6 +1236,9 @@ function buildApiTestUrl(key, ctx) {
   if (key === "networklist") return "/networklist/";
   if (key === "infor") return "/api/infor/list";
   if (key === "by-mac") return mac ? `/api/public/device/by-mac?mac_id=${mac}` : "";
+  if (key === "by-macs") return `/api/public/device/by-macs`;
+  if (key === "crm-webhook-url" || key === "webhook-infor") return `/webhook/infor`;
+  if (key === "crm-test-webhook" || key === "webhook-test") return `/webhook/infor/test`;
   if (key === "by-mac-now") return mac ? `/api/public/device/by-mac-now?mac_id=${mac}` : "";
   if (key === "ip-public") return "/api/public/ip/public";
   if (key === "ip-workstation") {
@@ -1348,7 +1351,18 @@ async function runApiTest(key, ctx) {
     return false;
   };
 
-  if (key === "tasks-create") {
+  if (key === "by-macs") {
+    method = "POST";
+    const sampleMac = String(ctx?.mac_id || "58:38:79:79:A3:EB").trim();
+    body = {
+      mac_ids: [sampleMac]
+    };
+    headers = { "Content-Type": "application/json" };
+  } else if (key === "crm-test-webhook" || key === "webhook-test") {
+    method = "POST";
+    body = {};
+    headers = { "Content-Type": "application/json" };
+  } else if (key === "tasks-create") {
     method = "POST";
     body = buildTaskApiTestPayload(ctx, {
       title: `API Docs Create Task ${Date.now()}`,
@@ -1777,7 +1791,7 @@ async function initApiTests(resetStatuses = true) {
   const buttons = Array.from(document.querySelectorAll(".api-test-btn"));
   const allBtn = qs("api-test-all-btn");
   const keys = [
-    "machinelist", "networklist", "infor", "by-mac", "by-lan", "ip-public", "ip-workstation", "all", "agents-list", "devices-list",
+    "machinelist", "networklist", "infor", "by-mac", "by-macs", "webhook-infor", "webhook-test", "crm-webhook-url", "by-lan", "ip-public", "ip-workstation", "all", "agents-list", "devices-list",
     "workspaces-list", "workspaces-create", "workspaces-update", "workspaces-delete",
     "locations-list", "locations-create", "locations-update", "locations-delete",
     "materials-list", "materials-create", "materials-update", "materials-delete",
@@ -2678,5 +2692,3 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 </script>
-
-<script type="module" crossorigin src="{{ url_for('static', filename='assets/index-B9kBqD07.js') }}"></script>

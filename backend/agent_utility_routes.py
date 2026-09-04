@@ -267,6 +267,49 @@ print("__PRINTER_INFO_JSON_END__")
 
 def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map: dict[str, str]) -> None:
 
+    @app.get("/api/uticommands")
+    def get_all_uticommands() -> Any:
+        from models import UtiCommand
+        from sqlalchemy import select
+        try:
+            with session_factory() as session:
+                cmds = session.execute(select(UtiCommand).order_by(UtiCommand.command.asc())).scalars().all()
+                res = []
+                for c in cmds:
+                    res.append({
+                        "command": c.command,
+                        "label": c.label,
+                        "icon": c.icon or "",
+                        "description": c.description or "",
+                        "output_modal": c.output_modal,
+                        "is_visible": bool(getattr(c, "is_visible", True) if getattr(c, "is_visible", True) is not None else True),
+                        "command_content": c.command_content or ""
+                    })
+                return jsonify({"ok": True, "commands": res})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/uticommands/<command_name>")
+    def update_uticommand_content(command_name: str) -> Any:
+        from models import UtiCommand
+        from sqlalchemy import select
+        body = request.get_json(silent=True) or {}
+        new_content = body.get("command_content")
+        is_vis = body.get("is_visible")
+        try:
+            with session_factory() as session:
+                cmd = session.execute(select(UtiCommand).where(UtiCommand.command == command_name)).scalar_one_or_none()
+                if not cmd:
+                    return jsonify({"ok": False, "error": "Command not found"}), 404
+                if new_content is not None:
+                    cmd.command_content = new_content
+                if is_vis is not None:
+                    cmd.is_visible = bool(is_vis)
+                session.commit()
+                return jsonify({"ok": True, "message": "Updated successfully", "is_visible": cmd.is_visible})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.get("/api/agents/<agent_uid>/utility-commands")
     def get_agent_utility_commands(agent_uid: str) -> Any:
         """Return the dynamic utility command list from Database."""
@@ -306,9 +349,11 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
             return jsonify({"ok": False, "error": "Thiếu thông tin agent_uid"}), 400
         return trigger_agent_utility_exec(agent_uid)
 
+    @app.post("/ui/agents/<agent_uid>/utility/exec")
     @app.post("/api/agents/<agent_uid>/utility/exec")
     def trigger_agent_utility_exec(agent_uid: str) -> Any:
-        """Queue a dynamic utility command to the agent for exec() execution."""
+        """Queue a dynamic utility command to the agent for exec() execution.
+        Unified handler for both /api/... and /ui/... endpoints."""
         body = request.get_json(silent=True) or {}
         command = _to_text(body.get("command", "exec"))
         command_content = _to_text(body.get("command_content", ""))
@@ -339,14 +384,12 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
             cmd_line = str(body.get("command_line")).strip()
             command_content = f"""import subprocess\nprint(subprocess.getoutput(r'''{cmd_line}'''))"""
 
+        # NO FALLBACK: Cấm đẩy script giả hoặc script rỗng khi không tìm thấy nội dung lệnh
         if not command_content:
-            command_content = f"""# Fallback execution for command: {command}
-import sys
-print(f"Executing utility command: {command}")
-"""
+            return jsonify({"ok": False, "error": f"Không tìm thấy nội dung thực thi hợp lệ cho lệnh '{command}'"}), 400
 
         target_ip = str(body.get("printer_ip") or body.get("ip") or body.get("target_ip") or "").strip()
-        target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "admin").strip()
+        target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "").strip()
         raw_pass = body.get("auth_password") if body.get("auth_password") is not None else body.get("password", body.get("target_pass", ""))
         target_pass = str(raw_pass or "").strip()
         target_id = str(body.get("target_id") or body.get("entry_id") or body.get("id") or body.get("registration_no") or "").strip()
@@ -364,9 +407,6 @@ print(f"Executing utility command: {command}")
         base64_content = str(body.get("base64_content") or body.get("base64") or body.get("content_base64") or "").strip()
         command_content = command_content.replace("__BASE64_CONTENT__", base64_content)
         command_content = command_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", new_ip)
-
-        if not command_content:
-            return jsonify({"ok": False, "error": "Missing command_content"}), 400
 
         sent_token = _request_api_token()
         ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token, request.args.get("lead"))
@@ -396,6 +436,53 @@ print(f"Executing utility command: {command}")
                 else:
                     return jsonify({"ok": False, "error": "Agent not found"}), 404
 
+            # ── Cơ chế chống gọi lặp lệnh liên tiếp (Dedup check: pending + processing) ──
+            from datetime import timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
+            existing_cmd = session.execute(
+                select(PrinterControlCommand).where(
+                    PrinterControlCommand.agent_uid == agent_uid,
+                    PrinterControlCommand.command_type == "trigger_utility",
+                    PrinterControlCommand.status.in_(["pending", "processing"]),
+                    PrinterControlCommand.requested_at >= cutoff,
+                    PrinterControlCommand.command_params.like(f'%"command": "{command}"%')
+                ).order_by(PrinterControlCommand.id.desc())
+            ).scalars().first()
+
+            if existing_cmd:
+                LOGGER.info("[utility/exec] Command '%s' for agent '%s' is already %s (ID: %s), skipping duplicate",
+                            command, agent_uid, existing_cmd.status, existing_cmd.id)
+                return jsonify({
+                    "ok": True,
+                    "skipped": True,
+                    "message": f"Lệnh '{command}' đang được Agent thực thi (ID: {existing_cmd.id}, trạng thái: {existing_cmd.status})",
+                    "command_id": int(existing_cmd.id),
+                    "id": int(existing_cmd.id),
+                    "status": existing_cmd.status,
+                }), 200
+
+            # Nếu là force_subnet_scan mới: Xóa cache DB và RAM trước khi quét
+            if command == "force_subnet_scan":
+                target_lan = agent.lan_uid or "default"
+                LOGGER.info("[VPS] Clearing DB printers & RAM cache for lan_uid=%s on force_subnet_scan", target_lan)
+                try:
+                    from models import Printer, DeviceInfor
+                    from sqlalchemy import delete
+                    session.execute(delete(Printer).where(Printer.lan_uid == target_lan))
+                    session.execute(delete(DeviceInfor).where(DeviceInfor.lan_uid == target_lan))
+                    session.commit()
+                except Exception as del_err:
+                    LOGGER.warning("[VPS] Could not delete DB printers for lan_uid %s: %s", target_lan, del_err)
+                
+                try:
+                    for ag_key, ag_data in list(ACTIVE_AGENTS.items()):
+                        if isinstance(ag_data, dict) and ag_data.get("lan_uid") == target_lan:
+                            ag_data["devices"] = {}
+                            ag_data["printers_json"] = []
+                except Exception as ram_err:
+                    LOGGER.warning("[VPS] Could not clear RAM printers for lan_uid %s: %s", target_lan, ram_err)
+
+
             if command == "sync_all_scanpoints":
                 from models import PrinterAuthCredential, UtiCommand
                 try:
@@ -421,7 +508,10 @@ print(f"Executing utility command: {command}")
                             continue
                             
                         name_lower = (printer_db.printer_name or "").lower()
-                        brand_name = "ricoh" if "ricoh" in name_lower else "toshiba" if "toshiba" in name_lower else "ricoh"
+                        brand_name = "ricoh" if "ricoh" in name_lower else "toshiba" if "toshiba" in name_lower or "e-studio" in name_lower else None
+                        if not brand_name:
+                            LOGGER.warning("[sync_all_scanpoints] Skipping printer %s — cannot determine brand from name '%s'", sp.mac_id, printer_db.printer_name)
+                            continue
                         list_cmd_name = f"{brand_name}_list_scan"
                         
                         cmd_entry = session.execute(
@@ -579,7 +669,10 @@ print(f"Executing utility command: {command}")
                                         
                                     if printer_db:
                                         name_lower = (printer_db.printer_name or "").lower()
-                                        brand_name = "ricoh" if "ricoh" in name_lower else "toshiba" if "toshiba" in name_lower else "ricoh"
+                                        brand_name = "ricoh" if "ricoh" in name_lower else "toshiba" if "toshiba" in name_lower or "e-studio" in name_lower else None
+                                        if not brand_name:
+                                            LOGGER.warning("[check_scan_ip_match] Skipping printer %s — cannot determine brand from name '%s'", sp.mac_id, printer_db.printer_name)
+                                            continue
                                         cmd_name = f"{brand_name}_change_ftp"
                                         
                                         cmd_entry = session.execute(
@@ -772,6 +865,7 @@ print(f"Executing utility command: {command}")
             "ok": True,
             "message": f"Utility exec '{command}' queued",
             "command_id": command_id,
+            "id": command_id,
         })
 
     @app.get("/api/agents/<agent_uid>/commands/<int:command_id>")

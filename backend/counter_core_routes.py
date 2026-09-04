@@ -488,3 +488,104 @@ def register_counter_core_routes(app: Flask, session_factory: Any) -> None:
                 "series": series,
             }
         )
+
+    @app.get("/api/dashboard/summary")
+    def dashboard_summary() -> Any:
+        lead = _to_text(request.args.get("lead"))
+        ip = _to_text(request.args.get("ip"))
+        printer_name = _to_text(request.args.get("printer_name"))
+        printer_type = _to_text(request.args.get("printer_type")).lower()
+        time_scope = _to_text(request.args.get("time_scope"))
+        datetime_from = _to_text(request.args.get("datetime_from"))
+        datetime_to = _to_text(request.args.get("datetime_to"))
+        favorite_only = _to_text(request.args.get("favorite")).lower() in {"1", "true", "yes", "on"}
+
+        with session_factory() as session:
+            c_stmt = _apply_common_filters(select(func.count(CounterInfor.id)), CounterInfor, lead, ip, printer_name, printer_type, time_scope, favorite_only, datetime_from, datetime_to)
+            counter_rows = session.scalar(c_stmt) or 0
+
+            s_stmt = _apply_common_filters(select(func.count(StatusInfor.id)), StatusInfor, lead, ip, printer_name, printer_type, time_scope, favorite_only, datetime_from, datetime_to)
+            status_rows = session.scalar(s_stmt) or 0
+
+            printers_stmt = select(func.count(func.distinct(Printer.id)))
+            if lead:
+                printers_stmt = printers_stmt.where(Printer.lead == lead)
+            printers_cnt = session.scalar(printers_stmt) or 0
+
+            leads_stmt = select(func.count(func.distinct(Printer.lead)))
+            leads_cnt = session.scalar(leads_stmt) or 0
+
+            latest_c_stmt = _apply_common_filters(select(CounterInfor), CounterInfor, lead, ip, printer_name, printer_type, time_scope, favorite_only, datetime_from, datetime_to).order_by(CounterInfor.timestamp.desc(), CounterInfor.id.desc()).limit(1)
+            latest_c = session.execute(latest_c_stmt).scalar_one_or_none()
+
+            latest_s_stmt = _apply_common_filters(select(StatusInfor), StatusInfor, lead, ip, printer_name, printer_type, time_scope, favorite_only, datetime_from, datetime_to).order_by(StatusInfor.timestamp.desc(), StatusInfor.id.desc()).limit(1)
+            latest_s = session.execute(latest_s_stmt).scalar_one_or_none()
+
+            latest_counter_at = latest_c.timestamp.isoformat() if (latest_c and latest_c.timestamp) else ""
+            latest_status_at = latest_s.timestamp.isoformat() if (latest_s and latest_s.timestamp) else ""
+
+            latest_totals = {
+                "total": latest_c.total if latest_c else 0,
+                "copier_bw": latest_c.copier_bw if latest_c else 0,
+                "printer_bw": latest_c.printer_bw if latest_c else 0,
+                "scanner_send_bw": latest_c.scanner_send_bw if latest_c else 0,
+                "scanner_send_color": latest_c.scanner_send_color if latest_c else 0,
+            }
+
+            latest_counter_info = {
+                "printer_name": latest_c.printer_name if latest_c else "-",
+                "ip": latest_c.ip if latest_c else "-",
+                "timestamp": latest_counter_at,
+                "begin_record_id": latest_c.begin_record_id if latest_c else "-",
+            } if latest_c else {}
+
+            latest_status_info = {
+                "printer_name": latest_s.printer_name if latest_s else "-",
+                "ip": latest_s.ip if latest_s else "-",
+                "timestamp": latest_status_at,
+                "system_status": latest_s.system_status if latest_s else "-",
+                "begin_record_id": latest_s.begin_record_id if latest_s else "-",
+            } if latest_s else {}
+
+            charts = {
+                "daily_total_month": {"labels": [], "values": []},
+                "daily_copier_printer": {"labels": [], "copier": [], "printer": []},
+                "pie_a3_a4": {"labels": ["A3", "A4"], "values": [0, 0]},
+                "pie_duplex_single": {"labels": ["Duplex", "Single"], "values": [0, 0]},
+                "hourly_total": {"labels": [], "values": []},
+                "hourly_a3_a4": {"labels": [], "a3": [], "a4": []},
+                "average_radar": {"labels": ["Total", "Copier", "Printer", "A3", "Duplex"], "values": [0, 0, 0, 0, 0]},
+                "distribution": {"labels": [], "values": []},
+            }
+
+            if latest_c:
+                a3_val = latest_c.a3_dlt or 0
+                total_val = latest_c.total or 0
+                a4_val = max(0, total_val - a3_val)
+                charts["pie_a3_a4"]["values"] = [a3_val, a4_val]
+
+                dup_val = latest_c.duplex or 0
+                single_val = max(0, total_val - dup_val)
+                charts["pie_duplex_single"]["values"] = [dup_val, single_val]
+
+                charts["average_radar"]["values"] = [
+                    latest_c.total or 0,
+                    latest_c.copier_bw or 0,
+                    latest_c.printer_bw or 0,
+                    latest_c.a3_dlt or 0,
+                    latest_c.duplex or 0,
+                ]
+
+        return jsonify({
+            "counter_rows": counter_rows,
+            "status_rows": status_rows,
+            "printers": printers_cnt,
+            "leads": leads_cnt,
+            "latest_counter_at": latest_counter_at,
+            "latest_status_at": latest_status_at,
+            "latest_totals": latest_totals,
+            "latest_counter_info": latest_counter_info,
+            "latest_status_info": latest_status_info,
+            "charts": charts,
+        })
+

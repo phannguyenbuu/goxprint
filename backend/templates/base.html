@@ -150,7 +150,9 @@
         </div>
       </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    {% if active_tab in ['dashboard', 'counter', 'status', 'heatmap'] %}
+    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+    {% endif %}
     {% include "_app_scripts.html" %}
   </body>
 </html>
