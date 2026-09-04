@@ -7,7 +7,7 @@ import {
   Outlet,
 } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { AppLayout } from '../components/layout/AppLayout';
 import type { User } from '../types/auth';
@@ -59,9 +59,7 @@ const DriversPage = React.lazy(() => import('../pages/DriversPage'));
 const AgentPage = React.lazy(() =>
   import('../pages/AgentPage').then((m) => ({ default: m.AgentPage }))
 );
-const WorkspacePage = React.lazy(() =>
-  import('../pages/WorkspacePage').then((m) => ({ default: m.WorkspacePage }))
-);
+
 
 // ---------- Loading fallback ----------
 function PageLoading() {
@@ -87,7 +85,6 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   const { isAuthenticated, user } = useAuthStore();
   const checkSession = useAuthStore((s) => s.checkSession);
-  const hasSelection = useWorkspaceStore((s) => s.activeIds.length > 0);
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -104,10 +101,7 @@ export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
-  // Must select workspace before accessing app pages
-  if (!hasSelection) {
-    return <Navigate to="/workspace" replace />;
-  }
+  // Workspace selection check removed
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
@@ -126,7 +120,6 @@ export function AppRouter() {
         <Routes>
           {/* Public route – no AppLayout */}
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/workspace" element={<WorkspacePage />} />
 
           {/* Protected routes – wrapped in AppLayout */}
           <Route element={<ProtectedRoute />}>
