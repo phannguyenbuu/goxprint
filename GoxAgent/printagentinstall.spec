@@ -5,7 +5,7 @@ a = Analysis(
     ['scratch/installer.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('scratch/logo1.ico', 'scratch')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
