@@ -434,7 +434,7 @@ export default function App() {
             <div style={{padding: '24px', textAlign: 'center'}}>
               <h3 style={{fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '8px'}}>Cần cài đặt & kích hoạt PrintAgent</h3>
               <p style={{fontSize: '14px', color: '#64748b', lineHeight: 1.5, marginBottom: '20px'}}>Vui lòng tải xuống và khởi chạy ứng dụng PrintAgent trên máy tính này để tự động kết nối máy photocopy và quét tài liệu Scan.</p>
-              <a href="https://download.goxprint.com/printagentinstall.exe" style={{display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#3b82f6', color: 'white', padding: '14px 28px', borderRadius: '12px', textDecoration: 'none', fontWeight: 600, fontSize: '16px', boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)', transition: 'all 0.2s'}}>
+              <a href="https://download.printagentx.com/printagentinstall.exe" style={{display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#3b82f6', color: 'white', padding: '14px 28px', borderRadius: '12px', textDecoration: 'none', fontWeight: 600, fontSize: '16px', boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)', transition: 'all 0.2s'}}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                 <span>Tải xuống PrintAgent (Windows)</span>
               </a>

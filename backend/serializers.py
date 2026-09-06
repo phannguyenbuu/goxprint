@@ -177,30 +177,17 @@ def _upsert_lan_and_agent(
                 )
                 print(f"[IP_CHANGE_DETECTED] Agent '{agent_uid}' changed IP: old={old_ref_ip} => new={local_ip}", flush=True)
                 
+                try:
+                    from utils import trigger_ip_change_workflow
+                    trigger_ip_change_workflow(session, lead, lan_uid, agent_uid, old_ref_ip, local_ip)
+                except Exception as wf_err:
+                    import logging
+                    logging.getLogger(__name__).error("[serializers] Error triggering IP change workflow for %s: %s", agent_uid, wf_err)
+
                 if ip_rec:
                     ip_rec.ip = local_ip
                     ip_rec.updated_at = datetime.now(timezone.utc)
                 agent.local_ip = local_ip
-
-                # Auto-resolve any pending/processing change_agent_ip command for this agent after DB IP is updated
-                from models import PrinterControlCommand
-                pending_ip_cmds = session.execute(
-                    select(PrinterControlCommand).where(
-                        PrinterControlCommand.agent_uid == agent_uid,
-                        PrinterControlCommand.status.in_(["pending", "processing"])
-                    )
-                ).scalars().all()
-                for pic in pending_ip_cmds:
-                    if pic.command_type == "trigger_utility":
-                        try:
-                            import json as _json
-                            cp_data = _json.loads(pic.command_params or "{}")
-                            if cp_data.get("command") == "change_agent_ip":
-                                pic.status = "success"
-                                pic.responded_at = datetime.now(timezone.utc)
-                                pic.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {local_ip}"
-                        except Exception:
-                            pass
 
         next_online = bool(is_online)
         if bool(agent.is_online) != next_online:
@@ -255,7 +242,7 @@ def _upsert_printer_from_polling(
         row = session.execute(
             select(Printer).where(Printer.lead == lead, Printer.ip == printer_ip).limit(1)
         ).scalar_one_or_none()
-    if row is None:
+    if row is None and not printer_mac and not printer_ip:
         row = session.execute(
             select(Printer)
             .where(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import logging
 from datetime import datetime, timezone
@@ -49,6 +50,7 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
 
     @app.post("/api/polling")
     def ingest_polling() -> Any:
+        utc_now = datetime.now(timezone.utc)
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             LOGGER.warning("polling: invalid json body from %s", request.remote_addr)
@@ -63,39 +65,67 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         # ── Handle explicit IP change event from Agent ───────────────────────────
         event_type = _to_text(body.get("event"))
         if event_type == "pc_ip_changed":
+            server_mode = os.getenv("SERVER_MODE", "full").strip().lower()
+            if server_mode == "ingest":
+                LOGGER.info("[pc_ip_changed] Ingest Worker forwarding pc_ip_changed to Control Plane (Port 8005)...")
+                try:
+                    import requests
+                    headers = {k: v for k, v in request.headers if k.lower() in ("x-lead-token", "content-type", "authorization")}
+                    fwd_resp = requests.post("http://127.0.0.1:8005/api/polling", json=body, headers=headers, timeout=10)
+                    return (fwd_resp.content, fwd_resp.status_code, list(fwd_resp.headers.items()))
+                except Exception as fwd_err:
+                    LOGGER.error("[pc_ip_changed] Failed to forward to Control Plane: %s", fwd_err)
+                    return jsonify({"error": f"Failed to forward pc_ip_changed to Control Plane: {fwd_err}"}), 502
+
+            # Control Plane execution (server_mode == "full")
             old_ip_ev = _to_text(body.get("old_ip", "")).strip()
             new_ip_ev = _to_text(body.get("new_ip", "")).strip()
-            agent_uid_ev = _to_text(body.get("agent_uid")) or "legacy-agent"
+            agent_uid_ev = _to_text(body.get("agent_uid", "")).strip()
+            if not agent_uid_ev:
+                LOGGER.warning("[pc_ip_changed] Missing agent_uid. Rejecting event (no fallback allowed).")
+                return jsonify({"ok": False, "error": "Missing agent_uid"}), 400
+
             with session_factory() as session:
                 lan_uid_ev, _ = _resolve_lan_uid_with_session(session, lead, body)
             if old_ip_ev and new_ip_ev and old_ip_ev != new_ip_ev:
                 with session_factory() as session:
                     try:
-                        from models import IPData
+                        from models import AgentNode, IPData
+                        # Strictly update AgentNode by exact agent_uid (no fallback)
+                        agent_node_ev = session.execute(
+                            select(AgentNode).where(AgentNode.agent_uid == agent_uid_ev)
+                        ).scalars().first()
+                        if agent_node_ev:
+                            agent_node_ev.local_ip = new_ip_ev
+                            LOGGER.info("[pc_ip_changed] Updated AgentNode.local_ip for %s: %s", agent_uid_ev, new_ip_ev)
+
                         ip_rec_ev = session.execute(
                             select(IPData).where(IPData.agent_name == agent_uid_ev)
                         ).scalars().first()
-                        if ip_rec_ev and (ip_rec_ev.ip or "").strip() == old_ip_ev:
-                            # Reference still on old_ip — workflow not yet triggered
-                            from utils import trigger_ip_change_workflow
-                            trigger_ip_change_workflow(
-                                session, lead, lan_uid_ev, agent_uid_ev, old_ip_ev, new_ip_ev
+                        if not ip_rec_ev:
+                            ip_rec_ev = IPData(
+                                agent_uid=agent_uid_ev,
+                                lan_uid=lan_uid_ev,
+                                agent_name=agent_uid_ev,
+                                ip=new_ip_ev,
+                                created_at=datetime.now(timezone.utc),
+                                updated_at=datetime.now(timezone.utc),
                             )
-                            # trigger_ip_change_workflow updates IPData.ip internally
-                            LOGGER.info(
-                                "[pc_ip_changed] Agent %s IP change %s → %s. Workflow triggered (Path A primary).",
-                                agent_uid_ev, old_ip_ev, new_ip_ev
-                            )
-                        elif ip_rec_ev and (ip_rec_ev.ip or "").strip() == new_ip_ev:
-                            LOGGER.info(
-                                "[pc_ip_changed] Agent %s: IPData already at %s — dedup skip.",
-                                agent_uid_ev, new_ip_ev
-                            )
-                        else:
-                            LOGGER.warning(
-                                "[pc_ip_changed] Agent %s: IPData.ip=%s, event old_ip=%s — mismatch, skip.",
-                                agent_uid_ev, ip_rec_ev.ip if ip_rec_ev else "N/A", old_ip_ev
-                            )
+                            session.add(ip_rec_ev)
+                            LOGGER.info("[pc_ip_changed] Created IPData for %s: %s", agent_uid_ev, new_ip_ev)
+                        elif (ip_rec_ev.ip or "").strip() != new_ip_ev:
+                            ip_rec_ev.ip = new_ip_ev
+                            ip_rec_ev.updated_at = datetime.now(timezone.utc)
+                            LOGGER.info("[pc_ip_changed] Updated IPData for %s: %s -> %s", agent_uid_ev, old_ip_ev, new_ip_ev)
+
+                        from utils import trigger_ip_change_workflow
+                        trigger_ip_change_workflow(
+                            session, lead, lan_uid_ev, agent_uid_ev, old_ip_ev, new_ip_ev
+                        )
+                        LOGGER.info(
+                            "[pc_ip_changed] Agent %s IP change %s → %s. Workflow triggered on Control Plane.",
+                            agent_uid_ev, old_ip_ev, new_ip_ev
+                        )
                         session.commit()
                     except Exception as ev_exc:
                         LOGGER.error("[pc_ip_changed] Error handling event for %s: %s", agent_uid_ev, ev_exc)
@@ -478,6 +508,8 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             agent_node.public_ip = client_pub_ip
                             agent_node.is_online = True
                             agent_node.last_seen_at = utc_now
+                            if local_ip and agent_node.local_ip != local_ip:
+                                agent_node.local_ip = local_ip
                         else:
                             agent_node = AgentNode(
                                 lead=lead,
@@ -562,7 +594,6 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
         # Compute script MD5 hashes
         scripts_info = {}
         try:
-            import os
             from pathlib import Path
             for name in ["diagnose.py"]:
                 script_path = os.path.join(os.path.dirname(__file__), "static", "releases", name)

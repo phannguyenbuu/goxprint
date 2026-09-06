@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -517,7 +517,6 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     stmt = stmt.where(PrinterControlCommand.command_type.ilike(f"%{cmd_type_q}%"))
                 if date_q:
                     try:
-                        from datetime import timedelta
                         d_start = datetime.strptime(date_q[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                         d_end = d_start + timedelta(days=1)
                         stmt = stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
@@ -583,7 +582,6 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     count_stmt = count_stmt.where(PrinterControlCommand.command_type.ilike(f"%{cmd_type_q}%"))
                 if date_q:
                     try:
-                        from datetime import timedelta
                         d_start = datetime.strptime(date_q[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                         d_end = d_start + timedelta(days=1)
                         count_stmt = count_stmt.where((PrinterControlCommand.requested_at >= d_start) & (PrinterControlCommand.requested_at < d_end))
@@ -633,9 +631,26 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                 
                 jobs = []
                 need_commit = False
+                now_utc = datetime.now(timezone.utc)
                 for row in rows:
                     status = row.status
                     error_message = row.error_message or ""
+                    
+                    # ── Auto-Timeout Watchdog: Tự động đánh dấu failed nếu job pending/processing quá 90 giây ──
+                    req_time = row.requested_at or getattr(row, 'created_at', None)
+                    if req_time and req_time.tzinfo is None:
+                        req_time = req_time.replace(tzinfo=timezone.utc)
+                    if status in ("pending", "processing") and req_time:
+                        elapsed = (now_utc - req_time).total_seconds()
+                        if elapsed > 90:
+                            status = "failed"
+                            timeout_msg = f"[-] Lỗi: Quá thời gian phản hồi từ Agent (Timeout {int(elapsed)}s)"
+                            error_message = (row.error_message or "") + (f"\n\n{timeout_msg}" if row.error_message else timeout_msg)
+                            row.status = "failed"
+                            row.error_message = error_message
+                            row.responded_at = now_utc
+                            session.add(row)
+                            need_commit = True
                     
                     # Check parent-child command status resolution
                     if row.command_params and "child_command_ids" in row.command_params and status == "pending":
@@ -682,24 +697,11 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                                     # Write resolution back to database
                                     row.status = status
                                     row.error_message = error_message
-                                    from datetime import datetime, timezone
                                     row.responded_at = datetime.now(timezone.utc)
                                     session.add(row)
                                     need_commit = True
                         except Exception as res_err:
                             LOGGER.warning("Failed to resolve parent status for job %s: %s", row.id, res_err)
-
-                    trunc_output = row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or ""
-                    if isinstance(trunc_output, str) and len(trunc_output) > 2000:
-                        trunc_output = trunc_output[:2000] + "... [truncated in list view]"
-
-                    trunc_err = error_message
-                    if isinstance(trunc_err, str) and len(trunc_err) > 2000:
-                        trunc_err = trunc_err[:2000] + "... [truncated in list view]"
-
-                    trunc_params = row.command_params or ""
-                    if isinstance(trunc_params, str) and len(trunc_params) > 2000:
-                        trunc_params = trunc_params[:2000] + "... [truncated in list view]"
 
                     jobs.append({
                         "id": int(row.id),
@@ -710,13 +712,13 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "printer_name": row.printer_name,
                         "ip": row.ip,
                         "command_type": row.command_type,
-                        "command_params": trunc_params,
-                        "command_content": row.__dict__.get("command_content") or trunc_params,
-                        "output": trunc_output,
-                        "result_payload": trunc_output,
+                        "command_params": row.command_params,
+                        "command_content": row.__dict__.get("command_content") or row.command_params or "",
+                        "output": row.__dict__.get("output") or row.__dict__.get("result_payload") or error_message or "",
+                        "result_payload": row.__dict__.get("result_payload") or row.__dict__.get("output") or error_message or "",
                         "status": status,
                         "is_favorite": bool(row.is_favorite),
-                        "error_message": trunc_err,
+                        "error_message": error_message,
                         "requested_at": _format_agents_datetime_ui(row.requested_at) if row.requested_at else "",
                         "responded_at": _format_agents_datetime_ui(row.responded_at) if row.responded_at else "",
                     })

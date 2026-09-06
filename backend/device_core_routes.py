@@ -21,9 +21,11 @@ LOGGER = logging.getLogger(__name__)
 
 def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[str, Any] | None = None) -> Printer | None:
     import re
-    ref_list = [device_ref]
+    ref_list = []
+    if device_ref:
+        ref_list.append(device_ref)
     if body and isinstance(body, dict):
-        for k in ["mac_address", "mac_id", "printer_mac_id", "printer_id", "id", "printer_ip", "ip"]:
+        for k in ["mac_address", "mac_id", "printer_mac_id"]:
             v = body.get(k)
             if v:
                 ref_list.append(v)
@@ -36,12 +38,7 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
             if norm and norm not in ref_list:
                 ref_list.append(norm)
 
-        # Extract embedded IP addresses
-        for ip in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", ref_str):
-            if ip not in ref_list:
-                ref_list.append(ip)
-
-    # 1. Try querying PostgreSQL database first
+    # 1. Try querying PostgreSQL Printer table strictly by normalized MAC address
     for ref in ref_list:
         if not ref:
             continue
@@ -59,25 +56,6 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
             )
             if p:
                 return p
-        raw_ref = _to_text(ref).strip()
-        if raw_ref.isdigit():
-            p = session.get(Printer, int(raw_ref))
-            if p:
-                return p
-        if raw_ref:
-            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_ref):
-                p = (
-                    session.execute(
-                        select(Printer)
-                        .where(Printer.ip == raw_ref)
-                        .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                        .limit(1)
-                    )
-                    .scalars()
-                    .first()
-                )
-                if p:
-                    return p
 
     # 1b. Try querying PostgreSQL scan_points table
     try:
@@ -119,13 +97,6 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
                     .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
                     .limit(1)
                 ).scalars().first()
-            if not dev_row and raw_ref and re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_ref):
-                dev_row = session.execute(
-                    select(DeviceInfor)
-                    .where(DeviceInfor.ip == raw_ref)
-                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                    .limit(1)
-                ).scalars().first()
             if dev_row:
                 return Printer(
                     id=0,
@@ -141,7 +112,7 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
     except Exception as e:
         LOGGER.warning("Error looking up DeviceInfor for printer target: %s", e)
 
-    # 2. Search in-memory NEW_LAN_SITES and ACTIVE_AGENTS RAM registries
+    # 2. Search in-memory NEW_LAN_SITES and ACTIVE_AGENTS RAM registries strictly by mac_id
     try:
         from active_agents_registry import NEW_LAN_SITES
         if isinstance(NEW_LAN_SITES, dict):
@@ -156,7 +127,7 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
                         if not ref:
                             continue
                         n_ref = _normalize_mac(ref)
-                        if (n_ref and p_mac and n_ref == p_mac) or (_to_text(ref).strip() == p_ip):
+                        if n_ref and p_mac and n_ref == p_mac:
                             return Printer(
                                 id=0,
                                 mac_address=p_mac or n_ref or "",
@@ -191,10 +162,6 @@ def _resolve_printer_control_target(session: Any, device_ref: Any, body: dict[st
                         continue
                     n_ref = _normalize_mac(ref)
                     if n_ref and p_mac and n_ref == p_mac:
-                        matched = True
-                        break
-                    raw = _to_text(ref).strip()
-                    if raw and (raw == p_ip or raw == p_name):
                         matched = True
                         break
 
@@ -262,10 +229,6 @@ def _resolve_copier_auth(session, printer, body: dict = None) -> tuple[str, str]
     if mac:
         cred = session.query(PrinterAuthCredential).filter(
             func.upper(PrinterAuthCredential.mac_address) == mac.upper()
-        ).first()
-    if not cred and ip and ip != "0.0.0.0":
-        cred = session.query(PrinterAuthCredential).filter(
-            PrinterAuthCredential.ip == ip
         ).first()
 
     if cred and cred.auth_user:
@@ -1329,19 +1292,63 @@ verify_auth()
                 target_agent_uid = _resolve_target_agent_uid(session, printer, req_agent_uid)
 
                 del_user, del_pass = _resolve_copier_auth(session, printer, body)
+
+                p_type = str(body.get("printer_type") or getattr(printer, "printer_type", "") or "").strip().lower()
+                pname_low = (printer.printer_name or "").lower()
+                norm_mac = printer_mac_value.upper().replace(":", "").replace("-", "")
+                if not p_type:
+                    if any(k in pname_low for k in ("toshiba", "e-studio", "estudio")) or norm_mac.startswith("008091"):
+                        p_type = "toshiba"
+                    elif any(k in pname_low for k in ("ricoh", "aficio")) or norm_mac.startswith("002673") or norm_mac.startswith("583879"):
+                        p_type = "ricoh"
+                    else:
+                        return jsonify({"ok": False, "error": f"Không thể xác định dòng máy in (Ricoh hay Toshiba) cho máy '{printer.printer_name}' (MAC: {printer_mac_value}, IP: {printer.ip or ip}). Cấm fallback!"}), 400
+
+                if p_type == "toshiba":
+                    cmd_name = "toshiba_change_ftp"
+                elif p_type == "ricoh":
+                    cmd_name = "ricoh_change_ftp"
+                else:
+                    return jsonify({"ok": False, "error": f"Dòng máy in '{p_type}' của '{printer.printer_name}' không được hỗ trợ đổi FTP. Cấm fallback!"}), 400
+
+                from models import UtiCommand
+                cmd_entry = session.execute(
+                    select(UtiCommand).where(UtiCommand.command == cmd_name)
+                ).scalar_one_or_none()
+                if not cmd_entry or not cmd_entry.command_content:
+                    return jsonify({"ok": False, "error": f"Không tìm thấy mẫu lệnh thực thi '{cmd_name}' trong bảng uti_commands!"}), 500
+
+                from utils import resolve_utility_command_content
+                raw_content = resolve_utility_command_content(session, cmd_entry.command_content)
+
+                effective_ip = printer.ip or ip
+                c_content = raw_content.replace("__TARGET_IP__", effective_ip).replace("__PRINTER_IP__", effective_ip)
+                c_content = c_content.replace("__TARGET_USER__", del_user).replace("__AUTH_USER__", del_user)
+                c_content = c_content.replace("__TARGET_PASS__", del_pass).replace("__AUTH_PASS__", del_pass)
+                c_content = c_content.replace("__TARGET_ID__", registration_no).replace("__ENTRY_ID__", registration_no).replace("__REGISTRATION_NO__", registration_no)
+                c_content = c_content.replace("__TARGET_SCAN_USER__", name).replace("__TARGET_NAME__", name).replace("__SCAN_USERNAME__", name)
+
                 cmd_params_dict = {
+                    "action": "exec_utility",
+                    "command": cmd_name,
+                    "command_content": c_content,
                     "registration_no": registration_no,
+                    "target_id": registration_no,
+                    "entry_id": registration_no,
                     "name": name,
+                    "target_name": name,
                     "email": email,
                     "folder": folder,
                     "user_code": user_code,
                     "fields": fields,
-                    "printer_ip": printer.ip or ip,
-                    "ip": printer.ip or ip,
+                    "printer_ip": effective_ip,
+                    "ip": effective_ip,
                     "mac_address": printer_mac_value,
                     "printer_mac_id": printer_mac_value,
                     "auth_user": del_user,
                     "auth_password": del_pass,
+                    "brand": p_type,
+                    "printer_type": p_type,
                 }
 
                 command = PrinterControlCommand(
@@ -1350,9 +1357,9 @@ verify_auth()
                     lan_uid=printer.lan_uid,
                     agent_uid=target_agent_uid,
                     printer_name=printer.printer_name,
-                    ip=printer.ip or ip,
+                    ip=effective_ip,
                     desired_enabled=printer.enabled,
-                    command_type="address_modify",
+                    command_type="trigger_utility",
                     auth_user=del_user,
                     auth_password=del_pass,
                     command_params=_json.dumps(cmd_params_dict),

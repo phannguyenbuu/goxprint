@@ -426,73 +426,56 @@ class PollingBridge(PollingWorkerMixin, PollingControlMixin, PollingIpChangeMixi
         return ""
 
     @staticmethod
-    def _resolve_local_ip() -> str:
+    def _resolve_local_ip(force: bool = False) -> str:
         import time
         now = time.time()
         cached_ip = getattr(PollingBridge._resolve_local_ip, "_cached_ip", "")
         cached_time = getattr(PollingBridge._resolve_local_ip, "_cached_time", 0.0)
-        if cached_ip and (now - cached_time < 15.0):
+        if not force and cached_ip and (now - cached_time < 3.0):
             return cached_ip
 
         candidates: list[str] = []
 
-        def _push(value: str) -> None:
+        def _push(value: str, priority_front: bool = False) -> None:
             text = str(value or "").strip()
-            if text and text not in candidates:
-                candidates.append(text)
+            if text and text not in candidates and not text.startswith("127.") and not text.startswith("169.254."):
+                if priority_front:
+                    candidates.insert(0, text)
+                else:
+                    candidates.append(text)
 
-        hostname = socket.gethostname()
-        try:
-            host_info = socket.gethostbyname_ex(hostname)
-            for value in host_info[2]:
-                _push(value)
-        except Exception:  # noqa: BLE001
-            pass
-
-        try:
-            for info in socket.getaddrinfo(hostname, None, family=socket.AF_INET):
-                _push(str(info[4][0] or "").strip())
-        except Exception:  # noqa: BLE001
-            pass
-
-        for probe_ip in ("8.8.8.8", "1.1.1.1", "192.168.1.1"):
+        # 1. Live UDP Routing socket probe (bắt trực tiếp IP card mạng đang có default route ra ngoài)
+        for probe_ip in ("8.8.8.8", "1.1.1.1", "192.168.1.1", "10.0.0.1"):
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                     sock.connect((probe_ip, 80))
-                    _push(sock.getsockname()[0])
-            except Exception:  # noqa: BLE001
+                    _push(sock.getsockname()[0], priority_front=True)
+            except Exception:
                 continue
 
-        # If we already have a valid unicast IP, skip running the slow powershell command!
-        has_unicast = any(PollingBridge._ipv4_scope_score(c) >= 200 for c in candidates)
-        if not has_unicast:
+        # 2. Quét trực tiếp card mạng vật lý đang Up qua psutil (không bị cache bởi Windows hostname)
+        try:
+            import psutil
+            if_stats = psutil.net_if_stats()
+            if_addrs = psutil.net_if_addrs()
+            for iface, addrs in if_addrs.items():
+                stat = if_stats.get(iface)
+                if not stat or not stat.isup:
+                    continue
+                is_virt = any(v in iface.lower() for v in ["tailscale", "virtual", "vethernet", "hyper-v", "wsl", "loopback", "vmware"])
+                for a in addrs:
+                    if a.family == socket.AF_INET and not a.address.startswith("127.") and not a.address.startswith("169.254."):
+                        _push(a.address, priority_front=not is_virt)
+        except Exception:
+            pass
+
+        # 3. Fallback lấy qua socket addrinfo nếu danh sách trống
+        if not candidates:
+            hostname = socket.gethostname()
             try:
-                script = r"""
-$ErrorActionPreference='SilentlyContinue'
-Get-NetIPAddress -AddressFamily IPv4 |
-  Where-Object { $_.IPAddress -and $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -ne '0.0.0.0' } |
-  Select-Object IPAddress,InterfaceAlias,PrefixOrigin,AddressState |
-  ConvertTo-Json -Depth 4
-"""
-                result = subprocess.run(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    check=True,
-                    **no_window_subprocess_kwargs(),
-                )
-                payload = json.loads(result.stdout or "[]")
-                if isinstance(payload, dict):
-                    payload = [payload]
-                if isinstance(payload, list):
-                    for item in payload:
-                        if not isinstance(item, dict):
-                            continue
-                        ip = str(item.get("IPAddress", "") or "").strip()
-                        if ip:
-                            _push(ip)
-            except Exception:  # noqa: BLE001
+                for info in socket.getaddrinfo(hostname, None, family=socket.AF_INET):
+                    _push(str(info[4][0] or "").strip())
+            except Exception:
                 pass
 
         best_ip = ""
@@ -503,7 +486,7 @@ Get-NetIPAddress -AddressFamily IPv4 |
                 best_ip = candidate
                 best_score = score
 
-        ret_ip = best_ip or ""
+        ret_ip = best_ip or (candidates[0] if candidates else "")
         PollingBridge._resolve_local_ip._cached_ip = ret_ip
         PollingBridge._resolve_local_ip._cached_time = now
         return ret_ip

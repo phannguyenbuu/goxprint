@@ -389,6 +389,7 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
             return jsonify({"ok": False, "error": f"Không tìm thấy nội dung thực thi hợp lệ cho lệnh '{command}'"}), 400
 
         target_ip = str(body.get("printer_ip") or body.get("ip") or body.get("target_ip") or "").strip()
+        target_mac = _normalize_mac(body.get("mac_id") or body.get("mac_address") or body.get("target_mac") or "")
         target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "").strip()
         raw_pass = body.get("auth_password") if body.get("auth_password") is not None else body.get("password", body.get("target_pass", ""))
         target_pass = str(raw_pass or "").strip()
@@ -398,8 +399,28 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         new_ip = str(body.get("new_ip") or "").strip()
         is_auto = bool(body.get("is_auto", False))
 
+        # If user or pass is missing, look up saved credentials from PrinterAuthCredential strictly by target_mac
+        if (not target_user or not target_pass) and target_mac:
+            from models import PrinterAuthCredential
+            try:
+                with session_factory() as s_cred:
+                    norm_m = _normalize_mac(target_mac)
+                    cred = s_cred.execute(
+                        select(PrinterAuthCredential).where(
+                            func.upper(PrinterAuthCredential.mac_address) == norm_m
+                        )
+                    ).scalars().first()
+                    if cred:
+                        if not target_user and cred.auth_user:
+                            target_user = cred.auth_user.strip()
+                        if not target_pass and cred.auth_password:
+                            target_pass = cred.auth_password.strip()
+            except Exception as exc_c:
+                LOGGER.debug("[utility/exec] Credential lookup error: %s", exc_c)
+
         # Always replace placeholders unconditionally
         command_content = command_content.replace("__TARGET_IP__", target_ip).replace("__PRINTER_IP__", target_ip)
+        command_content = command_content.replace("__TARGET_MAC__", target_mac).replace("__MAC_ID__", target_mac)
         command_content = command_content.replace("__TARGET_USER__", target_user).replace("__AUTH_USER__", target_user)
         command_content = command_content.replace("__TARGET_PASS__", target_pass).replace("__AUTH_PASS__", target_pass)
         command_content = command_content.replace("__TARGET_ID__", target_id).replace("__ENTRY_ID__", target_id).replace("__REGISTRATION_NO__", target_id)
@@ -657,15 +678,13 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                                 matching_copiers.append(f"{printer_name} ({sp.ip}): {', '.join(entry_strs)}")
                                 
                                 if change_all_to:
-                                    # Look up PrinterAuthCredential in DB by mac_address
+                                    # Look up PrinterAuthCredential in DB strictly by mac_address
+                                    norm_sp_mac = _normalize_mac(sp.mac_id)
                                     printer_db = session.execute(
-                                        select(PrinterAuthCredential).where(PrinterAuthCredential.mac_address == sp.mac_id)
+                                        select(PrinterAuthCredential).where(
+                                            func.upper(PrinterAuthCredential.mac_address) == norm_sp_mac
+                                        )
                                     ).scalars().first()
-                                    if not printer_db:
-                                        # Fallback to lookup by IP
-                                        printer_db = session.execute(
-                                            select(PrinterAuthCredential).where(PrinterAuthCredential.ip == sp.ip)
-                                        ).scalars().first()
                                         
                                     if printer_db:
                                         name_lower = (printer_db.printer_name or "").lower()
@@ -832,12 +851,39 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                     return jsonify({"ok": False, "error": f"DB Query failed: {db_err}"}), 500
 
             # Default fallback for other utility commands
+            printer_label = "AgentNode"
+            if target_mac:
+                from models import PrinterAuthCredential
+                try:
+                    norm_m = _normalize_mac(target_mac)
+                    p_cred = session.execute(
+                        select(PrinterAuthCredential).where(
+                            func.upper(PrinterAuthCredential.mac_address) == norm_m
+                        )
+                    ).scalars().first()
+                    if p_cred and p_cred.printer_name:
+                        printer_label = p_cred.printer_name
+                    else:
+                        p_row = session.execute(
+                            select(Printer).where(
+                                func.upper(Printer.mac_address) == norm_m
+                            )
+                        ).scalars().first()
+                        if p_row and p_row.name:
+                            printer_label = p_row.name
+                except Exception:
+                    pass
+                if printer_label == "AgentNode":
+                    printer_label = f"Copier ({target_ip or target_mac})"
+
             params_str = json.dumps({
                 "action": "exec_utility",
                 "command": command,
                 "command_content": command_content,
                 "printer_ip": target_ip,
                 "ip": target_ip,
+                "mac_id": target_mac,
+                "mac_address": target_mac,
                 "auth_user": target_user,
                 "auth_password": target_pass,
                 "target_id": target_id,
@@ -849,8 +895,8 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                 lead=lead_valid,
                 lan_uid=agent.lan_uid,
                 agent_uid=agent_uid,
-                printer_name="AgentNode",
-                ip="0.0.0.0",
+                printer_name=printer_label,
+                ip=target_ip or "0.0.0.0",
                 desired_enabled=True,
                 command_type="trigger_utility",
                 command_params=params_str,
@@ -858,8 +904,35 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                 requested_at=requested_at,
             )
             session.add(cmd)
-            session.commit()
+            session.flush()
             command_id = int(cmd.id)
+
+            if command == "change_agent_ip" and target_ip:
+                try:
+                    from models import IPData
+                    ip_rec = session.execute(
+                        select(IPData).where(IPData.agent_name == agent_uid)
+                    ).scalars().first()
+                    curr_ip = ((ip_rec.ip if ip_rec and ip_rec.ip else "") or (agent.local_ip if agent and agent.local_ip else "")).strip()
+                    if curr_ip and curr_ip != target_ip:
+                        from utils import trigger_ip_change_workflow
+                        trigger_ip_change_workflow(
+                            session,
+                            lead_valid,
+                            agent.lan_uid if agent else "default",
+                            agent_uid,
+                            curr_ip,
+                            target_ip
+                        )
+                except Exception as ip_wf_err:
+                    import logging
+                    logging.getLogger(__name__).error(
+                        "[agent_utility_routes] Failed to trigger IP change workflow for %s: %s",
+                        agent_uid,
+                        ip_wf_err
+                    )
+
+            session.commit()
 
         return jsonify({
             "ok": True,

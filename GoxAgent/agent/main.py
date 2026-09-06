@@ -284,7 +284,47 @@ def run_normal_mode(
         service.stop()
 
 
-def load_dynamic_scripts() -> None:
+def cleanup_legacy_watchdog() -> None:
+    """Terminates and removes any legacy watchdog processes/scripts."""
+    if sys.platform != "win32":
+        return
+    import subprocess
+    try:
+        subprocess.run(
+            ["wmic", "process", "where", "name='cmd.exe' and commandline like '%watchdog.bat%'", "call", "terminate"],
+            capture_output=True,
+            creationflags=0x08000000,
+        )
+        subprocess.run(
+            ["wmic", "process", "where", "name='wscript.exe' and commandline like '%run_watchdog.vbs%'", "call", "terminate"],
+            capture_output=True,
+            creationflags=0x08000000,
+        )
+    except Exception as exc:
+        logging.debug("Could not terminate old watchdog processes: %s", exc)
+
+    dirs_to_clean: list[Path] = []
+    try:
+        dirs_to_clean.append(Path(sys.executable).parent)
+    except Exception:
+        pass
+    dirs_to_clean.append(Path.cwd())
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        dirs_to_clean.append(Path(appdata) / "GoxPrintAgent")
+
+    for d in dirs_to_clean:
+        for fname in ["watchdog.bat", "run_watchdog.vbs", "printagent.update.exe", "printagent.bak.exe"]:
+            p = d / fname
+            try:
+                if p.exists():
+                    p.unlink(missing_ok=True)
+                    logging.info("Cleaned up legacy watchdog file: %s", p)
+            except Exception:
+                pass
+
+
+def ensure_dynamic_scripts_folder() -> None:
     import sys
     import os
     from pathlib import Path
@@ -457,14 +497,8 @@ def main() -> int:
             type=int,
             help="Duration of the sliced clip in seconds",
         )
-        parser.add_argument(
-            "--parent-pid",
-            default=0,
-            type=int,
-            help="Parent process ID for watchdog self-termination",
-        )
         args = parser.parse_args(sanitized_argv[1:])
-        log_debug(f"Args: mode={args.mode}, host={args.host}, port={args.port}, parent_pid={args.parent_pid}")
+        log_debug(f"Args: mode={args.mode}, host={args.host}, port={args.port}")
 
         if getattr(args, "get_video", False):
             from agent.services.camera_manager import CameraManager
@@ -520,6 +554,10 @@ def main() -> int:
 
 
         logging.info("Log files: stdout=%s stderr=%s", stdout_path.as_posix(), stderr_path.as_posix())
+        try:
+            cleanup_legacy_watchdog()
+        except Exception as cw_err:
+            logging.debug("cleanup_legacy_watchdog error: %s", cw_err)
      
         try:
             log_debug("Initializing AutoUpdater...")
@@ -546,17 +584,7 @@ def main() -> int:
                 log_debug("Web server started successfully. Launching Tray Controller...")
                 
                 def force_update_cb():
-                    LOGGER.info("Force update callback triggered from Tray")
-                    app_updater = app.config.get("UPDATER")
-                    if app_updater is not None:
-                        app_updater.state.last_check_at = ""
-                    else:
-                        updater.state.last_check_at = ""
-                    app_bridge = app.config.get("POLLING_BRIDGE")
-                    if app_bridge is not None:
-                        app_bridge.trigger_once()
-                    else:
-                        LOGGER.error("PollingBridge not found in app config during force update callback")
+                    LOGGER.info("Autoupdate is disabled. To update, please run printagentinstall.exe.")
     
                 tray = TrayController(
                     f"http://127.0.0.1:{args.port}",

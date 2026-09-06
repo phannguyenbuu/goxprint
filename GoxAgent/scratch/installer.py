@@ -28,97 +28,36 @@ except AttributeError:
 # --- CONFIGURATION ---
 INSTALL_DIR = Path(os.environ.get("APPDATA", "")) / "GoxPrintAgent"
 
-WATCHDOG_BAT_CONTENT = (
-    '@echo off\n'
-    'setlocal\n'
-    'cd /d "%~dp0"\n'
-    'echo ====================================================\n'
-    'echo PrintAgent Watchdog (Update ^& Emergency)\n'
-    'echo ====================================================\n'
-    '\n'
-    ':loop\n'
-    'rem --- 1. KIỂM TRA UPDATE ---\n'
-    'if exist "printagent.update.exe" (\n'
-    '    echo [Watchdog] Found update file for printagent. Checking integrity...\n'
-    '    for %%A in ("printagent.update.exe") do if %%~zA LSS 1000000 (\n'
-    '        echo [Watchdog] Update file too small ^(%%~zA bytes^), skipping corrupt update.\n'
-    '        del /f /q "printagent.update.exe" >nul 2>&1\n'
-    '        goto skip_update\n'
-    '    )\n'
-    '    echo [Watchdog] Applying update...\n'
-    '    taskkill /F /IM printagent.exe >nul 2>&1\n'
-    '    timeout /T 5 /nobreak >nul\n'
-    '    del /f /q "printagent.bak.exe" >nul 2>&1\n'
-    '    if exist "printagent.exe" (\n'
-    '        rename "printagent.exe" "printagent.bak.exe" >nul 2>&1\n'
-    '    )\n'
-    '    move /Y "printagent.update.exe" "printagent.exe" >nul 2>&1\n'
-    '    timeout /T 2 /nobreak >nul\n'
-    '    start /B "" "printagent.exe"\n'
-    ')\n'
-    ':skip_update\n'
-    'if exist "gox_ftp_server.update.exe" (\n'
-    '    echo [Watchdog] Found update file for gox_ftp_server. Applying...\n'
-    '    taskkill /F /IM gox_ftp_server.exe >nul 2>&1\n'
-    '    timeout /T 3 /nobreak >nul\n'
-    '    del /f /q "gox_ftp_server.bak.exe" >nul 2>&1\n'
-    '    if exist "gox_ftp_server.exe" (\n'
-    '        rename "gox_ftp_server.exe" "gox_ftp_server.bak.exe" >nul 2>&1\n'
-    '    )\n'
-    '    move /Y "gox_ftp_server.update.exe" "gox_ftp_server.exe" >nul 2>&1\n'
-    '    start /B "" "gox_ftp_server.exe"\n'
-    ')\n'
-    '\n'
-    'rem --- 2. KIỂM TRA PROCESS DANG CHAY ---\n'
-    'tasklist /FI "IMAGENAME eq printagent.exe" 2>NUL | find /I /N "printagent.exe">NUL\n'
-    'if "%ERRORLEVEL%"=="1" (\n'
-    '    start /B "" "printagent.exe"\n'
-    ')\n'
-    'tasklist /FI "IMAGENAME eq gox_ftp_server.exe" 2>NUL | find /I /N "gox_ftp_server.exe">NUL\n'
-    'if "%ERRORLEVEL%"=="1" (\n'
-    '    start /B "" "gox_ftp_server.exe"\n'
-    ')\n'
-    '\n'
-    'rem --- 3. KIỂM TRA RESTART KHẢN CẤP (API) ---\n'
-    'powershell -NoProfile -Command "try { $s=Get-Content \'settings.json\' -ErrorAction Stop | ConvertFrom-Json; $url=$s.api_url; if(!$url){$url=$s.polling.url}; if(!$url){$url=\'https://agentapi.quanlymay.com\'}; $url=$url.TrimEnd(\'/\'); $url=$url -replace \'/api$\', \'\'; $hostName=$env:COMPUTERNAME; $res=Invoke-RestMethod -Uri \\"$url/api/agent/watchdog-check?hostname=$hostName\\" -TimeoutSec 10 -ErrorAction Stop; if($res -match \'RESTART\') { Write-Host \\"$(Get-Date -Format \'yyyy-MM-dd HH:mm:ss\') RESTART SIGNAL RECEIVED!\\"; Stop-Process -Name \'printagent\' -Force -ErrorAction SilentlyContinue; Stop-Process -Name \'agent_loader\' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; if(Test-Path \'printagent.exe\') { Start-Process -FilePath \'printagent.exe\' -WindowStyle Hidden; Write-Host \'Agent restarted.\' } } } catch { }"\n'
-    '\n'
-    'rem --- Wait 30 seconds between watchdog cycles ---\n'
-    'timeout /T 30 /nobreak >nul\n'
-    'goto loop\n'
-)
 
-RUN_WATCHDOG_VBS_CONTENT = (
-    'Set WshShell = CreateObject("WScript.Shell")\n'
-    'Set fso = CreateObject("Scripting.FileSystemObject")\n'
-    'currentFolder = fso.GetParentFolderName(WScript.ScriptFullName)\n'
-    'WshShell.CurrentDirectory = currentFolder\n'
-    'WshShell.Run chr(34) & "watchdog.bat" & Chr(34), 0\n'
-    'Set WshShell = Nothing\n'
-)
-
-def create_startup_shortcut(target_vbs: Path):
+def create_startup_shortcut(target_exe: Path):
     print("Thiết lập tự động khởi chạy cùng Windows...")
     startup_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
     startup_dir.mkdir(parents=True, exist_ok=True)
     
-    shortcut_path = startup_dir / "GoxPrintAgent Watchdog.lnk"
-    
+    # Delete legacy watchdog shortcuts if present
+    for old_lnk in ["GoxPrintAgent Watchdog.lnk", "GoxPrintAgent_Watchdog_Startup.bat"]:
+        try:
+            (startup_dir / old_lnk).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    shortcut_path = startup_dir / "GoxPrintAgent.lnk"
     try:
         import win32com.client
         shell = win32com.client.Dispatch("WScript.Shell")
         shortcut = shell.CreateShortCut(str(shortcut_path))
-        shortcut.Targetpath = "wscript.exe"
-        shortcut.Arguments = f'"{str(target_vbs)}"'
-        shortcut.WorkingDirectory = str(target_vbs.parent)
-        shortcut.IconLocation = str(target_vbs.parent / "printagent.exe")
+        shortcut.Targetpath = str(target_exe)
+        shortcut.Arguments = ""
+        shortcut.WorkingDirectory = str(target_exe.parent)
+        shortcut.IconLocation = str(target_exe)
         shortcut.save()
         print(f" Đã tạo shortcut tại {shortcut_path}")
     except ImportError:
-        fallback_bat = startup_dir / "GoxPrintAgent_Watchdog_Startup.bat"
+        fallback_bat = startup_dir / "GoxPrintAgent_Startup.bat"
         with open(fallback_bat, "w", encoding="utf-8") as f:
             f.write("@echo off\n")
-            f.write(f'cd /d "{target_vbs.parent}"\n')
-            f.write(f'wscript.exe "{target_vbs}"\n')
+            f.write(f'cd /d "{target_exe.parent}"\n')
+            f.write(f'start "" "{target_exe.name}"\n')
         print(f" Đã tạo fallback startup bat tại {fallback_bat}")
     except Exception as e:
         print(f" Lỗi tạo shortcut: {e}")
@@ -408,22 +347,7 @@ def main():
     
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     
-    # 1. Write config files dynamically
-    print("\nĐang tạo các tệp cấu hình...")
-    try:
-        with open(INSTALL_DIR / "watchdog.bat", "w", encoding="utf-8") as f:
-            f.write(WATCHDOG_BAT_CONTENT)
-        print(" Đã ghi: watchdog.bat")
-        
-        with open(INSTALL_DIR / "run_watchdog.vbs", "w", encoding="utf-8") as f:
-            f.write(RUN_WATCHDOG_VBS_CONTENT)
-        print(" Đã ghi: run_watchdog.vbs")
-    except Exception as e:
-        print(f" Lỗi: {e}")
-        msg_box("Lỗi cài đặt", f"Không thể ghi file cấu hình: {e}", is_error=True)
-        sys.exit(1)
-        
-    # 2. Download printagent.exe with cache-busting from VPS
+    # 1. Download printagent.exe with cache-busting from VPS
     api_url = get_api_url_from_settings()
     dest_exe = INSTALL_DIR / "printagent.exe"
     
@@ -445,31 +369,26 @@ def main():
             msg_box("Lỗi tải xuống", "Không thể tải xuống PrintAgent từ máy chủ.", is_error=True)
             sys.exit(1)
 
-
-    # 4. Install GoxDriverService under LocalSystem (SYSTEM) account for 100% UAC-free silent driver installs
+    # 2. Install GoxDriverService under LocalSystem (SYSTEM) account for 100% UAC-free silent driver installs
     setup_gox_driver_service(api_url)
             
     print("\nCài đặt file thành công!")
     configure_settings_json()
     
-    # Configure startup
-    target_vbs = INSTALL_DIR / "run_watchdog.vbs"
-    create_startup_shortcut(target_vbs)
+    # Configure startup shortcut directly to printagent.exe
+    create_startup_shortcut(dest_exe)
     
-    print("\nKhởi động PrintAgent & Watchdog...")
+    print("\nKhởi động PrintAgent...")
     try:
         import subprocess
         subprocess.Popen([str(dest_exe)], cwd=str(INSTALL_DIR), creationflags=0x08000000)
-        time.sleep(1)
-        subprocess.Popen(["wscript.exe", str(target_vbs)], cwd=str(INSTALL_DIR), creationflags=0x08000000)
-        print(" Đã khởi chạy Watchdog và Agent.")
+        print(" Đã khởi chạy PrintAgent thành công.")
     except Exception as e:
         print(f" Lỗi khởi chạy: {e}")
         
     print("\n==============================================")
     print(" CÀI ĐẶT HOÀN TẤT!")
-    print(" PrintAgent sẽ luôn chạy ngầm và tự động")
-    print(" cập nhật phiên bản mới thông qua Watchdog.")
+    print(" PrintAgent đang chạy ngầm trên máy tính.")
     print("==============================================\n")
     
     # Fetch version from API

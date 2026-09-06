@@ -336,6 +336,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
             prune_offline_agents(timeout_seconds=120)
 
+            # Query all AgentNodes from DB first to get persistent public_ip, local_ip, hostname, local_mac
+            agent_nodes = session.execute(select(AgentNode)).scalars().all()
+            agent_db_map = {a.agent_uid: a for a in agent_nodes}
+
             ram_printers_lookup: dict[str, dict] = {}
             for agent_uid, agent_info in ACTIVE_AGENTS.items():
                 devices = agent_info["devices"] if (isinstance(agent_info, dict) and "devices" in agent_info) else {}
@@ -344,7 +348,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if norm_mac:
                         ram_printers_lookup[norm_mac] = dev
                         ram_printers_lookup[norm_mac]["_agent_uid"] = agent_uid
-                        ag_pub = agent_info.get("public_ip") or agent_info.get("wan_ip", "")
+                        db_a = agent_db_map.get(agent_uid)
+                        ag_pub = agent_info.get("public_ip") or agent_info.get("wan_ip", "") or (getattr(db_a, "public_ip", "") if db_a else "")
                         ram_printers_lookup[norm_mac]["_lan_uid"] = ag_pub or agent_info.get("lan_uid", "default")
 
 
@@ -437,9 +442,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 p_name = pr.printer_name or "Photocopy"
                 ag_uid = pr.agent_uid or ""
                 
+                db_a = agent_db_map.get(ag_uid)
                 ag_info = ACTIVE_AGENTS.get(ag_uid, {})
-                ag_pub = ag_info.get("public_ip") if isinstance(ag_info, dict) else ""
-                p_lan = ag_pub or pr.lan_uid or "default"
+                ag_pub = (ag_info.get("public_ip") if isinstance(ag_info, dict) else "") or (getattr(db_a, "public_ip", "") if db_a else "")
+                site_obj = existing_lan_map.get(pr.lan_uid)
+                site_pub = getattr(site_obj, "public_ip", "") if site_obj else ""
+                p_lan = ag_pub or site_pub or pr.lan_uid or "default"
                 
                 dedupe_key = (p_lan, p_mac or p_ip)
                 if dedupe_key in seen_printers:
@@ -590,13 +598,15 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             for uid in all_active_lan_uids:
                 if uid not in existing_lan_map:
                     try:
+                        is_ip = bool(re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', uid))
                         new_lan = LanSite(
                             lead=lead or "default",
                             lan_uid=uid,
-                            lan_name=f"LAN {uid}",
+                            lan_name=f"IP Public {uid}" if is_ip else f"LAN {uid}",
                             subnet_cidr="",
                             gateway_ip="",
                             gateway_mac="",
+                            public_ip=uid if is_ip else "",
                         )
                         session.add(new_lan)
                         session.commit()
@@ -689,11 +699,24 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     deduped_printers.append(p)
 
                 lan_pub_ip = getattr(r, "public_ip", "") or ""
+                if not lan_pub_ip and re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', r.lan_uid):
+                    lan_pub_ip = r.lan_uid
                 if not lan_pub_ip and agents_by_lan.get(r.lan_uid):
                     for ag in agents_by_lan.get(r.lan_uid, []):
                         if ag.get("public_ip"):
                             lan_pub_ip = ag.get("public_ip")
                             break
+                if not lan_pub_ip:
+                    for db_ag in agent_nodes:
+                        if (db_ag.lan_uid == r.lan_uid or db_ag.public_ip == r.lan_uid) and db_ag.public_ip:
+                            lan_pub_ip = db_ag.public_ip
+                            break
+                if lan_pub_ip and hasattr(r, "public_ip") and not getattr(r, "public_ip", ""):
+                    try:
+                        r.public_ip = lan_pub_ip
+                        session.commit()
+                    except Exception:
+                        session.rollback()
 
                 out_rows.append({
                     "lead": r.lead,
@@ -754,6 +777,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     if pkey not in existing_printer_keys:
                         group["printers"].append(pr)
                         existing_printer_keys.add(pkey)
+                
+                existing_email_ids = {e.get("id") or e.get("email") for e in group["emails"]}
+                for em in row.get("emails", []):
+                    ekey = em.get("id") or em.get("email")
+                    if ekey not in existing_email_ids:
+                        group["emails"].append(em)
+                        existing_email_ids.add(ekey)
 
             final_rows = list(pub_ip_map.values())
 
@@ -817,16 +847,22 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
 
         with session_factory() as session:
             try:
-                del_p = session.execute(sql_delete(Printer).where(Printer.lan_uid == lan_uid))
-                del_d = session.execute(sql_delete(DeviceInfor).where(DeviceInfor.lan_uid == lan_uid))
+                agents = session.execute(
+                    select(AgentNode).where((AgentNode.public_ip == lan_uid) | (AgentNode.lan_uid == lan_uid))
+                ).scalars().all()
+                target_lans = list({a.lan_uid for a in agents if a.lan_uid} | {lan_uid})
+                target_agents = [a.agent_uid for a in agents if a.agent_uid]
+
+                del_p = session.execute(sql_delete(Printer).where((Printer.lan_uid.in_(target_lans)) | (Printer.agent_uid.in_(target_agents))))
+                del_d = session.execute(sql_delete(DeviceInfor).where((DeviceInfor.lan_uid.in_(target_lans)) | (DeviceInfor.agent_uid.in_(target_agents))))
                 session.commit()
                 deleted = del_p.rowcount + del_d.rowcount
 
                 # Clear RAM cache (ACTIVE_AGENTS)
                 try:
                     from active_agents_registry import ACTIVE_AGENTS
-                    for ag_data in ACTIVE_AGENTS.values():
-                        if isinstance(ag_data, dict) and ag_data.get("lan_uid") == lan_uid:
+                    for ag_key, ag_data in ACTIVE_AGENTS.items():
+                        if isinstance(ag_data, dict) and (ag_data.get("lan_uid") in target_lans or ag_key in target_agents or ag_data.get("public_ip") == lan_uid):
                             ag_data["devices"] = {}
                 except Exception as ram_err:
                     LOGGER.warning("[purge_lan_printers] RAM clear error: %s", ram_err)
@@ -940,24 +976,13 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         LOGGER.info("[VPS Route] Purging DB Printers for lan_uid=%s and queuing force_subnet_scan", lan_uid)
         with session_factory() as session:
             _auto_record_client_public_ip(session, request)
-            try:
-                session.execute(delete(Printer).where(Printer.lan_uid == lan_uid))
-                session.execute(delete(DeviceInfor).where(DeviceInfor.lan_uid == lan_uid))
-                session.commit()
-            except Exception as e:
-                LOGGER.warning("Failed to purge DB printers for lan_uid=%s: %s", lan_uid, e)
 
-            try:
-                from active_agents_registry import ACTIVE_AGENTS
-                for ag_key, ag_data in list(ACTIVE_AGENTS.items()):
-                    if isinstance(ag_data, dict) and ag_data.get("lan_uid") == lan_uid:
-                        ag_data["devices"] = {}
-            except Exception as e:
-                LOGGER.warning("Failed to clear RAM printers for lan_uid=%s: %s", lan_uid, e)
-
-            # Find active agents for this lan_uid
+            # Find active agents for this public_ip / lan_uid
             agents = session.execute(
-                select(AgentNode).where(AgentNode.lan_uid == lan_uid, AgentNode.is_online == True)
+                select(AgentNode).where(
+                    (AgentNode.public_ip == lan_uid) | (AgentNode.lan_uid == lan_uid),
+                    AgentNode.is_online == True
+                )
             ).scalars().all()
 
             if not agents:
@@ -966,6 +991,24 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "ok": False,
                     "error": f"Không có Agent nào đang hoạt động trong mạng LAN '{lan_uid}' để thực hiện quét."
                 }), 404
+
+            target_lans = list({a.lan_uid for a in agents if a.lan_uid} | {lan_uid})
+            target_agents = [a.agent_uid for a in agents if a.agent_uid]
+
+            try:
+                session.execute(delete(Printer).where((Printer.lan_uid.in_(target_lans)) | (Printer.agent_uid.in_(target_agents))))
+                session.execute(delete(DeviceInfor).where((DeviceInfor.lan_uid.in_(target_lans)) | (DeviceInfor.agent_uid.in_(target_agents))))
+                session.commit()
+            except Exception as e:
+                LOGGER.warning("Failed to purge DB printers for lan_uid=%s: %s", lan_uid, e)
+
+            try:
+                from active_agents_registry import ACTIVE_AGENTS
+                for ag_key, ag_data in list(ACTIVE_AGENTS.items()):
+                    if isinstance(ag_data, dict) and (ag_data.get("lan_uid") in target_lans or ag_key in target_agents or ag_data.get("public_ip") == lan_uid):
+                        ag_data["devices"] = {}
+            except Exception as e:
+                LOGGER.warning("Failed to clear RAM printers for lan_uid=%s: %s", lan_uid, e)
 
             from datetime import timedelta
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
@@ -1064,7 +1107,12 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
             return jsonify({"ok": False, "error": "Missing address_book_data"}), 400
 
         printer_name = body.get("printer_name") or "Photocopy"
-        ip = body.get("ip") or body.get("printer_ip") or ""
+        ip = str(body.get("ip") or body.get("printer_ip") or "").strip()
+        if not ip or ip == "0.0.0.0":
+            return jsonify({
+                "ok": False,
+                "error": f"Thiếu IP máy in hợp lệ cho MAC {norm_mac}! Cấm lưu ScanPoint không có IP."
+            }), 400
         agent_uid = body.get("agent_uid") or ""
 
         with session_factory() as session:
@@ -1257,7 +1305,8 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         # Sinh lệnh address_modify cho từng máy in bị ảnh hưởng
                         child_ids = []
                         if matched_entries:
-                            from models import Printer
+                            from models import Printer, PrinterAuthCredential
+                            from sqlalchemy import func as _func
                             for entry in matched_entries:
                                 # Lookup printer to get id, auth_user, auth_password, lan_uid
                                 printer = session.execute(
@@ -1267,28 +1316,93 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                 ).scalars().first()
                                 
                                 p_id = printer.id if printer else 0
-                                p_user = printer.auth_user if printer else ""
-                                p_pass = printer.auth_password if printer else ""
                                 p_lan = printer.lan_uid if printer else lan_uid
                                 p_lead = printer.lead if printer else lead
+
+                                # Look up PrinterAuthCredential — no silent empty fallback
+                                norm_mac = entry["printer_mac"].upper().replace(":", "").replace("-", "")
+                                cred = session.execute(
+                                    select(PrinterAuthCredential).where(
+                                        _func.upper(_func.replace(_func.replace(PrinterAuthCredential.mac_address, ":", ""), "-", "")) == norm_mac
+                                    )
+                                ).scalars().first()
+
+                                if cred and cred.auth_user:
+                                    p_user = cred.auth_user.strip()
+                                    p_pass = (cred.auth_password or "").strip()
+                                elif printer and printer.auth_user:
+                                    p_user = printer.auth_user.strip()
+                                    p_pass = (printer.auth_password or "").strip()
+                                else:
+                                    p_user = ""
+                                    p_pass = ""
                                 
                                 old_folder = entry["path"]
                                 new_folder = old_folder.replace(old_ip, ip) if old_ip in old_folder else old_folder
                                 
-                                cmd_params_dict = {
-                                    "registration_no": entry["registration_no"],
-                                    "name": entry["entry_name"],
-                                    "email": "",
-                                    "folder": new_folder,
-                                    "user_code": "",
-                                    "fields": ["folder"],
+                                # Xác định dòng máy in (Ricoh hay Toshiba) - cấm fallback!
+                                p_name = str(entry.get("printer_name") or (printer.printer_name if printer else "") or "").strip()
+                                _pname_low = p_name.lower()
+                                norm_mac = entry["printer_mac"].upper().replace(":", "").replace("-", "")
+
+                                p_type = str(entry.get("printer_type") or getattr(printer, "printer_type", "") or "").strip().lower()
+                                if not p_type:
+                                    if any(k in _pname_low for k in ("toshiba", "e-studio", "estudio")) or norm_mac.startswith("008091"):
+                                        p_type = "toshiba"
+                                    elif any(k in _pname_low for k in ("ricoh", "aficio")) or norm_mac.startswith("002673") or norm_mac.startswith("583879"):
+                                        p_type = "ricoh"
+                                    else:
+                                        raise ValueError(
+                                            f"Không thể xác định dòng máy in (Ricoh hay Toshiba) cho máy '{p_name}' "
+                                            f"(MAC: {entry['printer_mac']}, IP: {entry['printer_ip']}). Cấm fallback!"
+                                        )
+
+                                if p_type == "toshiba":
+                                    cmd_name = "toshiba_change_ftp"
+                                elif p_type == "ricoh":
+                                    cmd_name = "ricoh_change_ftp"
+                                else:
+                                    raise ValueError(
+                                        f"Dòng máy in '{p_type}' của '{p_name}' không được hỗ trợ đổi FTP. Cấm fallback!"
+                                    )
+
+                                from models import UtiCommand
+                                cmd_entry = session.execute(
+                                    select(UtiCommand).where(UtiCommand.command == cmd_name)
+                                ).scalar_one_or_none()
+                                if not cmd_entry or not cmd_entry.command_content:
+                                    raise ValueError(f"Không tìm thấy mẫu lệnh thực thi '{cmd_name}' trong bảng uti_commands!")
+
+                                from utils import resolve_utility_command_content
+                                raw_content = resolve_utility_command_content(session, cmd_entry.command_content)
+
+                                c_content = raw_content.replace("__TARGET_IP__", entry["printer_ip"]).replace("__PRINTER_IP__", entry["printer_ip"])
+                                c_content = c_content.replace("__TARGET_USER__", p_user).replace("__AUTH_USER__", p_user)
+                                c_content = c_content.replace("__TARGET_PASS__", p_pass).replace("__AUTH_PASS__", p_pass)
+                                c_content = c_content.replace("__TARGET_ID__", str(entry["registration_no"])).replace("__ENTRY_ID__", str(entry["registration_no"])).replace("__REGISTRATION_NO__", str(entry["registration_no"]))
+                                c_content = c_content.replace("__TARGET_SCAN_USER__", entry["entry_name"]).replace("__TARGET_NAME__", entry["entry_name"]).replace("__SCAN_USERNAME__", entry["entry_name"])
+                                c_content = c_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", ip)
+
+                                p_params = _json.dumps({
+                                    "action": "exec_utility",
+                                    "command": cmd_name,
+                                    "command_content": c_content,
                                     "printer_ip": entry["printer_ip"],
                                     "ip": entry["printer_ip"],
+                                    "auth_user": p_user,
+                                    "auth_password": p_pass,
+                                    "target_id": entry["registration_no"],
+                                    "entry_id": entry["registration_no"],
+                                    "target_name": entry["entry_name"],
+                                    "old_ip": old_ip,
+                                    "new_ip": ip,
+                                    "brand": p_type,
+                                    "printer_type": p_type,
                                     "mac_address": entry["printer_mac"],
                                     "printer_mac_id": entry["printer_mac"],
-                                    "is_auto": True
-                                }
-                                
+                                    "is_auto": False,
+                                }, ensure_ascii=False)
+
                                 modify_cmd = PrinterControlCommand(
                                     printer_id=p_id,
                                     lead=p_lead,
@@ -1297,10 +1411,10 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                                     printer_name=entry["printer_name"],
                                     ip=entry["printer_ip"],
                                     desired_enabled=True,
-                                    command_type="address_modify",
+                                    command_type="trigger_utility",
                                     auth_user=p_user,
                                     auth_password=p_pass,
-                                    command_params=_json.dumps(cmd_params_dict, ensure_ascii=False),
+                                    command_params=p_params,
                                     status="pending",
                                     error_message="",
                                     requested_at=datetime.now(timezone.utc),

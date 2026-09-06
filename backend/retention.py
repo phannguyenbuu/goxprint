@@ -113,13 +113,16 @@ def _run_once(session_factory) -> dict[str, int]:
             r_jobs = session.execute(text('''
                 DELETE FROM "PrinterControlCommand"
                 WHERE (is_favorite IS NOT TRUE AND (is_favorite IS NULL OR is_favorite = FALSE))
+                  AND status NOT IN ('pending', 'processing', 'received')
                   AND id NOT IN (
-                      SELECT id FROM "PrinterControlCommand" ORDER BY id DESC LIMIT 200
+                      SELECT id FROM "PrinterControlCommand"
+                      ORDER BY COALESCE(requested_at, created_at) DESC NULLS LAST, id DESC
+                      LIMIT 500
                   )
             ''')).rowcount
             session.commit()
             if r_jobs:
-                LOGGER.info("retention: PrinterControlCommand purged %d old unstarred jobs (kept starred and top 200)", r_jobs)
+                LOGGER.info("retention: PrinterControlCommand purged %d old unstarred jobs (kept starred and top 500 by timestamp)", r_jobs)
                 results["PrinterControlCommand"] = r_jobs
     except Exception:
         LOGGER.exception("retention: error cleaning PrinterControlCommand")

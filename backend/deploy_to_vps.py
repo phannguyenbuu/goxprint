@@ -73,6 +73,7 @@ for html_file in local_backend.glob("templates/*.html"):
 # Static and Storage releases
 files_to_copy = [
     (str(local_backend / 'storage' / 'releases' / 'agent_release.json'), '/opt/printagent/storage/releases/agent_release.json'),
+    (str(local_backend / 'static' / 'releases' / 'printagent.exe'), '/opt/printagent/static/releases/printagent.exe'),
     (str(local_backend / 'storage' / 'drivers' / 'toshiba.json'), '/opt/printagent/storage/drivers/toshiba.json'),
     (str(local_backend / 'storage' / 'drivers' / 'ricoh.json'), '/opt/printagent/storage/drivers/ricoh.json'),
     (str(local_backend / 'storage' / 'drivers' / 'fujifilm.json'), '/opt/printagent/storage/drivers/fujifilm.json'),

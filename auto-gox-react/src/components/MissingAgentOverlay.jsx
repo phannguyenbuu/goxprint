@@ -33,7 +33,7 @@ export default function MissingAgentOverlay({ onRetry }) {
             <RefreshCw size={16} style={{ display: 'inline', marginRight: '8px' }} />
             Thử kết nối lại
           </button>
-          <a href="https://download.goxprint.com/printagentinstall.exe" style={{
+          <a href="https://download.printagentx.com/printagentinstall.exe" style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', 
             background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '12px 24px', 
             borderRadius: '10px', textDecoration: 'none', fontWeight: 600, fontSize: '15px', 

@@ -1217,6 +1217,20 @@ def create_app() -> Flask:
     from admin_public_ip_routes import register_admin_public_ip_routes
     from ui_routes import register_ui_routes
 
+    server_mode = os.getenv("SERVER_MODE", "full").strip().lower()
+    if server_mode == "ingest":
+        LOGGER.info("[Server] Starting in INGEST-ONLY mode (Telemetry & Public API).")
+        from polling_core_routes import register_polling_core_routes
+        from public_core_routes import register_public_core_routes
+        from public_device_routes import register_public_device_routes
+        from polling_aux_routes import register_polling_aux_routes
+
+        register_polling_core_routes(app, session_factory, lead_key_map)
+        register_public_core_routes(app, session_factory, lead_key_map)
+        register_public_device_routes(app, session_factory)
+        register_polling_aux_routes(app, session_factory, lead_key_map, drive_sync, cfg)
+        return app
+
     register_auth_routes(app, session_factory)
     register_public_core_routes(app, session_factory, lead_key_map)
     register_public_device_routes(app, session_factory)

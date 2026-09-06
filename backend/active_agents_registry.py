@@ -210,7 +210,21 @@ def get_all_devices_in_memory(client_ip: str = "", session_factory: Any = None) 
             if agent_pub_ip != client_ip and agent_loc_ip != client_ip:
                 continue
 
-        devices = agent_info.get("devices", {})
+        devices = dict(agent_info.get("devices", {}))
+        if not devices and agent_info.get("printers_json"):
+            for p_item in agent_info.get("printers_json"):
+                if isinstance(p_item, dict):
+                    p_mac = str(p_item.get("mac_address") or p_item.get("mac_id") or "").upper().replace("-", ":")
+                    if p_mac and p_mac not in devices:
+                        devices[p_mac] = {
+                            "printer_name": p_item.get("printer_name") or p_item.get("name") or "Unknown Printer",
+                            "ip": p_item.get("ip") or p_item.get("printer_ip") or "",
+                            "counter": p_item.get("counter") or {},
+                            "status": p_item.get("status") or {},
+                            "updated_at": agent_info.get("last_seen_at").isoformat() if agent_info.get("last_seen_at") else "",
+                        }
+
+        pub_ip = agent_info.get("public_ip", "") or agent_info.get("wan_ip", "")
         for mac_id, dev in devices.items():
             output.append({
                 "mac_id": mac_id,
@@ -219,6 +233,7 @@ def get_all_devices_in_memory(client_ip: str = "", session_factory: Any = None) 
                 "agent_uid": agent_uid,
                 "printer_name": dev.get("printer_name", ""),
                 "ip": dev.get("ip", ""),
+                "public_ip": pub_ip,
                 "counter": dev.get("counter") or {},
                 "status": dev.get("status") or {},
                 "last_seen_at": dev.get("updated_at", ""),

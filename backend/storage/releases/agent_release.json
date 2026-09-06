@@ -1,10 +1,11 @@
 {
-  "size": 24048996,
-  "version": "2.9.0812002000",
-  "published_at": "2026-08-12T00:18:47.573984+07:00",
-  "sha256": "a83e8e9adcc5b8e9fec5ce66504b0035f2bc2a4d32eff492dbd8a41798639709",
-  "mandatory": true,
+  "size": 19173080,
+  "version": "2.9.0905194600",
+  "published_at": "2026-09-05T19:50:12.085608+07:00",
+  "sha256": "735f3774cb5ec539ef7b9b1a53b55f44b264aa8508b4e19ff392771874982159",
+  "mandatory": false,
   "download_url": "https://agentapi.quanlymay.com/static/releases/printagent.exe",
-  "notes": "Build 2.9.0812002000: Fixed AttributeError on scan cycle.",
+  "installer_url": "https://agentapi.quanlymay.com/static/releases/printagentinstall.exe",
+  "notes": "Build 2.9.0905194600: Autoupdate & Watchdog completely removed. Manual update only via installer.",
   "channel": "stable"
 }

@@ -579,48 +579,7 @@ class PollingWorkerMixin:
                 LOGGER.warning("Failed to reload dynamic scripts: %s", exc)
 
     def _check_for_agent_update(self, lead: str, lan_uid: str, agent_uid: str, hostname: str, local_ip: str) -> bool:
-        if self._updater is None or not self._config.get_bool("modules.updater.enabled", True) or not self._updater.should_check():
-            return False
-        base_url = self._polling_base_url()
-        token = self._config.get_string("polling.token").strip()
-        if not base_url:
-            return False
-        self._release_last_check_at = self._now_iso()
-        ok, message, restart_required = self._updater.check_remote_release(
-            session=self._api_client.session,
-            base_url=base_url,
-            token=token,
-            lead=lead,
-            agent_uid=agent_uid,
-            lan_uid=lan_uid,
-            hostname=hostname,
-            local_ip=local_ip,
-        )
-        if ok:
-            self._release_last_error = ""
-            LOGGER.info("Agent release check: %s", message)
-        else:
-            self._release_last_error = message
-            LOGGER.warning("Agent release check failed: %s", message)
-        if restart_required:
-            self._update_staged = True
-            # Wait for all currently running commands to finish before shutting down
-            while True:
-                with self._running_commands_lock:
-                    running_count = len(self._running_commands)
-                if running_count == 0:
-                    break
-                LOGGER.info("Delaying agent restart for update: waiting for %d running copier commands to finish...", running_count)
-                time.sleep(1.0)
-
-            if self._restart_callback is not None:
-                try:
-                    self._restart_callback()
-                except Exception as exc:  # noqa: BLE001
-                    LOGGER.warning("Restart callback failed: %s", exc)
-            self._stop_event.set()
-            self._trigger_event.set()
-            return True
+        # Autoupdate completely disabled
         return False
 
     def _register_with_server(
@@ -806,8 +765,7 @@ class PollingWorkerMixin:
             LOGGER.warning("Initial agent registration failed: %s", exc)
 
         LOGGER.info("Polling worker loop running: hostname=%s local_ip=%s lan_uid=%s", hostname, local_ip, lan_uid)
-        if self._check_for_agent_update(lead, lan_uid, agent_uid, hostname, local_ip):
-            return
+        last_local_ip = str(local_ip or "").strip()
         while not self._stop_event.is_set():
             try:
                 try:
@@ -820,11 +778,17 @@ class PollingWorkerMixin:
                     continue
 
                 LOGGER.debug("Heartbeat: agent running")
+                local_ip = self._resolve_local_ip()
                 refreshed_lan_uid, refreshed_fingerprint = self._resolve_lan_info(hostname=hostname, local_ip=local_ip)
-                if refreshed_lan_uid and refreshed_lan_uid != lan_uid:
-                    LOGGER.info("LAN identity changed during runtime: %s -> %s", lan_uid, refreshed_lan_uid)
-                    lan_uid = refreshed_lan_uid
-                    fingerprint = refreshed_fingerprint or fingerprint
+                lan_changed = bool(refreshed_lan_uid and refreshed_lan_uid != lan_uid)
+                ip_changed = bool(local_ip and last_local_ip and local_ip != last_local_ip)
+                if lan_changed or ip_changed:
+                    if lan_changed:
+                        LOGGER.info("LAN identity changed during runtime: %s -> %s", lan_uid, refreshed_lan_uid)
+                        lan_uid = refreshed_lan_uid
+                        fingerprint = refreshed_fingerprint or fingerprint
+                    if ip_changed:
+                        LOGGER.info("Local IP changed during runtime: %s -> %s", last_local_ip, local_ip)
                     try:
                         lan_uid = self._register_with_server(
                             lead=lead,
@@ -834,8 +798,11 @@ class PollingWorkerMixin:
                             local_ip=local_ip,
                             fingerprint=fingerprint,
                         )
+                        last_local_ip = local_ip
                     except Exception as exc:  # noqa: BLE001
-                        LOGGER.warning("Runtime LAN re-registration failed: %s", exc)
+                        LOGGER.warning("Runtime LAN/IP re-registration failed: %s", exc)
+                elif local_ip:
+                    last_local_ip = local_ip
                 cycle_started_at = self._now_iso()
                 self._last_cycle_at = self._now_iso()
                 
@@ -1044,8 +1011,6 @@ class PollingWorkerMixin:
                 if self.scan_enabled():
                     current_lan_uid = self._resolved_lan_uid or lan_uid
                     self._run_scan_cycle(lead, current_lan_uid, agent_uid, hostname, local_ip, fingerprint, reason="polling-cycle")
-                if self._check_for_agent_update(lead, lan_uid, agent_uid, hostname, local_ip):
-                    break
                 triggered = self._trigger_event.wait(self.interval_seconds())
                 if triggered:
                     self._trigger_event.clear()

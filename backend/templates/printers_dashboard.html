@@ -1,26 +1,83 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
-    <div style="padding: 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1);">
+<style>
+    .printers-panel-box {
+        background: #ffffff !important;
+        border: 1px solid #d8e0ea !important;
+        border-radius: 10px;
+        color: #000000 !important;
+    }
+    .printers-panel-box h2,
+    .printers-panel-box p,
+    .printers-panel-box span,
+    .printers-panel-box div {
+        color: #000000 !important;
+    }
+    .printers-table-custom {
+        width: 100%;
+        border-collapse: collapse;
+        color: #000000 !important;
+    }
+    .printers-table-custom th {
+        background: #f1f5f9 !important;
+        color: #000000 !important;
+        font-weight: 700 !important;
+        border-bottom: 2px solid #cbd5e1 !important;
+        padding: 10px 14px !important;
+        font-size: 0.9rem !important;
+    }
+    .printers-table-custom td {
+        color: #000000 !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        padding: 10px 14px !important;
+        font-size: 0.9rem !important;
+    }
+    .printers-table-custom tr:hover td {
+        background: #f8fafc !important;
+    }
+    .status-badge.ok {
+        background: #dcfce7 !important;
+        color: #14532d !important;
+        border: 1px solid #86efac !important;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .status-badge.pending {
+        background: #f1f5f9 !important;
+        color: #1e293b !important;
+        border: 1px solid #cbd5e1 !important;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+</style>
+
+<section class="panel printers-panel-box" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+    <div style="padding: 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1;">
         <div>
-            <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700; color: #fff;">Printagent Live Data (App-Gox Source)</h2>
-            <p style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.9rem;">
+            <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700; color: #000000 !important;">Printagent Live Data (App-Gox Source)</h2>
+            <p style="margin: 4px 0 0; color: #333333 !important; font-size: 0.9rem;">
                 This table shows exactly what is sent to app-gox from the ACTIVE_AGENTS RAM in real-time. No LAN selection or network scanning required.
             </p>
         </div>
         <div>
-            <button id="refresh-btn" class="glass-btn" style="padding: 8px 16px;">
-                <svg style="width: 14px; height: 14px; margin-right: 6px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"></path></svg>
+            <button id="refresh-btn" class="glass-btn" style="padding: 8px 16px; color: #000000 !important; font-weight: 600; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center;">
+                <svg style="width: 14px; height: 14px; margin-right: 6px; stroke: #000000;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"></path></svg>
                 Refresh Data
             </button>
         </div>
     </div>
     
     <div style="padding: 16px 24px; overflow-y: auto; flex: 1;" class="glass-panel-table-wrap">
-        <table class="glass-table" style="width: 100%;">
+        <table class="printers-table-custom" style="width: 100%;">
             <thead>
                 <tr>
-                    <th style="text-align: left;">Lead / LAN</th>
+                    <th style="text-align: left;">Public IP</th>
                     <th style="text-align: left;">Printer Name</th>
                     <th style="text-align: left;">MAC Address</th>
                     <th style="text-align: left;">IP Address</th>
@@ -30,7 +87,7 @@
                 </tr>
             </thead>
             <tbody id="printers-tbody">
-                <tr><td colspan="7" style="text-align: center; padding: 32px; color: var(--text-muted);">Loading live data...</td></tr>
+                <tr><td colspan="7" style="text-align: center; padding: 32px; color: #000000 !important;">Loading live data...</td></tr>
             </tbody>
         </table>
     </div>
@@ -40,13 +97,13 @@
 document.addEventListener('DOMContentLoaded', () => {
     const fetchPrinters = async () => {
         const tbody = document.getElementById('printers-tbody');
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 32px; color: var(--text-muted);">Fetching...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 32px; color: #000000 !important;">Fetching...</td></tr>';
         try {
             const resp = await fetch('/api/public/crm/printers');
             const data = await resp.json();
             
             if (!data.ok || !data.printers || data.printers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 32px; color: var(--text-muted);">No printers found in ACTIVE_AGENTS RAM.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 32px; color: #000000 !important;">No printers found in ACTIVE_AGENTS RAM.</td></tr>';
                 return;
             }
 
@@ -64,28 +121,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     : `<span class="status-badge pending">No Data</span>`;
 
                 const time = p.last_seen_at ? new Date(p.last_seen_at).toLocaleString('vi-VN') : '-';
+                const publicIp = p.public_ip || p.wan_ip || '—';
 
                 html += `
                     <tr>
-                        <td style="font-size: 0.85rem;">
-                            <div style="font-weight: 600;">${escapeHtml(p.lead)}</div>
-                            <div style="color: var(--text-muted); font-family: monospace;">${escapeHtml(p.lan_uid)}</div>
+                        <td style="font-family: monospace; font-size: 0.9rem; font-weight: 700; color: #000000 !important;">
+                            ${escapeHtml(publicIp)}
                         </td>
-                        <td style="font-weight: 500; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(p.printer_name)}">
-                            ${escapeHtml(p.printer_name)}
+                        <td style="font-weight: 600; color: #000000 !important; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(p.printer_name)}">
+                            ${escapeHtml(p.printer_name || '—')}
                         </td>
-                        <td style="font-family: monospace; font-size: 0.9rem;">${escapeHtml(p.mac_id)}</td>
-                        <td style="font-family: monospace; font-size: 0.9rem; color: #60a5fa;">${escapeHtml(p.ip)}</td>
+                        <td style="font-family: monospace; font-size: 0.9rem; color: #000000 !important; font-weight: 600;">${escapeHtml(p.mac_id)}</td>
+                        <td style="font-family: monospace; font-size: 0.9rem; color: #000000 !important; font-weight: 600;">${escapeHtml(p.ip)}</td>
                         <td style="text-align: center;">${counterBadge}</td>
                         <td style="text-align: center;">${statusBadge}</td>
-                        <td style="text-align: right; font-size: 0.85rem; color: var(--text-muted);">${time}</td>
+                        <td style="text-align: right; font-size: 0.85rem; color: #000000 !important; font-weight: 500;">${time}</td>
                     </tr>
                 `;
             });
             tbody.innerHTML = html;
         } catch (err) {
             console.error(err);
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 32px; color: #ef4444;">Failed to fetch data: ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 32px; color: #dc2626 !important;">Failed to fetch data: ${escapeHtml(err.message)}</td></tr>`;
         }
     };
 

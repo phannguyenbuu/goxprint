@@ -497,7 +497,10 @@ def resolve_utility_command_content(session: Any, command_content: str) -> str:
 
 
 def try_resolve_when_ip_change_parent(session: Any, completed_child_id: int) -> None:
-    """Auto-resolve when_ip_change parent to 'success' once all its address_modify children are done."""
+    """Auto-resolve when_ip_change parent once all its children are done.
+    If ANY child command failed, parent becomes 'failed'.
+    Parent only becomes 'success' if ALL children succeeded.
+    """
     import json as _json
     import logging
     from datetime import datetime, timezone
@@ -526,14 +529,27 @@ def try_resolve_when_ip_change_parent(session: Any, completed_child_id: int) -> 
                         PrinterControlCommand.id.in_(child_ids)
                     )
                 ).scalars().all()
-                all_done = all(c.status in ("success", "failed") for c in children)
+                all_done = len(children) == len(child_ids) and all(c.status in ("success", "failed") for c in children)
                 if all_done:
-                    parent.status = "success"
+                    has_failure = any(c.status == "failed" for c in children)
+                    if has_failure:
+                        parent.status = "failed"
+                        failed_items = [
+                            f"- #{c.id} ({c.printer_name or c.ip}): {c.error_message or 'Thất bại'}"
+                            for c in children if c.status == "failed"
+                        ]
+                        parent.error_message = (parent.error_message or "").strip() + "\n\n❌ CÁC LỆNH CON THẤT BẠI:\n" + "\n".join(failed_items)
+                        logger.warning(
+                            "[when_ip_change] Parent #%d resolved to FAILED — %d/%d children failed.",
+                            parent.id, len(failed_items), len(child_ids)
+                        )
+                    else:
+                        parent.status = "success"
+                        logger.info(
+                            "[when_ip_change] Parent #%d resolved to SUCCESS — all %d children succeeded.",
+                            parent.id, len(child_ids)
+                        )
                     parent.responded_at = datetime.now(timezone.utc)
-                    logger.info(
-                        "[when_ip_change] Auto-resolved parent #%d to success — all %d children done.",
-                        parent.id, len(child_ids)
-                    )
             except Exception as inner_exc:
                 logger.warning("[when_ip_change] Error checking parent #%d: %s", parent.id, inner_exc)
     except Exception as exc:
@@ -551,11 +567,36 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
 
     logger = logging.getLogger(__name__)
     try:
-        # Bug fix 1: use .first() instead of scalar_one_or_none() to survive duplicate IPDatas rows
+        # Dedup guard: check if a when_ip_change workflow already exists in last 2 minutes for this agent and (old_ip, new_ip)
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+        existing_cmds = session.execute(
+            select(PrinterControlCommand).where(
+                PrinterControlCommand.agent_uid == agent_uid,
+                PrinterControlCommand.command_type == "when_ip_change",
+                PrinterControlCommand.requested_at >= cutoff
+            )
+        ).scalars().all()
+        for ex in existing_cmds:
+            try:
+                ex_p = _json.loads(ex.command_params or "{}")
+                if ex_p.get("old_ip") == old_ip and ex_p.get("new_ip") == new_ip:
+                    logger.info("[when_ip_change] Dedup skip: workflow already created in #%d for %s (%s -> %s)", ex.id, agent_uid, old_ip, new_ip)
+                    return
+            except Exception:
+                pass
+
+        # Bug fix 1: query by agent_name and lan_uid to match the exact row and avoid uq_ip_datas_lan_agent conflict
         ip_rec = session.execute(
-            select(IPData).where(IPData.agent_name == agent_uid)
+            select(IPData).where(IPData.agent_name == agent_uid, IPData.lan_uid == lan_uid)
             .order_by(IPData.updated_at.desc())
         ).scalars().first()
+        if ip_rec is None:
+            ip_rec = session.execute(
+                select(IPData).where(IPData.agent_name == agent_uid)
+                .order_by(IPData.updated_at.desc())
+            ).scalars().first()
+
         if ip_rec is None:
             ip_rec = IPData(
                 agent_uid=agent_uid,
@@ -568,26 +609,28 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
             session.add(ip_rec)
         else:
             ip_rec.ip = new_ip
-            ip_rec.lan_uid = lan_uid
             ip_rec.updated_at = datetime.now(timezone.utc)
 
-        # Auto-resolve any pending or processing change_agent_ip command for this agent
-        pending_ip_cmds = session.execute(
-            select(PrinterControlCommand).where(
-                PrinterControlCommand.agent_uid == agent_uid,
-                PrinterControlCommand.status.in_(["pending", "processing"])
-            )
-        ).scalars().all()
-        for pic in pending_ip_cmds:
-            if pic.command_type == "trigger_utility":
-                pic.status = "success"
-                pic.responded_at = datetime.now(timezone.utc)
-                pic.error_message = f"[✓] Đã cập nhật thành công IP tĩnh mới: {new_ip}"
+        # Find printers belonging to this lan_uid strictly by mac_id (NO agent_uid filter)
+        from models import DeviceInfor
+        from utils import _normalize_mac
+        lan_macs = set()
+        if lan_uid:
+            for m in session.execute(select(Printer.mac_address).where(Printer.lan_uid == lan_uid)).scalars().all():
+                norm_m = _normalize_mac(m)
+                if norm_m:
+                    lan_macs.add(norm_m)
+            for m in session.execute(select(DeviceInfor.mac_id).where(DeviceInfor.lan_uid == lan_uid)).scalars().all():
+                norm_m = _normalize_mac(m)
+                if norm_m:
+                    lan_macs.add(norm_m)
 
-        # Bug fix 2: filter scan_points by agent_uid — only this agent's copiers, not all globally
-        scan_points = session.execute(
-            select(ScanPoint).where(ScanPoint.agent_uid == agent_uid)
-        ).scalars().all()
+        all_sps = session.execute(select(ScanPoint)).scalars().all()
+        scan_points = []
+        for sp in all_sps:
+            sp_mac = _normalize_mac(sp.mac_id)
+            if not lan_macs or sp_mac in lan_macs:
+                scan_points.append(sp)
         matched_entries = []
         for sp in scan_points:
             abd = sp.address_book_data
@@ -609,15 +652,26 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
 
                     host = clean_host(folder_val)
                     if host == old_ip:
+                        sp_ip = str(sp.ip or "").strip()
+                        if not sp_ip:
+                            raise ValueError(
+                                f"Thiếu IP máy in trong scan_points cho máy in '{sp.printer_name}' (MAC: {sp.mac_id})"
+                            )
+                        sp_name = str(sp.printer_name or "").strip()
+                        if not sp_name:
+                            raise ValueError(
+                                f"Thiếu tên máy in trong scan_points cho máy in MAC: {sp.mac_id}"
+                            )
                         matched_entries.append({
-                            "printer_name": sp.printer_name or "Photocopy",
+                            "printer_name": sp_name,
                             "printer_mac": sp.mac_id,
-                            "printer_ip": sp.ip,
+                            "printer_ip": sp_ip,
                             "entry_name": entry.get("name") or entry.get("username") or entry.get("registration_no") or "Folder Destination",
                             "registration_no": entry.get("registration_no") or "",
                             "protocol": str(entry.get("protocol") or "FOLDER").upper(),
                             "server_host": host,
                             "path": entry.get("path_on_folder") or entry.get("folder_path") or entry.get("folder") or "",
+                            "agent_uid": sp.agent_uid or agent_uid,
                         })
 
         child_ids = []
@@ -631,6 +685,16 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
                 p_id = printer.id if printer else 0
                 p_lan = printer.lan_uid if printer else lan_uid
                 p_lead = printer.lead if printer else lead
+                p_ip = str(entry.get("printer_ip") or "").strip()
+                if not p_ip:
+                    raise ValueError(
+                        f"Thiếu IP máy in trong scan_points cho máy in '{entry.get('printer_name')}' (MAC: {entry.get('printer_mac')})"
+                    )
+                p_name = str(entry.get("printer_name") or "").strip()
+                if not p_name:
+                    raise ValueError(
+                        f"Thiếu tên máy in trong scan_points cho máy in MAC: {entry.get('printer_mac')}"
+                    )
                 
                 # Bug fix 3: look up PrinterAuthCredential — no silent empty fallback
                 norm_mac = entry["printer_mac"].upper().replace(":", "").replace("-", "")
@@ -649,41 +713,85 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
                 else:
                     p_user = ""
                     p_pass = ""
-                    logger.warning("[when_ip_change] No credentials found for printer %s (mac=%s) — address_modify sent with empty auth", entry["printer_ip"], entry["printer_mac"])
+                    logger.warning("[when_ip_change] No credentials found for printer %s (mac=%s) — trigger_utility sent with empty auth", p_ip, entry["printer_mac"])
                 
                 old_folder = entry["path"]
                 new_folder = old_folder.replace(old_ip, new_ip) if old_ip in old_folder else old_folder
 
-                # Infer printer brand from printer_name (Printer table has no printer_type column)
-                _pname_low = (entry["printer_name"] or "").lower()
-                p_type = "toshiba" if ("toshiba" in _pname_low or "e-studio" in _pname_low) else "ricoh"
+                # Xác định dòng máy in (Ricoh hay Toshiba) - cấm fallback!
+                _pname_low = p_name.lower()
+                norm_mac = entry["printer_mac"].upper().replace(":", "").replace("-", "")
 
-                cmd_params_dict = {
-                    "registration_no": entry["registration_no"],
-                    "name": entry["entry_name"],
-                    "email": "",
-                    "folder": new_folder,
-                    "user_code": "",
-                    "fields": {},
+                p_type = str(entry.get("printer_type") or getattr(printer, "printer_type", "") or "").strip().lower()
+                if not p_type:
+                    if any(k in _pname_low for k in ("toshiba", "e-studio", "estudio")) or norm_mac.startswith("008091"):
+                        p_type = "toshiba"
+                    elif any(k in _pname_low for k in ("ricoh", "aficio")) or norm_mac.startswith("002673") or norm_mac.startswith("583879"):
+                        p_type = "ricoh"
+                    else:
+                        raise ValueError(
+                            f"Không thể xác định dòng máy in (Ricoh hay Toshiba) cho máy '{p_name}' "
+                            f"(MAC: {entry['printer_mac']}, IP: {p_ip}). Cấm fallback!"
+                        )
+
+                if p_type == "toshiba":
+                    cmd_name = "toshiba_change_ftp"
+                elif p_type == "ricoh":
+                    cmd_name = "ricoh_change_ftp"
+                else:
+                    raise ValueError(
+                        f"Dòng máy in '{p_type}' của '{p_name}' không được hỗ trợ đổi FTP. Cấm fallback!"
+                    )
+
+                from models import UtiCommand
+                cmd_entry = session.execute(
+                    select(UtiCommand).where(UtiCommand.command == cmd_name)
+                ).scalar_one_or_none()
+                if not cmd_entry or not cmd_entry.command_content:
+                    raise ValueError(f"Không tìm thấy mẫu lệnh thực thi '{cmd_name}' trong bảng uti_commands!")
+
+                from utils import resolve_utility_command_content
+                raw_content = resolve_utility_command_content(session, cmd_entry.command_content)
+
+                c_content = raw_content.replace("__TARGET_IP__", p_ip).replace("__PRINTER_IP__", p_ip)
+                c_content = c_content.replace("__TARGET_USER__", p_user).replace("__AUTH_USER__", p_user)
+                c_content = c_content.replace("__TARGET_PASS__", p_pass).replace("__AUTH_PASS__", p_pass)
+                c_content = c_content.replace("__TARGET_ID__", str(entry["registration_no"])).replace("__ENTRY_ID__", str(entry["registration_no"])).replace("__REGISTRATION_NO__", str(entry["registration_no"]))
+                c_content = c_content.replace("__TARGET_SCAN_USER__", entry["entry_name"]).replace("__TARGET_NAME__", entry["entry_name"]).replace("__SCAN_USERNAME__", entry["entry_name"])
+                c_content = c_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", new_ip)
+
+                p_params = _json.dumps({
+                    "action": "exec_utility",
+                    "command": cmd_name,
+                    "command_content": c_content,
+                    "printer_ip": p_ip,
+                    "ip": p_ip,
+                    "auth_user": p_user,
+                    "auth_password": p_pass,
+                    "target_id": entry["registration_no"],
+                    "entry_id": entry["registration_no"],
+                    "target_name": entry["entry_name"],
+                    "old_ip": old_ip,
+                    "new_ip": new_ip,
+                    "brand": p_type,
                     "printer_type": p_type,
-                    "printer_ip": entry["printer_ip"],
-                    "ip": entry["printer_ip"],
                     "mac_address": entry["printer_mac"],
                     "printer_mac_id": entry["printer_mac"],
-                    "is_auto": True,
-                }
+                    "is_auto": False,
+                }, ensure_ascii=False)
+
                 modify_cmd = PrinterControlCommand(
                     printer_id=p_id,
                     lead=p_lead,
                     lan_uid=p_lan,
-                    agent_uid=agent_uid or "",
-                    printer_name=entry["printer_name"],
-                    ip=entry["printer_ip"],
+                    agent_uid=entry.get("agent_uid") or agent_uid or "",
+                    printer_name=p_name,
+                    ip=p_ip,
                     desired_enabled=True,
-                    command_type="address_modify",
+                    command_type="trigger_utility",
                     auth_user=p_user,
                     auth_password=p_pass,
-                    command_params=_json.dumps(cmd_params_dict, ensure_ascii=False),
+                    command_params=p_params,
                     status="pending",
                     error_message="",
                     requested_at=datetime.now(timezone.utc),
@@ -725,8 +833,9 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
         )
         session.add(cmd_log)
         session.flush()
-        logger.info("[when_ip_change] Triggered when_ip_change command #%d with %d child address_modify commands for agent %s (%s -> %s)", cmd_log.id, len(child_ids), agent_uid, old_ip, new_ip)
+        logger.info("[when_ip_change] Triggered when_ip_change command #%d with %d child trigger_utility commands for agent %s (%s -> %s)", cmd_log.id, len(child_ids), agent_uid, old_ip, new_ip)
     except Exception as exc:
         logger.error("[when_ip_change] Failed to trigger IP change workflow for agent %s: %s", agent_uid, exc)
+        raise
 
 

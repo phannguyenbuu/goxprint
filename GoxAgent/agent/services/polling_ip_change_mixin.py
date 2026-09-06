@@ -12,7 +12,12 @@ class PollingIpChangeMixin:
             LOGGER.debug("[polling_when_ip_change] Already running, skipping concurrent run.")
             return
         try:
-            current_ip = self._resolve_local_ip()
+            try:
+                self._config.reload()
+            except Exception:
+                pass
+
+            current_ip = self._resolve_local_ip(force=True)
             if not current_ip:
                 LOGGER.warning("[polling_when_ip_change] Cannot resolve local IP.")
                 return
@@ -31,16 +36,21 @@ class PollingIpChangeMixin:
             self._config.set_value("pc_ip", current_ip)
 
             # Report IP change event (old_ip and new_ip) to VPS API
+            agent_uid = str(getattr(self, "_agent_uid", "") or "").strip()
+            if not agent_uid:
+                LOGGER.warning("[polling_when_ip_change] Cannot report IP change: agent_uid is empty (no fallback allowed)")
+                return
+
             try:
-                if hasattr(self, "_api_client") and self._api_client:
-                    self._api_client.post_payload({
-                        "event": "pc_ip_changed",
-                        "agent_uid": getattr(self, "_agent_uid", ""),
-                        "old_ip": stored_ip,
-                        "new_ip": current_ip,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    LOGGER.info("[polling_when_ip_change] Reported IP change event to VPS: old_ip=%s, new_ip=%s", stored_ip, current_ip)
+                self._post_payload({
+                    "event": "pc_ip_changed",
+                    "lead": str(getattr(self, "_lead", "") or self._config.get_string("polling.lead", "")).strip(),
+                    "agent_uid": agent_uid,
+                    "old_ip": stored_ip,
+                    "new_ip": current_ip,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+                LOGGER.info("[polling_when_ip_change] Reported IP change event to VPS: old_ip=%s, new_ip=%s, agent_uid=%s", stored_ip, current_ip, agent_uid)
             except Exception as report_exc:
                 LOGGER.warning("[polling_when_ip_change] Report IP change to VPS failed: %s", report_exc)
 
@@ -361,8 +371,43 @@ class PollingIpChangeMixin:
         finally:
             session.close()
 
+    def _start_windows_ip_event_listener(self) -> None:
+        import sys
+        if sys.platform != "win32":
+            return
+        def _listener():
+            import ctypes
+            import ctypes.wintypes
+            iphlpapi = getattr(ctypes.windll, "iphlpapi", None)
+            if not iphlpapi or not hasattr(iphlpapi, "NotifyAddrChange"):
+                return
+            handle = ctypes.wintypes.HANDLE()
+            LOGGER.info("[PollingBridge] Windows Native NotifyAddrChange event listener active")
+            while not self._stop_event.is_set():
+                try:
+                    ret = iphlpapi.NotifyAddrChange(ctypes.byref(handle), None)
+                    if self._stop_event.is_set():
+                        break
+                    if ret == 0:
+                        LOGGER.info("[PollingBridge] Windows network IP change detected by OS! Triggering immediate check...")
+                        time.sleep(0.5)  # Đợi route hệ điều hành ổn định
+                        self.polling_when_ip_change()
+                except Exception as exc:
+                    LOGGER.debug("[PollingBridge] NotifyAddrChange exception: %s", exc)
+                    time.sleep(5.0)
+        t = threading.Thread(target=_listener, daemon=True, name="polling-ip-event-listener")
+        t.start()
+
     def _ip_change_polling_loop(self) -> None:
+        import threading
         LOGGER.info("IP change polling worker loop started")
+        
+        # Khởi chạy Win32 Native Event Listener nếu trên Windows
+        try:
+            self._start_windows_ip_event_listener()
+        except Exception as win_err:
+            LOGGER.debug("Could not start Windows IP event listener: %s", win_err)
+
         # Run immediately on start
         try:
             self.polling_when_ip_change()
@@ -370,8 +415,9 @@ class PollingIpChangeMixin:
             LOGGER.warning("Initial polling_when_ip_change call failed: %s", exc)
 
         while not self._stop_event.is_set():
-            # Wait 2 minutes (120 seconds) checking stop event every second
-            for _ in range(120):
+            # Đọc interval từ config (mặc định 15 giây dự phòng)
+            check_interval = max(5, self._config.get_int("polling.ip_change_interval_seconds", 15))
+            for _ in range(check_interval):
                 if self._stop_event.is_set():
                     break
                 time.sleep(1.0)
