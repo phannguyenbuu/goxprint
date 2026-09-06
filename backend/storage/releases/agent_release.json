@@ -5,7 +5,7 @@
   "sha256": "735f3774cb5ec539ef7b9b1a53b55f44b264aa8508b4e19ff392771874982159",
   "mandatory": false,
   "download_url": "https://agentapi.quanlymay.com/static/releases/printagent.exe",
-  "installer_url": "https://agentapi.quanlymay.com/static/releases/printagentinstall.exe",
+  "installer_url": "https://download.printagentx.com/printagentinstall.exe",
   "notes": "Build 2.9.0905194600: Autoupdate & Watchdog completely removed. Manual update only via installer.",
   "channel": "stable"
 }

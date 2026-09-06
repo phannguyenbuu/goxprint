@@ -223,14 +223,17 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
         sha256 = _to_text(payload.get("sha256")).lower()
         update_available = _is_newer_version(version, current_version)
 
-        dl_url = _to_text(payload.get("download_url")) or "https://download.goxprint.com/printagent.exe"
+        dl_url = _to_text(payload.get("download_url")) or "https://agentapi.quanlymay.com/static/releases/printagent.exe"
         if not dl_url.lower().endswith(".zip") and "?" not in dl_url:
             dl_url = f"{dl_url}?v={version}"
+
+        installer_url = _to_text(payload.get("installer_url")) or "https://download.printagentx.com/printagentinstall.exe"
 
         return jsonify({
             "ok": True,
             "version": version,
             "download_url": dl_url,
+            "installer_url": installer_url,
             "sha256": sha256,
             "size": int(payload.get("size") or 0),
             "published_at": _to_text(payload.get("published_at")),
