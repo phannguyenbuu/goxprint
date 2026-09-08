@@ -246,7 +246,10 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     "printers": printers_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
                     "lan_printers": printers_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid)), []),
                     "last_seen_at": _format_agents_datetime_ui(last_seen),
+                    "last_seen_at_iso": last_seen.isoformat() if last_seen else "",
+                    "last_seen_epoch": int(last_seen.timestamp()) if last_seen else 0,
                     "online_changed_at": _format_agents_datetime_ui(online_changed_at),
+                    "online_changed_at_iso": online_changed_at.isoformat() if online_changed_at else "",
                     "is_online": is_online,
                     "is_master": is_master,
                     "gds_status": _to_text(getattr(agent, 'gds_status', 'unknown')) or 'unknown',
@@ -313,11 +316,15 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "ftp_ports": row.ftp_ports,
                         "is_online": bool(row.is_online),
                         "changed_at": _format_agents_datetime_ui(row.changed_at),
+                        "changed_at_iso": row.changed_at.isoformat() if row.changed_at else "",
                         "last_seen_at": _format_agents_datetime_ui(row.last_seen_at),
+                        "last_seen_at_iso": row.last_seen_at.isoformat() if row.last_seen_at else "",
                         **_serialize_audit_payload_agents(row.created_at, row.updated_at),
                     }
+                    for row in rows
                 ],
                 "limit": limit,
+                "total": len(rows),
             }
         )
 

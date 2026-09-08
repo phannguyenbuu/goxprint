@@ -1,200 +1,1108 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .agent-main-cell {
+  /* Header & Subtabs */
+  .agent-subtabs-nav {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .subtab-btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #475569;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease-in-out;
+  }
+  .subtab-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+  .subtab-btn.active {
+    background: #0284c7 !important;
+    color: #ffffff !important;
+    border-color: #0284c7 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);
+  }
+  .subtab-badge {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #e2e8f0;
+    color: #475569;
+    transition: all 0.15s ease-in-out;
+  }
+  .subtab-btn.active .subtab-badge {
+    background: rgba(255, 255, 255, 0.25) !important;
+    color: #ffffff !important;
+  }
+
+  /* Metric cards */
+  .metrics-grid {
     display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .metric-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .metric-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+  .metric-val {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+  .metric-label {
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-top: 2px;
+  }
+
+  /* Filter board */
+  .filter-board {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    background: #f8fafc;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .filter-group {
+    display: flex;
+    flex-direction: column;
     gap: 4px;
   }
-  .agent-main-cell .agent-uid {
+  .filter-group label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #64748b;
+  }
+  .filter-input, .filter-select {
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    background: #ffffff;
+    color: #0f172a;
+    box-sizing: border-box;
+  }
+
+  /* Table styling */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .generic-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .generic-table th {
+    background: #f8fafc;
+    padding: 10px 12px;
+    text-align: left;
+    color: #475569;
+    font-weight: 600;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+  }
+  .generic-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #1e293b;
+    vertical-align: middle;
+  }
+  .generic-table tr:hover {
+    background: #f8fafc;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-online {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+  }
+  .badge-offline {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+  }
+  .badge-master {
+    background: #fffbeb;
+    color: #d97706;
+    border: 1px solid #fde68a;
+  }
+  .badge-service {
+    background: #f0fdf4;
+    color: #16a34a;
+    border: 1px solid #bbf7d0;
+  }
+  .badge-heartbeat {
     font-family: monospace;
-    font-weight: 700;
-    word-break: break-all;
-  }
-  .agent-main-cell .agent-link {
-    font-size: 12px;
-    color: #2f5fb3;
-    text-decoration: underline;
-    word-break: break-all;
-  }
-  .agent-subtext {
-    font-size: 12px;
-    color: rgba(42, 57, 82, 0.72);
-    word-break: break-word;
-  }
-  .agent-actions {
-    display: flex;
-    gap: 8px;
+    font-size: 0.78rem;
+    padding: 3px 7px;
+    border-radius: 6px;
+    display: inline-flex;
     align-items: center;
-    flex-wrap: wrap;
+    gap: 5px;
   }
-  .agent-actions-row {
+  .hb-good { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .hb-medium { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .hb-bad { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+
+  /* Pulsing dot */
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #10b981;
+    display: inline-block;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    animation: pulse 1.6s infinite cubic-bezier(0.66, 0, 0, 1);
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+
+  /* Chip list */
+  .chip-list {
     display: flex;
-    gap: 8px;
-    align-items: center;
     flex-wrap: wrap;
-    margin-top: 8px;
+    gap: 5px;
   }
-  .agent-info-line {
-    margin-top: 8px;
-    font-size: 12px;
+  .printer-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 0.75rem;
+    color: #334155;
   }
-  .ftp-modal-backdrop {
+
+  /* Action buttons */
+  .action-btn {
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+  }
+  .btn-web { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+  .btn-web:hover { background: #dbeafe; }
+  .btn-settings { background: #f8fafc; color: #475569; border-color: #cbd5e1; }
+  .btn-settings:hover { background: #f1f5f9; color: #0f172a; }
+  .btn-restart { background: #fff7ed; color: #c2410c; border-color: #ffedd5; }
+  .btn-restart:hover { background: #ffedd5; }
+  .btn-delete { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+  .btn-delete:hover { background: #fee2e2; }
+
+  /* Modal */
+  .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(16, 24, 40, 0.48);
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
     display: none;
     align-items: center;
     justify-content: center;
-    z-index: 60;
+    z-index: 9999;
     padding: 16px;
   }
-  .ftp-modal-backdrop.open {
+  .modal-backdrop.open { display: flex; }
+  .modal-card {
+    background: #ffffff;
+    border-radius: 12px;
+    max-width: 680px;
+    width: 100%;
+    max-height: 85vh;
     display: flex;
-  }
-  .ftp-modal-card {
-    width: min(520px, 100%);
-    background: #fff;
-    border-radius: 18px;
-    box-shadow: 0 28px 60px rgba(17, 24, 39, 0.22);
-    border: 1px solid rgba(129, 140, 248, 0.16);
-    padding: 18px;
-  }
-  .ftp-modal-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 14px;
-  }
-  .ftp-modal-field {
-    display: grid;
-    gap: 6px;
-  }
-  .ftp-modal-field.full {
-    grid-column: 1 / -1;
-  }
-  .ftp-modal-field label {
-    font-size: 12px;
-    font-weight: 700;
-    color: #36455f;
-  }
-  .ftp-modal-field input {
-    border: 1px solid #d9e4f5;
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-size: 14px;
-    outline: none;
-  }
-  .ftp-modal-path {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    border: 1px solid #d9e4f5;
-    border-radius: 10px;
+    flex-direction: column;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
     overflow: hidden;
   }
-  .ftp-modal-path-prefix {
-    padding: 10px 12px;
-    background: #f5f8ff;
-    color: #49608d;
-    font-family: monospace;
-    font-size: 13px;
-    border-right: 1px solid #d9e4f5;
-    white-space: nowrap;
+  .modal-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
-  .ftp-modal-path input {
-    border: 0;
-    border-radius: 0;
+  .modal-body {
+    padding: 18px;
+    overflow-y: auto;
+    font-size: 0.85rem;
   }
-  .ftp-modal-actions {
+  .modal-footer {
+    padding: 12px 18px;
+    border-top: 1px solid #e2e8f0;
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 16px;
-    flex-wrap: wrap;
+    gap: 8px;
+    background: #f8fafc;
   }
-  .agent-chip-list {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-  }
-  .agent-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: #eef6ff;
-    color: #284b82;
-    font-family: monospace;
-    font-size: 12px;
-    font-weight: 700;
-  }
-  .table-wrap { overflow-x: auto; }
-  .data-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-  .data-table th, .data-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
-  .data-table th { background: #f9f9f9; font-weight: 600; color: #333; }
-  .data-table tr:hover { background: #fafafa; }
 </style>
 
-{% set release = agent_release or {} %}
-<section class="card">
-  <div class="card-header">
-    <h2>PrintAgent Setup Packages</h2>
-    <p>Download the current PrintAgent release for target Windows machines. All times on this page use GMT+7.</p>
+<div class="panel" style="padding: 20px;">
+  <!-- Header title -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+    <div>
+      <h2 style="font-size: 1.4rem; font-weight: 700; color: #0f172a; margin: 0;">Quản lý PrintAgent</h2>
+      <p style="font-size: 0.85rem; color: #64748b; margin: 4px 0 0 0;">
+        Giám sát nhịp tim Heartbeat thời gian thực của các Agent, lịch sử hoạt động và gói cài đặt.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span id="sync-status" style="font-size: 0.8rem; color: #10b981; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+        <span class="pulse-dot"></span> Đang tự động cập nhật
+      </span>
+      <button id="btn-global-refresh" class="subtab-btn" style="padding: 7px 14px; font-size: 0.82rem;">
+        🔄 Làm mới ngay
+      </button>
+    </div>
   </div>
 
-  <div class="table-wrap" style="margin-top: 20px;">
-    <table class="data-table">
-      <thead>
+  <!-- Subtabs Navigation -->
+  <div class="agent-subtabs-nav">
+    <button type="button" id="subtab-btn-online" class="subtab-btn active">
+      <span>🟢 Agents đang chạy (Online)</span>
+      <span id="badge-online-count" class="subtab-badge">0</span>
+    </button>
+    <button type="button" id="subtab-btn-history" class="subtab-btn">
+      <span>🕒 Agent đã từng chạy & Lịch sử</span>
+      <span id="badge-history-count" class="subtab-badge">0</span>
+    </button>
+    <button type="button" id="subtab-btn-packages" class="subtab-btn">
+      <span>📦 Bộ cài đặt (Downloads)</span>
+    </button>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- SUBTAB 1: AGENTS ĐANG CHẠY (ONLINE WITH HEARTBEAT) -->
+  <!-- ========================================================================= -->
+  <div id="subtab-content-online">
+    <!-- Quick Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon" style="background: #ecfdf5; color: #059669;">💻</div>
+        <div>
+          <div id="metric-online-agents" class="metric-val">0</div>
+          <div class="metric-label">Agent đang Online</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon" style="background: #eff6ff; color: #2563eb;">🌐</div>
+        <div>
+          <div id="metric-active-lans" class="metric-val">0</div>
+          <div class="metric-label">Mạng LAN kết nối</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon" style="background: #faf5ff; color: #9333ea;">🖨️</div>
+        <div>
+          <div id="metric-managed-printers" class="metric-val">0</div>
+          <div class="metric-label">Máy in được quản lý</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon" style="background: #fefce8; color: #ca8a04;">💓</div>
+        <div>
+          <div id="metric-heartbeat-status" class="metric-val" style="font-size: 1.1rem; color: #059669;">Ổn định</div>
+          <div class="metric-label">Tình trạng Heartbeat</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter board -->
+    <div class="filter-board">
+      <div class="filter-group" style="flex: 1.5; min-width: 180px;">
+        <label>Tìm kiếm máy trạm / IP / UID</label>
+        <input type="text" id="filter-online-search" class="filter-input" placeholder="Nhập tên máy, IP hoặc UID...">
+      </div>
+      <div class="filter-group" style="flex: 1; min-width: 150px;">
+        <label>Mạng LAN</label>
+        <select id="filter-online-lan" class="filter-select">
+          <option value="">Tất cả mạng LAN</option>
+        </select>
+      </div>
+      <button id="btn-filter-online-reset" class="action-btn" style="background: #e2e8f0; color: #334155; padding: 8px 14px; font-size: 0.85rem; height: 35px;">
+        ↺ Xóa lọc
+      </button>
+    </div>
+
+    <!-- Table of Online Agents -->
+    <div class="table-wrap">
+      <table class="generic-table">
+        <thead>
+          <tr>
+            <th style="width: 210px;">Máy trạm (Agent)</th>
+            <th style="width: 190px;">Heartbeat về Server</th>
+            <th style="width: 200px;">Địa chỉ mạng (LAN & IP)</th>
+            <th style="width: 140px;">Phiên bản & Dịch vụ</th>
+            <th>Máy in phụ trách</th>
+            <th style="width: 120px; text-align: center;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-online-agents">
+          <tr>
+            <td colspan="6" style="padding: 24px; text-align: center; color: #64748b;">
+              ⏳ Đang kết nối và lấy danh sách Agent có Heartbeat...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- SUBTAB 2: AGENT ĐÃ TỪNG CHẠY & LỊCH SỬ HOẠT ĐỘNG -->
+  <!-- ========================================================================= -->
+  <div id="subtab-content-history" style="display: none;">
+    <!-- SECTION A: OFFLINE / PAST AGENTS -->
+    <div style="margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 style="font-size: 1.05rem; font-weight: 700; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 8px;">
+          <span>💤 Các Agent đã từng kết nối (Hiện đang Offline)</span>
+          <span id="badge-offline-subcount" class="subtab-badge">0</span>
+        </h3>
+        <span style="font-size: 0.8rem; color: #64748b;">Danh sách các máy trạm từng cài PrintAgent nhưng hiện không có tín hiệu Heartbeat.</span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="generic-table">
+          <thead>
+            <tr>
+              <th>Máy trạm / Agent UID</th>
+              <th>IP & MAC lần cuối</th>
+              <th>Mạng LAN</th>
+              <th>Phiên bản</th>
+              <th>Lần cuối nhìn thấy (Last seen)</th>
+              <th style="text-align: center; width: 100px;">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-offline-agents">
+            <tr>
+              <td colspan="6" style="padding: 20px; text-align: center; color: #64748b;">
+                Đang tải danh sách agent...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SECTION B: PRESENCE HISTORY LOG (NHẬT KÝ ĐỔI TRẠNG THÁI) -->
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <h3 style="font-size: 1.05rem; font-weight: 700; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 8px;">
+          <span>📋 Nhật ký lịch sử chạy (Kết nối & Ngắt kết nối)</span>
+          <span id="badge-presence-count" class="subtab-badge">0</span>
+        </h3>
+        <div style="display: flex; gap: 8px;">
+          <select id="filter-history-status" class="filter-select" style="padding: 5px 8px; font-size: 0.8rem;">
+            <option value="">Tất cả sự kiện</option>
+            <option value="online">Chỉ sự kiện Kết nối (Online)</option>
+            <option value="offline">Chỉ sự kiện Ngắt kết nối (Offline)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="generic-table">
+          <thead>
+            <tr>
+              <th style="width: 160px;">Thời gian ghi nhận</th>
+              <th>Máy trạm / Hostname</th>
+              <th>Agent UID</th>
+              <th>Local IP / MAC</th>
+              <th>Sự kiện</th>
+              <th>Lần trước đó (Last Seen)</th>
+              <th>Phiên bản / Mode</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-presence-history">
+            <tr>
+              <td colspan="7" style="padding: 20px; text-align: center; color: #64748b;">
+                Đang tải nhật ký lịch sử...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- SUBTAB 3: BỘ CÀI ĐẶT (SETUP PACKAGES) -->
+  <!-- ========================================================================= -->
+  <div id="subtab-content-packages" style="display: none;">
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+      <h4 style="margin: 0 0 4px 0; color: #1e40af; font-size: 0.95rem;">Tải xuống bộ cài đặt PrintAgent tự động cho máy trạm</h4>
+      <p style="margin: 0; font-size: 0.85rem; color: #3b82f6;">
+        Tải file cài đặt về máy tính cần quản trị, khởi chạy bằng quyền Quản trị viên (Run as Administrator) để tự động kích hoạt dịch vụ Agent.
+      </p>
+    </div>
+
+    {% set release = agent_release or {} %}
+    <div class="table-wrap">
+      <table class="generic-table">
+        <thead>
+          <tr>
+            <th>Phiên bản / Tên bộ cài</th>
+            <th>Ngày phát hành (GMT+7)</th>
+            <th>Dung lượng</th>
+            <th>Hệ điều hành tương thích</th>
+            <th>Link tải trực tiếp</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.5rem;">📦</span>
+                <div>
+                  <strong>v{{ release.version }} (Khuyên dùng)</strong>
+                  <span style="display: block; font-size: 11px; color: #64748b; margin-top: 2px;">printagentinstall.exe (Bản chuẩn)</span>
+                </div>
+              </div>
+            </td>
+            <td>{{ release.release_date or '-' }}</td>
+            <td>12.5 MB</td>
+            <td>Windows 10, Windows 11, Server 2016+</td>
+            <td>
+              <a href="https://download.printagentx.com/printagentinstall.exe?v={{ release.version }}" class="action-btn" style="background: #2563eb; color: #ffffff; padding: 8px 14px;">
+                ⬇️ Tải printagentinstall.exe
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.5rem;">🛡️</span>
+                <div>
+                  <strong style="color: #059669;">v{{ release.version }} (Windows 7 / 8 / 10)</strong>
+                  <span style="display: block; font-size: 11px; color: #64748b; margin-top: 2px;">printagentinstall_win7810.exe (Nhúng sẵn C++ Runtime)</span>
+                </div>
+              </div>
+            </td>
+            <td>{{ release.release_date or '-' }}</td>
+            <td>13.0 MB</td>
+            <td>Windows 7 SP1, Windows 8 / 8.1, Windows 10</td>
+            <td>
+              <a href="https://download.goxprint.com/printagentinstall_win7810.exe" class="action-btn" style="background: #059669; color: #ffffff; padding: 8px 14px;">
+                ⬇️ Tải printagentinstall_win7810.exe
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.5rem;">⚙️</span>
+                <div>
+                  <strong>Core Agent Executable</strong>
+                  <span style="display: block; font-size: 11px; color: #64748b; margin-top: 2px;">printagent.exe (File agent chạy nền)</span>
+                </div>
+              </div>
+            </td>
+            <td>{{ release.release_date or '-' }}</td>
+            <td>17.0 MB</td>
+            <td>Tất cả các phiên bản Windows (Python 3.8 Core)</td>
+            <td>
+              <a href="https://download.goxprint.com/printagent.exe" class="action-btn" style="background: #475569; color: #ffffff; padding: 8px 14px;">
+                ⬇️ Tải printagent.exe
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODAL: AGENT SETTINGS DETAIL -->
+<!-- ========================================================================= -->
+<div id="modal-agent-settings" class="modal-backdrop">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 style="margin: 0; font-size: 1.1rem; color: #0f172a;" id="modal-settings-title">⚙️ Cấu hình Agent</h3>
+      <button type="button" id="btn-close-settings-modal" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;">✕</button>
+    </div>
+    <div class="modal-body">
+      <pre id="modal-settings-content" style="background: #0f172a; color: #38bdf8; padding: 14px; border-radius: 8px; font-size: 0.8rem; overflow-x: auto; font-family: monospace; line-height: 1.5;"></pre>
+    </div>
+    <div class="modal-footer">
+      <button type="button" id="btn-copy-settings" class="action-btn btn-settings" style="padding: 8px 14px;">📋 Sao chép</button>
+      <button type="button" id="btn-ok-settings-modal" class="action-btn btn-web" style="padding: 8px 14px;">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Global states
+  let allAgentsData = [];
+  let onlineAgents = [];
+  let offlineAgents = [];
+  let historyLogs = [];
+  let activeSubtab = 'online';
+
+  // Subtab buttons
+  const btnOnline = document.getElementById('subtab-btn-online');
+  const btnHistory = document.getElementById('subtab-btn-history');
+  const btnPackages = document.getElementById('subtab-btn-packages');
+
+  const contentOnline = document.getElementById('subtab-content-online');
+  const contentHistory = document.getElementById('subtab-content-history');
+  const contentPackages = document.getElementById('subtab-content-packages');
+
+  function switchSubtab(tab) {
+    activeSubtab = tab;
+    [btnOnline, btnHistory, btnPackages].forEach(b => b.classList.remove('active'));
+    contentOnline.style.display = 'none';
+    contentHistory.style.display = 'none';
+    contentPackages.style.display = 'none';
+
+    if (tab === 'online') {
+      btnOnline.classList.add('active');
+      contentOnline.style.display = 'block';
+    } else if (tab === 'history') {
+      btnHistory.classList.add('active');
+      contentHistory.style.display = 'block';
+      if (historyLogs.length === 0) fetchHistoryLogs();
+    } else if (tab === 'packages') {
+      btnPackages.classList.add('active');
+      contentPackages.style.display = 'block';
+    }
+  }
+
+  btnOnline.addEventListener('click', () => switchSubtab('online'));
+  btnHistory.addEventListener('click', () => switchSubtab('history'));
+  btnPackages.addEventListener('click', () => switchSubtab('packages'));
+
+  // Calculate human-friendly time elapsed
+  function getHeartbeatDiff(epochSeconds) {
+    if (!epochSeconds) return { text: 'Chưa có', cls: 'hb-bad', seconds: 99999 };
+    const now = Math.floor(Date.now() / 1000);
+    const diff = Math.max(0, now - epochSeconds);
+    if (diff < 5) return { text: 'Vừa xong (1s)', cls: 'hb-good', seconds: diff };
+    if (diff < 30) return { text: `${diff}s trước (Tốt)`, cls: 'hb-good', seconds: diff };
+    if (diff < 90) return { text: `${diff}s trước (Chậm)`, cls: 'hb-medium', seconds: diff };
+    if (diff < 3600) return { text: `${Math.floor(diff/60)} phút trước`, cls: 'hb-bad', seconds: diff };
+    if (diff < 86400) return { text: `${Math.floor(diff/3600)} giờ trước`, cls: 'hb-bad', seconds: diff };
+    return { text: `${Math.floor(diff/86400)} ngày trước`, cls: 'hb-bad', seconds: diff };
+  }
+
+  // Fetch all agents (status=all to get both online and offline)
+  async function fetchAgentsData() {
+    try {
+      const res = await fetch('/api/agents?status=all&t=' + Date.now());
+      const data = await res.json();
+      if (!data || !data.rows) return;
+
+      allAgentsData = data.rows;
+      onlineAgents = allAgentsData.filter(a => a.is_online);
+      offlineAgents = allAgentsData.filter(a => !a.is_online);
+
+      // Update badges
+      document.getElementById('badge-online-count').textContent = onlineAgents.length;
+      document.getElementById('badge-history-count').textContent = offlineAgents.length;
+      document.getElementById('badge-offline-subcount').textContent = offlineAgents.length;
+
+      // Update metrics
+      document.getElementById('metric-online-agents').textContent = onlineAgents.length;
+
+      const lanSet = new Set(onlineAgents.map(a => a.lan_uid).filter(Boolean));
+      document.getElementById('metric-active-lans').textContent = lanSet.size;
+
+      let totalPrinters = 0;
+      onlineAgents.forEach(a => {
+        if (Array.isArray(a.printers)) totalPrinters += a.printers.length;
+      });
+      document.getElementById('metric-managed-printers').textContent = totalPrinters;
+
+      // Check max heartbeat delay
+      let maxDelay = 0;
+      const now = Math.floor(Date.now() / 1000);
+      onlineAgents.forEach(a => {
+        if (a.last_seen_epoch) {
+          const d = now - a.last_seen_epoch;
+          if (d > maxDelay) maxDelay = d;
+        }
+      });
+      const hbStatusEl = document.getElementById('metric-heartbeat-status');
+      if (onlineAgents.length === 0) {
+        hbStatusEl.textContent = 'Không có Agent';
+        hbStatusEl.style.color = '#64748b';
+      } else if (maxDelay <= 35) {
+        hbStatusEl.textContent = 'Rất tốt (<30s)';
+        hbStatusEl.style.color = '#059669';
+      } else if (maxDelay <= 90) {
+        hbStatusEl.textContent = 'Ổn định (<90s)';
+        hbStatusEl.style.color = '#d97706';
+      } else {
+        hbStatusEl.textContent = 'Có độ trễ';
+        hbStatusEl.style.color = '#dc2626';
+      }
+
+      // Populate LAN filter dropdown if not yet
+      populateLanDropdown();
+
+      // Render tables
+      renderOnlineTable();
+      renderOfflineTable();
+    } catch (err) {
+      console.error('Error fetching agents data:', err);
+    }
+  }
+
+  function populateLanDropdown() {
+    const sel = document.getElementById('filter-online-lan');
+    if (!sel || sel.options.length > 1) return;
+    const lans = {};
+    allAgentsData.forEach(a => {
+      if (a.lan_uid) lans[a.lan_uid] = a.lan_name || a.lan_uid;
+    });
+    Object.entries(lans).forEach(([uid, name]) => {
+      const opt = document.createElement('option');
+      opt.value = uid;
+      opt.textContent = `${name} (${uid})`;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Render Online Agents Table
+  function renderOnlineTable() {
+    const tbody = document.getElementById('tbody-online-agents');
+    if (!tbody) return;
+
+    const query = (document.getElementById('filter-online-search')?.value || '').trim().toLowerCase();
+    const selectedLan = document.getElementById('filter-online-lan')?.value || '';
+
+    const filtered = onlineAgents.filter(a => {
+      if (selectedLan && a.lan_uid !== selectedLan) return false;
+      if (query) {
+        const text = `${a.hostname} ${a.agent_uid} ${a.local_ip} ${a.local_mac} ${a.lan_name}`.toLowerCase();
+        if (!text.includes(query)) return false;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `
         <tr>
-          <th>Version</th>
-          <th>Release Date / Time (GMT+7)</th>
-          <th>Size</th>
-          <th>Target OS</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
+          <td colspan="6" style="padding: 28px; text-align: center; color: #64748b;">
+            Không tìm thấy Agent nào đang online phù hợp với bộ lọc.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(a => {
+      const hb = getHeartbeatDiff(a.last_seen_epoch);
+      const isMaster = a.is_master;
+      const port = a.web_port || 9173;
+      const webUrl = a.local_ip ? `http://${a.local_ip}:${port}` : `http://127.0.0.1:${port}`;
+
+      // Printers chips
+      let printersHtml = '<span style="color: #94a3b8; font-size: 0.78rem;">Chưa phát hiện máy in</span>';
+      if (Array.isArray(a.printers) && a.printers.length > 0) {
+        printersHtml = `<div class="chip-list">` + a.printers.map(p => `
+          <span class="printer-chip" title="MAC: ${p.mac_id || '-'}">
+            🖨️ <strong>${escapeHtml(p.printer_name || 'Printer')}</strong>
+            <span style="color: #64748b; font-family: monospace;">(${escapeHtml(p.ip)})</span>
+          </span>
+        `).join('') + `</div>`;
+      }
+
+      return `
         <tr>
+          <!-- Hostname & Agent UID -->
           <td>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <img src="/static/logo.png" alt="Agent Icon" style="width: 24px; height: 24px;">
+            <div style="display: flex; align-items: flex-start; gap: 8px;">
+              <span style="font-size: 1.3rem; line-height: 1;">💻</span>
               <div>
-                <strong>v{{ release.version }} ({{ (release.channel or 'stable')|upper }})</strong>
-                <span style="display: block; font-size: 11px; color: #64748b; margin-top: 2px;">Setup Loader (printagent.exe)</span>
+                <div style="font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                  ${escapeHtml(a.hostname || 'Máy trạm')}
+                  ${isMaster ? '<span class="badge badge-master">★ MASTER</span>' : '<span class="badge badge-online">● ONLINE</span>'}
+                </div>
+                <div style="font-family: monospace; font-size: 0.72rem; color: #64748b; margin-top: 2px;">
+                  UID: ${escapeHtml(a.agent_uid)}
+                </div>
               </div>
             </div>
           </td>
-          <td>{{ release.release_date or '-' }}</td>
-          <td>{{ release.size_label or '-' }}</td>
-          <td>Windows 10/11, Server</td>
+
+          <!-- Heartbeat -->
           <td>
-            <a href="https://download.printagentx.com/printagentinstall.exe?v={{ release.version }}" class="filter-btn" style="text-decoration: none; display: inline-block;">Download .exe</a>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <img src="/static/logo.png" alt="Agent Icon" style="width: 24px; height: 24px;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
               <div>
-                <strong>v{{ release.version }} (WIN 7/8/10)</strong>
-                <span style="display: block; font-size: 11px; color: #64748b; margin-top: 2px;">Tương thích Win 7 SP1, 8, 10 (printagentinstall_win7810.exe)</span>
+                <span class="badge-heartbeat ${hb.cls}">
+                  <span class="pulse-dot" style="${hb.cls === 'hb-good' ? '' : 'display:none;'}"></span>
+                  💓 ${hb.text}
+                </span>
+              </div>
+              <div style="font-size: 0.72rem; color: #64748b; margin-top: 2px;">
+                Lần cuối: <strong>${escapeHtml(a.last_seen_at || '-')}</strong>
+              </div>
+              ${a.online_changed_at ? `
+                <div style="font-size: 0.7rem; color: #94a3b8;">
+                  Online từ: ${escapeHtml(a.online_changed_at)}
+                </div>
+              ` : ''}
+            </div>
+          </td>
+
+          <!-- Mạng LAN & IP -->
+          <td>
+            <div>
+              <div style="font-weight: 600; color: #0f172a; font-family: monospace; font-size: 0.88rem;">
+                ${escapeHtml(a.local_ip || '-')}
+              </div>
+              <div style="font-size: 0.72rem; color: #64748b; font-family: monospace;">
+                MAC: ${escapeHtml(a.local_mac || '—')}
+              </div>
+              <div style="font-size: 0.72rem; color: #2563eb; margin-top: 2px; font-weight: 500;">
+                🌐 ${escapeHtml(a.lan_name || a.lan_uid || 'Mạng LAN')}
+                ${a.subnet_cidr ? `<span style="color: #64748b;">(${escapeHtml(a.subnet_cidr)})</span>` : ''}
               </div>
             </div>
           </td>
-          <td>{{ release.release_date or '-' }}</td>
-          <td>13.0 MB</td>
-          <td>Windows 7 / 8 / 10</td>
+
+          <!-- Version & Services -->
           <td>
-            <a href="https://download.goxprint.com/printagentinstall_win7810.exe" class="filter-btn" style="text-decoration: none; display: inline-block; background: #059669; border-color: #059669; color: white;">Download Win 7/8/10</a>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span class="badge" style="background: #f1f5f9; color: #334155; font-family: monospace;">
+                v${escapeHtml(a.app_version || '2.9')}
+              </span>
+              <div style="font-size: 0.72rem; color: #64748b;">
+                Mode: <strong>${escapeHtml(a.run_mode || 'web')}</strong> (Port ${port})
+              </div>
+              ${a.gds_status && a.gds_status !== 'unknown' ? `
+                <div style="font-size: 0.7rem; color: #059669;">
+                  GDS: <strong>${escapeHtml(a.gds_status)}</strong>
+                </div>
+              ` : ''}
+            </div>
+          </td>
+
+          <!-- Managed Printers -->
+          <td>
+            ${printersHtml}
+          </td>
+
+          <!-- Actions -->
+          <td style="text-align: center;">
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: stretch;">
+              <a href="${webUrl}" target="_blank" class="action-btn btn-web" title="Mở trang Web Agent trên máy trạm (Port ${port})">
+                🌐 Mở Web
+              </a>
+              <button type="button" class="action-btn btn-settings" onclick="viewAgentSettings('${escapeHtml(a.agent_uid)}', '${escapeHtml(a.hostname)}')">
+                ⚙️ Cấu hình
+              </button>
+              <button type="button" class="action-btn btn-restart" onclick="restartAgent('${escapeHtml(a.agent_uid)}', '${escapeHtml(a.hostname)}')">
+                🔄 Restart
+              </button>
+            </div>
           </td>
         </tr>
+      `;
+    }).join('');
+  }
 
+  // Render Offline / Past Agents Table
+  function renderOfflineTable() {
+    const tbody = document.getElementById('tbody-offline-agents');
+    if (!tbody) return;
 
+    if (offlineAgents.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="padding: 24px; text-align: center; color: #059669; font-weight: 500;">
+            ✔ Không có Agent nào đang offline. Tất cả các máy trạm đều đang kết nối!
+          </td>
+        </tr>`;
+      return;
+    }
 
-      </tbody>
-    </table>
-  </div>
+    tbody.innerHTML = offlineAgents.map(a => {
+      const hb = getHeartbeatDiff(a.last_seen_epoch);
+      return `
+        <tr>
+          <td>
+            <div style="font-weight: 600; color: #475569;">${escapeHtml(a.hostname || 'Máy trạm')}</div>
+            <div style="font-family: monospace; font-size: 0.72rem; color: #94a3b8;">UID: ${escapeHtml(a.agent_uid)}</div>
+          </td>
+          <td>
+            <div style="font-family: monospace; font-weight: 600;">${escapeHtml(a.local_ip || '—')}</div>
+            <div style="font-family: monospace; font-size: 0.72rem; color: #94a3b8;">${escapeHtml(a.local_mac || '—')}</div>
+          </td>
+          <td>
+            <div style="color: #475569;">${escapeHtml(a.lan_name || a.lan_uid || '—')}</div>
+            ${a.subnet_cidr ? `<div style="font-size: 0.7rem; color: #94a3b8;">${escapeHtml(a.subnet_cidr)}</div>` : ''}
+          </td>
+          <td>
+            <span class="badge" style="background: #f1f5f9; color: #64748b;">v${escapeHtml(a.app_version || '2.9')}</span>
+          </td>
+          <td>
+            <div style="color: #dc2626; font-weight: 600; font-size: 0.78rem;">
+              ● Mất kết nối (${hb.text})
+            </div>
+            <div style="font-size: 0.72rem; color: #64748b; margin-top: 2px;">
+              Lần cuối: ${escapeHtml(a.last_seen_at || '—')}
+            </div>
+          </td>
+          <td style="text-align: center;">
+            <button type="button" class="action-btn btn-delete" onclick="deleteOfflineAgent(${a.id}, '${escapeHtml(a.hostname)}')">
+              🗑️ Xóa bỏ
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Fetch Presence History Logs
+  async function fetchHistoryLogs() {
+    const tbody = document.getElementById('tbody-presence-history');
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #64748b;">Đang tải nhật ký lịch sử...</td></tr>`;
+    }
+    try {
+      const statusFilter = document.getElementById('filter-history-status')?.value || '';
+      let url = '/api/agents/history?limit=100';
+      if (statusFilter) url += `&status=${statusFilter}`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data || !data.rows) return;
+
+      historyLogs = data.rows;
+      document.getElementById('badge-presence-count').textContent = historyLogs.length;
+      renderPresenceHistory();
+    } catch (err) {
+      console.error('Error fetching presence logs:', err);
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #dc2626;">Lỗi khi tải lịch sử Agent.</td></tr>`;
+      }
+    }
+  }
+
+  // Render Presence History Table
+  function renderPresenceHistory() {
+    const tbody = document.getElementById('tbody-presence-history');
+    if (!tbody) return;
+
+    if (historyLogs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="padding: 24px; text-align: center; color: #64748b;">Chưa có nhật ký hoạt động nào được ghi nhận.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = historyLogs.map(log => {
+      const isOnline = log.is_online;
+      return `
+        <tr>
+          <td style="font-weight: 600; color: #0f172a; white-space: nowrap;">
+            ${escapeHtml(log.changed_at || '-')}
+          </td>
+          <td style="font-weight: 600;">
+            ${escapeHtml(log.hostname || 'Máy trạm')}
+          </td>
+          <td style="font-family: monospace; font-size: 0.78rem; color: #2563eb;">
+            ${escapeHtml(log.agent_uid)}
+          </td>
+          <td style="font-family: monospace; font-size: 0.8rem;">
+            ${escapeHtml(log.local_ip || '-')}
+            ${log.local_mac ? `<span style="display: block; font-size: 0.7rem; color: #94a3b8;">${escapeHtml(log.local_mac)}</span>` : ''}
+          </td>
+          <td>
+            ${isOnline 
+              ? '<span class="badge badge-online">🟢 KẾT NỐI (ONLINE)</span>' 
+              : '<span class="badge badge-offline">🔴 NGẮT KẾT NỐI (OFFLINE)</span>'}
+          </td>
+          <td style="font-size: 0.75rem; color: #64748b;">
+            ${escapeHtml(log.last_seen_at || '-')}
+          </td>
+          <td style="font-size: 0.75rem; color: #64748b;">
+            v${escapeHtml(log.app_version || '2.9')} (${escapeHtml(log.run_mode || 'web')})
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Helper Escape HTML
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // Modal Settings functions
+  window.viewAgentSettings = async function(agentUid, hostname) {
+    const modal = document.getElementById('modal-agent-settings');
+    const title = document.getElementById('modal-settings-title');
+    const content = document.getElementById('modal-settings-content');
+    title.textContent = `⚙️ Cấu hình Agent: ${hostname} (${agentUid})`;
+    content.textContent = 'Đang tải cấu hình settings.json...';
+    modal.classList.add('open');
+
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(agentUid)}/settings`);
+      const data = await res.json();
+      content.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      content.textContent = 'Lỗi không thể tải cấu hình: ' + err;
+    }
+  };
+
+  // Restart Agent function
+  window.restartAgent = async function(agentUid, hostname) {
+    if (!confirm(`Bạn có chắc chắn muốn gửi lệnh khởi động lại khẩn cấp (Emergency Restart) cho Agent "${hostname}"?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(agentUid)}/emergency-restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (data && data.ok) {
+        alert(`Đã gửi lệnh khởi động lại cho Agent "${hostname}" thành công!`);
+        setTimeout(fetchAgentsData, 2000);
+      } else {
+        alert(`Không thể gửi lệnh: ${data.error || 'Lỗi không xác định'}`);
+      }
+    } catch (err) {
+      alert(`Lỗi kết nối: ${err}`);
+    }
+  };
+
+  // Delete Offline Agent function
+  window.deleteOfflineAgent = async function(agentId, hostname) {
+    if (!confirm(`Xóa bản ghi Agent "${hostname}" khỏi hệ thống? (Chỉ nên xóa các máy trạm không còn hoạt động)`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data && data.ok) {
+        fetchAgentsData();
+      } else {
+        alert(`Không thể xóa: ${data.error || 'Lỗi không xác định'}`);
+      }
+    } catch (err) {
+      alert(`Lỗi: ${err}`);
+    }
+  };
+
+  // Close modal events
+  document.getElementById('btn-close-settings-modal')?.addEventListener('click', () => {
+    document.getElementById('modal-agent-settings').classList.remove('open');
+  });
+  document.getElementById('btn-ok-settings-modal')?.addEventListener('click', () => {
+    document.getElementById('modal-agent-settings').classList.remove('open');
+  });
+  document.getElementById('btn-copy-settings')?.addEventListener('click', () => {
+    const text = document.getElementById('modal-settings-content').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Đã sao chép nội dung cấu hình vào clipboard!');
+    });
+  });
+
+  // Filter events
+  document.getElementById('filter-online-search')?.addEventListener('input', renderOnlineTable);
+  document.getElementById('filter-online-lan')?.addEventListener('change', renderOnlineTable);
+  document.getElementById('btn-filter-online-reset')?.addEventListener('click', () => {
+    document.getElementById('filter-online-search').value = '';
+    document.getElementById('filter-online-lan').value = '';
+    renderOnlineTable();
+  });
+  document.getElementById('filter-history-status')?.addEventListener('change', fetchHistoryLogs);
+  document.getElementById('btn-global-refresh')?.addEventListener('click', () => {
+    fetchAgentsData();
+    if (activeSubtab === 'history') fetchHistoryLogs();
+  });
+
+  // Initial load
+  fetchAgentsData();
+
+  // Periodic heartbeat refresh every 10 seconds
+  setInterval(() => {
+    if (document.hidden) return;
+    if (activeSubtab === 'online') {
+      fetchAgentsData();
+    }
+  }, 10000);
+
+  // Re-calculate heartbeat diffs every 5 seconds for smooth real-time timer
+  setInterval(() => {
+    if (document.hidden) return;
+    if (activeSubtab === 'online') {
+      renderOnlineTable();
+    }
+  }, 5000);
+})();
+</script>
 
 
 {% endblock %}
