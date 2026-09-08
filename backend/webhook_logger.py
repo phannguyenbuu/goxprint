@@ -5,9 +5,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from sqlalchemy import select, delete
 from models import WebhookLog, utc_now
 
 LOGGER = logging.getLogger(__name__)
+
+MAX_WEBHOOK_LOGS = 2000
 
 
 def _to_json_str(val: Any, max_len: int = 40000) -> str:
@@ -25,6 +28,27 @@ def _to_json_str(val: Any, max_len: int = 40000) -> str:
     return s
 
 
+def prune_webhook_logs(session: Any, max_records: int = MAX_WEBHOOK_LOGS) -> int:
+    """Keep only the latest max_records entries in WebhookLog table."""
+    try:
+        cutoff_id = session.execute(
+            select(WebhookLog.id)
+            .order_by(WebhookLog.id.desc())
+            .offset(max_records)
+            .limit(1)
+        ).scalar()
+        if cutoff_id is not None:
+            del_stmt = delete(WebhookLog).where(WebhookLog.id <= cutoff_id)
+            res = session.execute(del_stmt)
+            deleted_count = res.rowcount or 0
+            if deleted_count > 0:
+                LOGGER.info("[WebhookLogger] Pruned %d old webhook logs (retained latest %d)", deleted_count, max_records)
+            return deleted_count
+    except Exception as exc:
+        LOGGER.warning("[WebhookLogger] Error pruning WebhookLog: %s", exc)
+    return 0
+
+
 def log_webhook_event(
     session_factory: Any,
     endpoint: str,
@@ -40,7 +64,7 @@ def log_webhook_event(
     duration_ms: int = 0,
     lead: str = "default",
 ) -> Optional[int]:
-    """Safely log a webhook or API user interaction into the WebhookLog table."""
+    """Safely log a webhook or API user interaction into the WebhookLog table, capping at 2000 records."""
     if not session_factory:
         return None
 
@@ -66,6 +90,12 @@ def log_webhook_event(
                 created_at=utc_now(),
             )
             session.add(log_entry)
+            session.flush()
+
+            # Automatically prune older logs every 5 inserts (maintains <= 2000 records)
+            if log_entry.id % 5 == 0:
+                prune_webhook_logs(session, MAX_WEBHOOK_LOGS)
+
             session.commit()
             return log_entry.id
     except Exception as exc:

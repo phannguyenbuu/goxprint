@@ -906,3 +906,14 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 500
 
+    @app.post("/api/webhook/logs/prune")
+    def prune_webhook_logs_endpoint() -> Any:
+        try:
+            from webhook_logger import prune_webhook_logs, MAX_WEBHOOK_LOGS
+            with session_factory() as session:
+                deleted = prune_webhook_logs(session, MAX_WEBHOOK_LOGS)
+                session.commit()
+                return jsonify({"ok": True, "deleted": deleted, "limit": MAX_WEBHOOK_LOGS})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
