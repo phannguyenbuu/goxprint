@@ -541,6 +541,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                     "hostname": db_host or agent_info.get("hostname", ""),
                     "local_ip": db_ip or agent_info.get("local_ip", ""),
                     "local_mac": db_mac or agent_info.get("local_mac", ""),
+                    "ip_mode": (db_a.ip_mode if db_a and db_a.ip_mode else agent_info.get("ip_mode", "unknown")) or "unknown",
                     "public_ip": pub_ip,
                     "wan_ip": pub_ip,
                     "app_version": agent_info.get("app_version", ""),
@@ -569,6 +570,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                         "hostname": db_a.hostname or "",
                         "local_ip": db_a.local_ip or "",
                         "local_mac": db_a.local_mac or "",
+                        "ip_mode": getattr(db_a, "ip_mode", "unknown") or "unknown",
                         "public_ip": db_pub_ip,
                         "wan_ip": db_pub_ip,
                         "app_version": db_a.app_version or "",
@@ -1170,12 +1172,11 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         with session_factory() as session:
             agents = session.execute(select(AgentNode)).scalars().all()
             ip_datas = session.execute(select(IPData)).scalars().all()
-            ip_map = {f"{r.lan_uid}|{r.agent_name}": r.ip for r in ip_datas}
+            ip_map = {r.agent_name: r.ip for r in ip_datas}
             
             result = []
             for a in agents:
-                key = f"{a.lan_uid}|{a.agent_uid}"
-                reference_ip = ip_map.get(key, "")
+                reference_ip = ip_map.get(a.agent_uid, "")
                 
                 # Auto-initialize IPData table with current IP if empty
                 if not reference_ip and a.local_ip:
@@ -1223,7 +1224,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
         with session_factory() as session:
             try:
                 ip_rec = session.execute(
-                    select(IPData).where(IPData.lan_uid == lan_uid, IPData.agent_name == agent_name)
+                    select(IPData).where(IPData.agent_name == agent_name)
                 ).scalar_one_or_none()
                 if ip_rec is None:
                     ip_rec = IPData(

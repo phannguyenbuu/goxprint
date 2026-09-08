@@ -101,7 +101,7 @@ else:
 out = subprocess.getoutput("tasklist /FI \\"IMAGENAME eq printagent.exe\\"")
 print(out)
 """,
-    "get_agent_ip": """import socket
+    "get_agent_ip": """import socket, subprocess, sys, re, json
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:
     s.connect(("8.8.8.8", 80))
@@ -110,7 +110,41 @@ except Exception:
     ip = "127.0.0.1"
 finally:
     s.close()
-print(f"Local IP: {ip}")
+
+mode = "unknown"
+if ip != "127.0.0.1":
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        out = subprocess.check_output(["netsh", "interface", "ipv4", "show", "addresses"], text=True, errors="ignore", creationflags=flags)
+        blocks = out.split("Configuration for interface ")
+        for b in blocks:
+            if ip in b:
+                m = re.search(r"DHCP enabled:\s+(Yes|No)", b, re.I)
+                if m:
+                    mode = "dhcp" if m.group(1).lower() == "yes" else "static"
+                    break
+    except Exception:
+        pass
+    if mode == "unknown":
+        try:
+            flags = 0x08000000 if sys.platform == "win32" else 0
+            cmd = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | Select-Object IPAddress, DHCPEnabled | ConvertTo-Json -Compress"]
+            out = subprocess.check_output(cmd, text=True, errors="ignore", creationflags=flags).strip()
+            if out:
+                data = json.loads(out)
+                if isinstance(data, dict):
+                    data = [data]
+                for item in data:
+                    ips = item.get("IPAddress") or []
+                    if isinstance(ips, str):
+                        ips = [ips]
+                    if any(ip in x for x in ips):
+                        mode = "dhcp" if item.get("DHCPEnabled") else "static"
+                        break
+        except Exception:
+            pass
+
+print(f"Local IP: {ip} ({mode.upper()})")
 """,
     "open_web_setting": """import webbrowser
 webbrowser.open("http://__TARGET_IP__")

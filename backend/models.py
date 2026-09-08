@@ -150,6 +150,7 @@ class AgentNode(Base):
     scan_auto_open_file: Mapped[bool] = mapped_column(Boolean, default=True)
     scan_auto_open_dir: Mapped[bool] = mapped_column(Boolean, default=True)
     gds_status: Mapped[str] = mapped_column(String(32), default="unknown")  # unknown | running | stopped | not_installed
+    ip_mode: Mapped[str] = mapped_column(String(16), default="unknown")  # dhcp | static | unknown
 
 
 class AgentPresenceLog(Base):
@@ -737,7 +738,7 @@ class IPData(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
 
     __table_args__ = (
-        UniqueConstraint("lan_uid", "agent_name", name="uq_ip_datas_lan_agent"),
+        UniqueConstraint("agent_name", name="uq_ip_datas_agent_name"),
     )
 
 
@@ -777,6 +778,27 @@ class SystemSetting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
     description: Mapped[str] = mapped_column(String(255), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class WebhookLog(Base):
+    """Log of all webhook interactions, user data requests, and CRM dispatches."""
+    __tablename__ = "WebhookLog"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead: Mapped[str] = mapped_column(String(64), index=True, default="default")
+    endpoint: Mapped[str] = mapped_column(String(128), index=True)
+    method: Mapped[str] = mapped_column(String(16), default="GET", index=True)
+    ip_address: Mapped[str] = mapped_column(String(64), default="", index=True)
+    user_agent: Mapped[str] = mapped_column(String(255), default="")
+    query_params: Mapped[str] = mapped_column(Text, default="")
+    request_payload: Mapped[str] = mapped_column(Text, default="")
+    response_status: Mapped[int] = mapped_column(Integer, default=200, index=True)
+    response_payload: Mapped[str] = mapped_column(Text, default="")
+    mac_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    printer_name: Mapped[str] = mapped_column(String(255), default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
 
 
 

@@ -510,6 +510,9 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             agent_node.last_seen_at = utc_now
                             if local_ip and agent_node.local_ip != local_ip:
                                 agent_node.local_ip = local_ip
+                            b_ip_mode = _to_text(body.get("ip_mode")).strip().lower()
+                            if b_ip_mode and b_ip_mode in ("dhcp", "static"):
+                                agent_node.ip_mode = b_ip_mode
                         else:
                             agent_node = AgentNode(
                                 lead=lead,
@@ -569,6 +572,14 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                                 LOGGER.warning("[ingest_polling] History log error: %s", h_exc)
 
                 session.commit()
+
+                # Auto-enqueue get_agent_ip if ip_mode is unknown
+                try:
+                    if agent_node and getattr(agent_node, "ip_mode", "unknown") in (None, "", "unknown"):
+                        from polling_aux_routes import enqueue_get_agent_ip_command
+                        enqueue_get_agent_ip_command(session, lead, lan_uid, agent_uid)
+                except Exception as e_ipm:
+                    LOGGER.debug("[ingest_polling] Auto-detect ip_mode enqueue error for %s: %s", agent_uid, e_ipm)
             except Exception as p_exc:  # noqa: BLE001
                 session.rollback()
                 LOGGER.warning("[ingest_polling] Auto-upsert Printer failed: %s", p_exc)

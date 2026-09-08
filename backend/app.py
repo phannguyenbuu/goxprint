@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from flask import Flask, g, jsonify, redirect, render_template, request, url_for
 from flask_cors import CORS
@@ -23,6 +24,7 @@ from logging.handlers import RotatingFileHandler
 from config import ServerConfig
 from db import create_session_factory
 from google_drive_sync import GoogleDriveSync
+from jwt_auth import COOKIE_NAME, ensure_default_admin, verify_auth_token
 from utils import (
     COUNTER_KEYS,
     UI_TZ,
@@ -1169,11 +1171,78 @@ def create_app() -> Flask:
         LOGGER.warning("Schema self-heal failed or database transient error: %s", exc, exc_info=True)
 
 
+    ensure_default_admin(session_factory)
+
     lead_key_map = cfg.lead_keys()
 
     @app.before_request
-    def _before_request_log() -> None:
+    def _before_request_handler() -> Any:
         g._req_started = time_module.perf_counter()
+
+        server_mode_val = os.getenv("SERVER_MODE", "full").strip().lower()
+        if server_mode_val == "ingest":
+            return None
+
+        if request.method == "OPTIONS":
+            return None
+
+        path = request.path or ""
+
+        # Static assets and storage bypass
+        if path.startswith("/static/") or path.startswith("/storage/") or path == "/favicon.ico":
+            return None
+
+        # Auth routes bypass
+        if path in ("/login", "/logout", "/api/login", "/api/login/google"):
+            return None
+
+        # Agent polling bypass
+        if path.startswith("/api/polling") or path.startswith("/polling/"):
+            return None
+
+        # Public APIs and Webhook endpoints bypass
+        if (
+            path.startswith("/api/public/")
+            or path.startswith("/webhook/")
+            or path in ("/machinelist/", "/networklist/", "/all/", "/api/infor/list")
+        ):
+            return None
+
+        # Check JWT token in cookie or Authorization header
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+
+        if token:
+            token_payload = verify_auth_token(token)
+            if token_payload:
+                g.current_user = token_payload
+                return None  # Authenticated!
+
+        # Check API key / API token headers for external integrations
+        api_token = (
+            request.headers.get("X-API-Token")
+            or request.headers.get("X-API-Key")
+            or request.headers.get("x-api-token")
+            or request.headers.get("x-api-key")
+            or request.headers.get("X-Lead-Token")
+        )
+        if api_token:
+            return None
+
+        # Unauthenticated request:
+        # If API request -> return 401 Unauthorized JSON
+        if path.startswith("/api/"):
+            return jsonify({"ok": False, "error": "Unauthorized. Please login or provide a valid token."}), 401
+
+        # If Web UI page -> redirect to /login with target URL
+        target = request.full_path if request.query_string else request.path
+        if target.endswith("?"):
+            target = target[:-1]
+        login_url = f"/login?next={quote(target)}" if target and target != "/" else "/login"
+        return redirect(login_url)
 
     @app.after_request
     def _after_request_log(response: Any) -> Any:

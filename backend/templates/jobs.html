@@ -5,97 +5,204 @@
     <h3 style="margin: 0; color: #0f172a; font-size: 1.25rem; font-weight: 700;">Job Manager</h3>
     <div style="display: flex; gap: 8px; align-items: center;">
       <button id="clear-pending-btn" class="filter-btn" style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="Xóa tất cả các lệnh in / utility đang treo ở trạng thái Pending hoặc Processing">🗑️ Xóa các lệnh chưa hoàn thành</button>
+      <button id="clear-webhooks-btn" class="filter-btn" style="display: none; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; align-items: center; gap: 6px;" title="Xóa toàn bộ lịch sử tương tác webhook">🗑️ Xóa tất cả Webhook Logs</button>
       <button id="refresh-btn" class="filter-btn" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">Refresh</button>
     </div>
   </div>
 
-  <div class="filter-board" style="display: flex; gap: 10px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-end; flex-wrap: wrap;">
-    <div class="filter-group" style="min-width: 110px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Agent UID</label>
-      <input type="text" id="filter-agent" placeholder="Agent UID..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
-    </div>
-
-    <div class="filter-group" style="min-width: 110px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Printer / IP</label>
-      <input type="text" id="filter-printer" placeholder="Tên máy in / IP..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
-    </div>
-
-    <div class="filter-group" style="min-width: 130px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Command Type</label>
-      <select id="filter-cmd-type" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
-        <option value="all">Tất cả Lệnh</option>
-        <option value="ip_changed">⚡ IP Changed (Đổi IP)</option>
-        <option value="force_subnet_scan">🔍 Force Subnet Scan</option>
-        <option value="install_driver">🖨️ Install Driver</option>
-        <option value="ricoh_create_scan">📁 Ricoh Create Scan</option>
-        <option value="toshiba_create_scan">📁 Toshiba Create Scan</option>
-        <option value="ricoh_delete_scan">🗑️ Ricoh Delete Scan</option>
-        <option value="toshiba_delete_scan">🗑️ Toshiba Delete Scan</option>
-        <option value="ricoh_change_ftp">🔄 Ricoh Change FTP</option>
-        <option value="toshiba_change_ftp">🔄 Toshiba Change FTP</option>
-        <option value="query_device_now">📊 Query Device</option>
-        <option value="start_tunnel">🌐 Start Tunnel</option>
-        <option value="restart_pc">⚡ Restart PC</option>
-      </select>
-    </div>
-
-    <div class="filter-group" style="min-width: 120px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Status</label>
-      <select id="filter-status" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
-        <option value="all">Tất cả Status</option>
-        <option value="favorite">⭐ Favorite (Job tốt)</option>
-        <option value="success">Success</option>
-        <option value="pending">Pending</option>
-        <option value="failed">Failed</option>
-      </select>
-    </div>
-
-    <div class="filter-group" style="min-width: 120px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Thời gian (Ngày)</label>
-      <input type="date" id="filter-date" style="width: 100%; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
-    </div>
-
-    <div class="filter-group" style="min-width: 130px; flex: 1;">
-      <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Tìm kiếm từ khóa...</label>
-      <input type="text" id="filter-search" placeholder="Từ khóa tìm..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
-    </div>
-
-    <div style="display: flex; gap: 6px; flex-shrink: 0;">
-      <button id="apply-filters" class="filter-btn" style="padding: 8px 16px; background: #0284c7; color: #ffffff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;">🔍 Tìm</button>
-      <button id="reset-filters" class="filter-btn" style="padding: 8px 12px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;" title="Xóa bộ lọc">↺ Bỏ lọc</button>
-    </div>
+  <!-- Subtabs Navigation -->
+  <div class="job-subtabs-nav" style="display: flex; gap: 10px; margin-bottom: 18px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
+    <button type="button" id="subtab-btn-commands" class="subtab-btn active">
+      <span>📋 Lệnh Agent & Hệ thống</span>
+      <span id="badge-jobs-count" class="subtab-badge">0</span>
+    </button>
+    <button type="button" id="subtab-btn-webhooks" class="subtab-btn">
+      <span>🔔 Giám sát Webhook (Thông tin user lấy)</span>
+      <span id="badge-webhooks-count" class="subtab-badge">0</span>
+    </button>
   </div>
 
-  <div class="table-wrap" style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
-    <table class="generic-table" style="width: 100%; min-width: 750px; border-collapse: collapse; font-size: 0.85rem;">
-      <thead>
-        <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-          <th style="padding: 8px 8px; text-align: center; color: #d97706; font-weight: 600; width: 40px;" title="Đánh dấu Job tốt / Yêu thích">⭐</th>
-          <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 55px;">ID</th>
-          <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 170px;">Command Type / Status</th>
-          <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 170px;">Agent UID / Printer</th>
-          <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 165px;">Time (Requested / Responded)</th>
-          <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600;">Error / Details</th>
-          <th style="padding: 8px 8px; text-align: center; color: #475569; font-weight: 600; width: 45px;">Xóa</th>
-        </tr>
-      </thead>
-      <tbody id="jobs-tbody">
-        <tr><td colspan="7" class="loading" style="padding: 16px; text-align: center; color: #64748b;">Loading Jobs...</td></tr>
-      </tbody>
-    </table>
-  </div>
-  
-  <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 6px; flex-wrap: wrap;">
-    <button id="prev-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&lt;</button>
-    <div id="page-numbers-list" style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;"></div>
-    <button id="next-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&gt;</button>
+  <!-- SUBTAB 1: LỆNH AGENT & HỆ THỐNG -->
+  <div id="subtab-content-commands">
+    <div class="filter-board" style="display: flex; gap: 10px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-end; flex-wrap: wrap;">
+      <div class="filter-group" style="min-width: 110px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Agent UID</label>
+        <input type="text" id="filter-agent" placeholder="Agent UID..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div class="filter-group" style="min-width: 110px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Printer / IP</label>
+        <input type="text" id="filter-printer" placeholder="Tên máy in / IP..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div class="filter-group" style="min-width: 130px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Command Type</label>
+        <select id="filter-cmd-type" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+          <option value="all">Tất cả Lệnh</option>
+          <option value="ip_changed">⚡ IP Changed (Đổi IP)</option>
+          <option value="force_subnet_scan">🔍 Force Subnet Scan</option>
+          <option value="install_driver">🖨️ Install Driver</option>
+          <option value="ricoh_create_scan">📁 Ricoh Create Scan</option>
+          <option value="toshiba_create_scan">📁 Toshiba Create Scan</option>
+          <option value="ricoh_delete_scan">🗑️ Ricoh Delete Scan</option>
+          <option value="toshiba_delete_scan">🗑️ Toshiba Delete Scan</option>
+          <option value="ricoh_change_ftp">🔄 Ricoh Change FTP</option>
+          <option value="toshiba_change_ftp">🔄 Toshiba Change FTP</option>
+          <option value="query_device_now">📊 Query Device</option>
+          <option value="start_tunnel">🌐 Start Tunnel</option>
+          <option value="restart_pc">⚡ Restart PC</option>
+        </select>
+      </div>
+
+      <div class="filter-group" style="min-width: 120px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Status</label>
+        <select id="filter-status" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+          <option value="all">Tất cả Status</option>
+          <option value="favorite">⭐ Favorite (Job tốt)</option>
+          <option value="success">Success</option>
+          <option value="pending">Pending</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+
+      <div class="filter-group" style="min-width: 120px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Thời gian (Ngày)</label>
+        <input type="date" id="filter-date" style="width: 100%; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+      </div>
+
+      <div class="filter-group" style="min-width: 130px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Tìm kiếm từ khóa...</label>
+        <input type="text" id="filter-search" placeholder="Từ khóa tìm..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div style="display: flex; gap: 6px; flex-shrink: 0;">
+        <button id="apply-filters" class="filter-btn" style="padding: 8px 16px; background: #0284c7; color: #ffffff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;">🔍 Tìm</button>
+        <button id="reset-filters" class="filter-btn" style="padding: 8px 12px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;" title="Xóa bộ lọc">↺ Bỏ lọc</button>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <table class="generic-table" style="width: 100%; min-width: 750px; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <th style="padding: 8px 8px; text-align: center; color: #d97706; font-weight: 600; width: 40px;" title="Đánh dấu Job tốt / Yêu thích">⭐</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 55px;">ID</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 170px;">Command Type / Status</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 170px;">Agent UID / Printer</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 165px;">Time (Requested / Responded)</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600;">Error / Details</th>
+            <th style="padding: 8px 8px; text-align: center; color: #475569; font-weight: 600; width: 45px;">Xóa</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-tbody">
+          <tr><td colspan="7" class="loading" style="padding: 16px; text-align: center; color: #64748b;">Loading Jobs...</td></tr>
+        </tbody>
+      </table>
+    </div>
     
-    <select id="page-size-select" style="margin: 0 0 0 10px; padding: 6px 10px; background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
-      <option value="20">20 / trang</option>
-      <option value="50" selected>50 / trang</option>
-      <option value="100">100 / trang</option>
-      <option value="200">200 / trang</option>
-    </select>
+    <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 6px; flex-wrap: wrap;">
+      <button id="prev-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&lt;</button>
+      <div id="page-numbers-list" style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;"></div>
+      <button id="next-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&gt;</button>
+      
+      <select id="page-size-select" style="margin: 0 0 0 10px; padding: 6px 10px; background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
+        <option value="20">20 / trang</option>
+        <option value="50" selected>50 / trang</option>
+        <option value="100">100 / trang</option>
+        <option value="200">200 / trang</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- SUBTAB 2: GIÁM SÁT WEBHOOK (THÔNG TIN USER LẤY) -->
+  <div id="subtab-content-webhooks" style="display: none;">
+    <div class="filter-board" style="display: flex; gap: 10px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-end; flex-wrap: wrap;">
+      <div class="filter-group" style="min-width: 140px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Endpoint</label>
+        <select id="wh-filter-endpoint" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+          <option value="all">Tất cả Endpoint</option>
+          <option value="/webhook/infor_get">/webhook/infor_get (Lấy info máy in)</option>
+          <option value="/webhook/infor_post">/webhook/infor_post (Bắn test CRM)</option>
+          <option value="crm_dispatch">CRM Dispatch (Tự động gửi CRM)</option>
+        </select>
+      </div>
+
+      <div class="filter-group" style="min-width: 100px; flex: 0.8;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Method</label>
+        <select id="wh-filter-method" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+          <option value="ALL">Tất cả</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+        </select>
+      </div>
+
+      <div class="filter-group" style="min-width: 110px; flex: 0.8;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Status</label>
+        <select id="wh-filter-status" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+          <option value="all">Tất cả Status</option>
+          <option value="200">200 OK (Thành công)</option>
+          <option value="error">4xx / 5xx (Lỗi)</option>
+        </select>
+      </div>
+
+      <div class="filter-group" style="min-width: 120px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Thiết bị / MAC</label>
+        <input type="text" id="wh-filter-mac" placeholder="MAC hoặc tên..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div class="filter-group" style="min-width: 110px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Client IP</label>
+        <input type="text" id="wh-filter-ip" placeholder="Client IP..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div class="filter-group" style="min-width: 120px; flex: 1;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Thời gian (Ngày)</label>
+        <input type="date" id="wh-filter-date" style="width: 100%; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #ffffff; color: #0f172a; box-sizing: border-box;">
+      </div>
+
+      <div class="filter-group" style="min-width: 140px; flex: 1.2;">
+        <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px;">Tìm kiếm từ khóa...</label>
+        <input type="text" id="wh-filter-search" placeholder="Từ khóa trong payload / query..." style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; background: #ffffff; color: #0f172a;">
+      </div>
+
+      <div style="display: flex; gap: 6px; flex-shrink: 0;">
+        <button id="wh-apply-filters" class="filter-btn" style="padding: 8px 16px; background: #0284c7; color: #ffffff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;">🔍 Tìm</button>
+        <button id="wh-reset-filters" class="filter-btn" style="padding: 8px 12px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.85rem;" title="Xóa bộ lọc">↺ Bỏ lọc</button>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <table class="generic-table" style="width: 100%; min-width: 900px; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 50px;">ID</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 140px;">Thời gian / Độ trễ</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 155px;">Endpoint / Method</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 130px;">Client IP</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 155px;">Thiết bị / MAC</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600; width: 180px;">Yêu cầu (Params/Body)</th>
+            <th style="padding: 8px 8px; text-align: left; color: #475569; font-weight: 600;">Thông tin User Lấy về (Response)</th>
+            <th style="padding: 8px 8px; text-align: center; color: #475569; font-weight: 600; width: 70px;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="webhooks-tbody">
+          <tr><td colspan="8" class="loading" style="padding: 16px; text-align: center; color: #64748b;">Đang tải Webhook Logs...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pagination-container" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 6px; flex-wrap: wrap;">
+      <button id="wh-prev-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&lt;</button>
+      <div id="wh-page-numbers-list" style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;"></div>
+      <button id="wh-next-page" class="filter-btn" style="margin: 0; padding: 6px 12px; background-color: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; cursor: pointer;">&gt;</button>
+      
+      <select id="wh-page-size-select" style="margin: 0 0 0 10px; padding: 6px 10px; background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
+        <option value="20">20 / trang</option>
+        <option value="50" selected>50 / trang</option>
+        <option value="100">100 / trang</option>
+        <option value="200">200 / trang</option>
+      </select>
+    </div>
   </div>
 </section>
 
@@ -107,7 +214,7 @@
     background-color: #f1f5f9 !important;
 }
 .status-badge {
-    padding: 4px 10px;
+    padding: 3px 8px;
     border-radius: 12px;
     font-size: 11px;
     font-weight: 700;
@@ -117,6 +224,46 @@
 .status-pending { background-color: #fffbe6; color: #d97706; border: 1px solid #fef3c7; }
 .status-success { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
 .status-failed { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+/* Subtabs Header */
+.subtab-btn {
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #475569;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease-in-out;
+}
+.subtab-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+.subtab-btn.active {
+    background: #0284c7 !important;
+    color: #ffffff !important;
+    border-color: #0284c7 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);
+}
+.subtab-badge {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #e2e8f0;
+    color: #475569;
+    transition: all 0.15s ease-in-out;
+}
+.subtab-btn.active .subtab-badge {
+    background: rgba(255, 255, 255, 0.25) !important;
+    color: #ffffff !important;
+}
 
 /* Modal 3-Tab Styling */
 .job-modal-tab-btn {
@@ -155,6 +302,13 @@
     width: 100%;
     justify-content: space-between;
   }
+  .job-subtabs-nav {
+    flex-direction: column !important;
+  }
+  .subtab-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
   .filter-board {
     flex-direction: column !important;
     align-items: stretch !important;
@@ -163,7 +317,7 @@
   .filter-group {
     width: 100% !important;
   }
-  .filter-group select, .filter-group input, #apply-filters {
+  .filter-group select, .filter-group input, #apply-filters, #wh-apply-filters {
     width: 100% !important;
   }
   .table-wrap {
@@ -181,11 +335,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    let jobsData = [];
-    let currentPage = 1;
-    let pageSize = 50;
-    let totalJobs = 0;
-
+    // Shared Utilities
     const escapeHtml = (str) => {
         if (!str) return '';
         return String(str)
@@ -195,6 +345,111 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     };
+
+    function showCopySuccess(btn) {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✓ Copied!';
+        btn.style.background = '#059669';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = '#059669';
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.style.background = '#ffffff';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+        }, 2000);
+    }
+
+    function fallbackCopyText(textarea, btn) {
+        textarea.select();
+        textarea.setSelectionRange(0, 99999);
+        try {
+            document.execCommand('copy');
+            showCopySuccess(btn);
+        } catch (err) {
+            alert('Không thể copy tự động!');
+        }
+    }
+
+    const createCopyableBlock = (title, content, type = 'json') => {
+        if (!content) return '';
+        const blockId = 'copy-block-' + Math.random().toString(36).substring(2, 9);
+        
+        let headerColor = '#0284c7';
+        let bgColor = '#f0f9ff';
+        let borderColor = '#bae6fd';
+        let textColor = '#0369a1';
+
+        if (type === 'code') {
+            headerColor = '#059669';
+            bgColor = '#f0fdf4';
+            borderColor = '#bbf7d0';
+            textColor = '#166534';
+        } else if (type === 'error') {
+            headerColor = '#dc2626';
+            bgColor = '#fef2f2';
+            borderColor = '#fecaca';
+            textColor = '#991b1b';
+        }
+
+        return `
+            <div style="margin-top: 10px; display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-shrink: 0;">
+                    <div style="font-size: 0.82rem; font-weight: 700; color: ${headerColor}; display: flex; align-items: center; gap: 6px;">${escapeHtml(title)}</div>
+                    <button type="button" class="copy-code-btn" data-target="${blockId}" style="background: #ffffff; border: 1px solid ${borderColor}; color: ${headerColor}; padding: 3px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        📋 Copy
+                    </button>
+                </div>
+                <textarea id="${blockId}" readonly style="width: 100%; flex: 1; height: 100%; min-height: 280px; background: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 12px 14px; border-radius: 8px; font-size: 0.85rem; overflow-y: auto; white-space: pre; word-break: normal; resize: none; font-family: Consolas, Monaco, monospace; line-height: 1.5; box-sizing: border-box; outline: none;">${escapeHtml(content)}</textarea>
+            </div>
+        `;
+    };
+
+    // =========================================================================
+    // SUBTAB SWITCHING LOGIC
+    // =========================================================================
+    let activeSubtab = 'commands';
+    const subtabBtnCommands = document.getElementById('subtab-btn-commands');
+    const subtabBtnWebhooks = document.getElementById('subtab-btn-webhooks');
+    const contentCommands = document.getElementById('subtab-content-commands');
+    const contentWebhooks = document.getElementById('subtab-content-webhooks');
+    const clearPendingBtn = document.getElementById('clear-pending-btn');
+    const clearWebhooksBtn = document.getElementById('clear-webhooks-btn');
+
+    function switchSubtab(tab) {
+        activeSubtab = tab;
+        if (tab === 'commands') {
+            subtabBtnCommands.classList.add('active');
+            subtabBtnWebhooks.classList.remove('active');
+            contentCommands.style.display = 'block';
+            contentWebhooks.style.display = 'none';
+            if (clearPendingBtn) clearPendingBtn.style.display = 'inline-flex';
+            if (clearWebhooksBtn) clearWebhooksBtn.style.display = 'none';
+        } else {
+            subtabBtnCommands.classList.remove('active');
+            subtabBtnWebhooks.classList.add('active');
+            contentCommands.style.display = 'none';
+            contentWebhooks.style.display = 'block';
+            if (clearPendingBtn) clearPendingBtn.style.display = 'none';
+            if (clearWebhooksBtn) clearWebhooksBtn.style.display = 'inline-flex';
+            if (webhooksData.length === 0) {
+                loadWebhookLogs();
+            }
+        }
+    }
+
+    subtabBtnCommands?.addEventListener('click', () => switchSubtab('commands'));
+    subtabBtnWebhooks?.addEventListener('click', () => switchSubtab('webhooks'));
+
+
+    // =========================================================================
+    // SECTION 1: COMMANDS (AGENT JOBS)
+    // =========================================================================
+    let jobsData = [];
+    let currentPage = 1;
+    let pageSize = 50;
+    let totalJobs = 0;
+    let isLoadingJobs = false;
 
     const getCommandName = (type, params) => {
         if (type === 'install_driver') {
@@ -305,7 +560,6 @@ document.addEventListener('DOMContentLoaded', () => {
             codeScript = obj.code;
             delete obj.code;
         } else if (obj.script) {
-            codeScript = obj.script;
             delete obj.script;
         }
 
@@ -321,40 +575,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return { jsonParams, codeScript };
     };
 
-    const createCopyableBlock = (title, content, type = 'json') => {
-        if (!content) return '';
-        const blockId = 'copy-block-' + Math.random().toString(36).substring(2, 9);
-        
-        let headerColor = '#0284c7';
-        let bgColor = '#f0f9ff';
-        let borderColor = '#bae6fd';
-        let textColor = '#0369a1';
-
-        if (type === 'code') {
-            headerColor = '#059669';
-            bgColor = '#f0fdf4';
-            borderColor = '#bbf7d0';
-            textColor = '#166534';
-        } else if (type === 'error') {
-            headerColor = '#dc2626';
-            bgColor = '#fef2f2';
-            borderColor = '#fecaca';
-            textColor = '#991b1b';
-        }
-
-        return `
-            <div style="margin-top: 10px; display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-shrink: 0;">
-                    <div style="font-size: 0.82rem; font-weight: 700; color: ${headerColor}; display: flex; align-items: center; gap: 6px;">${escapeHtml(title)}</div>
-                    <button type="button" class="copy-code-btn" data-target="${blockId}" style="background: #ffffff; border: 1px solid ${borderColor}; color: ${headerColor}; padding: 3px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        📋 Copy
-                    </button>
-                </div>
-                <textarea id="${blockId}" readonly style="width: 100%; flex: 1; height: 100%; min-height: 320px; background: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 14px 16px; border-radius: 8px; font-size: 0.85rem; overflow-y: auto; white-space: pre; word-break: normal; resize: none; font-family: Consolas, Monaco, monospace; line-height: 1.5; box-sizing: border-box; outline: none;">${escapeHtml(content)}</textarea>
-            </div>
-        `;
-    };
-
     const showJobDetailModal = (row) => {
         const modal = document.getElementById('detail-modal');
         const body = document.getElementById('detail-modal-body');
@@ -368,6 +588,16 @@ document.addEventListener('DOMContentLoaded', () => {
             formattedError = formattedError.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
         }
 
+        let formattedResult = row.result_data || '';
+        if (formattedResult) {
+            try {
+                const parsedRes = typeof formattedResult === 'string' ? JSON.parse(formattedResult) : formattedResult;
+                formattedResult = JSON.stringify(parsedRes, null, 2);
+            } catch (e) {
+                formattedResult = String(formattedResult).replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '  ');
+            }
+        }
+
         let statusClass = 'status-failed';
         let statusText = row.status || 'Failed';
         if (row.status === 'pending') { statusClass = 'status-pending'; statusText = 'Pending'; }
@@ -375,78 +605,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const isFav = Boolean(row.is_favorite);
 
-        const jsonParamsBlockHtml = createCopyableBlock('📦 Tham số Lệnh (Command Params JSON)', jsonParams, 'json');
-        const errorBlockHtml = createCopyableBlock('⚠️ Chi tiết Phản hồi / Kết quả / Log Error', formattedError, 'error');
-        const scriptBlockHtml = createCopyableBlock('🐍 Nội dung Code / Script (Command Content)', codeScript, 'code');
-
         body.innerHTML = `
-            <div style="background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 14px; max-width: 900px; width: 94vw; height: 90vh; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box;">
-                <!-- Header -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px; margin-bottom: 16px; flex-shrink: 0;">
-                    <div>
-                        <div style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">JOB #${row.id}</div>
-                        <h3 style="margin: 4px 0 0 0; color: #0284c7; font-size: 1.2rem; font-weight: 700;">${escapeHtml(cmdName)}</h3>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <button type="button" id="modal-fav-toggle-btn" style="background: ${isFav ? '#fffbe6' : '#f8fafc'}; border: 1px solid ${isFav ? '#fef3c7' : '#cbd5e1'}; color: ${isFav ? '#d97706' : '#64748b'}; font-size: 0.82rem; font-weight: 700; cursor: pointer; padding: 4px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s;">
-                            ${isFav ? '⭐ Job Yêu thích' : '☆ Đánh dấu Job tốt'}
-                        </button>
-                        <button id="job-modal-close-btn" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #64748b; font-size: 1.3rem; cursor: pointer; padding: 2px 10px; border-radius: 6px; line-height: 1; transition: all 0.2s;">&times;</button>
+            <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
+                <div>
+                    <h3 style="margin: 0 0 4px 0; color: #0f172a; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                        <span>Job #${row.id} - ${escapeHtml(cmdName)}</span>
+                        <span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span>
+                    </h3>
+                    <div style="font-size: 0.85rem; color: #64748b; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <span><strong style="color: #334155;">Agent UID:</strong> <code style="color: #0284c7; background: #e0f2fe; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${escapeHtml(row.agent_uid || 'N/A')}</code></span>
+                        <span><strong style="color: #334155;">Printer:</strong> ${escapeHtml(row.printer_name || 'N/A')}</span>
+                        <span><strong style="color: #334155;">IP:</strong> ${escapeHtml(row.ip || 'N/A')}</span>
                     </div>
                 </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" id="modal-fav-btn" style="background: ${isFav ? '#fffbe6' : '#f8fafc'}; border: 1px solid ${isFav ? '#fef3c7' : '#cbd5e1'}; color: ${isFav ? '#d97706' : '#64748b'}; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 0.85rem; transition: all 0.2s;">
+                        ${isFav ? '⭐ Job Yêu thích' : '☆ Đánh dấu Job tốt'}
+                    </button>
+                    <button type="button" id="job-modal-close-btn" style="background: none; border: none; font-size: 1.5rem; line-height: 1; color: #94a3b8; cursor: pointer; padding: 4px 8px; border-radius: 6px;" title="Đóng">✕</button>
+                </div>
+            </div>
 
-                <!-- 3 Modal Tabs Header -->
-                <div style="display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 16px; flex-shrink: 0;">
-                    <button class="job-modal-tab-btn active" data-target="job-tab-info">ℹ️ Thông tin chung & Tham số</button>
-                    <button class="job-modal-tab-btn" data-target="job-tab-error">⚠️ Kết quả / Log Error ${formattedError ? '🔴' : ''}</button>
-                    <button class="job-modal-tab-btn" data-target="job-tab-script">🐍 Code / Script ${codeScript ? '💻' : ''}</button>
+            <!-- Tab Navigation inside Modal -->
+            <div style="padding: 12px 20px 0 20px; background: #f8fafc; border-bottom: 1px solid #cbd5e1; display: flex; align-items: center;">
+                <button type="button" class="job-modal-tab-btn active" data-target="pane-params">⚙️ Parameters & Script</button>
+                <button type="button" class="job-modal-tab-btn" data-target="pane-output">📄 Output / Result</button>
+                <button type="button" class="job-modal-tab-btn" data-target="pane-error">⚠️ Error Logs</button>
+            </div>
+
+            <div style="padding: 20px; flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                <!-- Pane 1: Parameters & Script -->
+                <div id="pane-params" class="job-modal-pane" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                    ${createCopyableBlock("JSON Parameters", jsonParams, 'json')}
+                    ${createCopyableBlock("Command Script / Batch Code", codeScript, 'code')}
+                    ${!jsonParams && !codeScript ? '<div style="color: #64748b; font-style: italic; padding: 20px 0;">Không có parameters hoặc script cho job này.</div>' : ''}
                 </div>
 
-                <!-- Tab 1: General Info & Command Params -->
-                <div id="job-tab-info" class="job-modal-pane" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.88rem; background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e2e8f0; flex-shrink: 0;">
-                        <div><span style="color: #64748b; font-weight: 500;">Job ID:</span> <b style="color: #0f172a; font-family: monospace;">#${row.id}</b></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Trạng thái:</span> <span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Agent UID:</span> <b style="color: #0284c7; font-family: monospace;">${escapeHtml(row.agent_uid || 'N/A')}</b></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Loại Lệnh:</span> <b style="color: #0f172a;">${escapeHtml(row.command_type || '-')}</b></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Máy in liên quan:</span> <b style="color: #0f172a;">${escapeHtml(row.printer_name || '-')}</b></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Địa chỉ IP:</span> <span style="font-family: monospace; color: #0284c7; font-weight: 600;">${escapeHtml(row.ip || '-')}</span></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Thời gian Yêu cầu:</span> <span style="color: #334155;">${escapeHtml(row.requested_at || '-')}</span></div>
-                        <div><span style="color: #64748b; font-weight: 500;">Thời gian Phản hồi:</span> <span style="color: #334155;">${escapeHtml(row.responded_at || '-')}</span></div>
-                    </div>
-
-                    ${jsonParamsBlockHtml ? jsonParamsBlockHtml : '<div style="margin-top: 14px; color: #64748b; font-style: italic;">Không có tham số bổ sung.</div>'}
+                <!-- Pane 2: Output / Result -->
+                <div id="pane-output" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+                    ${createCopyableBlock("Kết quả thực thi (Result Data)", formattedResult, 'code')}
+                    ${!formattedResult ? '<div style="color: #64748b; font-style: italic; padding: 20px 0;">Chưa có dữ liệu kết quả từ agent.</div>' : ''}
                 </div>
 
-                <!-- Tab 2: Response & Error Details -->
-                <div id="job-tab-error" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px;">
-                    ${errorBlockHtml ? errorBlockHtml : `
-                        <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; padding: 20px; border-radius: 10px; text-align: center; font-size: 0.9rem; font-weight: 600;">
-                            ✅ Lệnh thực thi thành công, không phát sinh thông báo lỗi.
-                        </div>
-                    `}
+                <!-- Pane 3: Error Logs -->
+                <div id="pane-error" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+                    ${createCopyableBlock("Chi tiết lỗi (Error Details)", formattedError, 'error')}
+                    ${!formattedError ? '<div style="color: #059669; font-weight: 600; padding: 20px 0;">✔ Lệnh hoàn thành không có lỗi ghi nhận.</div>' : ''}
                 </div>
+            </div>
 
-                <!-- Tab 3: Python Code Script -->
-                <div id="job-tab-script" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px;">
-                    ${scriptBlockHtml ? scriptBlockHtml : `
-                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; color: #64748b; padding: 20px; border-radius: 10px; text-align: center; font-size: 0.9rem; font-weight: 500;">
-                            ℹ️ Lệnh này không chứa mã script Python (Command Content).
-                        </div>
-                    `}
-                </div>
-
-                <!-- Footer -->
-                <div style="display: flex; justify-content: flex-end; margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 12px; flex-shrink: 0;">
-                    <button id="job-modal-ok-btn" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #fff; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.88rem; box-shadow: 0 2px 8px rgba(2,132,199,0.3);">Đóng</button>
-                </div>
+            <div style="padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; background: #f8fafc; border-radius: 0 0 12px 12px;">
+                <button type="button" id="job-modal-ok-btn" class="filter-btn" style="background: #0284c7; color: #ffffff; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 600; cursor: pointer;">Đóng</button>
             </div>
         `;
 
         modal.hidden = false;
 
-        // Modal Fav Toggle Handler
-        const modalFavBtn = body.querySelector('#modal-fav-toggle-btn');
+        const modalFavBtn = body.querySelector('#modal-fav-btn');
         if (modalFavBtn) {
             modalFavBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -481,19 +696,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const activePane = body.querySelector('#' + targetId);
                 if (activePane) {
                     activePane.style.display = 'flex';
-                    activePane.querySelectorAll('textarea').forEach(ta => {
-                        setTimeout(() => { ta.scrollTop = ta.scrollHeight; }, 50);
-                    });
                 }
             });
         });
-
-        // Auto-scroll textareas to bottom on initial modal open
-        setTimeout(() => {
-            body.querySelectorAll('textarea').forEach(ta => {
-                ta.scrollTop = ta.scrollHeight;
-            });
-        }, 80);
 
         // Copy Button Handler
         body.querySelectorAll('.copy-code-btn').forEach(btn => {
@@ -516,31 +721,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        function showCopySuccess(btn) {
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '✓ Copied!';
-            btn.style.background = '#059669';
-            btn.style.color = '#ffffff';
-            btn.style.borderColor = '#059669';
-            setTimeout(() => {
-                btn.innerHTML = originalText;
-                btn.style.background = '#ffffff';
-                btn.style.color = '';
-                btn.style.borderColor = '';
-            }, 2000);
-        }
-
-        function fallbackCopyText(textarea, btn) {
-            textarea.select();
-            textarea.setSelectionRange(0, 99999);
-            try {
-                document.execCommand('copy');
-                showCopySuccess(btn);
-            } catch (err) {
-                alert('Không thể copy tự động!');
-            }
-        }
-
         const closeModal = () => { modal.hidden = true; };
         const closeX = document.getElementById('job-modal-close-btn');
         const closeOk = document.getElementById('job-modal-ok-btn');
@@ -548,7 +728,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (closeOk) closeOk.onclick = closeModal;
     };
 
-    let isLoadingJobs = false;
     const loadJobs = (silent = false) => {
         if (isLoadingJobs) return;
         isLoadingJobs = true;
@@ -584,6 +763,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     totalJobs = data.total || 0;
                     renderTable();
                     updatePaginationUI();
+                    const badge = document.getElementById('badge-jobs-count');
+                    if (badge) badge.textContent = totalJobs;
                 } else if (!silent) {
                     tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: red;">Failed to load jobs.</td></tr>';
                 }
@@ -648,7 +829,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadJobs();
     });
 
-    document.getElementById('refresh-btn').addEventListener('click', () => loadJobs(false));
     document.getElementById('clear-pending-btn').addEventListener('click', async () => {
         if (!confirm('Bạn có chắc chắn muốn HỦY / XÓA tất cả các lệnh chưa hoàn thành (Pending / Processing) không?')) {
             return;
@@ -760,10 +940,508 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+
+    // =========================================================================
+    // SECTION 2: WEBHOOK MONITORING LOGS (THÔNG TIN USER LẤY)
+    // =========================================================================
+    let webhooksData = [];
+    let whCurrentPage = 1;
+    let whPageSize = 50;
+    let whTotal = 0;
+    let isLoadingWebhooks = false;
+
+    const renderWebhooksTable = () => {
+        const tbody = document.getElementById('webhooks-tbody');
+        tbody.innerHTML = '';
+
+        if (!webhooksData || webhooksData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 24px; text-align: center; color: #64748b;">Chưa có lượt tương tác webhook nào phù hợp bộ lọc.</td></tr>';
+            return;
+        }
+
+        webhooksData.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.dataset.id = row.id;
+            tr.style.cursor = 'pointer';
+            tr.style.borderBottom = '1px solid #e2e8f0';
+            tr.title = 'Click để xem chi tiết đầy đủ thông tin user lấy về';
+
+            // Method badge
+            const isGet = (row.method || 'GET').toUpperCase() === 'GET';
+            const methodBadge = isGet 
+                ? `<span style="background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-family: monospace;">GET</span>`
+                : `<span style="background: #ede9fe; color: #7c3aed; border: 1px solid #ddd6fe; font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-family: monospace;">POST</span>`;
+
+            // Status badge
+            let statusBadge = `<span class="status-badge status-failed">${row.response_status || 500} ERR</span>`;
+            if (row.response_status >= 200 && row.response_status < 300) {
+                statusBadge = `<span class="status-badge status-success">${row.response_status} OK</span>`;
+            } else if (row.response_status >= 300 && row.response_status < 400) {
+                statusBadge = `<span class="status-badge status-pending">${row.response_status}</span>`;
+            }
+
+            // Summary snippet of request (query / body)
+            let reqSnippet = '—';
+            if (row.query_params && row.query_params !== '{}' && row.query_params !== '""') {
+                reqSnippet = `<div style="font-family: monospace; font-size: 11px; color: #0369a1; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(row.query_params)}">Query: ${escapeHtml(row.query_params)}</div>`;
+            }
+            if (row.request_payload) {
+                const bodyPreview = row.request_payload.replace(/\s+/g, ' ').trim();
+                const line = `<div style="font-family: monospace; font-size: 11px; color: #64748b; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;" title="${escapeHtml(bodyPreview)}">Body: ${escapeHtml(bodyPreview)}</div>`;
+                reqSnippet = (reqSnippet === '—') ? line : (reqSnippet + line);
+            }
+
+            // Summary snippet of user retrieved data (response)
+            let resPreview = '—';
+            if (row.response_payload) {
+                const previewClean = row.response_payload.replace(/\s+/g, ' ').trim();
+                const previewCut = previewClean.length > 100 ? previewClean.slice(0, 100) + '...' : previewClean;
+                resPreview = `
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                        ${statusBadge}
+                        <span style="font-size: 10.5px; color: #64748b;">${row.duration_ms || 0}ms</span>
+                    </div>
+                    <div style="font-family: monospace; font-size: 11px; color: #0f172a; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #f8fafc; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;" title="${escapeHtml(previewClean)}">
+                        ${escapeHtml(previewCut)}
+                    </div>
+                `;
+            } else {
+                resPreview = `<div style="display: flex; align-items: center; gap: 6px;">${statusBadge} <span style="font-size: 11px; color: #94a3b8;">(No payload)</span></div>`;
+            }
+
+            tr.innerHTML = `
+                <td style="padding: 8px 8px; color: #64748b; font-weight: 600;">${row.id}</td>
+                <td style="padding: 8px 8px;">
+                    <div style="font-size: 11.5px; color: #1e293b; font-weight: 600;">${escapeHtml(row.created_at || '—')}</div>
+                    <div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">Độ trễ: <strong style="color: #0284c7;">${row.duration_ms || 0} ms</strong></div>
+                </td>
+                <td style="padding: 8px 8px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                        ${methodBadge}
+                        <code style="font-family: monospace; font-size: 11.5px; font-weight: 700; color: #0f172a;">${escapeHtml(row.endpoint)}</code>
+                    </div>
+                    <div style="font-size: 10.5px; color: #64748b;">Tenant: <span style="color: #334155; font-weight: 600;">${escapeHtml(row.lead || 'default')}</span></div>
+                </td>
+                <td style="padding: 8px 8px;">
+                    <div><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #0284c7; font-size: 0.8rem; font-weight: 700;">${escapeHtml(row.ip_address || '—')}</code></div>
+                    <div style="font-size: 10.5px; color: #94a3b8; margin-top: 2px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(row.user_agent || '')}">${escapeHtml(row.user_agent || 'N/A')}</div>
+                </td>
+                <td style="padding: 8px 8px;">
+                    ${row.mac_id ? `<div style="font-family: monospace; font-size: 11.5px; font-weight: 700; color: #1e293b;">${escapeHtml(row.mac_id)}</div>` : '<div style="color: #94a3b8; font-size: 11px;">(Không có MAC)</div>'}
+                    ${row.printer_name ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">${escapeHtml(row.printer_name)}</div>` : ''}
+                </td>
+                <td style="padding: 8px 8px;">${reqSnippet}</td>
+                <td style="padding: 8px 8px;">${resPreview}</td>
+                <td style="padding: 8px 8px; text-align: center;">
+                    <div style="display: flex; gap: 4px; justify-content: center;">
+                        <button type="button" class="view-wh-btn" data-id="${row.id}" style="background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 6px; cursor: pointer; font-size: 0.82rem; color: #0284c7; padding: 3px 6px;" title="Xem chi tiết toàn bộ dữ liệu user lấy về">👁️</button>
+                        <button type="button" class="delete-wh-btn" data-id="${row.id}" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; cursor: pointer; font-size: 0.82rem; color: #dc2626; padding: 3px 6px;" title="Xóa log #${row.id}">🗑️</button>
+                    </div>
+                </td>
+            `;
+
+            tbody.appendChild(tr);
+        });
+    };
+
+    const showWebhookDetailModal = (row) => {
+        const modal = document.getElementById('detail-modal');
+        const body = document.getElementById('detail-modal-body');
+        if (!modal || !body || !row) return;
+
+        let statusClass = 'status-failed';
+        let statusBadgeText = `${row.response_status || 500} Error`;
+        if (row.response_status >= 200 && row.response_status < 300) {
+            statusClass = 'status-success';
+            statusBadgeText = `${row.response_status} OK`;
+        } else if (row.response_status >= 300 && row.response_status < 400) {
+            statusClass = 'status-pending';
+            statusBadgeText = `${row.response_status} Redirect`;
+        }
+
+        // Format query params
+        let formattedQuery = row.query_params || '';
+        try {
+            const q = typeof formattedQuery === 'string' ? JSON.parse(formattedQuery) : formattedQuery;
+            if (q && typeof q === 'object') formattedQuery = JSON.stringify(q, null, 2);
+        } catch(e) {}
+
+        // Format request payload
+        let formattedReq = row.request_payload || '';
+        try {
+            const r = typeof formattedReq === 'string' ? JSON.parse(formattedReq) : formattedReq;
+            if (r && typeof r === 'object') formattedReq = JSON.stringify(r, null, 2);
+        } catch(e) {}
+
+        // Format response payload
+        let formattedRes = row.response_payload || '';
+        try {
+            const resObj = typeof formattedRes === 'string' ? JSON.parse(formattedRes) : formattedRes;
+            if (resObj && typeof resObj === 'object') formattedRes = JSON.stringify(resObj, null, 2);
+        } catch(e) {}
+
+        const resSize = row.response_payload ? new Blob([row.response_payload]).size : 0;
+        const resSizeStr = resSize > 1024 ? `${(resSize / 1024).toFixed(1)} KB` : `${resSize} B`;
+
+        body.innerHTML = `
+            <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
+                <div>
+                    <h3 style="margin: 0 0 4px 0; color: #0f172a; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                        <span>🔔 Webhook Interaction #${row.id}</span>
+                        <span class="status-badge ${statusClass}">${escapeHtml(statusBadgeText)}</span>
+                    </h3>
+                    <div style="font-size: 0.85rem; color: #64748b; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <span><strong style="color: #334155;">Endpoint:</strong> <code style="color: #0284c7; background: #e0f2fe; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${escapeHtml(row.endpoint)}</code></span>
+                        <span><strong style="color: #334155;">Method:</strong> ${escapeHtml(row.method)}</span>
+                        <span><strong style="color: #334155;">Client IP:</strong> ${escapeHtml(row.ip_address || 'N/A')}</span>
+                        <span><strong style="color: #334155;">Thời gian:</strong> ${escapeHtml(row.created_at || '—')}</span>
+                        <span><strong style="color: #334155;">Độ trễ:</strong> ${row.duration_ms || 0} ms</span>
+                    </div>
+                </div>
+                <button type="button" id="wh-modal-close-btn" style="background: none; border: none; font-size: 1.5rem; line-height: 1; color: #94a3b8; cursor: pointer; padding: 4px 8px; border-radius: 6px;" title="Đóng">✕</button>
+            </div>
+
+            ${(row.mac_id || row.printer_name) ? `
+            <div style="background: #eff6ff; border-bottom: 1px solid #dbeafe; padding: 8px 20px; font-size: 0.85rem; color: #1e40af; display: flex; align-items: center; gap: 16px;">
+                <span><strong>Thiết bị:</strong> ${escapeHtml(row.printer_name || 'N/A')}</span>
+                <span><strong>MAC:</strong> <code style="font-family: monospace;">${escapeHtml(row.mac_id || 'N/A')}</code></span>
+            </div>
+            ` : ''}
+
+            <!-- Subtab Navigation inside Modal -->
+            <div style="padding: 12px 20px 0 20px; background: #f8fafc; border-bottom: 1px solid #cbd5e1; display: flex; align-items: center;">
+                <button type="button" class="job-modal-tab-btn active" data-target="pane-wh-response">📥 Thông tin User Lấy Về (${resSizeStr})</button>
+                <button type="button" class="job-modal-tab-btn" data-target="pane-wh-request">📤 Yêu Cầu Gửi Lên (Params/Body)</button>
+                <button type="button" class="job-modal-tab-btn" data-target="pane-wh-meta">ℹ️ Client Info & Headers</button>
+            </div>
+
+            <div style="padding: 20px; flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                <!-- Pane 1: Response / Thông tin user lấy về -->
+                <div id="pane-wh-response" class="job-modal-pane" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                    <div style="margin-bottom: 6px; font-size: 0.85rem; color: #475569;">
+                        Đây là dữ liệu JSON/Nội dung trả về cho client hoặc gửi sang CRM (${resSizeStr}):
+                    </div>
+                    ${createCopyableBlock("Dữ liệu Phản hồi (Response Payload)", formattedRes || '(Trống hoặc không có response payload)', 'code')}
+                </div>
+
+                <!-- Pane 2: Request -->
+                <div id="pane-wh-request" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0; gap: 12px;">
+                    <div>
+                        <div style="font-size: 0.85rem; color: #475569; margin-bottom: 4px;"><strong>Query Parameters:</strong></div>
+                        ${createCopyableBlock("Query Parameters (URL ?...)", formattedQuery || '(Không có tham số query)', 'json')}
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <div style="font-size: 0.85rem; color: #475569; margin-bottom: 4px;"><strong>Request Body Payload:</strong></div>
+                        ${createCopyableBlock("Request Body Payload", formattedReq || '(Không có request body)', 'json')}
+                    </div>
+                </div>
+
+                <!-- Pane 3: Metadata -->
+                <div id="pane-wh-meta" class="job-modal-pane" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700;">Client IP</div>
+                            <div style="font-size: 0.95rem; color: #0f172a; font-weight: 600; font-family: monospace; margin-top: 4px;">${escapeHtml(row.ip_address || '—')}</div>
+                        </div>
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700;">Thời gian xử lý</div>
+                            <div style="font-size: 0.95rem; color: #0f172a; font-weight: 600; margin-top: 4px;">${row.duration_ms || 0} ms</div>
+                        </div>
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700;">HTTP Status</div>
+                            <div style="font-size: 0.95rem; color: #0f172a; font-weight: 600; margin-top: 4px;">${row.response_status || '—'}</div>
+                        </div>
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700;">Lead Tenant</div>
+                            <div style="font-size: 0.95rem; color: #0f172a; font-weight: 600; margin-top: 4px;">${escapeHtml(row.lead || 'default')}</div>
+                        </div>
+                    </div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                        <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700; margin-bottom: 4px;">User Agent</div>
+                        <div style="font-size: 0.85rem; color: #334155; font-family: monospace; word-break: break-all;">${escapeHtml(row.user_agent || '—')}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; background: #f8fafc; border-radius: 0 0 12px 12px;">
+                <button type="button" id="wh-modal-ok-btn" class="filter-btn" style="background: #0284c7; color: #ffffff; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 600; cursor: pointer;">Đóng</button>
+            </div>
+        `;
+
+        modal.hidden = false;
+
+        // Modal Tab Switcher Handler
+        const tabBtns = body.querySelectorAll('.job-modal-tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                body.querySelectorAll('.job-modal-pane').forEach(pane => pane.style.display = 'none');
+                
+                const target = e.currentTarget;
+                target.classList.add('active');
+                const targetId = target.dataset.target;
+                const activePane = body.querySelector('#' + targetId);
+                if (activePane) {
+                    activePane.style.display = 'flex';
+                }
+            });
+        });
+
+        // Copy Button Handler
+        body.querySelectorAll('.copy-code-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const targetId = btn.getAttribute('data-target');
+                const textarea = body.querySelector('#' + targetId);
+                if (!textarea) return;
+                
+                const textToCopy = textarea.value;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        showCopySuccess(btn);
+                    }).catch(() => {
+                        fallbackCopyText(textarea, btn);
+                    });
+                } else {
+                    fallbackCopyText(textarea, btn);
+                }
+            });
+        });
+
+        const closeModal = () => { modal.hidden = true; };
+        const closeX = document.getElementById('wh-modal-close-btn');
+        const closeOk = document.getElementById('wh-modal-ok-btn');
+        if (closeX) closeX.onclick = closeModal;
+        if (closeOk) closeOk.onclick = closeModal;
+    };
+
+    const loadWebhookLogs = (silent = false) => {
+        if (isLoadingWebhooks) return;
+        isLoadingWebhooks = true;
+
+        const tbody = document.getElementById('webhooks-tbody');
+        if (!silent && tbody) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center; color: #64748b;">Đang tải Webhook Logs...</td></tr>';
+        }
+
+        const endpointVal = document.getElementById('wh-filter-endpoint')?.value || 'all';
+        const methodVal = document.getElementById('wh-filter-method')?.value || 'ALL';
+        const statusVal = document.getElementById('wh-filter-status')?.value || 'all';
+        const ipVal = (document.getElementById('wh-filter-ip')?.value || '').trim();
+        const macVal = (document.getElementById('wh-filter-mac')?.value || '').trim();
+        const dateVal = document.getElementById('wh-filter-date')?.value || '';
+        const searchVal = (document.getElementById('wh-filter-search')?.value || '').trim();
+
+        const params = new URLSearchParams({
+            limit: whPageSize,
+            page: whCurrentPage,
+            endpoint: endpointVal,
+            method: methodVal,
+            status: statusVal,
+            ip: ipVal,
+            mac_id: macVal,
+            date: dateVal,
+            q: searchVal
+        });
+
+        fetch(`/api/webhook/logs?${params.toString()}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.rows) {
+                    webhooksData = data.rows;
+                    whTotal = data.total || 0;
+                    renderWebhooksTable();
+                    updateWhPaginationUI();
+                    const badge = document.getElementById('badge-webhooks-count');
+                    if (badge) badge.textContent = whTotal;
+                } else if (!silent && tbody) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center; color: red;">Không thể tải Webhook Logs.</td></tr>';
+                }
+            })
+            .catch(err => {
+                console.error('Error loading webhook logs:', err);
+                if (!silent && tbody) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center; color: red;">Lỗi kết nối máy chủ.</td></tr>';
+                }
+            })
+            .finally(() => {
+                isLoadingWebhooks = false;
+            });
+    };
+
+    const updateWhPaginationUI = () => {
+        const totalPages = Math.ceil(whTotal / whPageSize) || 1;
+        const prevBtn = document.getElementById('wh-prev-page');
+        const nextBtn = document.getElementById('wh-next-page');
+        if (prevBtn) prevBtn.disabled = whCurrentPage <= 1;
+        if (nextBtn) nextBtn.disabled = whCurrentPage >= totalPages;
+
+        const pageContainer = document.getElementById('wh-page-numbers-list');
+        if (pageContainer) {
+            pageContainer.innerHTML = '';
+            for (let i = 1; i <= totalPages; i++) {
+                const btn = document.createElement('button');
+                btn.textContent = i;
+                btn.className = 'filter-btn page-num-btn';
+                btn.style.cssText = `margin: 0; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; border: 1px solid #cbd5e1; ${
+                    i === whCurrentPage 
+                        ? 'background-color: #0284c7; color: #fff; border-color: #0284c7;' 
+                        : 'background-color: #fff; color: #334155;'
+                }`;
+                btn.addEventListener('click', () => {
+                    if (whCurrentPage !== i) {
+                        whCurrentPage = i;
+                        loadWebhookLogs();
+                    }
+                });
+                pageContainer.appendChild(btn);
+            }
+        }
+    };
+
+    const triggerWhSearch = () => {
+        whCurrentPage = 1;
+        loadWebhookLogs();
+    };
+
+    document.getElementById('wh-apply-filters')?.addEventListener('click', triggerWhSearch);
+    document.getElementById('wh-reset-filters')?.addEventListener('click', () => {
+        if (document.getElementById('wh-filter-endpoint')) document.getElementById('wh-filter-endpoint').value = 'all';
+        if (document.getElementById('wh-filter-method')) document.getElementById('wh-filter-method').value = 'ALL';
+        if (document.getElementById('wh-filter-status')) document.getElementById('wh-filter-status').value = 'all';
+        if (document.getElementById('wh-filter-mac')) document.getElementById('wh-filter-mac').value = '';
+        if (document.getElementById('wh-filter-ip')) document.getElementById('wh-filter-ip').value = '';
+        if (document.getElementById('wh-filter-date')) document.getElementById('wh-filter-date').value = '';
+        if (document.getElementById('wh-filter-search')) document.getElementById('wh-filter-search').value = '';
+        triggerWhSearch();
+    });
+
+    ['wh-filter-endpoint', 'wh-filter-method', 'wh-filter-status', 'wh-filter-date'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', triggerWhSearch);
+    });
+
+    ['wh-filter-mac', 'wh-filter-ip', 'wh-filter-search'].forEach(id => {
+        document.getElementById(id)?.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') triggerWhSearch();
+        });
+    });
+
+    document.getElementById('wh-prev-page')?.addEventListener('click', () => {
+        if (whCurrentPage > 1) {
+            whCurrentPage--;
+            loadWebhookLogs();
+        }
+    });
+
+    document.getElementById('wh-next-page')?.addEventListener('click', () => {
+        const totalPages = Math.ceil(whTotal / whPageSize);
+        if (whCurrentPage < totalPages) {
+            whCurrentPage++;
+            loadWebhookLogs();
+        }
+    });
+
+    document.getElementById('wh-page-size-select')?.addEventListener('change', (e) => {
+        whPageSize = parseInt(e.target.value, 10);
+        whCurrentPage = 1;
+        loadWebhookLogs();
+    });
+
+    document.getElementById('clear-webhooks-btn')?.addEventListener('click', async () => {
+        if (!confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ lịch sử tương tác Webhook Logs không? Thao tác này không thể hoàn tác.')) {
+            return;
+        }
+        const btn = document.getElementById('clear-webhooks-btn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Đang xóa...';
+        try {
+            const res = await fetch('/api/webhook/logs/clear', { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                alert(`✔ ${data.message || 'Đã xóa toàn bộ Webhook Logs!'}`);
+                whCurrentPage = 1;
+                loadWebhookLogs(false);
+            } else {
+                alert(`❌ Lỗi: ${data.error || 'Không thể xóa logs'}`);
+            }
+        } catch (err) {
+            alert(`❌ Lỗi kết nối: ${err.message || err}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🗑️ Xóa tất cả Webhook Logs';
+        }
+    });
+
+    document.getElementById('webhooks-tbody')?.addEventListener('click', async (e) => {
+        const delBtn = e.target.closest('.delete-wh-btn');
+        if (delBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const logId = delBtn.dataset.id;
+            if (!confirm(`Bạn có chắc chắn muốn xóa bản ghi Webhook #${logId} không?`)) {
+                return;
+            }
+            delBtn.disabled = true;
+            delBtn.textContent = '⌛';
+            try {
+                const res = await fetch(`/api/webhook/logs/${logId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.ok) {
+                    loadWebhookLogs(false);
+                } else {
+                    alert(`❌ Lỗi xóa log #${logId}: ${data.error}`);
+                }
+            } catch (err) {
+                alert(`❌ Lỗi kết nối: ${err.message || err}`);
+            }
+            return;
+        }
+
+        const viewBtn = e.target.closest('.view-wh-btn');
+        const tr = e.target.closest('tr');
+        if (viewBtn || tr) {
+            const logId = viewBtn ? viewBtn.dataset.id : tr.dataset.id;
+            if (logId) {
+                const row = webhooksData.find(w => w.id == logId);
+                if (row) showWebhookDetailModal(row);
+            }
+        }
+    });
+
+    // =========================================================================
+    // GLOBAL CONTROLS
+    // =========================================================================
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+        if (activeSubtab === 'commands') {
+            loadJobs(false);
+        } else {
+            loadWebhookLogs(false);
+        }
+    });
+
+    // Initial load
     loadJobs();
+
+    // Fetch initial count for webhooks so badge displays correct number immediately
+    fetch('/api/webhook/logs?limit=1')
+        .then(r => r.json())
+        .then(d => {
+            if (d && typeof d.total === 'number') {
+                whTotal = d.total;
+                const b = document.getElementById('badge-webhooks-count');
+                if (b) b.textContent = d.total;
+            }
+        })
+        .catch(() => {});
+
+    // Periodic background refresh
     setInterval(() => {
         if (document.hidden) return;
-        loadJobs(true);
+        if (activeSubtab === 'commands') {
+            loadJobs(true);
+        } else {
+            loadWebhookLogs(true);
+        }
     }, 30000);
 });
 </script>

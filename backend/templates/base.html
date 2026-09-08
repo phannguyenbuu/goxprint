@@ -40,6 +40,11 @@
         <a class="link {% if active_tab == 'users' %}active{% endif %}" href="{{ url_for('users_page') }}"><span class="link-ico">&bull;</span><span>Users</span></a>
         <a class="link {% if active_tab == 'companies' %}active{% endif %}" href="{{ url_for('networks_page') }}"><span class="link-ico">&bull;</span><span>Networks</span></a>
         <a class="link {% if active_tab == 'repairs' %}active{% endif %}" href="{{ url_for('repairs_page') }}"><span class="link-ico">&bull;</span><span>Tasks</span></a>
+        <div class="sidebar-sep"></div>
+        <a class="link" href="{{ url_for('logout_page') }}" style="color: #f87171;" title="Đăng xuất khỏi hệ thống">
+          <span class="link-ico" style="font-size: 11px;">🚪</span>
+          <span>Đăng xuất</span>
+        </a>
       </aside>
       <main class="content">
         <header class="topbar">

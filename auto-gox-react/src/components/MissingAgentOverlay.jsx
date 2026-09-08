@@ -42,6 +42,11 @@ export default function MissingAgentOverlay({ onRetry }) {
             <Download size={16} />
             Tải xuống PrintAgent (Windows)
           </a>
+          <a href="https://download.goxprint.com/printagentinstall_win7810.exe" style={{
+            fontSize: '13px', color: '#60a5fa', textDecoration: 'underline', marginTop: '2px', marginBottom: '6px'
+          }}>
+            Bản cho Windows 7, 8, 10 (printagentinstall_win7810.exe)
+          </a>
           <button onClick={() => window.location.reload()} style={{
             background: 'transparent', border: '1px solid #475569', color: '#f8fafc', padding: '12px 24px', 
             borderRadius: '10px', fontWeight: 600, fontSize: '15px', cursor: 'pointer', width: '100%', maxWidth: '320px', transition: 'all 0.2s'

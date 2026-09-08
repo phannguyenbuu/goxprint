@@ -232,31 +232,40 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                     ).scalars().first()
                     old_ref_ip = (ip_rec.ip if ip_rec and ip_rec.ip else "") or (agent.local_ip if agent else "")
                     if old_ref_ip and old_ref_ip != incoming_local_ip:
-                        # Dedup guard: check if pc_ip_changed event already triggered workflow in last 5 min
-                        recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
-                        existing_workflow = session.execute(
+                        # Smart Dedup guard: only skip if the EXACT SAME (old_ref_ip -> incoming_local_ip) was triggered in the last 60s
+                        recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+                        existing_cmds = session.execute(
                             select(PrinterControlCommand).where(
                                 PrinterControlCommand.agent_uid == agent_uid,
                                 PrinterControlCommand.command_type == "when_ip_change",
                                 PrinterControlCommand.requested_at >= recent_cutoff
                             )
-                        ).scalars().first()
+                        ).scalars().all()
 
-                        if not existing_workflow:
+                        is_duplicate = False
+                        for ex in existing_cmds:
+                            try:
+                                ex_p = json.loads(ex.command_params or "{}")
+                                if ex_p.get("old_ip") == old_ref_ip and ex_p.get("new_ip") == incoming_local_ip:
+                                    is_duplicate = True
+                                    LOGGER.info("[polling_controls] Dedup skip: when_ip_change #%d already created for %s (%s -> %s)", ex.id, agent_uid, old_ref_ip, incoming_local_ip)
+                                    break
+                            except Exception:
+                                pass
+
+                        if not is_duplicate:
                             LOGGER.info("[polling_controls] Natural agent IP change detected for %s: %s -> %s. Triggering workflow...", agent_uid, old_ref_ip, incoming_local_ip)
                             from utils import trigger_ip_change_workflow
                             trigger_ip_change_workflow(session, lead_valid, lan_uid, agent_uid, old_ref_ip, incoming_local_ip)
-                        else:
-                            LOGGER.info("[polling_controls] Dedup: when_ip_change #%d already exists for agent %s (%s -> %s). Skipping duplicate workflow.", existing_workflow.id, agent_uid, old_ref_ip, incoming_local_ip)
 
-                        # Always update IPData and AgentNode regardless of dedup
-                        if ip_rec:
-                            ip_rec.ip = incoming_local_ip
-                            ip_rec.updated_at = datetime.now(timezone.utc)
-                        if agent:
-                            agent.local_ip = incoming_local_ip
-                            agent.updated_at = datetime.now(timezone.utc)
-                        session.commit()
+                            # Update IPData and AgentNode on successful workflow trigger
+                            if ip_rec:
+                                ip_rec.ip = incoming_local_ip
+                                ip_rec.updated_at = datetime.now(timezone.utc)
+                            if agent:
+                                agent.local_ip = incoming_local_ip
+                                agent.updated_at = datetime.now(timezone.utc)
+                            session.commit()
                 except Exception as ip_detect_err:
                     LOGGER.error("Error detecting natural IP change in polling_controls: %s", ip_detect_err)
 
@@ -1325,6 +1334,9 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                         ip_match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", new_ip_raw)
                         parsed_ip = ip_match.group(1) if ip_match else target_ip
 
+                        mode_match = re.search(r"\b(DHCP|STATIC)\b", new_ip_raw, re.I)
+                        parsed_mode = mode_match.group(1).lower() if mode_match else None
+
                         if parsed_ip:
                             ip_rec = session.execute(
                                 select(IPData).where(IPData.agent_name == command.agent_uid)
@@ -1340,9 +1352,15 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 LOGGER.info("[polling_control_result] IP change detected via %s for %s: %s -> %s. Triggering workflow...", cmd_name, command.agent_uid, old_ip, parsed_ip)
                                 from utils import trigger_ip_change_workflow
                                 trigger_ip_change_workflow(session, command.lead or "default", command.lan_uid or "default", command.agent_uid, old_ip, parsed_ip)
+                                # Re-fetch ip_rec since trigger_ip_change_workflow may have added/updated it
+                                ip_rec = session.execute(
+                                    select(IPData).where(IPData.agent_name == command.agent_uid)
+                                ).scalars().first()
 
                             if agent_node:
                                 agent_node.local_ip = parsed_ip
+                                if parsed_mode:
+                                    agent_node.ip_mode = parsed_mode
                                 agent_node.updated_at = datetime.now(timezone.utc)
                             
                             if ip_rec is None:
@@ -1357,6 +1375,8 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                                 session.add(ip_rec)
                             else:
                                 ip_rec.ip = parsed_ip
+                                if command.lan_uid:
+                                    ip_rec.lan_uid = command.lan_uid
                                 ip_rec.updated_at = datetime.now(timezone.utc)
 
                             # Update in-memory ACTIVE_AGENTS registry for real-time frontend update
@@ -1364,8 +1384,10 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             agent_entry = ACTIVE_AGENTS.get(command.agent_uid)
                             if agent_entry:
                                 agent_entry["local_ip"] = parsed_ip
+                                if parsed_mode:
+                                    agent_entry["ip_mode"] = parsed_mode
                                 agent_entry["last_seen_at"] = datetime.now(timezone.utc)
-                            LOGGER.info("[polling_control_result] Updated AgentNode/IPData/ACTIVE_AGENTS local_ip via %s: %s", cmd_name, parsed_ip)
+                            LOGGER.info("[polling_control_result] Updated AgentNode/IPData/ACTIVE_AGENTS local_ip via %s: %s (mode: %s)", cmd_name, parsed_ip, parsed_mode)
                     
                     if cmd_name in ["toshiba_change_ftp", "ricoh_change_ftp"]:
                         try:

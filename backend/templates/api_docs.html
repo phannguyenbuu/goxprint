@@ -36,29 +36,19 @@
             <span class="api-test-status idle" id="api-test-status-infor">-</span>
           </div>
           <div class="api-test-row">
-            <label>/api/public/device/by-mac</label>
-            <button type="button" class="api-test-btn" data-api-key="by-mac">Test</button>
-            <span class="api-test-status idle" id="api-test-status-by-mac">-</span>
-          </div>
-          <div class="api-test-row">
             <label>/api/public/device/by-macs (Batch 100)</label>
             <button type="button" class="api-test-btn" data-api-key="by-macs">POST</button>
             <span class="api-test-status idle" id="api-test-status-by-macs">-</span>
           </div>
           <div class="api-test-row">
-            <label>/api/public/device/by-mac-now</label>
-            <button type="button" class="api-test-btn" data-api-key="by-mac-now">Test</button>
-            <span class="api-test-status idle" id="api-test-status-by-mac-now">-</span>
-          </div>
-          <div class="api-test-row">
-            <label>/webhook/infor</label>
+            <label>/webhook/infor_get</label>
             <button type="button" class="api-test-btn" data-api-key="webhook-infor">GET</button>
             <span class="api-test-status idle" id="api-test-status-webhook-infor">-</span>
           </div>
           <div class="api-test-row">
-            <label>/webhook/infor/test</label>
-            <button type="button" class="api-test-btn" data-api-key="webhook-test">POST</button>
-            <span class="api-test-status idle" id="api-test-status-webhook-test">-</span>
+            <label>/webhook/infor_post</label>
+            <button type="button" class="api-test-btn" data-api-key="infor-webhook">POST</button>
+            <span class="api-test-status idle" id="api-test-status-infor-webhook">-</span>
           </div>
           <div class="api-test-row">
             <label>/api/public/ip/public</label>
@@ -364,12 +354,12 @@
           Configure where GoPrinx sends webhook events. You can manage this in <a href="/configs" style="color:#38bdf8; text-decoration:underline;">System Settings (/configs)</a> or via API:
         </p>
         <div style="background:#0f172a; padding: 12px; border-radius:6px; font-family:monospace; font-size:13px; color:#94a3b8; margin-bottom: 14px; line-height:1.6;">
-          <span style="color:#4ade80; font-weight:bold;">GET</span> /webhook/infor &nbsp;→&nbsp; Read current Webhook URL<br>
-          <span style="color:#fbbf24; font-weight:bold;">POST</span> /webhook/infor &nbsp;→&nbsp; Set Webhook URL: <code>{"url": "https://your-crm.com/webhook/infor"}</code>
+          <span style="color:#4ade80; font-weight:bold;">GET</span> /webhook/infor_get &nbsp;→&nbsp; Read current Webhook URL<br>
+          <span style="color:#fbbf24; font-weight:bold;">POST</span> /webhook/infor_post &nbsp;→&nbsp; Dispatch Webhook to CRM (Test Event)
         </div>
         <div style="display:flex; gap: 10px; align-items:center; flex-wrap:wrap;">
-          <button type="button" class="api-test-btn" data-api-key="webhook-infor" style="padding: 7px 16px; border-radius:4px; cursor:pointer;">Check Current URL</button>
-          <button type="button" class="api-test-btn" data-api-key="webhook-test" style="padding: 7px 16px; background:#0284c7; color:#fff; border-radius:4px; border:none; cursor:pointer;">Send Test Webhook to CRM</button>
+          <button type="button" class="api-test-btn" data-api-key="webhook-infor" style="padding: 7px 16px; border-radius:4px; cursor:pointer;">Check Current URL (/webhook/infor_get)</button>
+          <button type="button" class="api-test-btn" data-api-key="infor-webhook" style="padding: 7px 16px; background:#0284c7; color:#fff; border-radius:4px; border:none; cursor:pointer;">Dispatch Webhook (/webhook/infor_post)</button>
         </div>
       </div>
 

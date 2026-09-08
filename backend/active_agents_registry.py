@@ -44,6 +44,7 @@ def update_agent_in_memory(
     hostname: str = "",
     local_ip: str = "",
     local_mac: str = "",
+    ip_mode: str = "",
     app_version: str = "",
     run_mode: str = "web",
     web_port: int = 9173,
@@ -66,6 +67,7 @@ def update_agent_in_memory(
             "hostname": hostname,
             "local_ip": local_ip,
             "local_mac": local_mac,
+            "ip_mode": ip_mode or "unknown",
             "app_version": app_version,
             "run_mode": run_mode,
             "web_port": web_port,
@@ -81,6 +83,8 @@ def update_agent_in_memory(
         agent_entry["hostname"] = hostname or agent_entry["hostname"]
         agent_entry["local_ip"] = local_ip or agent_entry["local_ip"]
         agent_entry["local_mac"] = local_mac or agent_entry["local_mac"]
+        if ip_mode and ip_mode != "unknown":
+            agent_entry["ip_mode"] = ip_mode
         agent_entry["app_version"] = app_version or agent_entry["app_version"]
         if public_ip:
             agent_entry["public_ip"] = public_ip

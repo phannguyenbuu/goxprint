@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
-from sqlalchemy import select
+from sqlalchemy import select, func, delete
 
 from app_helpers import (
     ONLINE_STALE_SECONDS,
@@ -32,7 +32,7 @@ from serializers import (
     _refresh_stale_agent_offline,
     _upsert_lan_and_agent,
 )
-from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControlCommand
+from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControlCommand, WebhookLog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -784,3 +784,125 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
         response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         response.headers["Content-Type"] = "application/json; charset=utf-8"
         return response
+
+    @app.get("/api/webhook/logs")
+    def list_webhook_logs() -> Any:
+        try:
+            lead = _to_text(request.args.get("lead"))
+            endpoint_q = _to_text(request.args.get("endpoint"))
+            method_q = _to_text(request.args.get("method")).upper()
+            status_q = _to_text(request.args.get("status")).lower()
+            ip_q = _to_text(request.args.get("ip"))
+            mac_q = _to_text(request.args.get("mac_id"))
+            date_q = _to_text(request.args.get("date"))
+            search_q = _to_text(request.args.get("q"))
+
+            limit = _to_int(request.args.get("limit")) or 50
+            limit = max(1, min(limit, 200))
+            page = _to_int(request.args.get("page")) or 1
+            page = max(1, page)
+            offset = (page - 1) * limit
+
+            with session_factory() as session:
+                stmt = select(WebhookLog).order_by(WebhookLog.created_at.desc(), WebhookLog.id.desc())
+                count_stmt = select(func.count(WebhookLog.id))
+
+                filters = []
+                if lead:
+                    filters.append(WebhookLog.lead == lead)
+                if endpoint_q and endpoint_q != "all":
+                    filters.append(WebhookLog.endpoint.ilike(f"%{endpoint_q}%"))
+                if method_q and method_q != "ALL":
+                    filters.append(WebhookLog.method == method_q)
+                if status_q and status_q != "all":
+                    if status_q in ("200", "success", "ok"):
+                        filters.append(WebhookLog.response_status < 400)
+                    elif status_q in ("error", "failed", "fail"):
+                        filters.append(WebhookLog.response_status >= 400)
+                    elif status_q.isdigit():
+                        filters.append(WebhookLog.response_status == int(status_q))
+                if ip_q:
+                    filters.append(WebhookLog.ip_address.ilike(f"%{ip_q}%"))
+                if mac_q:
+                    filters.append(WebhookLog.mac_id.ilike(f"%{mac_q}%"))
+                if date_q:
+                    try:
+                        d_start = datetime.strptime(date_q[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        d_end = d_start + timedelta(days=1)
+                        filters.append(WebhookLog.created_at >= d_start)
+                        filters.append(WebhookLog.created_at < d_end)
+                    except Exception:
+                        pass
+                if search_q:
+                    filters.append(
+                        (WebhookLog.endpoint.ilike(f"%{search_q}%"))
+                        | (WebhookLog.ip_address.ilike(f"%{search_q}%"))
+                        | (WebhookLog.mac_id.ilike(f"%{search_q}%"))
+                        | (WebhookLog.printer_name.ilike(f"%{search_q}%"))
+                        | (WebhookLog.query_params.ilike(f"%{search_q}%"))
+                        | (WebhookLog.request_payload.ilike(f"%{search_q}%"))
+                        | (WebhookLog.response_payload.ilike(f"%{search_q}%"))
+                    )
+
+                if filters:
+                    for f in filters:
+                        stmt = stmt.where(f)
+                        count_stmt = count_stmt.where(f)
+
+                total_count = session.execute(count_stmt).scalar() or 0
+                rows = session.execute(stmt.offset(offset).limit(limit)).scalars().all()
+
+                return jsonify({
+                    "ok": True,
+                    "rows": [
+                        {
+                            "id": r.id,
+                            "lead": r.lead,
+                            "endpoint": r.endpoint,
+                            "method": r.method,
+                            "ip_address": r.ip_address,
+                            "user_agent": r.user_agent,
+                            "query_params": r.query_params,
+                            "request_payload": r.request_payload,
+                            "response_status": r.response_status,
+                            "response_payload": r.response_payload,
+                            "mac_id": r.mac_id,
+                            "printer_name": r.printer_name,
+                            "duration_ms": r.duration_ms,
+                            "created_at": _format_agents_datetime_ui(r.created_at),
+                            "created_at_iso": r.created_at.isoformat() if r.created_at else "",
+                        }
+                        for r in rows
+                    ],
+                    "total": total_count,
+                    "page": page,
+                    "limit": limit,
+                    "total_pages": max(1, (total_count + limit - 1) // limit),
+                })
+        except Exception as exc:
+            LOGGER.error("[GET /api/webhook/logs ERROR] %s", exc, exc_info=True)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.delete("/api/webhook/logs/<int:log_id>")
+    def delete_webhook_log(log_id: int) -> Any:
+        try:
+            with session_factory() as session:
+                log_row = session.get(WebhookLog, log_id)
+                if not log_row:
+                    return jsonify({"ok": False, "error": "Not found"}), 404
+                session.delete(log_row)
+                session.commit()
+                return jsonify({"ok": True, "deleted_id": log_id})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.post("/api/webhook/logs/clear")
+    def clear_webhook_logs() -> Any:
+        try:
+            with session_factory() as session:
+                session.execute(delete(WebhookLog))
+                session.commit()
+                return jsonify({"ok": True, "message": "All webhook logs cleared"})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+

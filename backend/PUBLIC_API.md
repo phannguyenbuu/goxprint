@@ -87,75 +87,7 @@ Notes:
 - The `counter_data` and `status_data` fields are JSON objects.
 - `mac_id` is normalized in `AA:BB:CC:DD:EE:FF` format.
 
-## 4) Get device infor by MAC ID
-- Method: `GET`
-- Path: `/api/public/device/by-mac`
-- Query params (required):
-  - `mac_id` (or `mac`) – MAC address, any format: `00:26:73:7D:78:F9`, `00-26-73-7D-78-F9`, or `0026737D78F9`
-
-Example:
-```bash
-curl -s "https://agentapi.quanlymay.com/api/public/device/by-mac?mac_id=0026737D78F9"
-```
-
-Notes:
-- Success responses always normalize `mac_id` to `AA:BB:CC:DD:EE:FF`.
-- Invalid MAC format returns `400`.
-- Unknown device returns `404`.
-
-Response:
-```json
-{
-  "ok": true,
-  "mac_id": "00:26:73:7D:78:F9",
-  "lead": "default",
-  "lan_uid": "lanf-33ef2446897e0a57",
-  "agent_uid": "agent-pc-01",
-  "printer_name": "Aficio MP 9002",
-  "ip": "192.168.1.224",
-  "counter": {
-    "total": "3653272"
-  },
-  "ok": true,
-  "mac_id": "00:26:73:7D:78:F9",
-  "lead": "default",
-  "lan_uid": "lanf-33ef2446897e0a57",
-  "agent_uid": "agent-pc-01",
-  "printer_name": "Aficio MP 9002",
-  "ip": "192.168.1.224",
-  "counter": {
-    "total": "3653272"
-  },
-  "status": {
-    "system_status": "Status OK"
-  },
-  "last_counter_at": "2026-03-02T00:00:00+00:00",
-  "last_status_at": "2026-03-02T00:00:00+00:00",
-  "updated_at": "2026-03-02T00:00:00+00:00"
-}
-```
-
-## 4b) Query real-time device infor by MAC ID (Force fresh check)
-- Method: `GET`
-- Path: `/api/public/device/by-mac-now`
-- Query params (required):
-  - `mac_id` (or `mac`) – MAC address, any format: `00:26:73:7D:78:F9`, `00-26-73-7D-78-F9`, or `0026737D78F9`
-
-Example:
-```bash
-curl -s "https://agentapi.quanlymay.com/api/public/device/by-mac-now?mac_id=0026737D78F9"
-```
-
-Notes:
-- Unlike `/api/public/device/by-mac` which returns cached database values, this endpoint actively triggers an on-demand SNMP/status query command on the managing Agent.
-- The request blocks (long-polls) and waits up to 10 seconds for the Agent response.
-- Success responses contain fresh, real-time counters and status.
-- Automatically updates the database cache for subsequent passive queries.
-- Returns `504` on Agent communication timeout, or `400` if the managing Agent is offline.
-
-Response: Same format as `/api/public/device/by-mac` but with real-time data.
-
-## 4c) Get batch device infor by MAC IDs (Up to 100 devices)
+## 4) Get batch device infor by MAC IDs (Up to 100 devices)
 - Method: `POST` (or `GET`)
 - Path: `/api/public/device/by-macs`
 - Headers:
@@ -260,42 +192,42 @@ Payload format sent to CRM:
 }
 ```
 
-## 4e) Webhook URL Configuration (/webhook/infor)
-- Primary Path: `/webhook/infor` (aliases: `/api/webhook/infor`, `/api/admin/crm/webhook-url`)
+## 4e) Webhook URL Configuration (/webhook/infor_get)
+- Primary Path: `GET /webhook/infor_get` (aliases: `/webhook/infor`, `/api/webhook/infor_get`, `/api/webhook/infor`, `/api/admin/crm/webhook-url`)
 - Description: Retrieve or update the destination webhook URL.
 - Paths:
-  - `GET /webhook/infor` – Retrieve current configured CRM webhook destination.
-  - `POST /webhook/infor` – Update CRM webhook destination URL (pass `{"url": "https://your-crm.com/webhook/infor"}`).
+  - `GET /webhook/infor_get` – Retrieve current configured CRM webhook destination.
+  - `POST /webhook/infor_get` – Update CRM webhook destination URL (pass `{"url": "https://your-crm.com/webhook/infor"}`).
   - Also supported directly in UI at `/configs` (System Settings -> 🔔 CRM Webhook Settings).
 
 Example (Read):
 ```bash
-curl -s "https://agentapi.quanlymay.com/webhook/infor"
+curl -s "https://agentapi.quanlymay.com/webhook/infor_get"
 ```
 Response:
 ```json
 {
   "ok": true,
   "configured": true,
-  "endpoint": "/webhook/infor",
+  "endpoint": "/webhook/infor_get",
   "webhook_url": "https://crm.yourdomain.com/webhook/infor"
 }
 ```
 
 Example (Update):
 ```bash
-curl -s -X POST "https://agentapi.quanlymay.com/webhook/infor" \
+curl -s -X POST "https://agentapi.quanlymay.com/webhook/infor_get" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://crm.yourdomain.com/webhook/infor"}'
 ```
 
-## 4f) Test Webhook Dispatch (/webhook/infor/test)
-- Primary Path: `POST /webhook/infor/test` (aliases: `/webhook/test`, `/api/admin/crm/test-webhook`)
+## 4f) Infor Webhook Dispatch (/webhook/infor_post)
+- Primary Path: `POST /webhook/infor_post` (aliases: `/infor/webhook`, `/infor/push`, `/infor/send`, `/infor/dispatch`, `/api/webhook/infor_post`, `/webhook/test`, `/webhook/infor/test`)
 - Description: Sends a simulated sample device change event to the configured CRM webhook URL and returns the delivery result, HTTP response code, and response text.
 
 Example:
 ```bash
-curl -s -X POST "https://agentapi.quanlymay.com/api/admin/crm/test-webhook" \
+curl -s -X POST "https://agentapi.quanlymay.com/webhook/infor_post" \
   -H "Content-Type: application/json"
 ```
 Response:

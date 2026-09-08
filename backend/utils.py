@@ -586,21 +586,15 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
             except Exception:
                 pass
 
-        # Bug fix 1: query by agent_name and lan_uid to match the exact row and avoid uq_ip_datas_lan_agent conflict
         ip_rec = session.execute(
-            select(IPData).where(IPData.agent_name == agent_uid, IPData.lan_uid == lan_uid)
+            select(IPData).where(IPData.agent_name == agent_uid)
             .order_by(IPData.updated_at.desc())
         ).scalars().first()
-        if ip_rec is None:
-            ip_rec = session.execute(
-                select(IPData).where(IPData.agent_name == agent_uid)
-                .order_by(IPData.updated_at.desc())
-            ).scalars().first()
 
         if ip_rec is None:
             ip_rec = IPData(
                 agent_uid=agent_uid,
-                lan_uid=lan_uid,
+                lan_uid=lan_uid or "default",
                 agent_name=agent_uid,
                 ip=new_ip,
                 created_at=datetime.now(timezone.utc),
@@ -609,6 +603,8 @@ def trigger_ip_change_workflow(session: Any, lead: str, lan_uid: str, agent_uid:
             session.add(ip_rec)
         else:
             ip_rec.ip = new_ip
+            if lan_uid:
+                ip_rec.lan_uid = lan_uid
             ip_rec.updated_at = datetime.now(timezone.utc)
 
         # Find printers belonging to this lan_uid strictly by mac_id (NO agent_uid filter)

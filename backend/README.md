@@ -63,11 +63,13 @@ Nguồn chuẩn: `backend/PUBLIC_API.md`
 - `GET /networklist/`
 - `GET /all/`
 - `GET /api/infor/list`
-- `GET /api/public/device/by-mac`
+- `POST/GET /api/public/device/by-macs`
 - `GET /api/public/device/online-status`
 - `GET /api/public/network/by-lan`
 - `GET /api/public/device/latest`
 - `GET /api/public/agent-machines`
+- `GET/POST /webhook/infor_get`
+- `POST/GET /webhook/infor_post`
 
 ### Device control / operator actions
 

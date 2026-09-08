@@ -74,22 +74,51 @@ def set_crm_webhook_url(session_factory: Any, url: str) -> None:
     LOGGER.info("[WebhookDispatcher] Updated crm_webhook_url to: %s", clean_url or "(disabled)")
 
 
-def _send_webhook_task(url: str, payload: dict[str, Any]) -> None:
-    """Fire-and-forget delivery task. Drops data immediately on failure or timeout."""
+def _send_webhook_task(session_factory: Any, url: str, payload: dict[str, Any]) -> None:
+    """Fire-and-forget delivery task. Drops data immediately on failure or timeout, logs interaction."""
     mac = payload.get("mac_id", "unknown")
+    printer_name = payload.get("printer_name", "")
+    t0 = time.perf_counter()
+    status_code = 0
+    resp_text = ""
     try:
         resp = requests.post(
             url,
             json=payload,
             headers={"Content-Type": "application/json", "User-Agent": "Goxprint-Webhook/1.0"},
-            timeout=2.0,
+            timeout=3.0,
         )
+        status_code = resp.status_code
+        resp_text = resp.text[:2000]
         if resp.status_code >= 400:
             LOGGER.warning("[Webhook] CRM returned HTTP %s for device %s (Dropped)", resp.status_code, mac)
     except requests.exceptions.Timeout:
-        LOGGER.warning("[Webhook] Timeout (2.0s) sending device %s to %s (Dropped)", mac, url)
+        status_code = 408
+        resp_text = "Connection timeout (3.0s)"
+        LOGGER.warning("[Webhook] Timeout (3.0s) sending device %s to %s (Dropped)", mac, url)
     except Exception as exc:
+        status_code = 500
+        resp_text = str(exc)
         LOGGER.warning("[Webhook] Connection error sending device %s to %s: %s (Dropped)", mac, url, exc)
+    finally:
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            from webhook_logger import log_webhook_event
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="crm_dispatch",
+                method="POST",
+                ip_address=url,
+                query_params={"target_url": url},
+                request_payload=payload,
+                response_status=status_code,
+                response_payload=resp_text,
+                mac_id=mac,
+                printer_name=printer_name,
+                duration_ms=dur_ms,
+            )
+        except Exception as log_exc:
+            LOGGER.debug("[WebhookDispatcher] Logging failed: %s", log_exc)
 
 
 def dispatch_device_change(session_factory: Any, device_payload: dict[str, Any]) -> None:
@@ -99,4 +128,5 @@ def dispatch_device_change(session_factory: Any, device_payload: dict[str, Any])
         return  # No webhook configured
 
     # Submit task to thread pool without waiting
-    _WEBHOOK_EXECUTOR.submit(_send_webhook_task, url, device_payload)
+    _WEBHOOK_EXECUTOR.submit(_send_webhook_task, session_factory, url, device_payload)
+

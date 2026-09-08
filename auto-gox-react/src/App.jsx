@@ -438,6 +438,11 @@ export default function App() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                 <span>Tải xuống PrintAgent (Windows)</span>
               </a>
+              <div style={{marginTop: '12px'}}>
+                <a href="https://download.goxprint.com/printagentinstall_win7810.exe" style={{fontSize: '13px', color: '#3b82f6', textDecoration: 'underline'}}>
+                  Bản dành riêng cho Windows 7, 8, 10 (printagentinstall_win7810.exe)
+                </a>
+              </div>
             </div>
           </div>
         </div>

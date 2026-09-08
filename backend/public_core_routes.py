@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import json
+import time as time_module
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -59,97 +60,6 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         from active_agents_registry import get_all_devices_in_memory
         devices = get_all_devices_in_memory(client_ip=client_ip, session_factory=session_factory)
         return jsonify({"ok": True, "printers": devices})
-
-
-    @app.get("/api/public/device/by-mac")
-    @app.get("/api/public/device/by-mac-backup")
-    def public_device_by_mac() -> Any:
-        mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
-        if not mac_input:
-            return jsonify({"ok": False, "error": "Missing parameter: mac_id"}), 400
-
-        normalized_mac = _normalize_mac(mac_input)
-        if not normalized_mac:
-            return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
-
-        from active_agents_registry import get_device_by_mac_in_memory
-        mem_device = get_device_by_mac_in_memory(normalized_mac)
-        if mem_device:
-            return jsonify(mem_device)
-
-        with session_factory() as session:
-            d_obj = session.execute(
-                select(DeviceInfor)
-                .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
-                .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-
-            # Check DeviceInforHistory for counter data if d_obj missing or has empty counter
-            dh_obj = None
-            if not d_obj or not (d_obj.counter_data and isinstance(d_obj.counter_data, dict) and len(d_obj.counter_data) > 0):
-                dh_obj = session.execute(
-                    select(DeviceInforHistory)
-                    .where(func.upper(DeviceInforHistory.mac_id) == normalized_mac)
-                    .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-
-            if d_obj:
-                counter = d_obj.counter_data if (d_obj.counter_data and isinstance(d_obj.counter_data, dict) and len(d_obj.counter_data) > 0) else (dh_obj.counter_data if dh_obj and dh_obj.counter_data else {})
-                status = d_obj.status_data if (d_obj.status_data and isinstance(d_obj.status_data, dict) and len(d_obj.status_data) > 0) else (dh_obj.status_data if dh_obj and dh_obj.status_data else {})
-                return jsonify({
-                    "ok": True,
-                    "mac_id": normalized_mac,
-                    "lead": d_obj.lead,
-                    "lan_uid": d_obj.lan_uid,
-                    "agent_uid": d_obj.agent_uid,
-                    "printer_name": d_obj.printer_name,
-                    "ip": d_obj.ip,
-                    "counter": counter or {},
-                    "status": status or {},
-                    "last_seen_at": d_obj.updated_at.isoformat() if d_obj.updated_at else "",
-                })
-
-            p_obj = session.execute(
-                select(Printer)
-                .where(func.upper(Printer.mac_address) == normalized_mac)
-                .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-            if p_obj:
-                counter = dh_obj.counter_data if dh_obj and dh_obj.counter_data else {}
-                status = dh_obj.status_data if dh_obj and dh_obj.status_data else {}
-                return jsonify({
-                    "ok": True,
-                    "mac_id": normalized_mac,
-                    "lead": p_obj.lead,
-                    "lan_uid": p_obj.lan_uid,
-                    "agent_uid": p_obj.agent_uid,
-                    "printer_name": p_obj.printer_name,
-                    "ip": p_obj.ip,
-                    "auth_user": p_obj.auth_user or "",
-                    "auth_password": p_obj.auth_password or "",
-                    "counter": counter or {},
-                    "status": status or {},
-                    "last_seen_at": p_obj.updated_at.isoformat() if p_obj.updated_at else "",
-                })
-
-            if dh_obj:
-                return jsonify({
-                    "ok": True,
-                    "mac_id": normalized_mac,
-                    "lead": dh_obj.lead,
-                    "lan_uid": dh_obj.lan_uid,
-                    "agent_uid": dh_obj.agent_uid,
-                    "printer_name": dh_obj.printer_name,
-                    "ip": dh_obj.ip,
-                    "counter": dh_obj.counter_data or {},
-                    "status": dh_obj.status_data or {},
-                    "last_seen_at": dh_obj.updated_at.isoformat() if dh_obj.updated_at else "",
-                })
-
-        return jsonify({"ok": False, "error": "Device not found for mac_id in database or active agents"}), 404
 
 
     @app.route("/api/public/device/by-macs", methods=["GET", "POST"])
@@ -271,11 +181,20 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         })
 
 
+    @app.route("/webhook/infor_get", methods=["GET", "POST"])
+    @app.route("/api/webhook/infor_get", methods=["GET", "POST"])
     @app.route("/webhook/infor", methods=["GET", "POST"])
     @app.route("/api/webhook/infor", methods=["GET", "POST"])
     @app.route("/api/admin/crm/webhook-url", methods=["GET", "POST"])
     def admin_crm_webhook_url() -> Any:
         from webhook_dispatcher import get_crm_webhook_url, set_crm_webhook_url
+        from webhook_logger import log_webhook_event
+        t0 = time_module.perf_counter()
+        caller_ip = request.headers.get("X-Forwarded-For") or request.remote_addr or ""
+        if "," in caller_ip:
+            caller_ip = caller_ip.split(",")[0].strip()
+        user_agent = request.headers.get("User-Agent", "")
+
         if request.method == "POST":
             body = request.get_json(silent=True) or {}
             # 1. Update webhook URL if url or webhook_url is passed
@@ -283,41 +202,170 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
             if url_val is not None:
                 clean_url = _to_text(url_val).strip()
                 set_crm_webhook_url(session_factory, clean_url)
-                return jsonify({
+                resp_data = {
                     "ok": True,
                     "webhook_url": clean_url,
-                    "endpoint": "/webhook/infor",
-                    "message": f"Webhook destination URL updated to: {clean_url or '(disabled)'}"
-                })
+                    "endpoint": "/webhook/infor_get",
+                    "message": f"Webhook destination URL updated to: {clean_url or '(disabled)'}",
+                }
+                dur = int((time_module.perf_counter() - t0) * 1000)
+                log_webhook_event(
+                    session_factory=session_factory,
+                    endpoint="/webhook/infor_get",
+                    method="POST",
+                    ip_address=caller_ip,
+                    user_agent=user_agent,
+                    request_payload=body,
+                    response_status=200,
+                    response_payload=resp_data,
+                    duration_ms=dur,
+                )
+                return jsonify(resp_data)
 
             # 2. Accept incoming event payload (test/receiver mode)
             event = body.get("event", "device_data_changed")
             mac_id = body.get("mac_id", "")
             LOGGER.info("[WebhookInfor] Received webhook POST event='%s' mac='%s'", event, mac_id)
-            return jsonify({
+            resp_data = {
                 "ok": True,
                 "received": True,
                 "event": event,
                 "mac_id": mac_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }), 200
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_get",
+                method="POST",
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                request_payload=body,
+                response_status=200,
+                response_payload=resp_data,
+                mac_id=mac_id,
+                duration_ms=dur,
+            )
+            return jsonify(resp_data), 200
 
+        # GET method
+        mac_q = _to_text(request.args.get("mac_id") or request.args.get("mac"))
+        all_q = _to_text(request.args.get("all"))
         current_url = get_crm_webhook_url(session_factory)
-        return jsonify({
+
+        # If user queries a specific device by mac_id:
+        if mac_q:
+            clean_mac = _normalize_mac(mac_q)
+            device_infor_row = None
+            counter_row = None
+            status_row = None
+            with session_factory() as session:
+                device_infor_row = session.execute(
+                    select(DeviceInfor).where(DeviceInfor.mac_id == clean_mac)
+                ).scalars().first()
+                counter_row = session.execute(
+                    select(CounterInfor).where(CounterInfor.mac_id == clean_mac).order_by(CounterInfor.timestamp.desc())
+                ).scalars().first()
+                status_row = session.execute(
+                    select(StatusInfor).where(StatusInfor.mac_id == clean_mac).order_by(StatusInfor.timestamp.desc())
+                ).scalars().first()
+
+            p_name = device_infor_row.printer_name if device_infor_row else (counter_row.printer_name if counter_row else "")
+            p_ip = device_infor_row.ip if device_infor_row else (counter_row.ip if counter_row else "")
+            c_data = (counter_row.raw_payload if counter_row and counter_row.raw_payload else (device_infor_row.counter_data if device_infor_row else {})) or {}
+            s_data = (status_row.raw_payload if status_row and status_row.raw_payload else (device_infor_row.status_data if device_infor_row else {})) or {}
+
+            dev_summary = {}
+            if device_infor_row:
+                dev_summary = {
+                    "printer_name": device_infor_row.printer_name or "",
+                    "ip": device_infor_row.ip or "",
+                    "lead": device_infor_row.lead or "",
+                    "lan_uid": device_infor_row.lan_uid or "",
+                    "agent_uid": device_infor_row.agent_uid or "",
+                    "last_counter_at": device_infor_row.last_counter_at.isoformat() if device_infor_row.last_counter_at else "",
+                    "last_status_at": device_infor_row.last_status_at.isoformat() if device_infor_row.last_status_at else "",
+                }
+
+            resp_data = {
+                "ok": True,
+                "endpoint": "/webhook/infor_get",
+                "mac_id": clean_mac,
+                "printer_name": p_name,
+                "ip": p_ip,
+                "device_infor": dev_summary,
+                "counter": c_data,
+                "status": s_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_get",
+                method="GET",
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                query_params=dict(request.args),
+                response_status=200,
+                response_payload=resp_data,
+                mac_id=clean_mac,
+                printer_name=p_name,
+                duration_ms=dur,
+            )
+            return jsonify(resp_data)
+
+        # Standard GET: return webhook config + usage info
+        resp_data = {
             "ok": True,
             "webhook_url": current_url or "",
             "configured": bool(current_url),
-            "endpoint": "/webhook/infor",
-            "description": "CRM Real-time Webhook URL configuration & receiver endpoint",
-        })
+            "endpoint": "/webhook/infor_get",
+            "description": "CRM Real-time Webhook URL configuration & data retrieval endpoint",
+            "usage": {
+                "read_config": "GET /webhook/infor_get",
+                "get_device_infor": "GET /webhook/infor_get?mac_id=<MAC_ADDRESS>",
+                "update_url": "POST /webhook/infor_get with {'url': 'https://your-crm.com/webhook'}",
+                "trigger_test": "POST /webhook/infor_post",
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        dur = int((time_module.perf_counter() - t0) * 1000)
+        log_webhook_event(
+            session_factory=session_factory,
+            endpoint="/webhook/infor_get",
+            method="GET",
+            ip_address=caller_ip,
+            user_agent=user_agent,
+            query_params=dict(request.args),
+            response_status=200,
+            response_payload=resp_data,
+            duration_ms=dur,
+        )
+        return jsonify(resp_data)
 
 
-    @app.route("/webhook/infor/test", methods=["GET", "POST"])
+    @app.route("/webhook/infor_post", methods=["GET", "POST"])
+    @app.route("/api/webhook/infor_post", methods=["GET", "POST"])
+    @app.route("/infor/webhook", methods=["GET", "POST"])
+    @app.route("/api/infor/webhook", methods=["GET", "POST"])
+    @app.route("/infor/push", methods=["GET", "POST"])
+    @app.route("/infor/send", methods=["GET", "POST"])
+    @app.route("/infor/dispatch", methods=["GET", "POST"])
+    @app.route("/infor/trigger", methods=["GET", "POST"])
     @app.route("/webhook/test", methods=["GET", "POST"])
+    @app.route("/api/webhook/test", methods=["GET", "POST"])
+    @app.route("/webhook/infor/test", methods=["GET", "POST"])
     @app.route("/api/admin/crm/test-webhook", methods=["GET", "POST"])
     def admin_crm_test_webhook() -> Any:
         from webhook_dispatcher import get_crm_webhook_url
+        from webhook_logger import log_webhook_event
         import requests
+        t0 = time_module.perf_counter()
+        caller_ip = request.headers.get("X-Forwarded-For") or request.remote_addr or ""
+        if "," in caller_ip:
+            caller_ip = caller_ip.split(",")[0].strip()
+        user_agent = request.headers.get("User-Agent", "")
+
         body = request.get_json(silent=True) or {}
         custom_url = body.get("url") or body.get("webhook_url") or request.args.get("url")
         url = (custom_url or get_crm_webhook_url(session_factory) or "").strip()
@@ -350,15 +398,30 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
         }
 
         if not url:
-            return jsonify({
+            resp_data = {
                 "ok": True,
                 "configured": False,
-                "endpoint": "/webhook/infor/test",
+                "endpoint": "/webhook/infor_post",
                 "status": "not_configured",
-                "message": "Chưa cấu hình URL Webhook CRM đích! Vui lòng vào System Settings (/configs) để nhập URL CRM của bạn hoặc gửi POST /webhook/infor.",
+                "message": "Chưa cấu hình URL Webhook CRM đích! Vui lòng vào System Settings (/configs) để nhập URL CRM của bạn hoặc gửi POST /webhook/infor_get.",
                 "guide": "Cấu hình tại https://agentapi.quanlymay.com/configs mục '🔔 CRM Webhook Settings'. Sau đó bấm lại nút này để bắn test sang CRM.",
                 "sample_payload": test_payload
-            }), 200
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_post",
+                method=request.method,
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                request_payload=body,
+                response_status=200,
+                response_payload=resp_data,
+                mac_id=test_payload["mac_id"],
+                printer_name=test_payload["printer_name"],
+                duration_ms=dur,
+            )
+            return jsonify(resp_data), 200
 
         try:
             resp = requests.post(
@@ -367,362 +430,77 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 headers={"Content-Type": "application/json", "User-Agent": "Goxprint-Webhook-Test/1.0"},
                 timeout=5.0
             )
-            return jsonify({
+            resp_data = {
                 "ok": resp.status_code < 400,
-                "endpoint": "/webhook/infor/test",
+                "endpoint": "/webhook/infor_post",
                 "target_url": url,
                 "status_code": resp.status_code,
                 "message": f"Webhook test sent to {url} (HTTP {resp.status_code})",
                 "response_text": resp.text[:500],
                 "payload_sent": test_payload
-            }), 200
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_post",
+                method=request.method,
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                request_payload=body or test_payload,
+                response_status=resp.status_code,
+                response_payload=resp_data,
+                mac_id=test_payload["mac_id"],
+                printer_name=test_payload["printer_name"],
+                duration_ms=dur,
+            )
+            return jsonify(resp_data), 200
         except requests.exceptions.Timeout:
-            return jsonify({
+            resp_data = {
                 "ok": False,
-                "endpoint": "/webhook/infor/test",
+                "endpoint": "/webhook/infor_post",
                 "target_url": url,
                 "error": f"Connection timed out after 5.0s contacting CRM endpoint: {url}",
                 "payload_sent": test_payload
-            }), 200
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_post",
+                method=request.method,
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                request_payload=body or test_payload,
+                response_status=408,
+                response_payload=resp_data,
+                mac_id=test_payload["mac_id"],
+                printer_name=test_payload["printer_name"],
+                duration_ms=dur,
+            )
+            return jsonify(resp_data), 200
         except Exception as exc:
-            return jsonify({
+            resp_data = {
                 "ok": False,
-                "endpoint": "/webhook/infor/test",
+                "endpoint": "/webhook/infor_post",
                 "target_url": url,
                 "error": f"Failed to dispatch test webhook to {url}: {exc}",
                 "payload_sent": test_payload
-            }), 200
+            }
+            dur = int((time_module.perf_counter() - t0) * 1000)
+            log_webhook_event(
+                session_factory=session_factory,
+                endpoint="/webhook/infor_post",
+                method=request.method,
+                ip_address=caller_ip,
+                user_agent=user_agent,
+                request_payload=body or test_payload,
+                response_status=500,
+                response_payload=resp_data,
+                mac_id=test_payload["mac_id"],
+                printer_name=test_payload["printer_name"],
+                duration_ms=dur,
+            )
+            return jsonify(resp_data), 200
 
-
-    @app.get("/api/public/device/by-mac-now")
-    def public_device_by_mac_now() -> Any:
-        mac_input = _to_text(request.args.get("mac_id") or request.args.get("mac"))
-        if not mac_input:
-            return jsonify({"ok": False, "error": "Missing parameter: mac_id"}), 400
-
-        normalized_mac = _normalize_mac(mac_input)
-        if not normalized_mac:
-            return jsonify({"ok": False, "error": "Invalid mac_id"}), 400
-
-        agent_uid = None
-        ip = None
-        printer_name = None
-        lead_val = None
-        lan_uid_val = None
-
-        from active_agents_registry import ACTIVE_AGENTS, prune_offline_agents
-        from models import DeviceInforHistory
-        prune_offline_agents(timeout_seconds=180)
-        for a_uid, a_info in ACTIVE_AGENTS.items():
-            printers_list = a_info.get("printers_json") or []
-            for dev in printers_list:
-                if not isinstance(dev, dict):
-                    continue
-                p_mac = _normalize_mac(dev.get("mac_address") or dev.get("mac_id"))
-                if p_mac and p_mac == normalized_mac:
-                    agent_uid = a_uid
-                    ip = _to_text(dev.get("ip"))
-                    printer_name = _to_text(dev.get("printer_name") or dev.get("name"))
-                    lead_val = a_info.get("lead", "default")
-                    lan_uid_val = a_info.get("lan_uid", "default")
-                    break
-            if agent_uid:
-                break
-
-        if not agent_uid:
-            with session_factory() as session:
-                printer = session.execute(
-                    select(Printer)
-                    .where(func.upper(Printer.mac_address) == normalized_mac)
-                    .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-                
-                if printer:
-                    agent_uid = printer.agent_uid
-                    ip = printer.ip
-                    printer_name = printer.printer_name
-                else:
-                    row = session.execute(
-                        select(DeviceInfor)
-                        .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
-                        .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                        .limit(1)
-                    ).scalar_one_or_none()
-                    if row:
-                        agent_uid = row.agent_uid
-                        ip = row.ip
-                        printer_name = row.printer_name
-                    else:
-                        dh_row = session.execute(
-                            select(DeviceInforHistory)
-                            .where(func.upper(DeviceInforHistory.mac_id) == normalized_mac)
-                            .order_by(DeviceInforHistory.updated_at.desc(), DeviceInforHistory.id.desc())
-                            .limit(1)
-                        ).scalar_one_or_none()
-                        if dh_row:
-                            agent_uid = dh_row.agent_uid
-                            ip = dh_row.ip
-                            printer_name = dh_row.printer_name
-
-        if not agent_uid:
-            return jsonify({"ok": False, "error": "Device not found in database or active agents"}), 404
-
-        name_lower = (printer_name or "").lower()
-        if "toshiba" in name_lower:
-            printer_type = "toshiba"
-        elif "epson" in name_lower:
-            printer_type = "epson"
-        else:
-            printer_type = "ricoh"
-
-        if not lead_val or not lan_uid_val:
-            with session_factory() as session:
-                agent = session.execute(
-                    select(AgentNode)
-                    .where(AgentNode.agent_uid == agent_uid)
-                    .order_by(AgentNode.is_online.desc(), AgentNode.last_seen_at.desc(), AgentNode.id.desc())
-                    .limit(1)
-                ).scalars().first()
-                if not agent or not agent.is_online:
-                    return jsonify({"ok": False, "error": "Agent managing this device is offline"}), 400
-
-                lead_val = agent.lead
-                lan_uid_val = agent.lan_uid
-
-        code_content = """
-import json
-import subprocess
-from agent.services.api_client import Printer
-
-def resolve_ip(mac, default_ip):
-    cleaned_mac = mac.replace(':', '-').lower()
-    
-    # 1. Check if default_ip is responding and matches MAC
-    try:
-        res = subprocess.run(f"ping -n 1 -w 500 {default_ip}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode == 0:
-            arp_out = subprocess.check_output(f"arp -a {default_ip}", shell=True, timeout=2).decode('ansi', errors='ignore')
-            if cleaned_mac in arp_out.replace(':', '-').lower():
-                return default_ip
-    except:
-        pass
-
-    # 2. Check local ARP table
-    try:
-        out = subprocess.check_output("arp -a", shell=True, timeout=3).decode('ansi', errors='ignore')
-        for line in out.splitlines():
-            if cleaned_mac in line.replace(':', '-').lower():
-                parts = line.split()
-                if parts and len(parts) >= 2:
-                    return parts[0]
-    except:
-        pass
-
-    # 3. Threaded Subnet Sweep Fallback: Ping sweep local subnet to populate ARP table & find new IP
-    try:
-        import socket, concurrent.futures
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_net_ip = s.getsockname()[0]
-        s.close()
-        
-        network_prefix = ".".join(local_net_ip.split(".")[:3])
-        def _quick_ping(target_ip):
-            subprocess.run(f"ping -n 1 -w 200 {target_ip}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-            list(executor.map(_quick_ping, [f"{network_prefix}.{i}" for i in range(1, 255)]))
-            
-        out_after_scan = subprocess.check_output("arp -a", shell=True, timeout=3).decode('ansi', errors='ignore')
-        for line in out_after_scan.splitlines():
-            if cleaned_mac in line.replace(':', '-').lower():
-                parts = line.split()
-                if parts and len(parts) >= 2:
-                    return parts[0]
-    except:
-        pass
-
-    return default_ip
-
-ip = resolve_ip("__MAC__", "__IP__")
-printer_name = "__NAME__"
-mac_address = "__MAC__"
-printer_type = "__TYPE__"
-
-printer = Printer(
-    id=0,
-    name=printer_name,
-    ip=ip,
-    user="",
-    password="",
-    printer_type=printer_type,
-    status="online",
-    mac_address=mac_address,
-)
-
-try:
-    collector = bridge._collector_service_for(printer)
-    counter_payload = collector.process_counter(printer, should_post=False)
-    status_payload = collector.process_status(printer, should_post=False)
-    counter_data = counter_payload.get("counter_data", {})
-    status_data = status_payload.get("status_data", {})
-    
-    payload = {
-        "ok": True,
-        "counter": counter_data,
-        "status": status_data,
-        "printer_name": counter_payload.get("printer_name", printer.name),
-        "ip": printer.ip,
-        "mac_id": printer.mac_address,
-    }
-except Exception as e:
-    payload = {
-        "ok": False,
-        "error": str(e)
-    }
-
-context["result_payload"] = payload
-""".replace("__MAC__", normalized_mac)\
-   .replace("__IP__", ip)\
-   .replace("__NAME__", printer_name)\
-   .replace("__TYPE__", printer_type)
-
-        from models import PrinterControlCommand
-        from sqlalchemy import delete
-        cmd_params = {
-            "action": "exec_utility",
-            "command": "query_device_now",
-            "command_content": code_content,
-            "is_auto": True
-        }
-        
-        command_id = None
-        try:
-            requested_at = datetime.now(timezone.utc)
-            with session_factory() as session:
-                command = PrinterControlCommand(
-                    printer_id=0,
-                    lead=lead_val,
-                    lan_uid=lan_uid_val,
-                    agent_uid=agent_uid,
-                    printer_name="",
-                    ip="",
-                    command_type="trigger_utility",
-                    command_params=json.dumps(cmd_params),
-                    status="pending",
-                    requested_at=requested_at,
-                )
-                session.add(command)
-                session.commit()
-                command_id = int(command.id)
-
-            success = False
-            result_payload_str = ""
-            import time
-            for _ in range(100):
-                time.sleep(0.2)
-                with session_factory() as session:
-                    cmd_status = session.execute(
-                        select(PrinterControlCommand).where(PrinterControlCommand.id == command_id)
-                    ).scalars().first()
-                    if cmd_status:
-                        if cmd_status.status == "success":
-                            success = True
-                            result_payload_str = cmd_status.error_message or ""
-                            break
-                        elif cmd_status.status == "failed":
-                            success = False
-                            result_payload_str = cmd_status.error_message or "Agent failed execution"
-                            break
-
-            if not success:
-                return jsonify({"ok": False, "error": f"Timeout or failed waiting for Agent response: {result_payload_str}"}), 504
-
-            res_dict = json.loads(result_payload_str)
-            if not res_dict.get("ok", False):
-                return jsonify({"ok": False, "error": res_dict.get("error", "Unknown error querying printer")}), 500
-            
-            with session_factory() as session:
-                row = session.execute(
-                    select(DeviceInfor)
-                    .where(func.upper(DeviceInfor.mac_id) == normalized_mac)
-                    .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-                now_dt = datetime.now(timezone.utc)
-                if row:
-                    row.counter_data = res_dict.get("counter")
-                    row.status_data = res_dict.get("status")
-                    if res_dict.get("ip"):
-                        row.ip = res_dict.get("ip")
-                    row.updated_at = now_dt
-                else:
-                    row = DeviceInfor(
-                        lead=lead_val or "default",
-                        lan_uid=lan_uid_val or "default",
-                        agent_uid=agent_uid or "",
-                        mac_id=normalized_mac,
-                        ip=res_dict.get("ip") or ip or "",
-                        printer_name=printer_name or "Photocopy",
-                        counter_data=res_dict.get("counter") or {},
-                        status_data=res_dict.get("status") or {},
-                        created_at=now_dt,
-                        updated_at=now_dt,
-                    )
-                    session.add(row)
-
-                dh_new = DeviceInforHistory(
-                    lead=lead_val or "default",
-                    lan_uid=lan_uid_val or "default",
-                    agent_uid=agent_uid or "",
-                    machine_uid=normalized_mac,
-                    mac_id=normalized_mac,
-                    ip=res_dict.get("ip") or ip or "",
-                    printer_name=printer_name or "Photocopy",
-                    counter_data=res_dict.get("counter") or {},
-                    status_data=res_dict.get("status") or {},
-                    created_at=now_dt,
-                    updated_at=now_dt,
-                )
-                session.add(dh_new)
-
-                printer_row = session.execute(
-                    select(Printer)
-                    .where(func.upper(Printer.mac_address) == normalized_mac)
-                    .order_by(Printer.updated_at.desc(), Printer.id.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-                if printer_row and res_dict.get("ip"):
-                    printer_row.ip = res_dict.get("ip")
-                    printer_row.updated_at = now_dt
-
-                session.commit()
-
-            return jsonify({
-                "ok": True,
-                "mac_id": normalized_mac,
-                "lead": lead_val,
-                "lan_uid": lan_uid_val,
-                "agent_uid": agent_uid,
-                "printer_name": res_dict.get("printer_name"),
-                "ip": res_dict.get("ip"),
-                "counter": res_dict.get("counter"),
-                "status": res_dict.get("status"),
-                "counter_data": res_dict.get("counter"),
-                "status_data": res_dict.get("status"),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Failed parsing payload: {e}. Raw: {result_payload_str}"}), 500
-        finally:
-            if command_id:
-                try:
-                    with session_factory() as session:
-                        session.execute(delete(PrinterControlCommand).where(PrinterControlCommand.id == command_id))
-                        session.commit()
-                except Exception as del_err:
-                    LOGGER.warning("Could not delete transient query_device_now command %s: %s", command_id, del_err)
 
     @app.get("/api/public/device/online-status")
     def public_device_online_status() -> Any:

@@ -1235,11 +1235,9 @@ function buildApiTestUrl(key, ctx) {
   if (key === "machinelist") return "/machinelist/";
   if (key === "networklist") return "/networklist/";
   if (key === "infor") return "/api/infor/list";
-  if (key === "by-mac") return mac ? `/api/public/device/by-mac?mac_id=${mac}` : "";
   if (key === "by-macs") return `/api/public/device/by-macs`;
-  if (key === "crm-webhook-url" || key === "webhook-infor") return `/webhook/infor`;
-  if (key === "crm-test-webhook" || key === "webhook-test") return `/webhook/infor/test`;
-  if (key === "by-mac-now") return mac ? `/api/public/device/by-mac-now?mac_id=${mac}` : "";
+  if (key === "crm-webhook-url" || key === "webhook-infor") return `/webhook/infor_get`;
+  if (key === "crm-test-webhook" || key === "webhook-test" || key === "infor-webhook") return `/webhook/infor_post`;
   if (key === "ip-public") return "/api/public/ip/public";
   if (key === "ip-workstation") {
     if (ctx.agent_uid) return `/api/public/ip/workstation?agent_uid=${encodeURIComponent(ctx.agent_uid)}`;
@@ -1500,9 +1498,6 @@ async function runApiTest(key, ctx) {
       email: "test-scan@example.com",
       filename: filename,
     };
-  } else if (key === "by-mac-now") {
-    // GET request, no body or prompt needed
-    method = "GET";
   } else if (key === "camera-record") {
     const mac_id = window.prompt("Nhập MAC ID của camera (ví dụ: aabbccddeeff):", ctx.mac_id || "");
     if (!mac_id) {
@@ -1791,7 +1786,7 @@ async function initApiTests(resetStatuses = true) {
   const buttons = Array.from(document.querySelectorAll(".api-test-btn"));
   const allBtn = qs("api-test-all-btn");
   const keys = [
-    "machinelist", "networklist", "infor", "by-mac", "by-macs", "webhook-infor", "webhook-test", "crm-webhook-url", "by-lan", "ip-public", "ip-workstation", "all", "agents-list", "devices-list",
+    "machinelist", "networklist", "infor", "by-macs", "webhook-infor", "infor-webhook", "webhook-test", "crm-webhook-url", "by-lan", "ip-public", "ip-workstation", "all", "agents-list", "devices-list",
     "workspaces-list", "workspaces-create", "workspaces-update", "workspaces-delete",
     "locations-list", "locations-create", "locations-update", "locations-delete",
     "materials-list", "materials-create", "materials-update", "materials-delete",
@@ -1804,7 +1799,7 @@ async function initApiTests(resetStatuses = true) {
   const manualOnlyKeys = [
     "devices-unlock", "devices-lock", "ftp-queue-create", "ftp-queue-update", "ftp-queue-delete",
     "scans-files-delete", "agent-settings", "agent-utility-devices", "agent-utility-open-folder",
-    "agent-utility-dxdiag", "agent-utility-change-ip", "by-mac-now", "camera-record"
+    "agent-utility-dxdiag", "agent-utility-change-ip", "camera-record"
   ];
   if (resetStatuses) {
     [...keys, ...manualOnlyKeys].forEach((key) => setApiTestStatus(key, "idle", "-"));
