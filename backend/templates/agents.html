@@ -468,7 +468,7 @@
               <th style="width: 160px;">Thời gian ghi nhận</th>
               <th>Máy trạm / Hostname</th>
               <th>Agent UID</th>
-              <th>Local IP / MAC</th>
+              <th>IP (LAN / Public) & MAC</th>
               <th>Sự kiện</th>
               <th>Lần trước đó (Last Seen)</th>
               <th>Phiên bản / Mode</th>
@@ -736,7 +736,7 @@
     const filtered = onlineAgents.filter(a => {
       if (selectedLan && a.lan_uid !== selectedLan) return false;
       if (query) {
-        const text = `${a.hostname} ${a.agent_uid} ${a.local_ip} ${a.local_mac} ${a.lan_name}`.toLowerCase();
+        const text = `${a.hostname} ${a.agent_uid} ${a.local_ip} ${a.public_ip || ''} ${a.local_mac} ${a.lan_name}`.toLowerCase();
         if (!text.includes(query)) return false;
       }
       return true;
@@ -810,8 +810,15 @@
           <!-- Mạng LAN & IP -->
           <td>
             <div>
-              <div style="font-weight: 600; color: #0f172a; font-family: monospace; font-size: 0.88rem;">
-                ${escapeHtml(a.local_ip || '-')}
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="font-weight: 600; color: #0f172a; font-family: monospace; font-size: 0.88rem;" title="IP Cục bộ (LAN)">
+                  ${escapeHtml(a.local_ip || '-')}
+                </span>
+                ${a.public_ip ? `
+                  <span class="badge" style="background: #e0f2fe; color: #0369a1; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
+                    🌍 ${escapeHtml(a.public_ip)}
+                  </span>
+                ` : ''}
               </div>
               <div style="font-size: 0.72rem; color: #64748b; font-family: monospace;">
                 MAC: ${escapeHtml(a.local_mac || '—')}
@@ -888,7 +895,14 @@
             <div style="font-family: monospace; font-size: 0.72rem; color: #94a3b8;">UID: ${escapeHtml(a.agent_uid)}</div>
           </td>
           <td>
-            <div style="font-family: monospace; font-weight: 600;">${escapeHtml(a.local_ip || '—')}</div>
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="font-family: monospace; font-weight: 600;">${escapeHtml(a.local_ip || '—')}</span>
+              ${a.public_ip ? `
+                <span class="badge" style="background: #f1f5f9; color: #475569; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #e2e8f0;" title="IP Công cộng (WAN / Public IP)">
+                  🌍 ${escapeHtml(a.public_ip)}
+                </span>
+              ` : ''}
+            </div>
             <div style="font-family: monospace; font-size: 0.72rem; color: #94a3b8;">${escapeHtml(a.local_mac || '—')}</div>
           </td>
           <td>
@@ -966,7 +980,14 @@
             ${escapeHtml(log.agent_uid)}
           </td>
           <td style="font-family: monospace; font-size: 0.8rem;">
-            ${escapeHtml(log.local_ip || '-')}
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span>${escapeHtml(log.local_ip || '-')}</span>
+              ${log.public_ip ? `
+                <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.7rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
+                  🌍 ${escapeHtml(log.public_ip)}
+                </span>
+              ` : ''}
+            </div>
             ${log.local_mac ? `<span style="display: block; font-size: 0.7rem; color: #94a3b8;">${escapeHtml(log.local_mac)}</span>` : ''}
           </td>
           <td>

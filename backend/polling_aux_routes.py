@@ -207,6 +207,7 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
                             hostname=agent.hostname or "",
                             local_ip=agent.local_ip or "",
                             local_mac=agent.local_mac or "",
+                            public_ip=agent.public_ip or client_pub_ip or "",
                             app_version=agent.app_version or "",
                             run_mode=agent.run_mode or "web",
                             web_port=int(agent.web_port or 9173),

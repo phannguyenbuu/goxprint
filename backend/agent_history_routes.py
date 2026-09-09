@@ -33,6 +33,7 @@ from serializers import (
     _upsert_lan_and_agent,
 )
 from models import AgentNode, LanSite, Printer, AgentPresenceLog, PrinterControlCommand, WebhookLog
+from active_agents_registry import ACTIVE_AGENTS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -238,6 +239,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     "hostname": agent.hostname,
                     "local_ip": agent.local_ip,
                     "local_mac": agent.local_mac,
+                    "public_ip": _to_text(getattr(agent, "public_ip", "")) or (ACTIVE_AGENTS.get(agent.agent_uid, {}).get("public_ip", "") if "ACTIVE_AGENTS" in globals() else ""),
                     "app_version": agent.app_version,
                     "run_mode": agent.run_mode or "web",
                     "web_port": port,
@@ -299,6 +301,11 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             elif status == "offline":
                 stmt = stmt.where(AgentPresenceLog.is_online.is_(False))
             rows = session.execute(stmt.limit(limit)).scalars().all()
+            agent_pub_ips: dict[str, str] = {}
+            for ag_uid, ag_pub in session.execute(select(AgentNode.agent_uid, AgentNode.public_ip)).all():
+                if ag_uid and ag_pub:
+                    agent_pub_ips[str(ag_uid)] = str(ag_pub)
+
         return jsonify(
             {
                 "rows": [
@@ -310,6 +317,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         "hostname": row.hostname,
                         "local_ip": row.local_ip,
                         "local_mac": row.local_mac,
+                        "public_ip": _to_text(getattr(row, "public_ip", "")) or agent_pub_ips.get(str(row.agent_uid), ""),
                         "app_version": row.app_version,
                         "run_mode": row.run_mode,
                         "web_port": int(row.web_port or 9173),

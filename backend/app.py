@@ -1157,6 +1157,7 @@ def create_app() -> Flask:
                         hostname=agent.hostname or "",
                         local_ip=agent.local_ip or "",
                         local_mac=agent.local_mac or "",
+                        public_ip=getattr(agent, "public_ip", "") or "",
                         app_version=agent.app_version or "",
                         run_mode=agent.run_mode or "web",
                         web_port=int(agent.web_port or 9173),

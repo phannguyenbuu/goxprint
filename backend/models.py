@@ -163,6 +163,7 @@ class AgentPresenceLog(Base):
     hostname: Mapped[str] = mapped_column(String(255), default="")
     local_ip: Mapped[str] = mapped_column(String(64), default="")
     local_mac: Mapped[str] = mapped_column(String(64), default="")
+    public_ip: Mapped[str | None] = mapped_column(String(64), default="", nullable=True)
     app_version: Mapped[str] = mapped_column(String(64), default="")
     run_mode: Mapped[str] = mapped_column(String(32), default="web")
     web_port: Mapped[int] = mapped_column(Integer, default=9173)
