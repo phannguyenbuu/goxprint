@@ -223,80 +223,92 @@ target_ip = "${cleanIp}".strip()
 print(f"=== PROBING SINGLE PRINTER DIRECTLY: {target_ip} ===")
 
 if not target_ip or target_ip == "__TARGET_IP__":
-    print("Error: Target IP not specified")
-    sys.exit(1)
+    print("[-] Error: Target IP not specified or invalid.")
+    printer_info = {
+        "ip": "",
+        "mac_address": "",
+        "mac_id": "",
+        "printer_name": "Unknown",
+        "printer_type": "generic",
+        "open_ports": [],
+        "is_online": False,
+        "error": "Target IP not specified",
+    }
+    print("__PRINTER_INFO_JSON_START__")
+    print(json.dumps(printer_info))
+    print("__PRINTER_INFO_JSON_END__")
+else:
+    def check_tcp(ip, port, timeout=1.5):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            res = s.connect_ex((ip, port))
+            s.close()
+            return res == 0
+        except Exception:
+            return False
 
-def check_tcp(ip, port, timeout=1.5):
+    open_ports = []
+    for p in [80, 443, 9100, 161, 515, 631]:
+        if check_tcp(target_ip, p):
+            open_ports.append(p)
+
+    print(f"Target IP {target_ip} open ports: {open_ports}")
+
+    mac_address = ""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        res = s.connect_ex((ip, port))
-        s.close()
-        return res == 0
-    except Exception:
-        return False
+        arp_out = subprocess.getoutput(f"arp -a {target_ip}")
+        mac_match = re.search(r"([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})", arp_out)
+        if mac_match:
+            mac_address = mac_match.group(1).upper().replace('-', ':')
+    except Exception as e:
+        print(f"ARP lookup error: {e}")
 
-open_ports = []
-for p in [80, 443, 9100, 161, 515, 631]:
-    if check_tcp(target_ip, p):
-        open_ports.append(p)
+    print(f"MAC Address: {mac_address or 'Unknown'}")
 
-print(f"Target IP {target_ip} open ports: {open_ports}")
+    printer_name = f"Printer ({target_ip})"
+    printer_type = "generic"
 
-mac_address = ""
-try:
-    arp_out = subprocess.getoutput(f"arp -a {target_ip}")
-    mac_match = re.search(r"([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})", arp_out)
-    if mac_match:
-        mac_address = mac_match.group(1).upper().replace('-', ':')
-except Exception as e:
-    print(f"ARP lookup error: {e}")
+    try:
+        import urllib.request
+        url = f"http://{target_ip}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            html = resp.read().decode('utf-8', errors='ignore').lower()
+            if "ricoh" in html:
+                printer_type = "ricoh"
+                printer_name = f"Ricoh Photocopy ({target_ip})"
+            elif "toshiba" in html:
+                printer_type = "toshiba"
+                printer_name = f"Toshiba Photocopy ({target_ip})"
+            elif "fuji" in html or "xerox" in html:
+                printer_type = "fujifilm"
+                printer_name = f"Fuji Xerox ({target_ip})"
+            elif "canon" in html:
+                printer_type = "canon"
+                printer_name = f"Canon Printer ({target_ip})"
+            elif "epson" in html:
+                printer_type = "epson"
+                printer_name = f"Epson Printer ({target_ip})"
+            elif "hp" in html or "hewlett" in html:
+                printer_type = "hp"
+                printer_name = f"HP Printer ({target_ip})"
+    except Exception as http_err:
+        print(f"HTTP probe note: {http_err}")
 
-print(f"MAC Address: {mac_address or 'Unknown'}")
+    printer_info = {
+        "ip": target_ip,
+        "mac_address": mac_address,
+        "mac_id": mac_address,
+        "printer_name": printer_name,
+        "printer_type": printer_type,
+        "open_ports": open_ports,
+        "is_online": len(open_ports) > 0 or bool(mac_address)
+    }
 
-printer_name = f"Printer ({target_ip})"
-printer_type = "generic"
-
-try:
-    import urllib.request
-    url = f"http://{target_ip}"
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=3) as resp:
-        html = resp.read().decode('utf-8', errors='ignore').lower()
-        if "ricoh" in html:
-            printer_type = "ricoh"
-            printer_name = f"Ricoh Photocopy ({target_ip})"
-        elif "toshiba" in html:
-            printer_type = "toshiba"
-            printer_name = f"Toshiba Photocopy ({target_ip})"
-        elif "fuji" in html or "xerox" in html:
-            printer_type = "fujifilm"
-            printer_name = f"Fuji Xerox ({target_ip})"
-        elif "canon" in html:
-            printer_type = "canon"
-            printer_name = f"Canon Printer ({target_ip})"
-        elif "epson" in html:
-            printer_type = "epson"
-            printer_name = f"Epson Printer ({target_ip})"
-        elif "hp" in html or "hewlett" in html:
-            printer_type = "hp"
-            printer_name = f"HP Printer ({target_ip})"
-except Exception as http_err:
-    print(f"HTTP probe note: {http_err}")
-
-printer_info = {
-    "ip": target_ip,
-    "mac_address": mac_address,
-    "mac_id": mac_address,
-    "printer_name": printer_name,
-    "printer_type": printer_type,
-    "open_ports": open_ports,
-    "is_online": len(open_ports) > 0 or bool(mac_address)
-}
-
-print("__PRINTER_INFO_JSON_START__")
-print(json.dumps(printer_info))
-print("__PRINTER_INFO_JSON_END__")
+    print("__PRINTER_INFO_JSON_START__")
+    print(json.dumps(printer_info))
+    print("__PRINTER_INFO_JSON_END__")
 `;
 
     try {
@@ -447,7 +459,19 @@ print("__PRINTER_INFO_JSON_END__")
 
         {/* Public IP LAN Input filter with Enter & Plane button */}
         <div style={styles.filterBar}>
-          <label style={styles.filterLabel}>🌐 IP Public LAN:</label>
+          <label
+            onClick={() => {
+              if (myClientIp) {
+                setInputIpDraft(myClientIp);
+                handleApplyPublicIp(myClientIp);
+                inputIpRef.current?.focus();
+              }
+            }}
+            style={{ ...styles.filterLabel, cursor: myClientIp ? 'pointer' : 'default' }}
+            title={myClientIp ? `Click để chọn IP Public mạng này: ${myClientIp}` : undefined}
+          >
+            🌐 IP Public LAN:
+          </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '420px' }}>
             <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
               <input
@@ -455,6 +479,12 @@ print("__PRINTER_INFO_JSON_END__")
                 type="text"
                 value={inputIpDraft}
                 onChange={(e) => setInputIpDraft(e.target.value)}
+                onClick={() => {
+                  if (!inputIpDraft && myClientIp) {
+                    setInputIpDraft(myClientIp);
+                    handleApplyPublicIp(myClientIp);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     handleApplyPublicIp(inputIpDraft);
@@ -464,8 +494,8 @@ print("__PRINTER_INFO_JSON_END__")
                 style={{
                   width: '100%',
                   padding: !isDirectIpMode
-                    ? ((selectedPublicIp || inputIpDraft) ? '8px 74px 8px 12px' : '8px 42px 8px 12px')
-                    : ((selectedPublicIp || inputIpDraft) ? '8px 40px 8px 12px' : '8px 12px 8px 12px'),
+                    ? ((selectedPublicIp || inputIpDraft || myClientIp) ? '8px 74px 8px 12px' : '8px 42px 8px 12px')
+                    : ((selectedPublicIp || inputIpDraft || myClientIp) ? '8px 40px 8px 12px' : '8px 12px 8px 12px'),
                   fontSize: '0.88rem',
                   borderRadius: '8px',
                   border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -476,19 +506,28 @@ print("__PRINTER_INFO_JSON_END__")
                   transition: 'padding 0.2s',
                 }}
               />
-              {(selectedPublicIp || inputIpDraft) && (
+              {(selectedPublicIp || inputIpDraft || myClientIp) && (
                 <button
                   onClick={() => {
-                    setInputIpDraft('');
-                    handleApplyPublicIp('');
+                    if (myClientIp && inputIpDraft !== myClientIp) {
+                      setInputIpDraft(myClientIp);
+                      handleApplyPublicIp(myClientIp);
+                    } else {
+                      setInputIpDraft('');
+                      handleApplyPublicIp('');
+                    }
                     inputIpRef.current?.focus();
                   }}
-                  title="Xóa IP Public"
+                  title={
+                    myClientIp && inputIpDraft !== myClientIp
+                      ? `Đặt về IP Public mạng này (${myClientIp})`
+                      : "Xóa IP Public"
+                  }
                   style={{
                     position: 'absolute',
                     right: !isDirectIpMode ? '40px' : '8px',
                     background: 'transparent',
-                    color: '#ef4444',
+                    color: (myClientIp && !inputIpDraft) ? '#38bdf8' : '#ef4444',
                     border: 'none',
                     boxShadow: 'none',
                     width: '24px',
@@ -504,7 +543,7 @@ print("__PRINTER_INFO_JSON_END__")
                     transition: 'all 0.2s',
                   }}
                 >
-                  ✕
+                  {(myClientIp && !inputIpDraft) ? '📍' : '✕'}
                 </button>
               )}
               {!isDirectIpMode && (

@@ -221,80 +221,92 @@ target_ip = "__TARGET_IP__".strip()
 print(f"=== PROBING SINGLE PRINTER DIRECTLY: {target_ip} ===")
 
 if not target_ip or target_ip == "__TARGET_IP__":
-    print("Error: Target IP not specified")
-    sys.exit(1)
+    print("[-] Error: Target IP not specified or invalid.")
+    printer_info = {
+        "ip": "",
+        "mac_address": "",
+        "mac_id": "",
+        "printer_name": "Unknown",
+        "printer_type": "generic",
+        "open_ports": [],
+        "is_online": False,
+        "error": "Target IP not specified",
+    }
+    print("__PRINTER_INFO_JSON_START__")
+    print(json.dumps(printer_info))
+    print("__PRINTER_INFO_JSON_END__")
+else:
+    def check_tcp(ip, port, timeout=1.5):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            res = s.connect_ex((ip, port))
+            s.close()
+            return res == 0
+        except Exception:
+            return False
 
-def check_tcp(ip, port, timeout=1.5):
+    open_ports = []
+    for p in [80, 443, 9100, 161, 515, 631]:
+        if check_tcp(target_ip, p):
+            open_ports.append(p)
+
+    print(f"Target IP {target_ip} open ports: {open_ports}")
+
+    mac_address = ""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        res = s.connect_ex((ip, port))
-        s.close()
-        return res == 0
-    except Exception:
-        return False
+        arp_out = subprocess.getoutput(f"arp -a {target_ip}")
+        mac_match = re.search(r"([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})", arp_out)
+        if mac_match:
+            mac_address = mac_match.group(1).upper().replace('-', ':')
+    except Exception as e:
+        print(f"ARP lookup error: {e}")
 
-open_ports = []
-for p in [80, 443, 9100, 161, 515, 631]:
-    if check_tcp(target_ip, p):
-        open_ports.append(p)
+    print(f"MAC Address: {mac_address or 'Unknown'}")
 
-print(f"Target IP {target_ip} open ports: {open_ports}")
+    printer_name = f"Printer ({target_ip})"
+    printer_type = "generic"
 
-mac_address = ""
-try:
-    arp_out = subprocess.getoutput(f"arp -a {target_ip}")
-    mac_match = re.search(r"([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})", arp_out)
-    if mac_match:
-        mac_address = mac_match.group(1).upper().replace('-', ':')
-except Exception as e:
-    print(f"ARP lookup error: {e}")
+    try:
+        import urllib.request
+        url = f"http://{target_ip}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            html = resp.read().decode('utf-8', errors='ignore').lower()
+            if "ricoh" in html:
+                printer_type = "ricoh"
+                printer_name = f"Ricoh Photocopy ({target_ip})"
+            elif "toshiba" in html:
+                printer_type = "toshiba"
+                printer_name = f"Toshiba Photocopy ({target_ip})"
+            elif "fuji" in html or "xerox" in html:
+                printer_type = "fujifilm"
+                printer_name = f"Fuji Xerox ({target_ip})"
+            elif "canon" in html:
+                printer_type = "canon"
+                printer_name = f"Canon Printer ({target_ip})"
+            elif "epson" in html:
+                printer_type = "epson"
+                printer_name = f"Epson Printer ({target_ip})"
+            elif "hp" in html or "hewlett" in html:
+                printer_type = "hp"
+                printer_name = f"HP Printer ({target_ip})"
+    except Exception as http_err:
+        print(f"HTTP probe note: {http_err}")
 
-print(f"MAC Address: {mac_address or 'Unknown'}")
+    printer_info = {
+        "ip": target_ip,
+        "mac_address": mac_address,
+        "mac_id": mac_address,
+        "printer_name": printer_name,
+        "printer_type": printer_type,
+        "open_ports": open_ports,
+        "is_online": len(open_ports) > 0 or bool(mac_address)
+    }
 
-printer_name = f"Printer ({target_ip})"
-printer_type = "generic"
-
-try:
-    import urllib.request
-    url = f"http://{target_ip}"
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=3) as resp:
-        html = resp.read().decode('utf-8', errors='ignore').lower()
-        if "ricoh" in html:
-            printer_type = "ricoh"
-            printer_name = f"Ricoh Photocopy ({target_ip})"
-        elif "toshiba" in html:
-            printer_type = "toshiba"
-            printer_name = f"Toshiba Photocopy ({target_ip})"
-        elif "fuji" in html or "xerox" in html:
-            printer_type = "fujifilm"
-            printer_name = f"Fuji Xerox ({target_ip})"
-        elif "canon" in html:
-            printer_type = "canon"
-            printer_name = f"Canon Printer ({target_ip})"
-        elif "epson" in html:
-            printer_type = "epson"
-            printer_name = f"Epson Printer ({target_ip})"
-        elif "hp" in html or "hewlett" in html:
-            printer_type = "hp"
-            printer_name = f"HP Printer ({target_ip})"
-except Exception as http_err:
-    print(f"HTTP probe note: {http_err}")
-
-printer_info = {
-    "ip": target_ip,
-    "mac_address": mac_address,
-    "mac_id": mac_address,
-    "printer_name": printer_name,
-    "printer_type": printer_type,
-    "open_ports": open_ports,
-    "is_online": len(open_ports) > 0 or bool(mac_address)
-}
-
-print("__PRINTER_INFO_JSON_START__")
-print(json.dumps(printer_info))
-print("__PRINTER_INFO_JSON_END__")
+    print("__PRINTER_INFO_JSON_START__")
+    print(json.dumps(printer_info))
+    print("__PRINTER_INFO_JSON_END__")
 """,
 }
 
@@ -423,6 +435,8 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
             return jsonify({"ok": False, "error": f"Không tìm thấy nội dung thực thi hợp lệ cho lệnh '{command}'"}), 400
 
         target_ip = str(body.get("printer_ip") or body.get("ip") or body.get("target_ip") or "").strip()
+        if command == "probe_single_printer" and not target_ip:
+            return jsonify({"ok": False, "error": "Chưa chỉ định địa chỉ IP máy in để probe"}), 400
         target_mac = _normalize_mac(body.get("mac_id") or body.get("mac_address") or body.get("target_mac") or "")
         target_user = str(body.get("auth_user") or body.get("user") or body.get("target_user") or "").strip()
         raw_pass = body.get("auth_password") if body.get("auth_password") is not None else body.get("password", body.get("target_pass", ""))
