@@ -157,20 +157,383 @@ print("Opened https://printagentx.com in default browser.")
 print("Triggering emergency exit/restart...")
 os._exit(0)
 """,
-    "create_scan_shortcut": """import os, sys
-try:
-    import win32com.client
-    desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
-    path = os.path.join(desktop, "Scan Files.lnk")
-    target = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
-    os.makedirs(target, exist_ok=True)
-    shell = win32com.client.Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortCut(path)
-    shortcut.TargetPath = target
-    shortcut.save()
-    print("Desktop shortcut created successfully.")
-except Exception as e:
-    print(f"Error creating shortcut: {e}")
+    "create_scan_shortcut": """import os, sys, subprocess, pathlib
+
+def get_real_desktop_path() -> str:
+    try:
+        import winreg
+        key_path = r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            val, _ = winreg.QueryValueEx(key, "Desktop")
+            expanded = os.path.expandvars(val)
+            if os.path.exists(expanded):
+                return expanded
+    except Exception:
+        pass
+
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"]
+        res = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=flags)
+        p = res.stdout.strip()
+        if p and os.path.exists(p):
+            return p
+    except Exception:
+        pass
+
+    user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
+    onedrive_desktop = os.path.join(user_prof, "OneDrive", "Desktop")
+    if os.path.exists(onedrive_desktop):
+        return onedrive_desktop
+
+    default_desktop = os.path.join(user_prof, "Desktop")
+    os.makedirs(default_desktop, exist_ok=True)
+    return default_desktop
+
+ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+os.makedirs(ftp_root, exist_ok=True)
+
+raw_target = "__FOLDER_NAME__".strip()
+if raw_target in ["__FOLDER_NAME__", "__TARGET_FOLDER__", "__TARGET_NAME__"]:
+    raw_target = ""
+clean_name = raw_target
+for ch in r'\\/:*?"<>|':
+    clean_name = clean_name.replace(ch, '')
+clean_name = clean_name.strip()
+
+if clean_name:
+    target_dir = os.path.join(ftp_root, clean_name)
+    os.makedirs(target_dir, exist_ok=True)
+    shortcut_filename = f"Scan - {clean_name}.lnk"
+else:
+    target_dir = ftp_root
+    shortcut_filename = "Thu muc Scan (GoPrinx).lnk"
+
+desktop_dir = get_real_desktop_path()
+shortcut_path = os.path.join(desktop_dir, shortcut_filename)
+
+safe_shortcut = shortcut_path.replace("'", "''")
+safe_target = target_dir.replace("'", "''")
+ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_shortcut}'); $s.TargetPath = '{safe_target}'; $s.WorkingDirectory = '{safe_target}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
+
+flags = 0x08000000 if sys.platform == "win32" else 0
+res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
+
+if os.path.exists(shortcut_path):
+    msg = f"Đã tạo thành công Shortcut '{shortcut_filename}' ngoài Desktop!\\n- Vị trí Desktop: {desktop_dir}\\n- Thư mục đích: {target_dir}"
+    print(msg)
+else:
+    err = res.stderr or res.stdout or "Không rõ nguyên nhân"
+    msg = f"Không thể tạo Shortcut ngoài Desktop. Lỗi: {err}"
+    print(msg)
+
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
+""",
+    "create_desktop_shortcut": """import os, sys, subprocess, pathlib
+
+def get_real_desktop_path() -> str:
+    try:
+        import winreg
+        key_path = r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            val, _ = winreg.QueryValueEx(key, "Desktop")
+            expanded = os.path.expandvars(val)
+            if os.path.exists(expanded):
+                return expanded
+    except Exception:
+        pass
+
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"]
+        res = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=flags)
+        p = res.stdout.strip()
+        if p and os.path.exists(p):
+            return p
+    except Exception:
+        pass
+
+    user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
+    onedrive_desktop = os.path.join(user_prof, "OneDrive", "Desktop")
+    if os.path.exists(onedrive_desktop):
+        return onedrive_desktop
+
+    default_desktop = os.path.join(user_prof, "Desktop")
+    os.makedirs(default_desktop, exist_ok=True)
+    return default_desktop
+
+ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+os.makedirs(ftp_root, exist_ok=True)
+
+raw_target = "__FOLDER_NAME__".strip()
+if raw_target in ["__FOLDER_NAME__", "__TARGET_FOLDER__", "__TARGET_NAME__"]:
+    raw_target = ""
+clean_name = raw_target
+for ch in r'\\/:*?"<>|':
+    clean_name = clean_name.replace(ch, '')
+clean_name = clean_name.strip()
+
+if clean_name:
+    target_dir = os.path.join(ftp_root, clean_name)
+    os.makedirs(target_dir, exist_ok=True)
+    shortcut_filename = f"Scan - {clean_name}.lnk"
+else:
+    target_dir = ftp_root
+    shortcut_filename = "Thu muc Scan (GoPrinx).lnk"
+
+desktop_dir = get_real_desktop_path()
+shortcut_path = os.path.join(desktop_dir, shortcut_filename)
+
+safe_shortcut = shortcut_path.replace("'", "''")
+safe_target = target_dir.replace("'", "''")
+ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_shortcut}'); $s.TargetPath = '{safe_target}'; $s.WorkingDirectory = '{safe_target}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
+
+flags = 0x08000000 if sys.platform == "win32" else 0
+res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
+
+if os.path.exists(shortcut_path):
+    msg = f"Đã tạo thành công Shortcut '{shortcut_filename}' ngoài Desktop!\\n- Vị trí Desktop: {desktop_dir}\\n- Thư mục đích: {target_dir}"
+    print(msg)
+else:
+    err = res.stderr or res.stdout or "Không rõ nguyên nhân"
+    msg = f"Không thể tạo Shortcut ngoài Desktop. Lỗi: {err}"
+    print(msg)
+
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
+""",
+    "create_ftp_folder": """import os, sys
+
+ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+os.makedirs(ftp_root, exist_ok=True)
+
+raw_target = "__FOLDER_NAME__".strip()
+if raw_target in ["__FOLDER_NAME__", "__TARGET_FOLDER__", "__TARGET_NAME__"]:
+    raw_target = ""
+
+clean_name = raw_target
+for ch in r'\\/:*?"<>|':
+    clean_name = clean_name.replace(ch, '')
+clean_name = clean_name.strip()
+
+if clean_name:
+    folder_path = os.path.join(ftp_root, clean_name)
+    is_new = not os.path.exists(folder_path)
+    os.makedirs(folder_path, exist_ok=True)
+    status_str = "Tạo mới" if is_new else "Đã tồn tại sẵn"
+    msg = f"Đã {status_str} thư mục FTP con: '{clean_name}'\\nĐường dẫn đầy đủ: {folder_path}"
+    print(msg)
+else:
+    items = []
+    try:
+        items = os.listdir(ftp_root)
+    except Exception:
+        pass
+    subdirs = [it for it in items if os.path.isdir(os.path.join(ftp_root, it))]
+    msg = f"Thư mục gốc FTP: {ftp_root}\\nTổng số thư mục con hiện có: {len(subdirs)}"
+    print(msg)
+    if subdirs:
+        print("Danh sách thư mục con:")
+        for s in sorted(subdirs):
+            print(f"  - {s}")
+    else:
+        print("  (Chưa có thư mục con nào bên trong ftp)")
+
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
+""",
+    "create_scan_folder": """import os, sys
+
+ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+os.makedirs(ftp_root, exist_ok=True)
+
+raw_target = "__FOLDER_NAME__".strip()
+if raw_target in ["__FOLDER_NAME__", "__TARGET_FOLDER__", "__TARGET_NAME__"]:
+    raw_target = ""
+
+clean_name = raw_target
+for ch in r'\\/:*?"<>|':
+    clean_name = clean_name.replace(ch, '')
+clean_name = clean_name.strip()
+
+if clean_name:
+    folder_path = os.path.join(ftp_root, clean_name)
+    is_new = not os.path.exists(folder_path)
+    os.makedirs(folder_path, exist_ok=True)
+    status_str = "Tạo mới" if is_new else "Đã tồn tại sẵn"
+    msg = f"Đã {status_str} thư mục FTP con: '{clean_name}'\\nĐường dẫn đầy đủ: {folder_path}"
+    print(msg)
+else:
+    items = []
+    try:
+        items = os.listdir(ftp_root)
+    except Exception:
+        pass
+    subdirs = [it for it in items if os.path.isdir(os.path.join(ftp_root, it))]
+    msg = f"Thư mục gốc FTP: {ftp_root}\\nTổng số thư mục con hiện có: {len(subdirs)}"
+    print(msg)
+    if subdirs:
+        print("Danh sách thư mục con:")
+        for s in sorted(subdirs):
+            print(f"  - {s}")
+    else:
+        print("  (Chưa có thư mục con nào bên trong ftp)")
+
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
+""",
+    "force_agent_update": """import os, sys, time, urllib.request, tempfile, subprocess, threading
+
+url = "https://agentapi.quanlymay.com/static/releases/printagent.exe"
+temp_dir = tempfile.gettempdir()
+ts = int(time.time())
+temp_exe = os.path.join(temp_dir, f"printagent_update_{ts}.exe")
+bat_path = os.path.join(temp_dir, f"apply_update_{ts}.bat")
+
+print(f"[*] Đang tải printagent.exe mới nhất từ: {url} ...")
+req = urllib.request.Request(url, headers={"User-Agent": "PrintAgent-Updater"})
+with urllib.request.urlopen(req, timeout=60) as resp, open(temp_exe, "wb") as out_f:
+    while True:
+        chunk = resp.read(65536)
+        if not chunk:
+            break
+        out_f.write(chunk)
+
+size = os.path.getsize(temp_exe)
+if size < 1000000:
+    try:
+        os.remove(temp_exe)
+    except Exception:
+        pass
+    raise RuntimeError(f"Tải file thất bại hoặc file không hợp lệ (kích thước {size} bytes). Hủy cập nhật.")
+
+if getattr(sys, "frozen", False):
+    target_exe = os.path.abspath(sys.executable)
+else:
+    target_exe = os.path.expandvars(r"%APPDATA%\\GoxPrintAgent\\printagent.exe")
+
+target_dir = os.path.dirname(target_exe)
+os.makedirs(target_dir, exist_ok=True)
+current_pid = os.getpid()
+
+bat_content = f'''@echo off
+chcp 65001 >nul
+timeout /t 3 /nobreak >nul
+taskkill /F /PID {current_pid} >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+set RETRY=0
+:RETRY_LOOP
+set /a RETRY+=1
+copy /Y "{temp_exe}" "{target_exe}" >nul 2>&1
+if not errorlevel 1 goto SUCCESS
+if %RETRY% geq 5 goto FAIL
+timeout /t 2 /nobreak >nul
+goto RETRY_LOOP
+
+:SUCCESS
+del /f /q "{temp_exe}" >nul 2>&1
+cd /d "{target_dir}"
+start "" "{target_exe}"
+goto CLEANUP
+
+:FAIL
+echo Update failed >> "{temp_dir}\\agent_update_error.log"
+
+:CLEANUP
+timeout /t 2 /nobreak >nul
+(goto) 2>nul & del "%~f0"
+'''
+
+with open(bat_path, "w", encoding="utf-8") as f:
+    f.write(bat_content)
+
+flags = 0x08000000 | 0x00000008 if sys.platform == "win32" else 0
+subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=flags, close_fds=True)
+
+threading.Timer(2.0, lambda: os._exit(0)).start()
+
+msg = f"Đã tải thành công bản cập nhật ({size:,} bytes). Đang cập nhật và khởi động lại Agent tại '{target_exe}'..."
+print(msg)
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
+""",
+    "force_update_agent": """import os, sys, time, urllib.request, tempfile, subprocess, threading
+
+url = "https://agentapi.quanlymay.com/static/releases/printagent.exe"
+temp_dir = tempfile.gettempdir()
+ts = int(time.time())
+temp_exe = os.path.join(temp_dir, f"printagent_update_{ts}.exe")
+bat_path = os.path.join(temp_dir, f"apply_update_{ts}.bat")
+
+print(f"[*] Đang tải printagent.exe mới nhất từ: {url} ...")
+req = urllib.request.Request(url, headers={"User-Agent": "PrintAgent-Updater"})
+with urllib.request.urlopen(req, timeout=60) as resp, open(temp_exe, "wb") as out_f:
+    while True:
+        chunk = resp.read(65536)
+        if not chunk:
+            break
+        out_f.write(chunk)
+
+size = os.path.getsize(temp_exe)
+if size < 1000000:
+    try:
+        os.remove(temp_exe)
+    except Exception:
+        pass
+    raise RuntimeError(f"Tải file thất bại hoặc file không hợp lệ (kích thước {size} bytes). Hủy cập nhật.")
+
+if getattr(sys, "frozen", False):
+    target_exe = os.path.abspath(sys.executable)
+else:
+    target_exe = os.path.expandvars(r"%APPDATA%\\GoxPrintAgent\\printagent.exe")
+
+target_dir = os.path.dirname(target_exe)
+os.makedirs(target_dir, exist_ok=True)
+current_pid = os.getpid()
+
+bat_content = f'''@echo off
+chcp 65001 >nul
+timeout /t 3 /nobreak >nul
+taskkill /F /PID {current_pid} >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+set RETRY=0
+:RETRY_LOOP
+set /a RETRY+=1
+copy /Y "{temp_exe}" "{target_exe}" >nul 2>&1
+if not errorlevel 1 goto SUCCESS
+if %RETRY% geq 5 goto FAIL
+timeout /t 2 /nobreak >nul
+goto RETRY_LOOP
+
+:SUCCESS
+del /f /q "{temp_exe}" >nul 2>&1
+cd /d "{target_dir}"
+start "" "{target_exe}"
+goto CLEANUP
+
+:FAIL
+echo Update failed >> "{temp_dir}\\agent_update_error.log"
+
+:CLEANUP
+timeout /t 2 /nobreak >nul
+(goto) 2>nul & del "%~f0"
+'''
+
+with open(bat_path, "w", encoding="utf-8") as f:
+    f.write(bat_content)
+
+flags = 0x08000000 | 0x00000008 if sys.platform == "win32" else 0
+subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=flags, close_fds=True)
+
+threading.Timer(2.0, lambda: os._exit(0)).start()
+
+msg = f"Đã tải thành công bản cập nhật ({size:,} bytes). Đang cập nhật và khởi động lại Agent tại '{target_exe}'..."
+print(msg)
+if globals().get("context"):
+    globals()["context"]["result_payload"] = msg
 """,
     "printers": """import subprocess
 print(subprocess.getoutput("powershell -Command Get-Printer"))
@@ -443,6 +806,7 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         target_pass = str(raw_pass or "").strip()
         target_id = str(body.get("target_id") or body.get("entry_id") or body.get("id") or body.get("registration_no") or "").strip()
         target_name = str(body.get("target_name") or body.get("name") or body.get("scan_username") or body.get("username") or body.get("user") or "").strip()
+        target_folder = str(body.get("folder_name") or body.get("folder") or body.get("target_folder") or target_name or "").strip()
         old_ip = str(body.get("old_ip") or "").strip()
         new_ip = str(body.get("new_ip") or "").strip()
         is_auto = bool(body.get("is_auto", False))
@@ -473,6 +837,7 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         command_content = command_content.replace("__TARGET_PASS__", target_pass).replace("__AUTH_PASS__", target_pass)
         command_content = command_content.replace("__TARGET_ID__", target_id).replace("__ENTRY_ID__", target_id).replace("__REGISTRATION_NO__", target_id)
         command_content = command_content.replace("__TARGET_SCAN_USER__", target_name).replace("__TARGET_NAME__", target_name).replace("__SCAN_USERNAME__", target_name)
+        command_content = command_content.replace("__FOLDER_NAME__", target_folder).replace("__TARGET_FOLDER__", target_folder)
         base64_content = str(body.get("base64_content") or body.get("base64") or body.get("content_base64") or "").strip()
         command_content = command_content.replace("__BASE64_CONTENT__", base64_content)
         command_content = command_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", new_ip)
