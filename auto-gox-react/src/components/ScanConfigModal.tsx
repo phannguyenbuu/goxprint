@@ -309,32 +309,41 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
               {processSteps.map(s => (
                 <div key={s.stepId} className={`process-step-card ${s.status}`}>
                   <div className="step-header">
-                    <div className="step-title">{s.text}</div>
+                    <div className="step-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🖨️</span> {s.text}
+                    </div>
                     <div className={`step-badge ${s.status}`}>
                       {s.status === 'pending' && 'Đang chờ'}
                       {s.status === 'running' && 'Đang chạy...'}
-                      {s.status === 'success' && 'Hoàn thành'}
-                      {s.status === 'failed' && 'Thất bại'}
+                      {s.status === 'success' && '✓ Hoàn thành'}
+                      {s.status === 'failed' && '✕ Thất bại'}
                     </div>
                   </div>
-                  <div className="step-subtext" style={{ marginTop: '8px' }}>
+                  <div className="step-subtext" style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     {s.status === 'success' ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ 
+                      <>
+                        <div style={{ 
                           display: 'inline-flex', 
                           alignItems: 'center', 
-                          gap: '6px',
-                          background: 'rgba(16, 185, 129, 0.12)', 
-                          color: '#10b981', 
-                          border: '1px solid rgba(16, 185, 129, 0.3)', 
-                          padding: '4px 12px', 
+                          gap: '8px',
+                          background: '#ecfdf5', 
+                          color: '#065f46', 
+                          border: '1px solid #a7f3d0', 
+                          padding: '6px 14px', 
                           borderRadius: '8px', 
                           fontWeight: 600,
-                          fontSize: '13px' 
+                          fontSize: '13.5px' 
                         }}>
-                          {s.scanCount !== null && s.scanCount !== undefined ? `📊 Số lượng scan: ${s.scanCount}` : '✅ Cấu hình hoàn thành!'}
-                        </span>
-                      </div>
+                          <span>📊</span>
+                          <span>Số lượng mục scan:</span>
+                          <span style={{ background: '#059669', color: '#ffffff', fontWeight: 700, padding: '1px 8px', borderRadius: '5px', fontSize: '13px' }}>
+                            {s.scanCount !== null && s.scanCount !== undefined ? s.scanCount : 'Đã đồng bộ'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: '#64748b' }}>
+                          Tự động đồng bộ FTP & Danh bạ
+                        </div>
+                      </>
                     ) : (
                       <span style={{ fontSize: '13px', color: s.status === 'failed' ? '#ef4444' : undefined }}>
                         {s.subText}

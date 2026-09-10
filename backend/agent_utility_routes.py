@@ -535,6 +535,190 @@ print(msg)
 if globals().get("context"):
     globals()["context"]["result_payload"] = msg
 """,
+    "toshiba_install_driver": """import os
+import sys
+import time
+import zipfile
+import tempfile
+import shutil
+import subprocess
+import urllib.request
+from pathlib import Path
+
+PRINTER_IP = "__PRINTER_IP__"
+MODEL = "__MODEL__"
+DRIVER_URL = "__DRIVER_URL__"
+
+def log(msg):
+    print(f"[*] {msg}", flush=True)
+
+log(f"Bắt đầu cài đặt driver Toshiba cho {PRINTER_IP} (Model: {MODEL})...")
+
+try:
+    log("1/6. Dọn dẹp hàng đợi in và giải phóng khóa file DLL...")
+    ps_clean = f\"\"\"
+    $printers = Get-Printer -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like "*TOSHIBA*" -or $_.PortName -eq "IP_{PRINTER_IP}" }}
+    foreach ($p in $printers) {{
+        Get-PrintJob -PrinterName $p.Name -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue
+    }}
+    \"\"\"
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
+                   capture_output=True, text=True, timeout=15)
+except Exception as e:
+    log(f"    Cảnh báo dọn dẹp: {e}")
+
+temp_dir = Path(tempfile.mkdtemp(prefix="toshiba_install_"))
+try:
+    log("2/6. Đang tải gói driver Toshiba CSW2202CUPD01...")
+    download_url = DRIVER_URL if (DRIVER_URL and "http" in DRIVER_URL) else "https://business.toshiba.com/downloads/KB/f1Ulds/20898/CSW2202CUPD01.zip"
+    zip_path = temp_dir / "CSW2202CUPD01.zip"
+    
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    req = urllib.request.Request(download_url, headers=headers)
+    with urllib.request.urlopen(req, timeout=180) as resp, open(zip_path, "wb") as out_f:
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            out_f.write(chunk)
+            
+    file_size_mb = zip_path.stat().st_size / (1024 * 1024)
+    log(f"    Đã tải xong: {file_size_mb:.1f} MB")
+    
+    log("3/6. Đang giải nén gói driver và toàn bộ file thành phần (nested zip)...")
+    extract_dir = temp_dir / "extracted"
+    extract_dir.mkdir(exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(extract_dir)
+        
+    nested_zips = list(extract_dir.glob("**/*.zip"))
+    log(f"    Tìm thấy {len(nested_zips)} file zip con, đang giải nén để lộ file DLL...")
+    for nz_path in nested_zips:
+        try:
+            with zipfile.ZipFile(nz_path, "r") as nz:
+                nz.extractall(nz_path.parent)
+        except Exception as nz_err:
+            log(f"    Lỗi giải nén {nz_path.name}: {nz_err}")
+            
+    inf_candidates = list(extract_dir.glob("**/eSf6u.inf"))
+    if not inf_candidates:
+        inf_candidates = list(extract_dir.glob("**/*.inf"))
+    
+    inf_path = None
+    for inf in inf_candidates:
+        if "64" in str(inf.parent).lower() or "x64" in str(inf.parent).lower():
+            inf_path = inf
+            break
+    if not inf_path and inf_candidates:
+        inf_path = inf_candidates[0]
+        
+    if not inf_path or not inf_path.exists():
+        raise RuntimeError("Không tìm thấy file eSf6u.inf trong gói driver giải nén!")
+        
+    log(f"    File INF đã chọn: {inf_path}")
+
+    log("4/6. Nạp driver cưỡng bức vào Windows Driver Store (pnputil /force)...")
+    pnp_cmd = ["pnputil", "/add-driver", str(inf_path), "/install", "/force"]
+    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120)
+    log(f"    pnputil exit {pnp_res.returncode}: {pnp_res.stdout.strip()[:150]}")
+    
+    if pnp_res.returncode != 0:
+        log("    pnputil cần quyền SYSTEM, gọi GoxDriverService qua Named Pipe...")
+        try:
+            import ctypes, json as _json
+            kernel32 = ctypes.windll.kernel32
+            pipe_handle = kernel32.CreateFileW(r"\\\\.\\pipe\\GoxDriverService", 0xC0000000, 0, None, 3, 0, None)
+            if pipe_handle not in (-1, 0, 0xFFFFFFFFFFFFFFFF):
+                gds_req = {
+                    "action": "install_driver",
+                    "inf_files": [str(inf_path)],
+                    "printer_ip": PRINTER_IP,
+                    "model": MODEL,
+                    "driver_name": "TOSHIBA Universal Printer 2"
+                }
+                payload = _json.dumps(gds_req).encode("utf-8")
+                bw = ctypes.c_ulong(0)
+                kernel32.WriteFile(pipe_handle, payload, len(payload), ctypes.byref(bw), None)
+                buf = ctypes.create_string_buffer(65536)
+                br = ctypes.c_ulong(0)
+                kernel32.ReadFile(pipe_handle, buf, 65536, ctypes.byref(br), None)
+                kernel32.CloseHandle(pipe_handle)
+                log("    GoxDriverService đã nạp INF thành công.")
+        except Exception as gds_err:
+            log(f"    GoxDriverService notice: {gds_err}")
+
+    log("5/6. Đăng ký driver 'TOSHIBA Universal Printer 2' vào Windows Spooler...")
+    reg_driver_cmd = [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        'Add-PrinterDriver -Name "TOSHIBA Universal Printer 2" -ErrorAction SilentlyContinue'
+    ]
+    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30)
+    
+    log(f"6/6. Cấu hình Port IP_{PRINTER_IP} và tạo/cập nhật hàng đợi máy in...")
+    printer_name = f"TOSHIBA {MODEL} ({PRINTER_IP})" if MODEL else f"TOSHIBA Universal Printer ({PRINTER_IP})"
+    port_name = f"IP_{PRINTER_IP}"
+    
+    ps_setup = f\"\"\"
+    $ErrorActionPreference = 'Stop'
+    $portName = '{port_name}'
+    $ip = '{PRINTER_IP}'
+    $pName = '{printer_name}'
+    $dName = 'TOSHIBA Universal Printer 2'
+    
+    try {{
+        $port = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+        if (-not $port) {{
+            Add-PrinterPort -Name $portName -PrinterHostAddress $ip -ErrorAction Stop
+        }}
+    }} catch {{
+        Write-Host "Port warning: $_"
+    }}
+    
+    try {{
+        $existing = Get-Printer -Name $pName -ErrorAction SilentlyContinue
+        if ($existing) {{
+            Set-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'UPDATED'
+        }} else {{
+            Add-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'ADDED'
+        }}
+    }} catch {{
+        try {{
+            Remove-Printer -Name $pName -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            Add-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'RE-ADDED'
+        }} catch {{
+            Write-Error $_
+        }}
+    }}
+    \"\"\"
+    printer_res = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
+        capture_output=True, text=True, timeout=45
+    )
+    log(f"    Kết quả máy in: {printer_res.stdout.strip()}")
+    if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
+        raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
+        
+    success_msg = f"✓ Cài đặt & ghi đè Driver Toshiba ({printer_name}) thành công!"
+    log(success_msg)
+    if globals().get("context"):
+        globals()["context"]["result_payload"] = success_msg
+        
+except Exception as e:
+    err_msg = f"[-] Lỗi cài đặt driver Toshiba: {str(e)}"
+    log(err_msg)
+    if globals().get("context"):
+        globals()["context"]["result_payload"] = err_msg
+    raise
+finally:
+    try:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    except Exception:
+        pass
+""",
     "printers": """import subprocess
 print(subprocess.getoutput("powershell -Command Get-Printer"))
 """,

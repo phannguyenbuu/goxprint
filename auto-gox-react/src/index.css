@@ -1167,3 +1167,79 @@ footer {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Process steps cards & badges */
+.process-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.process-step-card {
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  transition: var(--transition-smooth);
+}
+
+.process-step-card.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.process-step-card.failed {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.process-step-card.running {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.step-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-main);
+}
+
+.step-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.2px;
+}
+
+.step-badge.success {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.step-badge.running {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+}
+
+.step-badge.failed {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.step-badge.pending {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
