@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { probeLocalAgent, syncUtiCommands, fetchPrintersFromAgent } from './services/api';
+import { probeLocalAgent, syncUtiCommands, fetchPrintersFromAgent, fetchCopierCredentialsApi } from './services/api';
+import { loadDriverCatalogs } from './utils/drivers';
 import PrinterModal from './components/PrinterModal';
 import ToastContainer from './components/ToastContainer';
 import './index.css';
@@ -12,9 +13,7 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
   
-  // App initialization states
-  const [isAppReady, setIsAppReady] = useState(false);
-  const [initStatusText, setInitStatusText] = useState('Đang khởi tạo hệ thống...');
+  // App is ready immediately - no initial splash or disabled state
   const [preloadedPrinters, setPreloadedPrinters] = useState([]);
 
   // Form states
@@ -58,15 +57,17 @@ export default function App() {
     let pollInterval;
     
     const initApp = async () => {
-      // 1. Tải UtiCommands ngầm (được vpsFetch hỗ trợ auth)
-      await syncUtiCommands();
+      // 1. Tải UtiCommands và Driver Catalogs ngầm song song
+      Promise.allSettled([
+        syncUtiCommands(),
+        loadDriverCatalogs(),
+        fetchCopierCredentialsApi()
+      ]).catch(() => {});
 
-      // 2. Kiểm tra kết nối Agent
+      // 2. Kiểm tra kết nối Agent ngầm
       const agent = await connectAgent();
       
       if (!agent) {
-        setIsAppReady(true);
-        setInitStatusText('');
         // Polling nhẹ nhàng mỗi 3s trong nền để tự nhận diện khi người dùng bật PrintAgent
         pollInterval = setInterval(async () => {
           const successAgent = await connectAgent();
@@ -82,10 +83,12 @@ export default function App() {
     };
     
     const proceedWithScan = async (agentObj) => {
-       const printers = await fetchPrintersFromAgent(agentObj.agent_uid);
-       setPreloadedPrinters(printers);
-       setInitStatusText('');
-       setIsAppReady(true);
+       try {
+         const printers = await fetchPrintersFromAgent(agentObj.agent_uid);
+         setPreloadedPrinters(printers || []);
+       } catch (e) {
+         // ignore
+       }
     };
     
     initApp();
@@ -229,7 +232,7 @@ export default function App() {
               <div className="info-card-left">
                 <span className="info-card-label">IP PUBLIC (Mạng ngoài)</span>
                 <span className="info-card-value">
-                  {publicIp || (!isAppReady ? 'Đang tải...' : 'Không khả dụng')}
+                  {publicIp || 'Đang tải...'}
                 </span>
               </div>
               <div className="info-card-right">
@@ -266,15 +269,9 @@ export default function App() {
         <section className="actions-section">
           <div className="actions-header" style={{ marginTop: '30px', marginBottom: '24px', textAlign: 'center' }}>
             <p className="main-subheading" style={{ fontSize: '1.1rem', color: '#4b5563', margin: 0 }}>Giải pháp cài đặt máy in và thiết lập Scan to Folder một chạm</p>
-            {!isAppReady && initStatusText && (
-               <p style={{ marginTop: '12px', color: '#3b82f6', fontWeight: 500 }}>
-                 <span className="spinner" style={{ display: 'inline-block', marginRight: '8px', width: '14px', height: '14px', border: '2px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></span>
-                 {initStatusText}
-               </p>
-            )}
           </div>
           
-          <div className="action-grid" style={{ opacity: isAppReady ? 1 : 0.5, pointerEvents: isAppReady ? 'auto' : 'none', transition: 'opacity 0.3s' }}>
+          <div className="action-grid">
             {/* Install Driver */}
             <div id="btn-action-driver" className="action-btn-card" role="button" tabIndex="0" onClick={() => openModal('driver')} style={{ alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%', justifyContent: 'center' }}>
@@ -412,7 +409,7 @@ export default function App() {
       </footer>
 
       {isAgentMissing && (
-        <div className="modal-overlay" style={{position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(6px)', zIndex: 99999, alignItems: 'center', justifyContent: 'center', padding: '20px', display: 'flex'}}>
+        <div className="modal-overlay" style={{position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.75)', zIndex: 99999, alignItems: 'center', justifyContent: 'center', padding: '20px', display: 'flex'}}>
           <div style={{background: '#ffffff', borderRadius: '20px', maxWidth: '620px', width: '100%', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', position: 'relative'}}>
             <button onClick={() => setIsAgentMissing(false)} style={{position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px'}}>✕</button>
             <div style={{background: '#f8fafc', padding: '16px', textAlign: 'center', borderBottom: '1px solid #e2e8f0'}}>

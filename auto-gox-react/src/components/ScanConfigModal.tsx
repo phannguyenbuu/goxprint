@@ -9,10 +9,14 @@ interface ScanConfigModalProps {
 }
 
 export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose, showToast }: ScanConfigModalProps) {
-  const [printers, setPrinters] = useState<any[]>([]);
-  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(() => {
-    return Boolean(localAgent && (!preloadedPrinters || preloadedPrinters.length === 0));
+  const [printers, setPrinters] = useState<any[]>(() => {
+    if (!preloadedPrinters || preloadedPrinters.length === 0) return [];
+    return preloadedPrinters.filter((p: any) => {
+      const n = (p.name || '').toLowerCase();
+      return !n.includes('unknown') && !n.includes('hb test') && !n.includes('[debug]') && p.type !== 'error';
+    });
   });
+  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(false);
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const [copierCredentials, setCopierCredentials] = useState<Record<string, any>>({});
   
@@ -34,10 +38,6 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
 
   useEffect(() => {
     const initData = async () => {
-      if (localAgent && (!preloadedPrinters || preloadedPrinters.length === 0)) {
-        setLoadingPrinters(true);
-      }
-      
       // Load copier auth credentials from VPS DB (PrinterAuthCredential)
       const credsMap = await fetchCopierCredentialsApi();
       if (credsMap) {
@@ -47,7 +47,9 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
       if (localAgent) {
         let data = preloadedPrinters;
         if (!data || data.length === 0) {
+           setLoadingPrinters(true);
            data = await fetchPrintersFromAgent(localAgent.agent_uid);
+           setLoadingPrinters(false);
         }
         
         const filtered = (data || []).filter((p: any) => {
@@ -60,7 +62,6 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
            setSelectedPrinterIds([filtered[0].id]);
         }
       }
-      setLoadingPrinters(false);
     };
     initData();
   }, [localAgent]);

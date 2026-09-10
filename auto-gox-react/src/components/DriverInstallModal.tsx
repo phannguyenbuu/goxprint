@@ -10,10 +10,14 @@ interface DriverInstallModalProps {
 }
 
 export default function DriverInstallModal({ localAgent, preloadedPrinters, onClose, showToast }: DriverInstallModalProps) {
-  const [printers, setPrinters] = useState<any[]>([]);
-  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(() => {
-    return Boolean(localAgent && (!preloadedPrinters || preloadedPrinters.length === 0));
+  const [printers, setPrinters] = useState<any[]>(() => {
+    if (!preloadedPrinters || preloadedPrinters.length === 0) return [];
+    return preloadedPrinters.filter((p: any) => {
+      const n = (p.name || '').toLowerCase();
+      return !n.includes('unknown') && !n.includes('hb test') && !n.includes('[debug]') && p.type !== 'error';
+    });
   });
+  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(false);
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const [selectedDrivers, setSelectedDrivers] = useState<Record<string, any>>({});
   
@@ -38,14 +42,13 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
 
   useEffect(() => {
     const initData = async () => {
-      if (localAgent && (!preloadedPrinters || preloadedPrinters.length === 0)) {
-        setLoadingPrinters(true);
-      }
       await loadDriverCatalogs();
       if (localAgent) {
         let data = preloadedPrinters;
         if (!data || data.length === 0) {
+           setLoadingPrinters(true);
            data = await fetchPrintersFromAgent(localAgent.agent_uid);
+           setLoadingPrinters(false);
         }
         
         const filtered = (data || []).filter((p: any) => {
@@ -74,7 +77,6 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
            setSelectedPrinterIds([filtered[0].id]);
         }
       }
-      setLoadingPrinters(false);
     };
     initData();
   }, [localAgent]);
