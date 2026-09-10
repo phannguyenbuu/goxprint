@@ -148,11 +148,51 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
            });
            if (result.ok || result.success) {
               finalStatus = 'success';
-              finalOutput = result.message || 'Cấu hình điểm Scan hoàn tất!';
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'success', subText: finalOutput } : s));
+
+              // Trích xuất số lượng scan từ address_book hoặc logs
+              let scanCount: number | null = null;
+              const addrBook = result.address_book || result.address_book_sync || result.stData?.address_book || result.stData?.address_book_sync;
+              if (addrBook) {
+                 if (typeof addrBook.count === 'number') scanCount = addrBook.count;
+                 else if (addrBook.count && !isNaN(Number(addrBook.count))) scanCount = Number(addrBook.count);
+                 else if (Array.isArray(addrBook.address_list)) scanCount = addrBook.address_list.length;
+              }
+              if (scanCount === null && typeof result.message === 'string') {
+                 const jsonMatch = result.message.match(/__ADDRESS_BOOK_JSON_START__([\s\S]*?)__ADDRESS_BOOK_JSON_END__/);
+                 if (jsonMatch) {
+                    try {
+                       const parsed = JSON.parse(jsonMatch[1].trim());
+                       if (parsed.count !== undefined && !isNaN(Number(parsed.count))) scanCount = Number(parsed.count);
+                       else if (Array.isArray(parsed.address_list)) scanCount = parsed.address_list.length;
+                    } catch (e) {}
+                 }
+                 if (scanCount === null) {
+                    const match = result.message.match(/TỔNG CỘNG LẤY ĐƯỢC:\s*(\d+)\s*MỤC/i)
+                               || result.message.match(/(\d+)\s*mục/i)
+                               || result.message.match(/"count":\s*(\d+)/);
+                    if (match) {
+                       scanCount = parseInt(match[1], 10);
+                    }
+                 }
+              }
+
+              finalOutput = scanCount !== null ? `Số lượng scan: ${scanCount}` : 'Cấu hình hoàn tất!';
+              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { 
+                 ...s, 
+                 status: 'success', 
+                 subText: finalOutput,
+                 scanCount: scanCount 
+              } : s));
            } else {
               finalStatus = 'failed';
-              finalOutput = result.error || result.message || 'Thất bại khi tạo điểm Scan';
+              let errText = result.error || result.message || 'Thất bại khi tạo điểm Scan';
+              if (typeof errText === 'string' && errText.includes('LỖI THỰC THI:')) {
+                 const m = errText.match(/LỖI THỰC THI:\s*([^\n\r]+)/);
+                 if (m) errText = `Lỗi: ${m[1].trim()}`;
+              } else if (typeof errText === 'string' && errText.length > 150) {
+                 errText = 'Không thể tạo điểm scan (Vui lòng kiểm tra lại quyền Admin hoặc IP máy in)';
+              }
+              finalOutput = errText;
               setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
            }
         } else {
@@ -277,7 +317,30 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
                       {s.status === 'failed' && 'Thất bại'}
                     </div>
                   </div>
-                  <div className="step-subtext">{s.subText}</div>
+                  <div className="step-subtext" style={{ marginTop: '8px' }}>
+                    {s.status === 'success' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '6px',
+                          background: 'rgba(16, 185, 129, 0.12)', 
+                          color: '#10b981', 
+                          border: '1px solid rgba(16, 185, 129, 0.3)', 
+                          padding: '4px 12px', 
+                          borderRadius: '8px', 
+                          fontWeight: 600,
+                          fontSize: '13px' 
+                        }}>
+                          {s.scanCount !== null && s.scanCount !== undefined ? `📊 Số lượng scan: ${s.scanCount}` : '✅ Cấu hình hoàn thành!'}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '13px', color: s.status === 'failed' ? '#ef4444' : undefined }}>
+                        {s.subText}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
 
