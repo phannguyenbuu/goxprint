@@ -11,7 +11,9 @@ interface DriverInstallModalProps {
 
 export default function DriverInstallModal({ localAgent, preloadedPrinters, onClose, showToast }: DriverInstallModalProps) {
   const [printers, setPrinters] = useState<any[]>([]);
-  const [loadingPrinters, setLoadingPrinters] = useState(true);
+  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(() => {
+    return Boolean(localAgent && (!preloadedPrinters || preloadedPrinters.length === 0));
+  });
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const [selectedDrivers, setSelectedDrivers] = useState<Record<string, any>>({});
   
@@ -36,7 +38,9 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
 
   useEffect(() => {
     const initData = async () => {
-      setLoadingPrinters(true);
+      if (localAgent && (!preloadedPrinters || preloadedPrinters.length === 0)) {
+        setLoadingPrinters(true);
+      }
       await loadDriverCatalogs();
       if (localAgent) {
         let data = preloadedPrinters;
@@ -271,9 +275,16 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
                 {loadingPrinters ? (
                   <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>Đang quét thiết bị...</div>
                 ) : printers.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>🖨️</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Không tìm thấy máy photocopy tương thích.</div>
+                  <div style={{ textAlign: 'center', padding: '24px 20px' }}>
+                    <div style={{ fontSize: '36px', marginBottom: '10px' }}>🖨️</div>
+                    <div style={{ color: 'var(--text-main)', fontWeight: 600, fontSize: '15px', marginBottom: '6px' }}>
+                      {!localAgent ? 'Chưa kết nối PrintAgent cục bộ' : 'Không tìm thấy máy photocopy trong mạng LAN'}
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                      {!localAgent 
+                        ? 'Vui lòng tải và khởi chạy ứng dụng PrintAgent trên máy tính này để quét danh sách máy in.' 
+                        : 'Hãy kiểm tra lại máy in đã bật nguồn và cùng lớp mạng LAN với máy tính.'}
+                    </div>
                   </div>
                 ) : (
                   printers.map(p => {

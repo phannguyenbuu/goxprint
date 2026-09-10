@@ -73,7 +73,7 @@ export async function fetchCopierCredentialsApi() {
 export async function syncUtiCommands() {
   if (!navigator.onLine) return;
   try {
-    const res = await fetch('https://agentapi.quanlymay.com/api/uticommands');
+    const res = await vpsFetch('/api/uticommands');
     if (res.ok) {
       const data = await res.json();
       if (data && data.ok && Array.isArray(data.commands)) {

@@ -58,17 +58,16 @@ export default function App() {
     let pollInterval;
     
     const initApp = async () => {
-      // 1. Tải UtiCommands
-      setInitStatusText('Đang đồng bộ dữ liệu lệnh (UtiCommands)...');
+      // 1. Tải UtiCommands ngầm (được vpsFetch hỗ trợ auth)
       await syncUtiCommands();
 
-      // 2. Kết nối Agent
-      setInitStatusText('Đang kết nối PrintAgent cục bộ...');
-      let agent = await connectAgent();
+      // 2. Kiểm tra kết nối Agent
+      const agent = await connectAgent();
       
       if (!agent) {
-        setInitStatusText('Đang chờ kết nối PrintAgent...');
-        // Poll every 3 seconds for Agent
+        setIsAppReady(true);
+        setInitStatusText('');
+        // Polling nhẹ nhàng mỗi 3s trong nền để tự nhận diện khi người dùng bật PrintAgent
         pollInterval = setInterval(async () => {
           const successAgent = await connectAgent();
           if (successAgent) {
@@ -77,23 +76,12 @@ export default function App() {
             proceedWithScan(successAgent);
           }
         }, 3000);
-
-        // Show modal after 10 seconds of failing
-        setTimeout(() => {
-          setLocalAgent(prev => {
-            if (!prev) setIsAgentMissing(true);
-            return prev;
-          });
-          setIsAppReady(true);
-          setInitStatusText('');
-        }, 10000);
       } else {
         proceedWithScan(agent);
       }
     };
     
     const proceedWithScan = async (agentObj) => {
-       setInitStatusText('Đang quét thiết bị mạng LAN (Deep Scan)...');
        const printers = await fetchPrintersFromAgent(agentObj.agent_uid);
        setPreloadedPrinters(printers);
        setInitStatusText('');
@@ -113,7 +101,6 @@ export default function App() {
   }, []);
 
   const openModal = (mode) => {
-    if (!isAppReady) return;
     setActiveMode(mode);
     setIsModalOpen(true);
   };

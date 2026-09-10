@@ -1205,7 +1205,7 @@ def create_app() -> Flask:
         if (
             path.startswith("/api/public/")
             or path.startswith("/webhook/")
-            or path in ("/machinelist/", "/networklist/", "/all/", "/api/infor/list")
+            or path in ("/machinelist/", "/networklist/", "/all/", "/api/infor/list", "/api/uticommands")
         ):
             return None
 

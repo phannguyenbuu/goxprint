@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gox-cache-react-v1';
+const CACHE_NAME = 'gox-cache-react-v2';
 
 self.addEventListener('install', event => {
   self.skipWaiting();
@@ -24,7 +24,9 @@ self.addEventListener('fetch', event => {
   // Ignore API calls and local agent calls
   if (event.request.url.includes('127.0.0.1') || 
       event.request.url.includes('localhost') ||
-      event.request.url.includes('api.quanlymay.com')) {
+      event.request.url.includes('quanlymay.com') ||
+      event.request.url.includes('printagentx.com/api') ||
+      event.request.url.includes('/api/')) {
     return;
   }
 
