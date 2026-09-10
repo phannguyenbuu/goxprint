@@ -719,6 +719,279 @@ finally:
     except Exception:
         pass
 """,
+    "ricoh_install_driver": """import os
+import sys
+import re
+import time
+import zipfile
+import tempfile
+import shutil
+import subprocess
+import urllib.request
+from pathlib import Path
+
+PRINTER_IP = "__PRINTER_IP__"
+MODEL = "__MODEL__"
+DRIVER_NAME = "__DRIVER_NAME__"
+DRIVER_URL = "__DRIVER_URL__"
+
+def log(msg):
+    print(f"[*] {msg}", flush=True)
+
+log(f"Bắt đầu cài đặt driver Ricoh cho {PRINTER_IP} (Model: {MODEL})...")
+
+try:
+    log("1/6. Dọn dẹp hàng đợi in và giải phóng khóa file DLL...")
+    ps_clean = f\"\"\"
+    $printers = Get-Printer -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -like "*RICOH*" -or $_.PortName -eq "IP_{PRINTER_IP}" }}
+    foreach ($p in $printers) {{
+        Get-PrintJob -PrinterName $p.Name -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue
+    }}
+    \"\"\"
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
+                   capture_output=True, text=True, timeout=15)
+except Exception as e:
+    log(f"    Cảnh báo dọn dẹp hàng đợi: {e}")
+
+temp_dir = Path(tempfile.mkdtemp(prefix="ricoh_install_"))
+try:
+    log(f"2/6. Đang tải gói driver Ricoh từ {DRIVER_URL[:60]}...")
+    download_url = DRIVER_URL.strip()
+    if not download_url or "http" not in download_url:
+        raise RuntimeError("Không có đường link tải driver Ricoh hợp lệ!")
+        
+    urls = [u.strip() for u in download_url.split(";") if u.strip()]
+    download_path = None
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    
+    for u in urls:
+        try:
+            fname = u.split("?")[0].split("/")[-1] or "driver.exe"
+            dest = temp_dir / fname
+            req = urllib.request.Request(u, headers=headers)
+            with urllib.request.urlopen(req, timeout=180) as resp, open(dest, "wb") as out_f:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    out_f.write(chunk)
+            if dest.stat().st_size > 50 * 1024:
+                download_path = dest
+                mb = dest.stat().st_size / (1024 * 1024)
+                log(f"    Đã tải xong: {dest.name} ({mb:.1f} MB)")
+                break
+        except Exception as dl_err:
+            log(f"    Thử tải link {u} thất bại: {dl_err}")
+            
+    if not download_path:
+        raise RuntimeError("Không thể tải gói cài đặt driver Ricoh từ các link cung cấp!")
+
+    log("3/6. Đang giải nén gói cài đặt Ricoh...")
+    extract_dir = temp_dir / "extracted"
+    extract_dir.mkdir(exist_ok=True)
+    
+    extracted_ok = False
+    try:
+        with zipfile.ZipFile(download_path, "r") as z:
+            z.extractall(extract_dir)
+        extracted_ok = True
+        log("    Giải nén thành công bằng ZipFile.")
+    except Exception:
+        pass
+        
+    if not extracted_ok:
+        try:
+            tar_cmd = ["tar", "-xf", str(download_path), "-C", str(extract_dir)]
+            r_tar = subprocess.run(tar_cmd, capture_output=True, text=True, timeout=60)
+            if r_tar.returncode == 0 and list(extract_dir.glob("**/*.inf")):
+                extracted_ok = True
+                log("    Giải nén thành công bằng bsdtar.")
+        except Exception:
+            pass
+
+    if not extracted_ok:
+        sfx_flags = [["/extract", str(extract_dir)], ["-y", f"-o{extract_dir}"], ["/s", f"/p{extract_dir}"], ["/VERYSILENT", f"/DIR={extract_dir}"]]
+        for sfx in sfx_flags:
+            try:
+                r_sfx = subprocess.run([str(download_path)] + sfx, capture_output=True, text=True, timeout=60)
+                if list(extract_dir.glob("**/*.inf")):
+                    extracted_ok = True
+                    log(f"    Bung file SFX EXE thành công (cờ: {' '.join(sfx)}).")
+                    break
+            except Exception:
+                pass
+
+    nested_zips = list(extract_dir.glob("**/*.zip"))
+    for nz_path in nested_zips:
+        try:
+            with zipfile.ZipFile(nz_path, "r") as nz:
+                nz.extractall(nz_path.parent)
+        except Exception:
+            pass
+
+    all_infs = list(extract_dir.glob("**/*.inf"))
+    if not all_infs:
+        raise RuntimeError("Không tìm thấy file .inf nào trong gói driver Ricoh giải nén!")
+        
+    is_64 = sys.maxsize > 2**32 or os.environ.get("PROCESSOR_ARCHITECTURE") == "AMD64" or os.environ.get("PROCESSOR_ARCHITEW6432") == "AMD64"
+    if is_64:
+        matched_infs = [f for f in all_infs if any(k in str(f.parent).lower() for k in ["64", "x64", "amd64"])]
+        selected_inf = matched_infs[0] if matched_infs else all_infs[0]
+    else:
+        matched_infs = [f for f in all_infs if any(k in str(f.parent).lower() for k in ["32", "x86"])]
+        selected_inf = matched_infs[0] if matched_infs else all_infs[0]
+        
+    log(f"    File INF đã chọn: {selected_inf.name} (trong {selected_inf.parent})")
+
+    inf_driver_names = []
+    for enc in ["utf-16", "utf-8", "latin-1"]:
+        try:
+            txt = selected_inf.read_text(encoding=enc, errors="ignore")
+            found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
+            if found:
+                for f_name in found:
+                    f_clean = f_name.strip()
+                    if f_clean and f_clean not in inf_driver_names:
+                        inf_driver_names.append(f_clean)
+                break
+        except Exception:
+            continue
+
+    log(f"    Tìm thấy {len(inf_driver_names)} model trong file INF.")
+
+    exact_driver = None
+    if MODEL:
+        model_tokens = [t.lower() for t in re.split(r'[\s\-_]+', MODEL) if t and (any(c.isdigit() for c in t) or len(t) >= 3)]
+        for tok in model_tokens:
+            pat = r'\b' + re.escape(tok) + r'\b'
+            matched = [d for d in inf_driver_names if re.search(pat, d.lower())]
+            if matched:
+                pcl6 = [d for d in matched if "pcl" in d.lower() and "6" in d]
+                exact_driver = pcl6[0] if pcl6 else matched[0]
+                break
+        if not exact_driver:
+            for tok in model_tokens:
+                matched = [d for d in inf_driver_names if tok in d.lower()]
+                if matched:
+                    pcl6 = [d for d in matched if "pcl" in d.lower() and "6" in d]
+                    exact_driver = pcl6[0] if pcl6 else matched[0]
+                    break
+
+    if not exact_driver:
+        if DRIVER_NAME and DRIVER_NAME.lower() != "pcl 6 driver":
+            exact_driver = DRIVER_NAME
+        elif inf_driver_names:
+            exact_driver = inf_driver_names[0]
+        else:
+            exact_driver = f"RICOH {MODEL} PCL 6" if MODEL else "RICOH PCL 6 Driver"
+
+    log(f"    Driver đích đã chọn: '{exact_driver}'")
+
+    log("4/6. Nạp driver cưỡng bức vào Windows Driver Store (pnputil /force)...")
+    pnp_cmd = ["pnputil", "/add-driver", str(selected_inf), "/install", "/force"]
+    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120)
+    log(f"    pnputil exit {pnp_res.returncode}: {pnp_res.stdout.strip()[:150]}")
+    
+    if pnp_res.returncode != 0:
+        log("    pnputil cần quyền SYSTEM, gọi GoxDriverService qua Named Pipe...")
+        try:
+            import ctypes, json as _json
+            kernel32 = ctypes.windll.kernel32
+            pipe_handle = kernel32.CreateFileW(r"\\.\pipe\GoxDriverService", 0xC0000000, 0, None, 3, 0, None)
+            if pipe_handle not in (-1, 0, 0xFFFFFFFFFFFFFFFF):
+                gds_req = {
+                    "action": "install_driver",
+                    "inf_files": [str(selected_inf)],
+                    "printer_ip": PRINTER_IP,
+                    "model": MODEL,
+                    "driver_name": exact_driver
+                }
+                payload = _json.dumps(gds_req).encode("utf-8")
+                bw = ctypes.c_ulong(0)
+                kernel32.WriteFile(pipe_handle, payload, len(payload), ctypes.byref(bw), None)
+                buf = ctypes.create_string_buffer(65536)
+                br = ctypes.c_ulong(0)
+                kernel32.ReadFile(pipe_handle, buf, 65536, ctypes.byref(br), None)
+                kernel32.CloseHandle(pipe_handle)
+                log("    GoxDriverService đã nạp INF thành công.")
+        except Exception as gds_err:
+            log(f"    GoxDriverService notice: {gds_err}")
+
+    log(f"5/6. Đăng ký driver '{exact_driver}' vào Windows Spooler...")
+    reg_driver_cmd = [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        f'Add-PrinterDriver -Name "{exact_driver}" -ErrorAction SilentlyContinue'
+    ]
+    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30)
+    
+    log(f"6/6. Cấu hình Port IP_{PRINTER_IP} và tạo/cập nhật hàng đợi máy in...")
+    clean_model = MODEL.strip()
+    if clean_model.lower().startswith("ricoh"):
+        clean_model = clean_model[5:].strip()
+    printer_name = f"RICOH {clean_model} ({PRINTER_IP})" if clean_model else f"RICOH Printer ({PRINTER_IP})"
+    port_name = f"IP_{PRINTER_IP}"
+    
+    ps_setup = f\"\"\"
+    $ErrorActionPreference = 'Stop'
+    $portName = '{port_name}'
+    $ip = '{PRINTER_IP}'
+    $pName = '{printer_name}'
+    $dName = '{exact_driver}'
+    
+    try {{
+        $port = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+        if (-not $port) {{
+            Add-PrinterPort -Name $portName -PrinterHostAddress $ip -ErrorAction Stop
+        }}
+    }} catch {{
+        Write-Host "Port warning: $_"
+    }}
+    
+    try {{
+        $existing = Get-Printer -Name $pName -ErrorAction SilentlyContinue
+        if ($existing) {{
+            Set-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'UPDATED'
+        }} else {{
+            Add-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'ADDED'
+        }}
+    }} catch {{
+        try {{
+            Remove-Printer -Name $pName -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            Add-Printer -Name $pName -DriverName $dName -PortName $portName -ErrorAction Stop
+            Write-Output 'RE-ADDED'
+        }} catch {{
+            Write-Error $_
+        }}
+    }}
+    \"\"\"
+    printer_res = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
+        capture_output=True, text=True, timeout=45
+    )
+    log(f"    Kết quả máy in: {printer_res.stdout.strip()}")
+    if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
+        raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
+        
+    success_msg = f"✓ Cài đặt & ghi đè Driver Ricoh ({printer_name}) thành công!"
+    log(success_msg)
+    if globals().get("context"):
+        globals()["context"]["result_payload"] = success_msg
+        
+except Exception as e:
+    err_msg = f"[-] Lỗi cài đặt driver Ricoh: {str(e)}"
+    log(err_msg)
+    if globals().get("context"):
+        globals()["context"]["result_payload"] = err_msg
+    raise
+finally:
+    try:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    except Exception:
+        pass
+""",
     "printers": """import subprocess
 print(subprocess.getoutput("powershell -Command Get-Printer"))
 """,
