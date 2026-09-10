@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchPrintersFromAgent, installDriverApi, testPrinterLoginApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
 import { loadDriverCatalogs, matchPrinterDrivers } from '../utils/drivers';
+import { parseStepInfo } from '../utils/stepParser';
 
 interface DriverInstallModalProps {
   localAgent: any;
@@ -25,20 +26,21 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
   const [printerPass, setPrinterPass] = useState('');
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processSteps, setProcessSteps] = useState<any[]>([]); 
   const [isFinished, setIsFinished] = useState(false);
   const [testingAuth, setTestingAuth] = useState(false);
   const [testAuthStatus, setTestAuthStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [testAuthErrorMsg, setTestAuthErrorMsg] = useState('');
-  const [debugScript, setDebugScript] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handleShowDebug = (e: any) => {
-      setDebugScript(prev => prev ? prev + "\n\n=================================\n\n" + e.detail : e.detail);
-    };
-    window.addEventListener('show-debug-script', handleShowDebug);
-    return () => window.removeEventListener('show-debug-script', handleShowDebug);
-  }, []);
+  // Step-by-step progress state (shows 1 clean step at a time)
+  const [activePrinterName, setActivePrinterName] = useState('');
+  const [currentStepInfo, setCurrentStepInfo] = useState({
+    currentStep: 1,
+    totalSteps: 6,
+    title: 'Đang chuẩn bị tiến trình cài đặt...',
+    percent: 10,
+    isFinished: false,
+    isSuccess: false
+  });
 
   useEffect(() => {
     const initData = async () => {
@@ -112,7 +114,6 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
     setTestingAuth(true);
     setTestAuthStatus('idle');
     setTestAuthErrorMsg('');
-    setDebugScript(null);
     if (showToast) showToast(`Đang kiểm tra đăng nhập trên ${printer.name}...`, 'info');
     try {
       const res = await testPrinterLoginApi(printer.ip, printer.type, printerUser, printerPass);
@@ -136,33 +137,35 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
   const handleStartProcess = async () => {
     if (selectedPrinterIds.length === 0) return;
     
-    setDebugScript(null);
     setIsProcessing(true);
     setIsFinished(false);
 
-    const steps: any[] = [];
     const targets = printers.filter(p => selectedPrinterIds.includes(p.id));
-
-    targets.forEach(p => {
-       steps.push({
-         stepId: `driver_${p.id}`,
-         text: `Cài đặt Driver cho ${p.name}`,
-         status: 'pending',
-         subText: 'Đang chờ khởi tạo...'
-       });
-    });
-    setProcessSteps(steps);
 
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
-      const stepId = `driver_${p.id}`;
-
-      setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'running', subText: 'Đang gửi lệnh đến PrintAgent...' } : s));
+      const targetPrefix = targets.length > 1 ? `[Máy ${i + 1}/${targets.length}] ` : '';
+      setActivePrinterName(`${p.name} (${p.ip})`);
+      setCurrentStepInfo({
+        currentStep: 1,
+        totalSteps: 6,
+        title: `${targetPrefix}Khởi tạo tiến trình cài đặt driver...`,
+        percent: 15,
+        isFinished: false,
+        isSuccess: false
+      });
       
       const driverInfo = selectedDrivers[p.id];
       if (!driverInfo) {
-         setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: 'Chưa chọn Driver phù hợp' } : s));
-         continue;
+        setCurrentStepInfo({
+          currentStep: 6,
+          totalSteps: 6,
+          title: `${targetPrefix}Chưa chọn driver phù hợp cho máy in`,
+          percent: 100,
+          isFinished: true,
+          isSuccess: false
+        });
+        continue;
       }
 
       try {
@@ -171,26 +174,58 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
         let finalOutput = '';
 
         if (res.ok && res.command_id) {
-           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: 'Đang tải gói cài đặt và đăng ký Driver Windows...' } : s));
+           setCurrentStepInfo({
+             currentStep: 2,
+             totalSteps: 6,
+             title: `${targetPrefix}Đang nạp gói cài đặt driver...`,
+             percent: 25,
+             isFinished: false,
+             isSuccess: false
+           });
            const result = await trackCommandProgressPromise(res.command_id, (txt: string) => {
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: txt } : s));
+              const step = parseStepInfo(txt, 6, p.name);
+              setCurrentStepInfo({
+                ...step,
+                title: targetPrefix + step.title
+              });
            });
            if (result.ok || result.success) {
               finalStatus = 'success';
-              finalOutput = result.message || 'Cài đặt Driver hoàn tất!';
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'success', subText: finalOutput } : s));
+              finalOutput = `Cài đặt Driver cho ${p.name} thành công!`;
+              setCurrentStepInfo({
+                currentStep: 6,
+                totalSteps: 6,
+                title: `${targetPrefix}Cài đặt Driver hoàn tất thành công!`,
+                percent: 100,
+                isFinished: true,
+                isSuccess: true
+              });
            } else {
               finalStatus = 'failed';
               finalOutput = result.error || result.message || 'Thất bại khi cài đặt';
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
+              setCurrentStepInfo({
+                currentStep: 6,
+                totalSteps: 6,
+                title: `${targetPrefix}${finalOutput}`,
+                percent: 100,
+                isFinished: true,
+                isSuccess: false
+              });
            }
         } else {
            finalStatus = 'failed';
            finalOutput = res.error || 'Lỗi gửi lệnh cài driver';
-           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
+           setCurrentStepInfo({
+             currentStep: 6,
+             totalSteps: 6,
+             title: `${targetPrefix}${finalOutput}`,
+             percent: 100,
+             isFinished: true,
+             isSuccess: false
+           });
         }
 
-        // Record Job & Log to VPS database (only if local-only execution, since VPS API already recorded the job)
+        // Record Job & Log to VPS database
         if (!res?.is_vps) {
           recordJobToVpsApi({
             agentUid: localAgent?.agent_uid,
@@ -211,7 +246,14 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
           });
         }
       } catch (err: any) {
-        setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: err.message || 'Lỗi không xác định' } : s));
+        setCurrentStepInfo({
+          currentStep: 6,
+          totalSteps: 6,
+          title: `${targetPrefix}${err.message || 'Lỗi không xác định'}`,
+          percent: 100,
+          isFinished: true,
+          isSuccess: false
+        });
       }
     }
 
@@ -336,35 +378,55 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
               </div>
             </>
           ) : (
-            <div className="progress-status-box">
-              {processSteps.map(step => (
-                <div key={step.stepId} style={{ marginBottom: '6px' }}>
-                  <span style={{ color: step.status === 'failed' ? '#ef4444' : (step.status === 'success' ? '#10b981' : '#38bdf8') }}>
-                    [{step.status.toUpperCase()}]
-                  </span> {step.text} - {step.subText}
+            <div style={{ padding: '36px 20px', textAlign: 'center' }}>
+              {isProcessing && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#eff6ff', marginBottom: '16px' }}>
+                  <span className="spinner" style={{ width: '28px', height: '28px', border: '3px solid #bfdbfe', borderTopColor: '#3b82f6' }}></span>
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+              {isFinished && currentStepInfo.isSuccess && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#dcfce7', color: '#16a34a', fontSize: '28px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  ✓
+                </div>
+              )}
+              {isFinished && !currentStepInfo.isSuccess && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#fee2e2', color: '#dc2626', fontSize: '28px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  ✕
+                </div>
+              )}
 
-          {debugScript && (
-            <div style={{ marginTop: '15px', background: '#1e1e1e', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <span style={{ color: '#00ff00', fontSize: '13px', fontWeight: 'bold' }}>Debug Script</span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => { navigator.clipboard.writeText(debugScript); if(showToast) showToast('Đã copy code!', 'success'); }} style={{ background: '#007bff', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Copy</button>
-                  <button onClick={() => setDebugScript(null)} style={{ background: '#dc3545', color: 'white', border: 'none', padding: '4px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}>Đóng</button>
-                </div>
+              <div style={{ marginBottom: '12px' }}>
+                <span style={{ 
+                  display: 'inline-block', 
+                  padding: '4px 16px', 
+                  borderRadius: '9999px', 
+                  fontSize: '13px', 
+                  fontWeight: 600, 
+                  background: isFinished ? (currentStepInfo.isSuccess ? '#dcfce7' : '#fee2e2') : '#e0f2fe',
+                  color: isFinished ? (currentStepInfo.isSuccess ? '#15803d' : '#991b1b') : '#0369a1'
+                }}>
+                  {isFinished ? (currentStepInfo.isSuccess ? 'Hoàn thành' : 'Thất bại') : `Bước ${currentStepInfo.currentStep}/${currentStepInfo.totalSteps}`}
+                </span>
               </div>
-              <textarea
-                readOnly
-                value={debugScript}
-                style={{
-                  width: '100%', height: '120px', background: '#000', color: '#00ff00',
-                  fontFamily: 'monospace', fontSize: '11px', padding: '8px',
-                  border: '1px solid #333', borderRadius: '4px', resize: 'vertical'
-                }}
-              />
+
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>
+                {currentStepInfo.title}
+              </h3>
+
+              {activePrinterName && (
+                <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '24px' }}>
+                  Máy in: <strong>{activePrinterName}</strong>
+                </p>
+              )}
+
+              <div style={{ width: '100%', maxWidth: '380px', height: '8px', background: '#e2e8f0', borderRadius: '9999px', margin: '0 auto', overflow: 'hidden' }}>
+                <div style={{ 
+                  width: `${currentStepInfo.percent}%`, 
+                  height: '100%', 
+                  background: isFinished ? (currentStepInfo.isSuccess ? '#10b981' : '#ef4444') : '#3b82f6', 
+                  transition: 'width 0.4s ease' 
+                }}></div>
+              </div>
             </div>
           )}
         </div>

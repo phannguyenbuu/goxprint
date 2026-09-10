@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchPrintersFromAgent, installScanApi, addLanEmailApi, trackCommandProgressPromise, recordJobToVpsApi, fetchCopierCredentialsApi } from '../services/api';
+import { parseStepInfo } from '../utils/stepParser';
 
 interface ScanConfigModalProps {
   localAgent: any;
@@ -24,17 +25,19 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
   const [scanEmail, setScanEmail] = useState('');
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processSteps, setProcessSteps] = useState<any[]>([]); 
   const [isFinished, setIsFinished] = useState(false);
-  const [debugScript, setDebugScript] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handleShowDebug = (e: any) => {
-      setDebugScript(prev => prev ? prev + "\n\n=================================\n\n" + e.detail : e.detail);
-    };
-    window.addEventListener('show-debug-script', handleShowDebug);
-    return () => window.removeEventListener('show-debug-script', handleShowDebug);
-  }, []);
+  // Step-by-step progress state (shows 1 clean step at a time)
+  const [activePrinterName, setActivePrinterName] = useState('');
+  const [scanCount, setScanCount] = useState<number | null>(null);
+  const [currentStepInfo, setCurrentStepInfo] = useState({
+    currentStep: 1,
+    totalSteps: 3,
+    title: 'Đang chuẩn bị khởi tạo Scan...',
+    percent: 15,
+    isFinished: false,
+    isSuccess: false
+  });
 
   useEffect(() => {
     const initData = async () => {
@@ -84,26 +87,24 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
        return;
     }
 
-    setDebugScript(null);
     setIsProcessing(true);
     setIsFinished(false);
+    setScanCount(null);
 
-    const steps: any[] = [];
     const targets = printers.filter(p => selectedPrinterIds.includes(p.id));
-
-    targets.forEach(p => {
-       steps.push({
-         stepId: `scan_${p.id}`,
-         text: `Cấu hình Scan to Folder cho ${p.name}`,
-         status: 'pending',
-         subText: 'Đang chờ thực thi...'
-       });
-    });
-    setProcessSteps(steps);
 
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
-      const stepId = `scan_${p.id}`;
+      const targetPrefix = targets.length > 1 ? `[Máy ${i + 1}/${targets.length}] ` : '';
+      setActivePrinterName(`${p.name} (${p.ip})`);
+      setCurrentStepInfo({
+        currentStep: 1,
+        totalSteps: 3,
+        title: `${targetPrefix}Khởi tạo tiến trình cấu hình Scan...`,
+        percent: 20,
+        isFinished: false,
+        isSuccess: false
+      });
 
       // Resolve copier auth user/pass automatically from VPS credentials map by MAC or IP
       const rawMac = String(p.mac || p.mac_address || p.mac_id || '').toUpperCase();
@@ -113,8 +114,6 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
       const printerUser = cred.user || cred.auth_user || 'admin';
       const printerPass = cred.password || cred.auth_password || '';
 
-      setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'running', subText: `Đang gửi lệnh tạo điểm Scan (User: ${printerUser})...` } : s));
-
       try {
         const res = await installScanApi(p.ip, p.type, scanName, localAgent?.agent_uid, printerUser, printerPass);
         let finalStatus = 'failed';
@@ -123,7 +122,14 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         // Check for WIM tunnel HTML non-JSON response safely
         if (res && res.error && (res.error.includes('Unexpected token') || res.error.includes('Tunnel Pro'))) {
            const safeMsg = '⚠️ Không thể gửi lệnh qua đường hầm WIM máy in. Vui lòng thực hiện trên máy có Agent local :9173.';
-           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: safeMsg } : s));
+           setCurrentStepInfo({
+             currentStep: 3,
+             totalSteps: 3,
+             title: safeMsg,
+             percent: 100,
+             isFinished: true,
+             isSuccess: false
+           });
            if (showToast) showToast(safeMsg, 'warning');
            
            recordJobToVpsApi({
@@ -147,47 +153,61 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
         }
 
         if (res.ok && res.command_id) {
-           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: 'Đang khởi tạo cổng FTP local & Đăng ký danh bạ máy in...' } : s));
+           setCurrentStepInfo({
+             currentStep: 1,
+             totalSteps: 3,
+             title: `${targetPrefix}Đang tạo thư mục Scan và gửi lệnh đến thiết bị...`,
+             percent: 35,
+             isFinished: false,
+             isSuccess: false
+           });
            const result = await trackCommandProgressPromise(res.command_id, (txt: string) => {
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, subText: txt } : s));
+              const step = parseStepInfo(txt, 3, p.name);
+              setCurrentStepInfo({
+                ...step,
+                title: targetPrefix + step.title
+              });
            });
            if (result.ok || result.success) {
               finalStatus = 'success';
 
               // Trích xuất số lượng scan từ address_book hoặc logs
-              let scanCount: number | null = null;
+              let detectedScanCount: number | null = null;
               const addrBook = result.address_book || result.address_book_sync || result.stData?.address_book || result.stData?.address_book_sync;
               if (addrBook) {
-                 if (typeof addrBook.count === 'number') scanCount = addrBook.count;
-                 else if (addrBook.count && !isNaN(Number(addrBook.count))) scanCount = Number(addrBook.count);
-                 else if (Array.isArray(addrBook.address_list)) scanCount = addrBook.address_list.length;
+                 if (typeof addrBook.count === 'number') detectedScanCount = addrBook.count;
+                 else if (addrBook.count && !isNaN(Number(addrBook.count))) detectedScanCount = Number(addrBook.count);
+                 else if (Array.isArray(addrBook.address_list)) detectedScanCount = addrBook.address_list.length;
               }
-              if (scanCount === null && typeof result.message === 'string') {
+              if (detectedScanCount === null && typeof result.message === 'string') {
                  const jsonMatch = result.message.match(/__ADDRESS_BOOK_JSON_START__([\s\S]*?)__ADDRESS_BOOK_JSON_END__/);
                  if (jsonMatch) {
                     try {
                        const parsed = JSON.parse(jsonMatch[1].trim());
-                       if (parsed.count !== undefined && !isNaN(Number(parsed.count))) scanCount = Number(parsed.count);
-                       else if (Array.isArray(parsed.address_list)) scanCount = parsed.address_list.length;
+                       if (parsed.count !== undefined && !isNaN(Number(parsed.count))) detectedScanCount = Number(parsed.count);
+                       else if (Array.isArray(parsed.address_list)) detectedScanCount = parsed.address_list.length;
                     } catch (e) {}
                  }
-                 if (scanCount === null) {
+                 if (detectedScanCount === null) {
                     const match = result.message.match(/TỔNG CỘNG LẤY ĐƯỢC:\s*(\d+)\s*MỤC/i)
                                || result.message.match(/(\d+)\s*mục/i)
                                || result.message.match(/"count":\s*(\d+)/);
                     if (match) {
-                       scanCount = parseInt(match[1], 10);
+                       detectedScanCount = parseInt(match[1], 10);
                     }
                  }
               }
 
-              finalOutput = scanCount !== null ? `Số lượng scan: ${scanCount}` : 'Cấu hình hoàn tất!';
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { 
-                 ...s, 
-                 status: 'success', 
-                 subText: finalOutput,
-                 scanCount: scanCount 
-              } : s));
+              finalOutput = detectedScanCount !== null ? `Số lượng scan: ${detectedScanCount}` : 'Cấu hình hoàn tất!';
+              setScanCount(detectedScanCount);
+              setCurrentStepInfo({
+                currentStep: 3,
+                totalSteps: 3,
+                title: `${targetPrefix}Cấu hình Scan to Folder thành công!`,
+                percent: 100,
+                isFinished: true,
+                isSuccess: true
+              });
            } else {
               finalStatus = 'failed';
               let errText = result.error || result.message || 'Thất bại khi tạo điểm Scan';
@@ -198,15 +218,29 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
                  errText = 'Không thể tạo điểm scan (Vui lòng kiểm tra lại quyền Admin hoặc IP máy in)';
               }
               finalOutput = errText;
-              setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
+              setCurrentStepInfo({
+                currentStep: 3,
+                totalSteps: 3,
+                title: `${targetPrefix}${finalOutput}`,
+                percent: 100,
+                isFinished: true,
+                isSuccess: false
+              });
            }
         } else {
            finalStatus = 'failed';
            finalOutput = res.error || res.logs || 'Lỗi cấu hình Scan';
-           setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: finalOutput } : s));
+           setCurrentStepInfo({
+             currentStep: 3,
+             totalSteps: 3,
+             title: `${targetPrefix}${finalOutput}`,
+             percent: 100,
+             isFinished: true,
+             isSuccess: false
+           });
         }
 
-        // Record Job & Log to VPS database (only if local-only execution, since VPS API already recorded the job)
+        // Record Job & Log to VPS database
         if (!res?.is_vps) {
           recordJobToVpsApi({
             agentUid: localAgent?.agent_uid,
@@ -227,7 +261,14 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
           });
         }
       } catch (err: any) {
-        setProcessSteps(prev => prev.map(s => s.stepId === stepId ? { ...s, status: 'failed', subText: err.message || 'Lỗi không xác định' } : s));
+        setCurrentStepInfo({
+          currentStep: 3,
+          totalSteps: 3,
+          title: `${targetPrefix}${err.message || 'Lỗi không xác định'}`,
+          percent: 100,
+          isFinished: true,
+          isSuccess: false
+        });
       }
 
       if (scanEmail) {
@@ -317,71 +358,78 @@ export default function ScanConfigModal({ localAgent, preloadedPrinters, onClose
               </div>
             </>
           ) : (
-            <div className="process-steps-list">
-              {processSteps.map(s => (
-                <div key={s.stepId} className={`process-step-card ${s.status}`}>
-                  <div className="step-header">
-                    <div className="step-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>🖨️</span> {s.text}
-                    </div>
-                    <div className={`step-badge ${s.status}`}>
-                      {s.status === 'pending' && 'Đang chờ'}
-                      {s.status === 'running' && 'Đang chạy...'}
-                      {s.status === 'success' && '✓ Hoàn thành'}
-                      {s.status === 'failed' && '✕ Thất bại'}
-                    </div>
-                  </div>
-                  <div className="step-subtext" style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    {s.status === 'success' ? (
-                      <>
-                        <div style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: '8px',
-                          background: '#ecfdf5', 
-                          color: '#065f46', 
-                          border: '1px solid #a7f3d0', 
-                          padding: '6px 14px', 
-                          borderRadius: '8px', 
-                          fontWeight: 600,
-                          fontSize: '13.5px' 
-                        }}>
-                          <span>📊</span>
-                          <span>Số lượng mục scan:</span>
-                          <span style={{ background: '#059669', color: '#ffffff', fontWeight: 700, padding: '1px 8px', borderRadius: '5px', fontSize: '13px' }}>
-                            {s.scanCount !== null && s.scanCount !== undefined ? s.scanCount : 'Đã đồng bộ'}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12.5px', color: '#64748b' }}>
-                          Tự động đồng bộ FTP & Danh bạ
-                        </div>
-                      </>
-                    ) : (
-                      <span style={{ fontSize: '13px', color: s.status === 'failed' ? '#ef4444' : undefined }}>
-                        {s.subText}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {debugScript && (
-                <div style={{ marginTop: '16px', background: '#1e293b', borderRadius: '8px', padding: '12px', color: '#f8fafc', fontSize: '11px', fontFamily: 'monospace' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, color: '#38bdf8' }}>Debug Script</span>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(debugScript);
-                        if (showToast) showToast('Đã copy Debug Script!', 'success');
-                      }}
-                      style={{ padding: '2px 8px', fontSize: '11px', background: '#334155', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>{debugScript}</pre>
+            <div style={{ padding: '36px 20px', textAlign: 'center' }}>
+              {isProcessing && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#eff6ff', marginBottom: '16px' }}>
+                  <span className="spinner" style={{ width: '28px', height: '28px', border: '3px solid #bfdbfe', borderTopColor: '#3b82f6' }}></span>
                 </div>
               )}
+              {isFinished && currentStepInfo.isSuccess && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#dcfce7', color: '#16a34a', fontSize: '28px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  ✓
+                </div>
+              )}
+              {isFinished && !currentStepInfo.isSuccess && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', background: '#fee2e2', color: '#dc2626', fontSize: '28px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  ✕
+                </div>
+              )}
+
+              <div style={{ marginBottom: '12px' }}>
+                <span style={{ 
+                  display: 'inline-block', 
+                  padding: '4px 16px', 
+                  borderRadius: '9999px', 
+                  fontSize: '13px', 
+                  fontWeight: 600, 
+                  background: isFinished ? (currentStepInfo.isSuccess ? '#dcfce7' : '#fee2e2') : '#e0f2fe',
+                  color: isFinished ? (currentStepInfo.isSuccess ? '#15803d' : '#991b1b') : '#0369a1'
+                }}>
+                  {isFinished ? (currentStepInfo.isSuccess ? 'Hoàn thành' : 'Thất bại') : `Bước ${currentStepInfo.currentStep}/${currentStepInfo.totalSteps}`}
+                </span>
+              </div>
+
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>
+                {currentStepInfo.title}
+              </h3>
+
+              {activePrinterName && (
+                <p style={{ fontSize: '14px', color: '#64748b', marginBottom: scanCount !== null ? '12px' : '24px' }}>
+                  Thiết bị: <strong>{activePrinterName}</strong> • Thư mục: <strong>{scanName}</strong>
+                </p>
+              )}
+
+              {scanCount !== null && (
+                <div style={{ marginBottom: '20px' }}>
+                  <span style={{ 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: '8px', 
+                    background: '#ecfdf5', 
+                    color: '#065f46', 
+                    border: '1px solid #a7f3d0', 
+                    padding: '6px 14px', 
+                    borderRadius: '8px', 
+                    fontWeight: 600, 
+                    fontSize: '13.5px' 
+                  }}>
+                    <span>📊</span>
+                    <span>Số lượng mục scan:</span>
+                    <span style={{ background: '#059669', color: '#ffffff', fontWeight: 700, padding: '1px 8px', borderRadius: '5px', fontSize: '13px' }}>
+                      {scanCount}
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              <div style={{ width: '100%', maxWidth: '380px', height: '8px', background: '#e2e8f0', borderRadius: '9999px', margin: '0 auto', overflow: 'hidden' }}>
+                <div style={{ 
+                  width: `${currentStepInfo.percent}%`, 
+                  height: '100%', 
+                  background: isFinished ? (currentStepInfo.isSuccess ? '#10b981' : '#ef4444') : '#3b82f6', 
+                  transition: 'width 0.4s ease' 
+                }}></div>
+              </div>
             </div>
           )}
         </div>
