@@ -411,6 +411,13 @@ try:
     if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
+    try:
+        log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+    except Exception as ui_err:
+        log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
+
     success_msg = f"✓ Cài đặt & ghi đè Driver Toshiba ({printer_name}) thành công!"
     log(success_msg)
     if globals().get("context"):
@@ -681,6 +688,13 @@ try:
     if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
+    try:
+        log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+    except Exception as ui_err:
+        log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
+
     success_msg = f"✓ Cài đặt & ghi đè Driver Ricoh ({printer_name}) thành công!"
     log(success_msg)
     if globals().get("context"):
