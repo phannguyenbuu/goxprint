@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gox-cache-react-v2';
+const CACHE_NAME = 'gox-cache-react-v3';
 
 self.addEventListener('install', event => {
   self.skipWaiting();
@@ -6,7 +6,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
-  // Clear old caches (including the old 'gox-cache-vX' from the Vanilla JS version)
+  // Clear old caches (including previous v1/v2 caches)
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
@@ -21,6 +21,16 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  // Only handle HTTP/HTTPS requests (ignore chrome-extension://, moz-extension://, etc.)
+  if (!event.request.url.startsWith('http://') && !event.request.url.startsWith('https://')) {
+    return;
+  }
+
+  // Only handle GET requests (Cache API does not support POST, PUT, DELETE, etc.)
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   // Ignore API calls and local agent calls
   if (event.request.url.includes('127.0.0.1') || 
       event.request.url.includes('localhost') ||
@@ -37,10 +47,13 @@ self.addEventListener('fetch', event => {
       caches.match(event.request).then(cachedResponse => {
         if (cachedResponse) return cachedResponse;
         return fetch(event.request).then(response => {
-          return caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, response.clone());
-            return response;
-          });
+          if (response && response.status === 200) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, responseClone).catch(() => {});
+            });
+          }
+          return response;
         });
       })
     );
@@ -48,17 +61,15 @@ self.addEventListener('fetch', event => {
   }
 
   // For HTML files (like index.html) and everything else, use Network First!
-  // This ensures that when we deploy a new version, the browser ALWAYS fetches
-  // the newest index.html, which contains the links to the new hashed assets.
-  // NO MORE Ctrl + F5 REQUIRED!
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Cache the newest response
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseClone);
-        });
+        if (response && response.status === 200) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseClone).catch(() => {});
+          });
+        }
         return response;
       })
       .catch(() => {
@@ -67,3 +78,4 @@ self.addEventListener('fetch', event => {
       })
   );
 });
+
