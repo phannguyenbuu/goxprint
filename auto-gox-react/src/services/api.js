@@ -815,7 +815,7 @@ export async function installScanApi(printerIp, brand, folderName, agentUid, aut
            printer_ip: printerIp,
            auth_user: authUser || 'admin',
            auth_password: authPass || '',
-           target_name: folderName || 'null'
+           target_name: folderName || ''
          })
        });
        const data = await vpsRes.json();
@@ -840,7 +840,7 @@ export async function installScanApi(printerIp, brand, folderName, agentUid, aut
     script = script.replace(/__TARGET_IP__/g, printerIp).replace(/__PRINTER_IP__/g, printerIp);
     script = script.replace(/__TARGET_USER__/g, authUser || 'admin').replace(/__AUTH_USER__/g, authUser || 'admin');
     script = script.replace(/__TARGET_PASS__/g, authPass || '').replace(/__AUTH_PASS__/g, authPass || '');
-    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || 'null').replace(/__TARGET_NAME__/g, folderName || 'null').replace(/__SCAN_USERNAME__/g, folderName || 'null');
+    script = script.replace(/__TARGET_SCAN_USER__/g, folderName || '').replace(/__TARGET_NAME__/g, folderName || '').replace(/__SCAN_USERNAME__/g, folderName || '');
     script = script.replace(/__TARGET_EMAIL__/g, '').replace(/__EMAIL__/g, '').replace(/__TARGET_ID__/g, '');
 
     try {

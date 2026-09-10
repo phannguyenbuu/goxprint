@@ -16,8 +16,112 @@ NAME = "__TARGET_NAME__"
 # __TOSHIBA_LOGIN__
 # __TOSHIBA_LIST__
 
+def ensure_local_ftp_and_shortcut(scan_name: str):
+    """
+    Tự động tạo thư mục con bên trong thư mục gốc FTP của Agent
+    và tạo Shortcut (.lnk) ngoài Desktop trỏ vào thư mục con đó.
+    """
+    import os, sys, subprocess, pathlib
+    print("[*] Đang khởi tạo thư mục FTP con và Shortcut Desktop...")
+    
+    # 1. Xác định thư mục gốc FTP
+    ftp_root = ""
+    bridge_obj = globals().get('bridge') or locals().get('bridge')
+    if bridge_obj:
+        try:
+            cfg_root = bridge_obj._config.get_string("ftp_root")
+            if cfg_root and os.path.exists(cfg_root):
+                ftp_root = cfg_root
+        except Exception:
+            pass
+    if not ftp_root:
+        ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\Temp\GoPrinxAgent\ftp")
+    
+    try:
+        os.makedirs(ftp_root, exist_ok=True)
+    except Exception as e:
+        print(f"[-] Lỗi tạo thư mục FTP gốc ({ftp_root}): {e}")
+
+    # 2. Làm sạch tên thư mục scan
+    raw_name = str(scan_name or "").strip()
+    if raw_name in ["__TARGET_SCAN_USER__", "__TARGET_NAME__", "__SCAN_USERNAME__", "null", "None", "undefined"]:
+        raw_name = ""
+    clean_name = raw_name
+    for ch in r'\/:*?"<>|':
+        clean_name = clean_name.replace(ch, '')
+    clean_name = clean_name.strip()
+
+    # 3. Tạo thư mục con trong FTP
+    if clean_name:
+        target_dir = os.path.join(ftp_root, clean_name)
+        shortcut_filename = f"Scan - {clean_name}.lnk"
+    else:
+        target_dir = ftp_root
+        shortcut_filename = "Thu muc Scan (GoPrinx).lnk"
+
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        print(f"[+] Đã tạo thư mục FTP con: {target_dir}")
+    except Exception as e:
+        print(f"[-] Lỗi tạo thư mục FTP con: {e}")
+
+    # 4. Xác định Desktop thực tế của người dùng
+    def _get_desktop() -> str:
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                val, _ = winreg.QueryValueEx(key, "Desktop")
+                expanded = os.path.expandvars(val)
+                if os.path.exists(expanded):
+                    return expanded
+        except Exception:
+            pass
+
+        try:
+            flags = 0x08000000 if sys.platform == "win32" else 0
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"]
+            res = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=flags)
+            p = res.stdout.strip()
+            if p and os.path.exists(p):
+                return p
+        except Exception:
+            pass
+
+        user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
+        onedrive_desktop = os.path.join(user_prof, "OneDrive", "Desktop")
+        if os.path.exists(onedrive_desktop):
+            return onedrive_desktop
+
+        default_desktop = os.path.join(user_prof, "Desktop")
+        os.makedirs(default_desktop, exist_ok=True)
+        return default_desktop
+
+    # 5. Tạo Shortcut ngoài Desktop bằng WScript.Shell
+    try:
+        desktop_dir = _get_desktop()
+        shortcut_path = os.path.join(desktop_dir, shortcut_filename)
+        safe_shortcut = shortcut_path.replace("'", "''")
+        safe_target = target_dir.replace("'", "''")
+        ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_shortcut}'); $s.TargetPath = '{safe_target}'; $s.WorkingDirectory = '{safe_target}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
+        if os.path.exists(shortcut_path):
+            print(f"[+] Đã tạo Shortcut ngoài Desktop: {shortcut_path} -> {target_dir}")
+        else:
+            print(f"[-] Cảnh báo: Chưa tạo được Shortcut ngoài Desktop ({shortcut_path})")
+    except Exception as sc_err:
+        print(f"[-] Cảnh báo tạo Shortcut ngoài Desktop: {sc_err}")
+
+    return target_dir, clean_name
+
 def setup_toshiba_scan(printer_ip, admin_user, admin_password, scan_username, existing_group=None):
     print(f"[*] Tạo Scan-to-FTP cho Toshiba {printer_ip}, user: {scan_username}")
+    
+    # 0. Khởi tạo thư mục FTP con và Shortcut ngoài Desktop
+    target_scan_dir, clean_scan_name = ensure_local_ftp_and_shortcut(scan_username)
+    if clean_scan_name:
+        scan_username = clean_scan_name
     
     local_ip = get_local_ip(printer_ip)
     ftp_port = "2130"
