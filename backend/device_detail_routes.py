@@ -32,6 +32,7 @@ from pathlib import Path
 PRINTER_IP = "__PRINTER_IP__"
 MODEL = "__MODEL__"
 DRIVER_URL = "__DRIVER_URL__"
+NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 def log(msg):
     print(f"[*] {msg}", flush=True)
@@ -47,8 +48,8 @@ try:
         Get-PrintJob -PrinterName $p.Name -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue
     }}
     """
-    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
-                   capture_output=True, text=True, timeout=15)
+    subprocess.run(["powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
+                   capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
 except Exception as e:
     log(f"    Cảnh báo dọn dẹp hàng đợi: {e}")
 
@@ -107,7 +108,7 @@ try:
     # 4. pnputil /add-driver with /force
     log("4/6. Nạp driver cưỡng bức vào Windows Driver Store (pnputil /force)...")
     pnp_cmd = ["pnputil", "/add-driver", str(inf_path), "/install", "/force"]
-    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120)
+    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120, creationflags=NO_WINDOW)
     log(f"    pnputil exit {pnp_res.returncode}: {pnp_res.stdout.strip()[:150]}")
     
     # Fallback to GoxDriverService (SYSTEM) if pnputil returned non-zero
@@ -139,10 +140,10 @@ try:
     # 5. Register Driver in Spooler
     log("5/6. Đăng ký driver 'TOSHIBA Universal Printer 2' vào Windows Spooler...")
     reg_driver_cmd = [
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        "powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         'Add-PrinterDriver -Name "TOSHIBA Universal Printer 2" -ErrorAction SilentlyContinue'
     ]
-    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30)
+    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
     
     # 6. Setup Port & Printer Queue (Force Overwrite)
     log(f"6/6. Cấu hình Port IP_{PRINTER_IP} và tạo/cập nhật hàng đợi máy in...")
@@ -188,8 +189,8 @@ try:
     }}
     """
     printer_res = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
-        capture_output=True, text=True, timeout=45
+        ["powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
+        capture_output=True, text=True, timeout=45, creationflags=NO_WINDOW
     )
     log(f"    Kết quả máy in: {printer_res.stdout.strip()}")
     if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
@@ -197,8 +198,9 @@ try:
         
     try:
         log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
-        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
-        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/p", "/n", printer_name], creationflags=NO_WINDOW)
+        time.sleep(1.0)
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/e", "/n", printer_name], creationflags=NO_WINDOW)
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 
@@ -235,6 +237,7 @@ PRINTER_IP = "__PRINTER_IP__"
 MODEL = "__MODEL__"
 DRIVER_NAME = "__DRIVER_NAME__"
 DRIVER_URL = "__DRIVER_URL__"
+NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 def log(msg):
     print(f"[*] {msg}", flush=True)
@@ -249,8 +252,8 @@ try:
         Get-PrintJob -PrinterName $p.Name -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue
     }}
     """
-    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
-                   capture_output=True, text=True, timeout=15)
+    subprocess.run(["powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_clean],
+                   capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
 except Exception as e:
     log(f"    Cảnh báo dọn dẹp hàng đợi: {e}")
 
@@ -303,7 +306,7 @@ try:
     if not extracted_ok:
         try:
             tar_cmd = ["tar", "-xf", str(download_path), "-C", str(extract_dir)]
-            r_tar = subprocess.run(tar_cmd, capture_output=True, text=True, timeout=60)
+            r_tar = subprocess.run(tar_cmd, capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW)
             if r_tar.returncode == 0 and list(extract_dir.glob("**/*.inf")):
                 extracted_ok = True
                 log("    Giải nén thành công bằng bsdtar.")
@@ -314,7 +317,7 @@ try:
         sfx_flags = [["/extract", str(extract_dir)], ["-y", f"-o{extract_dir}"], ["/s", f"/p{extract_dir}"], ["/VERYSILENT", f"/DIR={extract_dir}"]]
         for sfx in sfx_flags:
             try:
-                r_sfx = subprocess.run([str(download_path)] + sfx, capture_output=True, text=True, timeout=60)
+                r_sfx = subprocess.run([str(download_path)] + sfx, capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW)
                 if list(extract_dir.glob("**/*.inf")):
                     extracted_ok = True
                     log(f"    Bung file SFX EXE thành công (cờ: {' '.join(sfx)}).")
@@ -358,6 +361,8 @@ try:
         except Exception:
             continue
 
+    # Ưu tiên các model có nhãn RICOH trước các nhãn con Gestetner/Lanier/Savin
+    inf_driver_names = sorted(inf_driver_names, key=lambda d: 0 if "ricoh" in d.lower() else 1)
     log(f"    Tìm thấy {len(inf_driver_names)} model trong file INF.")
 
     exact_driver = None
@@ -390,7 +395,7 @@ try:
 
     log("4/6. Nạp driver cưỡng bức vào Windows Driver Store (pnputil /force)...")
     pnp_cmd = ["pnputil", "/add-driver", str(selected_inf), "/install", "/force"]
-    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120)
+    pnp_res = subprocess.run(pnp_cmd, capture_output=True, text=True, timeout=120, creationflags=NO_WINDOW)
     log(f"    pnputil exit {pnp_res.returncode}: {pnp_res.stdout.strip()[:150]}")
     
     if pnp_res.returncode != 0:
@@ -420,10 +425,10 @@ try:
 
     log(f"5/6. Đăng ký driver '{exact_driver}' vào Windows Spooler...")
     reg_driver_cmd = [
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        "powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         f'Add-PrinterDriver -Name "{exact_driver}" -ErrorAction SilentlyContinue'
     ]
-    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30)
+    subprocess.run(reg_driver_cmd, capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
     
     log(f"6/6. Cấu hình Port IP_{PRINTER_IP} và tạo/cập nhật hàng đợi máy in...")
     clean_model = MODEL.strip()
@@ -469,8 +474,8 @@ try:
     }}
     """
     printer_res = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
-        capture_output=True, text=True, timeout=45
+        ["powershell", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_setup],
+        capture_output=True, text=True, timeout=45, creationflags=NO_WINDOW
     )
     log(f"    Kết quả máy in: {printer_res.stdout.strip()}")
     if printer_res.returncode != 0 or ("ADDED" not in printer_res.stdout and "UPDATED" not in printer_res.stdout and "RE-ADDED" not in printer_res.stdout):
@@ -478,8 +483,9 @@ try:
         
     try:
         log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
-        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
-        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/p", "/n", printer_name], creationflags=NO_WINDOW)
+        time.sleep(1.0)
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/e", "/n", printer_name], creationflags=NO_WINDOW)
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gox-cache-react-v5';
+const CACHE_NAME = 'gox-cache-react-v6';
 
 self.addEventListener('install', event => {
   self.skipWaiting();
