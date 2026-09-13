@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPrintersFromAgent, installDriverApi, testPrinterLoginApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
+import { fetchPrintersFromAgent, installDriverApi, trackCommandProgressPromise, recordJobToVpsApi } from '../services/api';
 import { loadDriverCatalogs, matchPrinterDrivers } from '../utils/drivers';
 import { parseStepInfo } from '../utils/stepParser';
 
@@ -22,14 +22,8 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const [selectedDrivers, setSelectedDrivers] = useState<Record<string, any>>({});
   
-  const [printerUser, setPrinterUser] = useState('admin');
-  const [printerPass, setPrinterPass] = useState('');
-  
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
-  const [testingAuth, setTestingAuth] = useState(false);
-  const [testAuthStatus, setTestAuthStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [testAuthErrorMsg, setTestAuthErrorMsg] = useState('');
 
   // Step-by-step progress state (shows 1 clean step at a time)
   const [activePrinterName, setActivePrinterName] = useState('');
@@ -100,38 +94,6 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
          model: selectedOption.getAttribute('data-model')
        }
     }));
-  };
-
-  const handleTestAuth = async () => {
-    if (selectedPrinterIds.length === 0) {
-      if (showToast) showToast('Vui lòng chọn ít nhất 1 máy photocopy để Test Password.', 'warning');
-      return;
-    }
-    const targetId = selectedPrinterIds[0];
-    const printer = printers.find(p => p.id === targetId);
-    if (!printer) return;
-    
-    setTestingAuth(true);
-    setTestAuthStatus('idle');
-    setTestAuthErrorMsg('');
-    if (showToast) showToast(`Đang kiểm tra đăng nhập trên ${printer.name}...`, 'info');
-    try {
-      const res = await testPrinterLoginApi(printer.ip, printer.type, printerUser, printerPass);
-      if (res.ok) {
-        if (showToast) showToast(`Đã test đăng nhập thành công trên ${printer.name}!`, 'success');
-        setTestAuthStatus('success');
-      } else {
-        if (showToast) showToast(`Lỗi đăng nhập: ${res.error || 'Sai thông tin'}`, 'error');
-        setTestAuthStatus('error');
-        setTestAuthErrorMsg(res.error || 'Sai thông tin');
-      }
-    } catch (e: any) {
-      if (showToast) showToast(`Lỗi không xác định khi kết nối máy in`, 'error');
-      setTestAuthStatus('error');
-      setTestAuthErrorMsg(e.toString());
-    } finally {
-      setTestingAuth(false);
-    }
   };
 
   const handleStartProcess = async () => {
@@ -272,46 +234,8 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
         <div className="modal-body">
           {!isProcessing && !isFinished ? (
             <>
-              <div style={{ marginBottom: '20px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                <label className="form-label" style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>1. Tài khoản WIM máy in (Để Test Đăng nhập)</label>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    style={{ flex: 1 }} 
-                    placeholder="Tên đăng nhập (VD: admin)" 
-                    value={printerUser} 
-                    onChange={e => setPrinterUser(e.target.value)} 
-                  />
-                  <input 
-                    type="password" 
-                    className="form-input" 
-                    style={{ flex: 1 }} 
-                    placeholder="Mật khẩu" 
-                    value={printerPass} 
-                    onChange={e => setPrinterPass(e.target.value)} 
-                  />
-                  <button 
-                    type="button" 
-                    className="btn-test-auth" 
-                    onClick={handleTestAuth} 
-                    disabled={testingAuth}
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {testingAuth ? 'Đang test...' : 'Test Pass'}
-                  </button>
-                  {testAuthStatus === 'success' && <span style={{ color: 'green', fontSize: '18px', fontWeight: 'bold' }}>✅</span>}
-                  {testAuthStatus === 'error' && <span style={{ color: 'red', fontSize: '18px', fontWeight: 'bold' }}>❌</span>}
-                </div>
-                {testAuthStatus === 'error' && testAuthErrorMsg && (
-                  <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: 'bold' }}>
-                    Lỗi: {testAuthErrorMsg}
-                  </div>
-                )}
-              </div>
-
               <p>
-                <strong>2. Chọn máy photocopy cần cài Driver</strong><br />
+                <strong>Chọn máy photocopy cần cài Driver</strong><br />
                 <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Hệ thống tự động khớp Driver phù hợp với model máy in.</span>
               </p>
 
