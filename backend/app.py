@@ -1187,6 +1187,11 @@ def create_app() -> Flask:
         if request.method == "OPTIONS":
             return None
 
+        # Wildcard tunnel subdomain proxy bypass: forward traffic to reverse SSH tunnel without auth check
+        host = request.host or ""
+        if host.endswith(".app.goxprint.com") and host != "app.goxprint.com":
+            return None
+
         path = request.path or ""
 
         # Static assets and storage bypass
@@ -1206,6 +1211,7 @@ def create_app() -> Flask:
             path.startswith("/api/public/")
             or path.startswith("/webhook/")
             or path in ("/machinelist/", "/networklist/", "/all/", "/api/infor/list", "/api/uticommands")
+            or (request.method == "GET" and (path == "/api/agents" or (path.startswith("/api/agents/") and path not in ("/api/agents/history", "/api/agents/settings"))))
         ):
             return None
 
@@ -1248,7 +1254,7 @@ def create_app() -> Flask:
     @app.after_request
     def _after_request_log(response: Any) -> Any:
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key, X-API-Token, x-api-key, x-api-token, Cache-Control, Pragma"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key, X-API-Token, x-api-key, x-api-token, Cache-Control, Pragma, Expires, expires"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         try:
             path = request.path or ""

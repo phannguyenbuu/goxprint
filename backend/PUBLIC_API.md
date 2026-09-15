@@ -576,6 +576,45 @@ Example success response:
 }
 ```
 
+## 8) Agents List & Details (Public)
+- Method: `GET`
+- Paths:
+  - List all agents: `/api/agents` (optional query: `status=online|offline|all`, `agent_uid=<uid>`, `lan_uid=<lan_uid>`, `lead=<lead>`)
+  - Get single agent: `/api/agents/<agent_uid>`
+- Response contains `public_ip` (WAN/public IP of the agent), `local_ip`, `hostname`, `is_online`, `last_seen_at`, etc.
+
+Example:
+```bash
+curl -s "https://agentapi.quanlymay.com/api/agents"
+curl -s "https://agentapi.quanlymay.com/api/agents?agent_uid=tony"
+curl -s "https://agentapi.quanlymay.com/api/agents/tony"
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "count": 1,
+  "public_ip": "183.80.156.85",
+  "agent_uid": "tony",
+  "local_ip": "192.168.1.111",
+  "hostname": "tony",
+  "is_online": true,
+  "rows": [
+    {
+      "id": 3,
+      "agent_uid": "tony",
+      "public_ip": "183.80.156.85",
+      "local_ip": "192.168.1.111",
+      "hostname": "tony",
+      "is_online": true,
+      "lan_uid": "default",
+      "last_seen_at_iso": "2026-09-15T09:07:16+07:00"
+    }
+  ]
+}
+```
+
 ## 8A) Device scan-folder assignment
 
 Use this endpoint when the client only knows the Ricoh machine MAC and wants the server to choose the correct Windows agent automatically.

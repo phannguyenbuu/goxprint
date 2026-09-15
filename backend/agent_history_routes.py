@@ -91,7 +91,11 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
         lead = _to_text(request.args.get("lead"))
         lan_uid = _to_text(request.args.get("lan_uid"))
         agent_uid = _to_text(request.args.get("agent_uid"))
-        status = _to_text(request.args.get("status")).lower() or "online"
+        raw_status = request.args.get("status")
+        if raw_status is not None:
+            status = _to_text(raw_status).lower()
+        else:
+            status = "" if agent_uid else "online"
         stale_seconds = _to_int(request.args.get("stale_seconds")) or ONLINE_STALE_SECONDS
         stale_seconds = max(30, stale_seconds)
 
@@ -99,7 +103,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
             _refresh_stale_agent_offline(session=session, lead=lead, lan_uid=lan_uid, agent_uid=agent_uid, stale_seconds=stale_seconds)
             session.commit()
             stmt = (
-                select(AgentNode, LanSite.lan_name, LanSite.subnet_cidr, LanSite.gateway_ip)
+                select(AgentNode, LanSite.lan_name, LanSite.subnet_cidr, LanSite.gateway_ip, LanSite.public_ip)
                 .join(LanSite, (AgentNode.lead == LanSite.lead) & (AgentNode.lan_uid == LanSite.lan_uid), isouter=True)
                 .order_by(AgentNode.last_seen_at.desc(), AgentNode.id.desc())
             )
@@ -213,7 +217,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     master_by_lan[(l_lead, l_lan)] = master_agent.agent_uid
 
         result_rows: list[dict[str, Any]] = []
-        for agent, lan_name, subnet_cidr, gateway_ip in rows:
+        for agent, lan_name, subnet_cidr, gateway_ip, lan_public_ip in rows:
             last_seen = agent.last_seen_at if agent.last_seen_at and agent.last_seen_at.tzinfo else (
                 agent.last_seen_at.replace(tzinfo=timezone.utc) if agent.last_seen_at else None
             )
@@ -227,6 +231,11 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                 continue
             port = int(agent.web_port or 9173)
             is_master = master_by_lan.get((_to_text(agent.lead), _to_text(agent.lan_uid))) == agent.agent_uid
+            resolved_public_ip = (
+                _to_text(getattr(agent, "public_ip", ""))
+                or (ACTIVE_AGENTS.get(agent.agent_uid, {}).get("public_ip", "") if "ACTIVE_AGENTS" in globals() else "")
+                or _to_text(lan_public_ip)
+            )
             result_rows.append(
                 {
                     "id": int(agent.id),
@@ -239,7 +248,7 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     "hostname": agent.hostname,
                     "local_ip": agent.local_ip,
                     "local_mac": agent.local_mac,
-                    "public_ip": _to_text(getattr(agent, "public_ip", "")) or (ACTIVE_AGENTS.get(agent.agent_uid, {}).get("public_ip", "") if "ACTIVE_AGENTS" in globals() else ""),
+                    "public_ip": resolved_public_ip,
                     "app_version": agent.app_version,
                     "run_mode": agent.run_mode or "web",
                     "web_port": port,
@@ -260,7 +269,89 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                     **_serialize_audit_payload_agents(agent.created_at, agent.updated_at),
                 }
             )
-        return jsonify({"rows": result_rows, "stale_seconds": stale_seconds})
+        out_payload: dict[str, Any] = {
+            "ok": True,
+            "count": len(result_rows),
+            "rows": result_rows,
+            "stale_seconds": stale_seconds,
+        }
+        if agent_uid and result_rows:
+            matched = next((r for r in result_rows if r.get("agent_uid", "").lower() == agent_uid.lower()), result_rows[0])
+            out_payload["agent_uid"] = matched.get("agent_uid", "")
+            out_payload["public_ip"] = matched.get("public_ip", "")
+            out_payload["local_ip"] = matched.get("local_ip", "")
+            out_payload["hostname"] = matched.get("hostname", "")
+            out_payload["is_online"] = matched.get("is_online", False)
+            out_payload["agent"] = matched
+        elif len(result_rows) == 1:
+            out_payload["public_ip"] = result_rows[0].get("public_ip", "")
+
+        return jsonify(out_payload)
+
+    @app.get("/api/agents/<agent_uid>")
+    def get_single_agent(agent_uid: str) -> Any:
+        if agent_uid in ("history", "public", "settings", "utility-commands", "cameras"):
+            return jsonify({"ok": False, "error": "Endpoint not found"}), 404
+        with session_factory() as session:
+            _refresh_stale_agent_offline(session=session, agent_uid=agent_uid, stale_seconds=ONLINE_STALE_SECONDS)
+            session.commit()
+            stmt = (
+                select(AgentNode, LanSite.lan_name, LanSite.subnet_cidr, LanSite.gateway_ip, LanSite.public_ip)
+                .join(LanSite, (AgentNode.lead == LanSite.lead) & (AgentNode.lan_uid == LanSite.lan_uid), isouter=True)
+                .where(AgentNode.agent_uid == agent_uid)
+                .order_by(AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+            )
+            row = session.execute(stmt).first()
+            if not row:
+                stmt_ci = (
+                    select(AgentNode, LanSite.lan_name, LanSite.subnet_cidr, LanSite.gateway_ip, LanSite.public_ip)
+                    .join(LanSite, (AgentNode.lead == LanSite.lead) & (AgentNode.lan_uid == LanSite.lan_uid), isouter=True)
+                    .where(AgentNode.agent_uid.ilike(agent_uid))
+                    .order_by(AgentNode.last_seen_at.desc(), AgentNode.id.desc())
+                )
+                row = session.execute(stmt_ci).first()
+
+            if not row:
+                return jsonify({"ok": False, "error": f"Agent '{agent_uid}' not found", "agent_uid": agent_uid, "public_ip": ""}), 404
+
+            agent, lan_name, subnet_cidr, gateway_ip, lan_public_ip = row
+            resolved_public_ip = (
+                _to_text(getattr(agent, "public_ip", ""))
+                or (ACTIVE_AGENTS.get(agent.agent_uid, {}).get("public_ip", "") if "ACTIVE_AGENTS" in globals() else "")
+                or _to_text(lan_public_ip)
+            )
+            last_seen = agent.last_seen_at if agent.last_seen_at and agent.last_seen_at.tzinfo else (
+                agent.last_seen_at.replace(tzinfo=timezone.utc) if agent.last_seen_at else None
+            )
+            agent_data = {
+                "id": int(agent.id),
+                "lead": agent.lead,
+                "lan_uid": agent.lan_uid,
+                "lan_name": _to_text(lan_name),
+                "subnet_cidr": _to_text(subnet_cidr),
+                "gateway_ip": _to_text(gateway_ip),
+                "agent_uid": agent.agent_uid,
+                "hostname": agent.hostname,
+                "local_ip": agent.local_ip,
+                "local_mac": agent.local_mac,
+                "public_ip": resolved_public_ip,
+                "app_version": agent.app_version,
+                "run_mode": agent.run_mode or "web",
+                "web_port": int(agent.web_port or 9173),
+                "is_online": bool(agent.is_online),
+                "last_seen_at": _format_agents_datetime_ui(last_seen),
+                "last_seen_at_iso": last_seen.isoformat() if last_seen else "",
+                "last_seen_epoch": int(last_seen.timestamp()) if last_seen else 0,
+            }
+            return jsonify({
+                "ok": True,
+                "agent_uid": agent.agent_uid,
+                "public_ip": resolved_public_ip,
+                "local_ip": agent.local_ip,
+                "hostname": agent.hostname,
+                "is_online": bool(agent.is_online),
+                "agent": agent_data,
+            })
 
     @app.delete("/api/agents/<int:agent_id>")
     def delete_agent(agent_id: int) -> Any:
