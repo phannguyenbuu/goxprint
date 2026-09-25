@@ -136,7 +136,7 @@ def register_agent_settings_routes(app: Flask, session_factory: Any, lead_key_ma
 
     @app.post("/api/agents/bulk-set-interval")
     def bulk_set_device_interval() -> Any:
-        """Patch device_interval_seconds trong settings.json của tất cả agent online.
+        """Patch nhiều field vào settings.json của tất cả agent online.
         Dùng trigger_utility exec_utility — không cần rebuild agent."""
         body = request.get_json(silent=True) or {}
         sent_token = _request_api_token()
@@ -144,14 +144,74 @@ def register_agent_settings_routes(app: Flask, session_factory: Any, lead_key_ma
         if not ok_auth:
             return auth_error
 
-        try:
-            new_interval = int(body.get("device_interval_seconds", 0))
-        except (ValueError, TypeError):
-            return jsonify({"ok": False, "error": "device_interval_seconds phải là số nguyên"}), 400
-        if new_interval < 5 or new_interval > 3600:
-            return jsonify({"ok": False, "error": "device_interval_seconds phải từ 5 đến 3600 giây"}), 400
+        # Đọc và validate các field
+        ftp_port = body.get("ftp_port")
+        ftp_user = body.get("ftp_user")
+        ftp_pass = body.get("ftp_pass")
+        device_interval = body.get("device_interval_seconds")
+        control_interval = body.get("control_interval_seconds")
+        driver_preference = body.get("driver_preference")
+        show_tray_icon = body.get("show_tray_icon")
+        scan_auto_open_file = body.get("scan_auto_open_file")
+        scan_auto_open_dir = body.get("scan_auto_open_dir")
 
-        # Script Python chạy thẳng trong agent: đọc settings.json, patch field, ghi lại
+        if device_interval is not None:
+            try:
+                device_interval = int(device_interval)
+                if device_interval < 5 or device_interval > 3600:
+                    return jsonify({"ok": False, "error": "device_interval_seconds phải từ 5 đến 3600 giây"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"ok": False, "error": "device_interval_seconds phải là số nguyên"}), 400
+
+        if control_interval is not None:
+            try:
+                control_interval = int(control_interval)
+                if control_interval < 1 or control_interval > 60:
+                    return jsonify({"ok": False, "error": "control_interval_seconds phải từ 1 đến 60 giây"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"ok": False, "error": "control_interval_seconds phải là số nguyên"}), 400
+
+        if ftp_port is not None:
+            try:
+                ftp_port = int(ftp_port)
+                if ftp_port < 1 or ftp_port > 65535:
+                    return jsonify({"ok": False, "error": "ftp_port phải từ 1 đến 65535"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"ok": False, "error": "ftp_port phải là số nguyên"}), 400
+
+        # Build patch lines cho script Python
+        patch_lines = []
+        if ftp_port is not None:
+            patch_lines.append(f"cfg['ftp_port'] = {ftp_port}")
+        if ftp_user is not None:
+            patch_lines.append(f"cfg['ftp_user'] = {repr(str(ftp_user))}")
+        if ftp_pass is not None:
+            patch_lines.append(f"cfg['ftp_pass'] = {repr(str(ftp_pass))}")
+        if show_tray_icon is not None:
+            patch_lines.append(f"cfg['show_tray_icon'] = {repr(bool(show_tray_icon))}")
+
+        polling_lines = []
+        if device_interval is not None:
+            polling_lines.append(f"cfg['polling']['device_interval_seconds'] = {repr(str(device_interval))}")
+        if control_interval is not None:
+            polling_lines.append(f"cfg['polling']['control_interval_seconds'] = {repr(str(control_interval))}")
+        if driver_preference is not None:
+            polling_lines.append(f"cfg['polling']['driver_preference'] = {repr(str(driver_preference))}")
+        if scan_auto_open_file is not None:
+            polling_lines.append(f"cfg['polling']['scan_auto_open_file'] = {repr(bool(scan_auto_open_file))}")
+        if scan_auto_open_dir is not None:
+            polling_lines.append(f"cfg['polling']['scan_auto_open_dir'] = {repr(bool(scan_auto_open_dir))}")
+
+        if not patch_lines and not polling_lines:
+            return jsonify({"ok": False, "error": "Không có thông số nào được gửi"}), 400
+
+        polling_init = ""
+        if polling_lines:
+            polling_init = "\nif 'polling' not in cfg or not isinstance(cfg.get('polling'), dict):\n    cfg['polling'] = {}"
+
+        patch_body = "\n".join(patch_lines) or ""
+        polling_body = "\n".join(polling_lines) or ""
+
         patch_script = f"""import os, json
 appdata = os.getenv('APPDATA', '')
 if not appdata:
@@ -161,19 +221,18 @@ if not appdata:
 target = os.path.join(appdata, 'GoxPrintAgent', 'settings.json')
 with open(target, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
-if 'polling' not in cfg or not isinstance(cfg.get('polling'), dict):
-    cfg['polling'] = {{}}
-cfg['polling']['device_interval_seconds'] = {new_interval}
+{patch_body}{polling_init}
+{polling_body}
 with open(target, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
-print(f"OK: device_interval_seconds={new_interval} da ghi vao {{target}}")
+print(f"OK: settings.json da duoc cap nhat tai {{target}}")
 """
 
         import json as _json
         requested_at = datetime.now(timezone.utc)
         params_str = _json.dumps({
             "action": "exec_utility",
-            "command": "bulk_set_interval",
+            "command": "bulk_save_settings",
             "command_content": patch_script,
             "is_auto": True,
         })
@@ -208,13 +267,13 @@ print(f"OK: device_interval_seconds={new_interval} da ghi vao {{target}}")
             session.commit()
 
         LOGGER.info(
-            "[bulk-set-interval] Queued patch device_interval_seconds=%d for %d online agents (lead=%s)",
-            new_interval, queued_count, lead_valid,
+            "[bulk-save-settings] Queued settings patch for %d online agents (lead=%s)",
+            queued_count, lead_valid,
         )
         return jsonify({
             "ok": True,
-            "message": f"Đã gửi lệnh đặt polling interval {new_interval}s cho {queued_count} Agent đang online.",
+            "message": f"Đã gửi lệnh cập nhật settings.json cho {queued_count} Agent đang online.",
             "queued_count": queued_count,
-            "device_interval_seconds": new_interval,
         })
+
 

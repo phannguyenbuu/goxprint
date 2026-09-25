@@ -596,30 +596,108 @@
 </div>
 
 <!-- ========================================================================= -->
-<!-- MODAL: BULK SET POLLING INTERVAL -->
+<!-- MODAL: BULK SAVE SETTINGS.JSON -->
 <!-- ========================================================================= -->
+<style>
+  .bulk-field { margin-bottom: 14px; }
+  .bulk-field label { font-size: 0.82rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px; }
+  .bulk-field .hint { font-size: 0.73rem; color: #64748b; margin-top: 3px; display: block; line-height: 1.4; }
+  .bulk-field input[type="number"],
+  .bulk-field input[type="text"],
+  .bulk-field input[type="password"] {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
+    font-size: 0.88rem; color: #0f172a; background: #fff;
+  }
+  .bulk-field input:focus { outline: none; border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(96,165,250,0.2); }
+  .bulk-section-title {
+    font-size: 0.78rem; font-weight: 700; color: #6366f1; text-transform: uppercase;
+    letter-spacing: 0.06em; margin: 16px 0 10px 0; padding-bottom: 5px;
+    border-bottom: 1px solid #e0e7ff;
+  }
+  .bulk-toggle-row { display: flex; align-items: center; gap: 10px; }
+  .bulk-toggle-row label { font-size: 0.82rem; font-weight: 600; color: #334155; cursor: pointer; margin: 0; }
+</style>
 <div id="modal-bulk-interval" class="modal-backdrop">
-  <div class="modal-card" style="max-width: 440px;">
+  <div class="modal-card" style="max-width: 540px;">
     <div class="modal-header">
-      <h3 style="margin: 0; font-size: 1.05rem; color: #0f172a;">📡 Đặt Polling Interval hàng loạt</h3>
+      <h3 style="margin: 0; font-size: 1.05rem; color: #0f172a;">💾 Lưu Settings.json hàng loạt</h3>
       <button type="button" id="btn-close-bulk-interval" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;">✕</button>
     </div>
-    <div class="modal-body">
-      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.83rem; color: #1e40af; line-height: 1.5;">
-        Gửi lệnh cập nhật <strong>device_interval_seconds</strong> trong <code>settings.json</code> của <strong>tất cả Agent đang online</strong> ngay lập tức.<br>
-        Agent sẽ nhận lệnh trong vòng &lt;1 giây và tự động ghi vào file cấu hình cục bộ.
+    <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.82rem; color: #1e40af; line-height: 1.5;">
+        Ghi đè các thông số bên dưới vào <strong>settings.json</strong> của <strong>tất cả Agent đang online</strong>.<br>
+        Các thông số riêng của từng máy (<code>agent_uid</code>, <code>pc_name</code>, <code>pc_ip</code>, <code>scan_dirs</code>) sẽ được <strong>giữ nguyên</strong>.
       </div>
-      <div class="filter-group" style="margin-bottom: 8px;">
-        <label style="font-size: 0.85rem; font-weight: 600; color: #334155;">Vòng Polling Thiết bị / Máy in (giây)</label>
-        <input type="number" id="input-bulk-interval" min="5" max="3600" value="60"
-          style="margin-top: 6px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-weight: 700; width: 100%; box-sizing: border-box; color: #0f172a;">
-        <span style="font-size: 0.75rem; color: #64748b; margin-top: 4px; display: block;">Tối thiểu: 5 giây — Tối đa: 3600 giây (1 giờ). Mặc định: 60 giây.</span>
+
+      <!-- FTP -->
+      <div class="bulk-section-title">📁 FTP Server (nhận scan từ máy photo)</div>
+      <div class="bulk-field">
+        <label>FTP Port</label>
+        <input type="number" id="bs-ftp-port" value="2130" min="1" max="65535">
+        <span class="hint">Cổng FTP Agent lắng nghe nhận file scan. Mặc định: 2130.</span>
       </div>
-      <div id="bulk-interval-status" style="font-size: 0.83rem; font-weight: 600; margin-top: 10px; min-height: 20px;"></div>
+      <div class="bulk-field">
+        <label>FTP User</label>
+        <input type="text" id="bs-ftp-user" value="goxprint">
+        <span class="hint">Tên đăng nhập FTP mà máy photo dùng để gửi scan. Mặc định: goxprint.</span>
+      </div>
+      <div class="bulk-field">
+        <label>FTP Password</label>
+        <input type="text" id="bs-ftp-pass" value="goxprint">
+        <span class="hint">Mật khẩu FTP. Mặc định: goxprint.</span>
+      </div>
+
+      <!-- Polling -->
+      <div class="bulk-section-title">⏱️ Polling Interval</div>
+      <div class="bulk-field">
+        <label>Device Interval (giây) — Vòng quét thiết bị / máy in</label>
+        <input type="number" id="bs-device-interval" value="60" min="5" max="3600">
+        <span class="hint">Tần suất Agent poll dữ liệu counter từ máy in. Mặc định: 60 giây.</span>
+      </div>
+      <div class="bulk-field">
+        <label>Control Interval (giây) — Vòng nhận lệnh từ server</label>
+        <input type="number" id="bs-control-interval" value="1" min="1" max="60">
+        <span class="hint">Tần suất Agent hỏi server có lệnh mới không. Mặc định: 1 giây.</span>
+      </div>
+
+      <!-- Driver -->
+      <div class="bulk-section-title">🖨️ Driver</div>
+      <div class="bulk-field">
+        <label>Driver Preference (phân cách bằng dấu chấm phẩy)</label>
+        <input type="text" id="bs-driver-pref" value="pcl 6;pcl6;pcl;easysetup;universal;postscript;ps">
+        <span class="hint">Thứ tự ưu tiên driver khi cài tự động. Mặc định: pcl 6;pcl6;pcl;easysetup;universal;postscript;ps</span>
+      </div>
+
+      <!-- UI -->
+      <div class="bulk-section-title">🖥️ Giao diện</div>
+      <div class="bulk-field">
+        <div class="bulk-toggle-row">
+          <input type="checkbox" id="bs-tray-icon" checked style="width:16px;height:16px;cursor:pointer;">
+          <label for="bs-tray-icon">Hiển thị biểu tượng System Tray</label>
+        </div>
+        <span class="hint">Bật/tắt icon Agent ở góc phải thanh taskbar. Mặc định: bật.</span>
+      </div>
+      <div class="bulk-field">
+        <div class="bulk-toggle-row">
+          <input type="checkbox" id="bs-scan-open-file" checked style="width:16px;height:16px;cursor:pointer;">
+          <label for="bs-scan-open-file">Tự động mở file sau khi scan xong</label>
+        </div>
+        <span class="hint">Mặc định: bật.</span>
+      </div>
+      <div class="bulk-field">
+        <div class="bulk-toggle-row">
+          <input type="checkbox" id="bs-scan-open-dir" checked style="width:16px;height:16px;cursor:pointer;">
+          <label for="bs-scan-open-dir">Tự động mở thư mục scan sau khi nhận file</label>
+        </div>
+        <span class="hint">Mặc định: bật.</span>
+      </div>
+
+      <div id="bulk-interval-status" style="font-size: 0.83rem; font-weight: 600; margin-top: 12px; min-height: 20px;"></div>
     </div>
     <div class="modal-footer">
       <button type="button" id="btn-confirm-bulk-interval" class="action-btn btn-web" style="padding: 9px 20px; font-size: 0.88rem;">
-        📡 Gửi lệnh cho tất cả Agent
+        💾 Lưu cho tất cả Agent
       </button>
       <button type="button" id="btn-cancel-bulk-interval" class="action-btn btn-settings" style="padding: 9px 14px; font-size: 0.88rem;">
         Đóng
@@ -1200,7 +1278,7 @@
     if (activeSubtab === 'history') fetchHistoryLogs();
   });
 
-  // ── Bulk Set Polling Interval ──────────────────────────────────────────────
+  // ── Bulk Save Settings.json ────────────────────────────────────────────────
   const modalBulk = document.getElementById('modal-bulk-interval');
   const statusEl  = document.getElementById('bulk-interval-status');
   const confirmBtn = document.getElementById('btn-confirm-bulk-interval');
@@ -1209,7 +1287,7 @@
     statusEl.textContent = '';
     statusEl.style.color = '';
     confirmBtn.disabled = false;
-    confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+    confirmBtn.textContent = '💾 Lưu cho tất cả Agent';
     modalBulk.classList.add('open');
   }
   function closeBulkModal() { modalBulk.classList.remove('open'); }
@@ -1219,41 +1297,72 @@
   document.getElementById('btn-cancel-bulk-interval')?.addEventListener('click', closeBulkModal);
 
   confirmBtn?.addEventListener('click', async () => {
-    const val = parseInt(document.getElementById('input-bulk-interval').value, 10);
-    if (!val || val < 5 || val > 3600) {
-      statusEl.textContent = '❌ Giá trị không hợp lệ (5 – 3600 giây)';
-      statusEl.style.color = '#dc2626';
-      return;
+    const ftpPort    = parseInt(document.getElementById('bs-ftp-port').value, 10);
+    const ftpUser    = document.getElementById('bs-ftp-user').value.trim();
+    const ftpPass    = document.getElementById('bs-ftp-pass').value.trim();
+    const devInt     = parseInt(document.getElementById('bs-device-interval').value, 10);
+    const ctrlInt    = parseInt(document.getElementById('bs-control-interval').value, 10);
+    const driverPref = document.getElementById('bs-driver-pref').value.trim();
+    const trayIcon   = document.getElementById('bs-tray-icon').checked;
+    const openFile   = document.getElementById('bs-scan-open-file').checked;
+    const openDir    = document.getElementById('bs-scan-open-dir').checked;
+
+    if (!ftpPort || ftpPort < 1 || ftpPort > 65535) {
+      statusEl.textContent = '❌ FTP Port không hợp lệ (1–65535)';
+      statusEl.style.color = '#dc2626'; return;
     }
+    if (devInt < 5 || devInt > 3600) {
+      statusEl.textContent = '❌ Device Interval không hợp lệ (5–3600 giây)';
+      statusEl.style.color = '#dc2626'; return;
+    }
+    if (ctrlInt < 1 || ctrlInt > 60) {
+      statusEl.textContent = '❌ Control Interval không hợp lệ (1–60 giây)';
+      statusEl.style.color = '#dc2626'; return;
+    }
+
     confirmBtn.disabled = true;
     confirmBtn.textContent = '⏳ Đang gửi...';
     statusEl.textContent = '';
+
+    const payload = {
+      ftp_port: ftpPort,
+      ftp_user: ftpUser,
+      ftp_pass: ftpPass,
+      device_interval_seconds: devInt,
+      control_interval_seconds: ctrlInt,
+      driver_preference: driverPref,
+      show_tray_icon: trayIcon,
+      scan_auto_open_file: openFile,
+      scan_auto_open_dir: openDir,
+    };
+
     try {
       const res = await fetch('/api/agents/bulk-set-interval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_interval_seconds: val }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.ok) {
         statusEl.textContent = `✅ ${data.message}`;
         statusEl.style.color = '#059669';
-        confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+        confirmBtn.textContent = '💾 Lưu cho tất cả Agent';
         confirmBtn.disabled = false;
       } else {
         statusEl.textContent = `❌ Lỗi: ${data.error || 'Thất bại'}`;
         statusEl.style.color = '#dc2626';
         confirmBtn.disabled = false;
-        confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+        confirmBtn.textContent = '💾 Lưu cho tất cả Agent';
       }
     } catch (err) {
       statusEl.textContent = `❌ Lỗi kết nối: ${err}`;
       statusEl.style.color = '#dc2626';
       confirmBtn.disabled = false;
-      confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+      confirmBtn.textContent = '💾 Lưu cho tất cả Agent';
     }
   });
   // ──────────────────────────────────────────────────────────────────────────
+
 
 
   // Initial load
