@@ -310,6 +310,9 @@
       <span id="sync-status" style="font-size: 0.8rem; color: #10b981; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
         <span class="pulse-dot"></span> Đang tự động cập nhật
       </span>
+      <button id="btn-bulk-interval" class="subtab-btn" style="padding: 7px 14px; font-size: 0.82rem; background: #eff6ff; color: #2563eb; border-color: #bfdbfe;">
+        📡 Đặt Polling Interval
+      </button>
       <button id="btn-global-refresh" class="subtab-btn" style="padding: 7px 14px; font-size: 0.82rem;">
         🔄 Làm mới ngay
       </button>
@@ -592,6 +595,39 @@
   </div>
 </div>
 
+<!-- ========================================================================= -->
+<!-- MODAL: BULK SET POLLING INTERVAL -->
+<!-- ========================================================================= -->
+<div id="modal-bulk-interval" class="modal-backdrop">
+  <div class="modal-card" style="max-width: 440px;">
+    <div class="modal-header">
+      <h3 style="margin: 0; font-size: 1.05rem; color: #0f172a;">📡 Đặt Polling Interval hàng loạt</h3>
+      <button type="button" id="btn-close-bulk-interval" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.83rem; color: #1e40af; line-height: 1.5;">
+        Gửi lệnh cập nhật <strong>device_interval_seconds</strong> trong <code>settings.json</code> của <strong>tất cả Agent đang online</strong> ngay lập tức.<br>
+        Agent sẽ nhận lệnh trong vòng &lt;1 giây và tự động ghi vào file cấu hình cục bộ.
+      </div>
+      <div class="filter-group" style="margin-bottom: 8px;">
+        <label style="font-size: 0.85rem; font-weight: 600; color: #334155;">Vòng Polling Thiết bị / Máy in (giây)</label>
+        <input type="number" id="input-bulk-interval" min="5" max="3600" value="60"
+          style="margin-top: 6px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-weight: 700; width: 100%; box-sizing: border-box; color: #0f172a;">
+        <span style="font-size: 0.75rem; color: #64748b; margin-top: 4px; display: block;">Tối thiểu: 5 giây — Tối đa: 3600 giây (1 giờ). Mặc định: 60 giây.</span>
+      </div>
+      <div id="bulk-interval-status" style="font-size: 0.83rem; font-weight: 600; margin-top: 10px; min-height: 20px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" id="btn-confirm-bulk-interval" class="action-btn btn-web" style="padding: 9px 20px; font-size: 0.88rem;">
+        📡 Gửi lệnh cho tất cả Agent
+      </button>
+      <button type="button" id="btn-cancel-bulk-interval" class="action-btn btn-settings" style="padding: 9px 14px; font-size: 0.88rem;">
+        Đóng
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   // Global states
@@ -815,8 +851,13 @@
                   ${escapeHtml(a.local_ip || '-')}
                 </span>
                 ${a.public_ip ? `
-                  <span class="badge" style="background: #e0f2fe; color: #0369a1; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
-                    🌍 ${escapeHtml(a.public_ip)}
+                  <span style="display: inline-flex; align-items: center; gap: 5px;">
+                    <span class="badge" style="background: #e0f2fe; color: #0369a1; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
+                      🌍 ${escapeHtml(a.public_ip)}
+                    </span>
+                    <button type="button" class="copy-ip-btn" onclick="copyPublicIp(this, '${escapeHtml(a.public_ip)}'); event.stopPropagation();" title="Sao chép Public IP: ${escapeHtml(a.public_ip)}" style="background: #ffffff; border: 1px solid #cbd5e1; padding: 0; width: 20px; height: 20px; cursor: pointer; color: #0284c7; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" onmouseenter="this.style.background='#e0f2fe'; this.style.borderColor='#38bdf8';" onmouseleave="this.style.background='#ffffff'; this.style.borderColor='#cbd5e1';">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
                   </span>
                 ` : ''}
               </div>
@@ -898,8 +939,13 @@
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span style="font-family: monospace; font-weight: 600;">${escapeHtml(a.local_ip || '—')}</span>
               ${a.public_ip ? `
-                <span class="badge" style="background: #f1f5f9; color: #475569; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #e2e8f0;" title="IP Công cộng (WAN / Public IP)">
-                  🌍 ${escapeHtml(a.public_ip)}
+                <span style="display: inline-flex; align-items: center; gap: 5px;">
+                  <span class="badge" style="background: #f1f5f9; color: #475569; font-family: monospace; font-size: 0.72rem; font-weight: 600; border: 1px solid #e2e8f0;" title="IP Công cộng (WAN / Public IP)">
+                    🌍 ${escapeHtml(a.public_ip)}
+                  </span>
+                  <button type="button" class="copy-ip-btn" onclick="copyPublicIp(this, '${escapeHtml(a.public_ip)}'); event.stopPropagation();" title="Sao chép Public IP: ${escapeHtml(a.public_ip)}" style="background: #ffffff; border: 1px solid #cbd5e1; padding: 0; width: 20px; height: 20px; cursor: pointer; color: #64748b; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" onmouseenter="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseleave="this.style.background='#ffffff'; this.style.borderColor='#cbd5e1';">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
                 </span>
               ` : ''}
             </div>
@@ -983,8 +1029,13 @@
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span>${escapeHtml(log.local_ip || '-')}</span>
               ${log.public_ip ? `
-                <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.7rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
-                  🌍 ${escapeHtml(log.public_ip)}
+                <span style="display: inline-flex; align-items: center; gap: 5px;">
+                  <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.7rem; font-weight: 600; border: 1px solid #bae6fd;" title="IP Công cộng (WAN / Public IP)">
+                    🌍 ${escapeHtml(log.public_ip)}
+                  </span>
+                  <button type="button" class="copy-ip-btn" onclick="copyPublicIp(this, '${escapeHtml(log.public_ip)}'); event.stopPropagation();" title="Sao chép Public IP: ${escapeHtml(log.public_ip)}" style="background: #ffffff; border: 1px solid #cbd5e1; padding: 0; width: 20px; height: 20px; cursor: pointer; color: #0284c7; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" onmouseenter="this.style.background='#e0f2fe'; this.style.borderColor='#38bdf8';" onmouseleave="this.style.background='#ffffff'; this.style.borderColor='#cbd5e1';">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
                 </span>
               ` : ''}
             </div>
@@ -1016,6 +1067,51 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
+
+  // Copy Public IP to clipboard with icon feedback
+  window.copyPublicIp = function(btn, ip) {
+    if (!ip) return;
+    const copySvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+    const checkSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+    const origBg = btn.style.background;
+    const origBorder = btn.style.borderColor;
+
+    const showSuccess = () => {
+      btn.innerHTML = checkSvg;
+      btn.style.background = '#ecfdf5';
+      btn.style.borderColor = '#10b981';
+      btn.title = `Đã copy: ${ip}`;
+      setTimeout(() => {
+        btn.innerHTML = copySvg;
+        btn.style.background = origBg;
+        btn.style.borderColor = origBorder;
+        btn.title = `Sao chép Public IP: ${ip}`;
+      }, 1500);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ip).then(showSuccess).catch(() => {
+        fallbackCopy();
+      });
+    } else {
+      fallbackCopy();
+    }
+
+    function fallbackCopy() {
+      try {
+        const temp = document.createElement('input');
+        temp.value = ip;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+        showSuccess();
+      } catch (e) {
+        prompt('Sao chép IP:', ip);
+      }
+    }
+  };
 
   // Modal Settings functions
   window.viewAgentSettings = async function(agentUid, hostname) {
@@ -1103,6 +1199,62 @@
     fetchAgentsData();
     if (activeSubtab === 'history') fetchHistoryLogs();
   });
+
+  // ── Bulk Set Polling Interval ──────────────────────────────────────────────
+  const modalBulk = document.getElementById('modal-bulk-interval');
+  const statusEl  = document.getElementById('bulk-interval-status');
+  const confirmBtn = document.getElementById('btn-confirm-bulk-interval');
+
+  function openBulkModal() {
+    statusEl.textContent = '';
+    statusEl.style.color = '';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+    modalBulk.classList.add('open');
+  }
+  function closeBulkModal() { modalBulk.classList.remove('open'); }
+
+  document.getElementById('btn-bulk-interval')?.addEventListener('click', openBulkModal);
+  document.getElementById('btn-close-bulk-interval')?.addEventListener('click', closeBulkModal);
+  document.getElementById('btn-cancel-bulk-interval')?.addEventListener('click', closeBulkModal);
+
+  confirmBtn?.addEventListener('click', async () => {
+    const val = parseInt(document.getElementById('input-bulk-interval').value, 10);
+    if (!val || val < 5 || val > 3600) {
+      statusEl.textContent = '❌ Giá trị không hợp lệ (5 – 3600 giây)';
+      statusEl.style.color = '#dc2626';
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '⏳ Đang gửi...';
+    statusEl.textContent = '';
+    try {
+      const res = await fetch('/api/agents/bulk-set-interval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_interval_seconds: val }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        statusEl.textContent = `✅ ${data.message}`;
+        statusEl.style.color = '#059669';
+        confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+        confirmBtn.disabled = false;
+      } else {
+        statusEl.textContent = `❌ Lỗi: ${data.error || 'Thất bại'}`;
+        statusEl.style.color = '#dc2626';
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+      }
+    } catch (err) {
+      statusEl.textContent = `❌ Lỗi kết nối: ${err}`;
+      statusEl.style.color = '#dc2626';
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '📡 Gửi lệnh cho tất cả Agent';
+    }
+  });
+  // ──────────────────────────────────────────────────────────────────────────
+
 
   // Initial load
   fetchAgentsData();
