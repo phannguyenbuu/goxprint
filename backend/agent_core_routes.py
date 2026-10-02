@@ -60,11 +60,33 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
             subdomain = host.split(".")[0]
             port = TUNNEL_TOKENS.get(subdomain)
             if not port:
+                # Fallback: token format is wim<timestamp><port>, e.g. wim17892902778100
+                if subdomain.startswith("wim") and len(subdomain) > 7:
+                    try:
+                        candidate_port = int(subdomain[-4:])
+                        if 8100 <= candidate_port <= 8200 and not is_port_free(candidate_port):
+                            port = candidate_port
+                            TUNNEL_TOKENS[subdomain] = port
+                    except Exception:
+                        pass
+
+            if not port:
                 from flask import redirect
                 return redirect("https://app.goxprint.com/test-404")
+
+            from flask import Response
+
+            if request.method == "OPTIONS":
+                origin = request.headers.get("Origin") or "*"
+                resp = Response("", status=204)
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key, X-API-Token, x-api-key, x-api-token, Cache-Control, Pragma, Expires, expires, *"
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                return resp
+
             if port:
                 import requests
-                from flask import Response
                 
                 path = request.path
                 if request.query_string:
@@ -108,9 +130,13 @@ def register_agent_core_routes(app: Flask, session_factory: Any, lead_key_map: d
                     return f"Tunnel Proxy Error: Failed to connect to local port {port} after retries: {last_exc}", 502
                 
                 try:
-                    excluded_headers = ["content-length", "transfer-encoding", "connection", "content-encoding"]
+                    excluded_headers = ["content-length", "transfer-encoding", "connection", "content-encoding", "access-control-allow-origin", "access-control-allow-credentials"]
                     resp_headers = [(name, val) for name, val in resp.raw.headers.items() if name.lower() not in excluded_headers]
                     resp_headers.append(("Connection", "close"))
+                    
+                    origin = request.headers.get("Origin") or "*"
+                    resp_headers.append(("Access-Control-Allow-Origin", origin))
+                    resp_headers.append(("Access-Control-Allow-Credentials", "true"))
                     
                     return Response(
                         resp.iter_content(chunk_size=1024*64),

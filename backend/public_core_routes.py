@@ -1042,3 +1042,298 @@ def register_public_core_routes(app: Flask, session_factory: Any, lead_key_map: 
                 })
         except Exception as e:
             return jsonify({"ok": True, "definitive_ports": [9100], "web_ports": [], "all_ports": [9100]})
+
+    # ─── BURST INTERVAL (RAM-ONLY OVERRIDE) ENDPOINTS ────────────────────────
+    # Active burst sessions tracking: { norm_mac: { ...session details... } }
+    BURST_ACTIVE_SESSIONS: dict[str, dict[str, Any]] = {}
+
+    def _resolve_device_agent(norm_mac: str) -> tuple[str, str, str, str, str]:
+        """Resolve agent_uid, lan_uid, lead, printer_name, ip from normalized MAC."""
+        from active_agents_registry import get_device_by_mac_in_memory
+
+        # 1. Quick in-memory lookup
+        mem_dev = get_device_by_mac_in_memory(norm_mac)
+        if mem_dev and mem_dev.get("ok") and mem_dev.get("agent_uid"):
+            return (
+                mem_dev.get("agent_uid", ""),
+                mem_dev.get("lan_uid", ""),
+                mem_dev.get("lead", ""),
+                mem_dev.get("printer_name", ""),
+                mem_dev.get("ip", ""),
+            )
+
+        # 2. Database lookup
+        with session_factory() as session:
+            dev_rec = session.execute(
+                select(DeviceInfor)
+                .where(func.upper(DeviceInfor.mac_id) == norm_mac)
+                .order_by(DeviceInfor.updated_at.desc(), DeviceInfor.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if dev_rec and dev_rec.agent_uid:
+                return (
+                    dev_rec.agent_uid,
+                    dev_rec.lan_uid or "",
+                    dev_rec.lead or "",
+                    dev_rec.printer_name or "",
+                    dev_rec.ip or "",
+                )
+
+            p_rec = session.execute(
+                select(Printer)
+                .where(func.upper(Printer.mac_address) == norm_mac)
+                .order_by(Printer.updated_at.desc(), Printer.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if p_rec and p_rec.agent_uid:
+                return (
+                    p_rec.agent_uid,
+                    p_rec.lan_uid or "",
+                    p_rec.lead or "",
+                    p_rec.printer_name or "",
+                    p_rec.ip or "",
+                )
+
+        return ("", "", "", "", "")
+
+    @app.route("/api/public/device/burst-interval", methods=["POST"])
+    @app.route("/api/device/burst-interval", methods=["POST"])
+    def public_device_burst_interval() -> Any:
+        import uuid
+        from models import PrinterControlCommand
+
+        data = request.get_json(silent=True) or {}
+        mac_raw = data.get("mac_id") or data.get("mac") or request.args.get("mac_id") or request.args.get("mac") or ""
+        norm_mac = _normalize_mac(_to_text(mac_raw))
+        if not norm_mac:
+            return jsonify({"ok": False, "error": "Missing or invalid 'mac_id' parameter"}), 400
+
+        # Parse & validate timeout (default 1800s = 30m, capped at 1800s)
+        raw_timeout = data.get("timeout") or data.get("duration") or data.get("duration_seconds") or request.args.get("timeout") or 1800
+        try:
+            timeout_sec = int(raw_timeout)
+        except (ValueError, TypeError):
+            timeout_sec = 1800
+        safe_timeout = max(5, min(1800, timeout_sec))  # Bound: 5s to 1800s (30m max)
+
+        # Parse target & restore intervals
+        raw_target = data.get("target_interval") or request.args.get("target_interval") or 1
+        try:
+            target_interval = max(1, min(60, int(raw_target)))
+        except (ValueError, TypeError):
+            target_interval = 1
+
+        raw_restore = data.get("restore_interval") or request.args.get("restore_interval") or 60
+        try:
+            restore_interval = max(5, min(3600, int(raw_restore)))
+        except (ValueError, TypeError):
+            restore_interval = 60
+
+        agent_uid, lan_uid, lead, printer_name, printer_ip = _resolve_device_agent(norm_mac)
+        if not agent_uid:
+            return jsonify({
+                "ok": False,
+                "error": f"Không tìm thấy Agent quản lý thiết bị có mac_id '{norm_mac}'",
+                "mac_id": norm_mac,
+            }), 404
+
+        session_id = uuid.uuid4().hex[:8]
+        now_utc = datetime.now(timezone.utc)
+        expires_at = now_utc + timedelta(seconds=safe_timeout)
+
+        # Generate RAM-only Python script for Agent (Zero disk writes to settings.json)
+        burst_script = f"""import threading, time
+
+sess_id = {repr(session_id)}
+wait_secs = {safe_timeout}
+target_val = {repr(str(target_interval))}
+restore_val = {repr(str(restore_interval))}
+
+if not hasattr(bridge, "_active_burst_sessions"):
+    bridge._active_burst_sessions = {{}}
+bridge._active_burst_sessions["current"] = sess_id
+
+# Update in RAM only (zero disk writes, fail-safe on restart/power cut)
+bridge._config._data.setdefault("polling", {{}})["device_interval_seconds"] = target_val
+bridge._trigger_event.set()
+
+def _burst_watchdog():
+    time.sleep(wait_secs)
+    # Only restore if this exact session is still current
+    if getattr(bridge, "_active_burst_sessions", {{}}).get("current") == sess_id:
+        bridge._config._data.setdefault("polling", {{}})["device_interval_seconds"] = restore_val
+        bridge._trigger_event.set()
+        bridge._active_burst_sessions.pop("current", None)
+        print(f"[BURST_WATCHDOG] Session {{sess_id}} completed. Restored interval to {{restore_val}}s.")
+
+threading.Thread(target=_burst_watchdog, name=f"burst_wd_{{sess_id}}", daemon=True).start()
+print(f"[BURST_STARTED] Session {{sess_id}}: interval={{target_val}}s for {{wait_secs}}s (RAM-only)")
+"""
+
+        params_str = json.dumps({
+            "action": "exec_utility",
+            "command": f"burst_interval_{session_id}",
+            "command_content": burst_script,
+            "is_auto": True,
+        })
+
+        with session_factory() as session:
+            cmd = PrinterControlCommand(
+                printer_id=0,
+                lead=lead or "default",
+                lan_uid=lan_uid or "default",
+                agent_uid=agent_uid,
+                printer_name=printer_name or "AgentNode",
+                ip=printer_ip or "0.0.0.0",
+                desired_enabled=True,
+                command_type="trigger_utility",
+                command_params=params_str,
+                status="pending",
+                requested_at=now_utc,
+                created_at=now_utc,
+                updated_at=now_utc,
+            )
+            session.add(cmd)
+            session.commit()
+
+        BURST_ACTIVE_SESSIONS[norm_mac] = {
+            "session_id": session_id,
+            "mac_id": norm_mac,
+            "agent_uid": agent_uid,
+            "printer_name": printer_name,
+            "printer_ip": printer_ip,
+            "target_interval": target_interval,
+            "restore_interval": restore_interval,
+            "timeout_seconds": safe_timeout,
+            "started_at": now_utc.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "expires_at_epoch": time_module.time() + safe_timeout,
+        }
+
+        LOGGER.info("[BurstInterval] Started burst session %s for MAC %s (Agent: %s, %ds -> %ds for %ds)",
+                    session_id, norm_mac, agent_uid, restore_interval, target_interval, safe_timeout)
+
+        return jsonify({
+            "ok": True,
+            "message": f"Kích hoạt chế độ đọc nhanh {target_interval}s thành công (RAM-only). Sẽ tự động khôi phục về {restore_interval}s sau {safe_timeout}s.",
+            "mac_id": norm_mac,
+            "agent_uid": agent_uid,
+            "printer_name": printer_name,
+            "printer_ip": printer_ip,
+            "session_id": session_id,
+            "target_interval": target_interval,
+            "restore_interval": restore_interval,
+            "timeout_seconds": safe_timeout,
+            "max_safety_seconds": 1800,
+            "expires_at": expires_at.isoformat(),
+        })
+
+    @app.route("/api/public/device/cancel-burst", methods=["POST"])
+    @app.route("/api/device/cancel-burst", methods=["POST"])
+    @app.route("/api/public/device/restore-interval", methods=["POST"])
+    @app.route("/api/device/restore-interval", methods=["POST"])
+    def public_device_cancel_burst() -> Any:
+        from models import PrinterControlCommand
+
+        data = request.get_json(silent=True) or {}
+        mac_raw = data.get("mac_id") or data.get("mac") or request.args.get("mac_id") or request.args.get("mac") or ""
+        norm_mac = _normalize_mac(_to_text(mac_raw))
+        if not norm_mac:
+            return jsonify({"ok": False, "error": "Missing or invalid 'mac_id' parameter"}), 400
+
+        raw_restore = data.get("restore_interval") or request.args.get("restore_interval") or 60
+        try:
+            restore_interval = max(5, min(3600, int(raw_restore)))
+        except (ValueError, TypeError):
+            restore_interval = 60
+
+        agent_uid, lan_uid, lead, printer_name, printer_ip = _resolve_device_agent(norm_mac)
+        if not agent_uid:
+            return jsonify({
+                "ok": False,
+                "error": f"Không tìm thấy Agent quản lý thiết bị có mac_id '{norm_mac}'",
+                "mac_id": norm_mac,
+            }), 404
+
+        now_utc = datetime.now(timezone.utc)
+        cancel_script = f"""restore_val = {repr(str(restore_interval))}
+if hasattr(bridge, "_active_burst_sessions"):
+    bridge._active_burst_sessions["current"] = None
+bridge._config._data.setdefault("polling", {{}})["device_interval_seconds"] = restore_val
+bridge._trigger_event.set()
+print(f"[BURST_CANCELLED] Immediately restored interval to {{restore_val}}s.")
+"""
+
+        params_str = json.dumps({
+            "action": "exec_utility",
+            "command": "cancel_burst_interval",
+            "command_content": cancel_script,
+            "is_auto": True,
+        })
+
+        with session_factory() as session:
+            cmd = PrinterControlCommand(
+                printer_id=0,
+                lead=lead or "default",
+                lan_uid=lan_uid or "default",
+                agent_uid=agent_uid,
+                printer_name=printer_name or "AgentNode",
+                ip=printer_ip or "0.0.0.0",
+                desired_enabled=True,
+                command_type="trigger_utility",
+                command_params=params_str,
+                status="pending",
+                requested_at=now_utc,
+                created_at=now_utc,
+                updated_at=now_utc,
+            )
+            session.add(cmd)
+            session.commit()
+
+        prior_sess = BURST_ACTIVE_SESSIONS.pop(norm_mac, None)
+        LOGGER.info("[BurstInterval] Cancelled burst session for MAC %s (Agent: %s, restored to %ds)",
+                    norm_mac, agent_uid, restore_interval)
+
+        return jsonify({
+            "ok": True,
+            "message": f"Đã ngắt chế độ đọc nhanh cho thiết bị {norm_mac}. Đã gửi lệnh khôi phục về {restore_interval}s.",
+            "mac_id": norm_mac,
+            "agent_uid": agent_uid,
+            "restore_interval": restore_interval,
+            "was_active": prior_sess is not None,
+        })
+
+    @app.route("/api/public/device/burst-status", methods=["GET", "POST"])
+    @app.route("/api/device/burst-status", methods=["GET", "POST"])
+    def public_device_burst_status() -> Any:
+        mac_raw = request.args.get("mac_id") or request.args.get("mac")
+        if not mac_raw and request.is_json:
+            body = request.get_json(silent=True) or {}
+            mac_raw = body.get("mac_id") or body.get("mac")
+        norm_mac = _normalize_mac(_to_text(mac_raw or ""))
+        if not norm_mac:
+            return jsonify({"ok": False, "error": "Missing or invalid 'mac_id' parameter"}), 400
+
+        sess = BURST_ACTIVE_SESSIONS.get(norm_mac)
+        if sess:
+            remaining = int(sess.get("expires_at_epoch", 0) - time_module.time())
+            if remaining > 0:
+                return jsonify({
+                    "ok": True,
+                    "is_burst_active": True,
+                    "seconds_remaining": remaining,
+                    "session": sess,
+                    "mac_id": norm_mac,
+                    "agent_uid": sess.get("agent_uid", ""),
+                })
+            else:
+                BURST_ACTIVE_SESSIONS.pop(norm_mac, None)
+
+        agent_uid, _, _, _, _ = _resolve_device_agent(norm_mac)
+        return jsonify({
+            "ok": True,
+            "is_burst_active": False,
+            "seconds_remaining": 0,
+            "mac_id": norm_mac,
+            "agent_uid": agent_uid,
+        })

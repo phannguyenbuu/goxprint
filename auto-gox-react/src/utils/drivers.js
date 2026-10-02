@@ -62,11 +62,13 @@ export function matchPrinterDrivers(printerName) {
         score += 30;
       }
       
+      let hasDigitMatch = false;
       const digitsInModel = (modelName.match(/\d+/g) || []);
       if (digitsInQuery.length && digitsInModel.length) {
         const digitIntersection = digitsInQuery.filter(d => digitsInModel.includes(d));
         if (digitIntersection.length) {
           score += 100;
+          hasDigitMatch = true;
         } else {
           score -= 100;
         }
@@ -112,6 +114,7 @@ export function matchPrinterDrivers(printerName) {
           score: score,
           brand: brand,
           model: modelName,
+          hasDigitMatch: hasDigitMatch,
           drivers: driversList
         });
       }
@@ -119,5 +122,12 @@ export function matchPrinterDrivers(printerName) {
   }
   
   matches.sort((a, b) => b.score - a.score);
-  return matches.slice(0, 3);
+  
+  // (1) Nếu khớp tên brand + mã máy thì hiển thị hết, không cắt slice(0, 3)
+  const exactMatches = matches.filter(m => m.hasDigitMatch);
+  if (exactMatches.length > 0) {
+    return exactMatches;
+  }
+  
+  return matches;
 }

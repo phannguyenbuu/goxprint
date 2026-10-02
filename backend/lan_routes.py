@@ -94,6 +94,13 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
 
     raw_p_name = str(printer_name).strip()
 
+    # Reject obviously generic / placeholder names that cannot be matched to a model
+    _lower_raw = raw_p_name.lower()
+    _GENERIC_NAMES = {"unknown", "unknown printer", "printer", "copier", "photocopy",
+                      "photocopy machine", "máy in", "may in", "generic", "n/a", "none", ""}
+    if _lower_raw in _GENERIC_NAMES or re.match(r'^[\d.:/ ]+$', raw_p_name):
+        return []
+
     # Prepend brand names if missing based on user directives:
     # 1. If name contains 'estudio' or 'e-studio' and doesn't start with TOSHIBA, prepend 'TOSHIBA '
     if re.search(r'e[-_]?studio', raw_p_name, re.IGNORECASE) and not raw_p_name.upper().startswith("TOSHIBA"):
@@ -111,7 +118,11 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
     name_lower = (clean_p_name or raw_p_name).lower()
     brands_to_search = []
     
-    is_ricoh = any(k in name_lower for k in ["ricoh", "aficio", "savin", "gestetner", "lanier", "infotec", "mp", "im", "pro"])
+    # Use word-boundary matching to avoid false positives like "im" in "fujifilm" or "pro" in "apeos pro"
+    is_ricoh = bool(re.search(r'\b(ricoh|aficio|savin|gestetner|lanier|infotec)\b', name_lower)) \
+               or bool(re.search(r'\bmp\b', name_lower)) \
+               or bool(re.search(r'\bim\b', name_lower) and 'fuji' not in name_lower) \
+               or bool(re.search(r'\bpro\b', name_lower) and 'apeos' not in name_lower and 'docu' not in name_lower)
     is_toshiba = any(k in name_lower for k in ["toshiba", "e-studio", "estudio"])
     is_fuji = any(k in name_lower for k in ["fujifilm", "fuji", "xerox", "apeos", "docucentre", "docuprint"])
     
@@ -122,15 +133,13 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
     if is_fuji:
         brands_to_search.append(("fujifilm", _load_driver_catalog("fujifilm")))
         
+    # If no brand detected, don't blindly search all brands — return empty
     if not brands_to_search:
-        brands_to_search = [
-            ("ricoh", _load_driver_catalog("ricoh")),
-            ("toshiba", _load_driver_catalog("toshiba")),
-            ("fujifilm", _load_driver_catalog("fujifilm")),
-        ]
+        return []
         
     matches = []
     digits_in_query = re.findall(r'\d+', clean_p_name)
+
     
     for brand, catalog in brands_to_search:
         for item in catalog:
@@ -177,14 +186,51 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
                             if d_url:
                                 drivers_list.append({"name": d_name, "url": d_url})
                 
-                # Include all_exe packages for complete Ricoh driver list!
+                # Include all_exe packages for complete Ricoh driver list
                 all_exe = item.get("all_exe", [])
                 if isinstance(all_exe, list):
                     for exe_url in all_exe:
                         exe_str = str(exe_url).strip()
                         if exe_str and not any(d["url"] == exe_str for d in drivers_list):
-                            fn = exe_str.split("/")[-1]
-                            drivers_list.append({"name": f"Driver Package ({fn})", "url": exe_str})
+                            fn = exe_str.split("/")[-1].lower()
+                            # Smart labeling based on Ricoh filename patterns
+                            # z9928x = PCL6 Driver for Universal Print (most common, ~126 models)
+                            if any(p in fn for p in ["z9928", "z9929", "z9430", "z8912", "z8913"]):
+                                label = "PCL6 Driver for Universal Print"
+                            elif "driver_web_installer" in fn:
+                                label = "Web Installer (Tất cả Drivers)"
+                            elif "printerdiagnostictool" in fn:
+                                label = "Printer Diagnostic Tool"
+                            # z0636x = PCL6 Driver (model-specific, most common ~225 models)
+                            elif any(p in fn for p in ["z0636", "z0640", "z0641"]):
+                                label = "PCL6 Driver"
+                            # z0499x = RPCS Driver (~223 models)
+                            elif "z0499" in fn or "z049" in fn:
+                                label = "RPCS Driver"
+                            # z0639x, z0638x, z0636x = Generic PCL5e
+                            elif any(p in fn for p in ["z0639", "z0638", "z063b", "z063c", "z063d", "z063e", "z063f"]):
+                                label = "Generic PCL5e Driver"
+                            # z0634x = PostScript3
+                            elif any(p in fn for p in ["z0634", "z0635", "z0630", "z0631", "z0632", "z0633"]):
+                                label = "PostScript3 Driver (Universal)"
+                            elif "z064" in fn:
+                                label = "PCL6 Driver"
+                            else:
+                                label = f"Driver Package ({exe_str.split('/')[-1]})"
+                            drivers_list.append({"name": label, "url": exe_str})
+
+                # Sort: "PCL6 Driver for Universal Print" first, then model-specific PCL6, rest after
+                def _ricoh_sort_key(d):
+                    nm = d["name"].lower()
+                    if "universal print" in nm: return 0
+                    if "pcl 6 driver" in nm or "pcl6 driver" == nm: return 1
+                    if "postscript" in nm: return 2
+                    if "pcl5" in nm or "pcl 5" in nm: return 3
+                    if "rpcs" in nm: return 4
+                    if "web installer" in nm: return 5
+                    if "diagnostic" in nm: return 9
+                    return 6
+                drivers_list.sort(key=_ricoh_sort_key)
 
                 support_url = item.get("support_url", "")
             elif brand == "toshiba":
@@ -196,12 +242,20 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
                             d_name = str(d.get("name") or d.get("description") or "Driver").strip()
                             if d_url:
                                 item_dict = {"name": d_name, "url": d_url}
-                                if "CSW2202CUPD01.zip" in d_url or "Universal" in d_name:
-                                    if item_dict not in drivers_list:
-                                        drivers_list.insert(0, item_dict)
-                                else:
-                                    if item_dict not in drivers_list:
-                                        drivers_list.append(item_dict)
+                                if item_dict not in drivers_list:
+                                    drivers_list.append(item_dict)
+                
+                # Sort Toshiba: Universal Printer 2 first, then Windows Generic, then rest
+                def _toshiba_sort_key(d):
+                    nm = d["name"].lower()
+                    if "universal printer 2" in nm: return 0
+                    if "universal" in nm: return 1
+                    if "windows generic" in nm: return 2
+                    if "pcl" in nm: return 3
+                    if "ps driver" in nm or "postscript" in nm: return 4
+                    return 5
+                drivers_list.sort(key=_toshiba_sort_key)
+
                 support_url = f"https://business.toshiba.com/product/{item.get('slug', '')}#downloads" if item.get('slug') else ""
             else: # fujifilm
                 links = item.get("all_links", []) or item.get("drivers", [])
@@ -236,18 +290,16 @@ def _match_printer_drivers(printer_name: str) -> list[dict[str, Any]]:
             
     if matches:
         matches.sort(key=lambda x: x["score"], reverse=True)
-        # If query has specific model digits (e.g. 7503, 6503, 4515), return ONLY exact model matches!
+        # If query has specific model digits (e.g. 7503, 6503, 4515), return exact matches only
         if digits_in_query:
             exact_digit_matches = [m for m in matches if m["score"] > 50]
             if exact_digit_matches:
-                return exact_digit_matches
+                return exact_digit_matches[:3]
         
-        # If query is brand-wide (no model digits), return top matching brand models
-        positive_matches = [m for m in matches if m["score"] >= 0]
-        if positive_matches:
-            return positive_matches[:10]
-            
-        return matches[:5]
+        # No digits in query (brand-wide): return only the single best match if score is meaningful
+        best = matches[0]
+        if best["score"] > 20:
+            return [best]
 
     return []
 
@@ -538,7 +590,7 @@ def register_lan_routes(app: Flask, session_factory: Any) -> None:
                 
                 agent_dict = {
                     "agent_uid": agent_uid,
-                    "hostname": db_host or agent_info.get("hostname", ""),
+                    "hostname": agent_info.get("hostname") or db_host or "",
                     "local_ip": db_ip or agent_info.get("local_ip", ""),
                     "local_mac": db_mac or agent_info.get("local_mac", ""),
                     "ip_mode": (db_a.ip_mode if db_a and db_a.ip_mode else agent_info.get("ip_mode", "unknown")) or "unknown",

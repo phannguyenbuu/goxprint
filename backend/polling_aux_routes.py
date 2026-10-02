@@ -346,11 +346,11 @@ def register_polling_aux_routes(app: Flask, session_factory: Any, lead_key_map: 
             for cmd in pending_cmds:
                 if cmd.command_params and "child_command_ids" in cmd.command_params:
                     continue
-                if cmd.printer_id and int(cmd.printer_id) > 0:
+                if cmd.command_type == "trigger_utility" or not cmd.printer_id or int(cmd.printer_id) <= 0:
+                    pending_agent_cmds.append(cmd)
+                else:
                     if int(cmd.printer_id) not in pending_by_printer:
                         pending_by_printer[int(cmd.printer_id)] = cmd
-                else:
-                    pending_agent_cmds.append(cmd)
 
             agent_commands_serialized = [
                 {

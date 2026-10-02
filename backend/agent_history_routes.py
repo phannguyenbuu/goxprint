@@ -748,7 +748,9 @@ def register_agent_history_routes(app: Flask, session_factory: Any, lead_key_map
                         req_time = req_time.replace(tzinfo=timezone.utc)
                     if status in ("pending", "processing") and req_time:
                         elapsed = (now_utc - req_time).total_seconds()
-                        if elapsed > 90:
+                        is_heavy = row.command_type in ("trigger_utility", "install_driver") or (row.command_params and "install_driver" in str(row.command_params))
+                        timeout_limit = 300 if is_heavy else 90
+                        if elapsed > timeout_limit:
                             status = "failed"
                             timeout_msg = f"[-] Lỗi: Quá thời gian phản hồi từ Agent (Timeout {int(elapsed)}s)"
                             error_message = (row.error_message or "") + (f"\n\n{timeout_msg}" if row.error_message else timeout_msg)

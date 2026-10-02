@@ -1083,14 +1083,14 @@ export async function trackCommandProgressPromise(commandId, onUpdate) {
   // VPS tracking logic
   return new Promise((resolve) => {
     let checkCount = 0;
-    const maxChecks = 120; // 2 minutes max
+    const maxChecks = 300; // 5 minutes max
     let lastText = "";
 
     const intervalId = setInterval(async () => {
       checkCount++;
       if (checkCount >= maxChecks) {
         clearInterval(intervalId);
-        resolve({ ok: false, success: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent (Timeout 120s)' });
+        resolve({ ok: false, success: false, error: 'Quá thời gian cài đặt chờ phản hồi từ Agent (Timeout 300s)' });
         return;
       }
 

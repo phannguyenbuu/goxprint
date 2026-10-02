@@ -197,10 +197,42 @@ try:
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
     try:
-        log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
+        log("    Đang hiển thị 3 hộp thoại Hàng đợi in, Printer Properties và Printing Preferences...")
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/o", "/n", printer_name], creationflags=NO_WINDOW)
+        time.sleep(1.0)
         subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/p", "/n", printer_name], creationflags=NO_WINDOW)
         time.sleep(1.0)
         subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/e", "/n", printer_name], creationflags=NO_WINDOW)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            time.sleep(1.0)
+            screen_w = user32.GetSystemMetrics(0)
+            x_pref = max(screen_w - 660, 500)
+            x_prop = max(x_pref - 420, 250)
+            found_wins = []
+            def _enum(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if printer_name in title:
+                        found_wins.append((hwnd, title))
+                return True
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(_enum), 0)
+            for h, t in found_wins:
+                if "Preferences" in t:
+                    user32.SetWindowPos(h, 0, x_pref, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                elif "Properties" in t:
+                    user32.SetWindowPos(h, 0, x_prop, 60, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                else:
+                    user32.SetWindowPos(h, 0, 30, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+        except Exception:
+            pass
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 
@@ -340,50 +372,109 @@ try:
     is_64 = sys.maxsize > 2**32 or os.environ.get("PROCESSOR_ARCHITECTURE") == "AMD64" or os.environ.get("PROCESSOR_ARCHITEW6432") == "AMD64"
     if is_64:
         matched_infs = [f for f in all_infs if any(k in str(f.parent).lower() for k in ["64", "x64", "amd64"])]
-        selected_inf = matched_infs[0] if matched_infs else all_infs[0]
+        candidate_infs = matched_infs if matched_infs else all_infs
     else:
         matched_infs = [f for f in all_infs if any(k in str(f.parent).lower() for k in ["32", "x86"])]
-        selected_inf = matched_infs[0] if matched_infs else all_infs[0]
-        
-    log(f"    File INF đã chọn: {selected_inf.name} (trong {selected_inf.parent})")
+        candidate_infs = matched_infs if matched_infs else all_infs
 
+    model_tokens = [t.lower() for t in re.split(r'[\s\-_]+', MODEL) if t and (any(c.isdigit() for c in t) or len(t) >= 3)] if MODEL else []
+    extra_digits = re.findall(r'\d+', MODEL) if MODEL else []
+    for d in extra_digits:
+        if d.lower() not in model_tokens:
+            model_tokens.append(d.lower())
+
+    selected_inf = None
+    exact_driver = None
     inf_driver_names = []
-    for enc in ["utf-16", "utf-8", "latin-1"]:
-        try:
-            txt = selected_inf.read_text(encoding=enc, errors="ignore")
-            found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
-            if found:
-                for f_name in found:
-                    f_clean = f_name.strip()
-                    if f_clean and f_clean not in inf_driver_names:
-                        inf_driver_names.append(f_clean)
-                break
-        except Exception:
+
+    # Quét TẤT CẢ các file INF để tìm file INF nào chứa đúng model cần cài
+    for inf_file in candidate_infs:
+        curr_drivers = []
+        for enc in ["utf-16", "utf-8", "latin-1"]:
+            try:
+                txt = inf_file.read_text(encoding=enc, errors="ignore")
+                found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
+                if found:
+                    for f_name in found:
+                        f_clean = f_name.strip()
+                        if f_clean and f_clean not in curr_drivers:
+                            curr_drivers.append(f_clean)
+                    break
+            except Exception:
+                continue
+
+        if not curr_drivers:
             continue
 
-    # Ưu tiên các model có nhãn RICOH trước các nhãn con Gestetner/Lanier/Savin
-    inf_driver_names = sorted(inf_driver_names, key=lambda d: 0 if "ricoh" in d.lower() else 1)
-    log(f"    Tìm thấy {len(inf_driver_names)} model trong file INF.")
+        curr_drivers = sorted(curr_drivers, key=lambda d: 0 if "ricoh" in d.lower() else 1)
+        ricoh_only = [d for d in curr_drivers if "ricoh" in d.lower()]
+        search_pool = ricoh_only if ricoh_only else curr_drivers
 
-    exact_driver = None
-    if MODEL:
-        model_tokens = [t.lower() for t in re.split(r'[\s\-_]+', MODEL) if t and (any(c.isdigit() for c in t) or len(t) >= 3)]
         for tok in model_tokens:
             pat = r'\b' + re.escape(tok) + r'\b'
-            matched = [d for d in inf_driver_names if re.search(pat, d.lower())]
+            matched = [d for d in search_pool if re.search(pat, d.lower())]
             if matched:
                 pcl6 = [d for d in matched if "pcl" in d.lower() and "6" in d]
                 exact_driver = pcl6[0] if pcl6 else matched[0]
+                selected_inf = inf_file
+                inf_driver_names = curr_drivers
                 break
-        if not exact_driver:
+
+        if exact_driver:
+            break
+
+    # Nếu chưa tìm thấy theo exact token, thử tìm substring
+    if not exact_driver:
+        for inf_file in candidate_infs:
+            curr_drivers = []
+            for enc in ["utf-16", "utf-8", "latin-1"]:
+                try:
+                    txt = inf_file.read_text(encoding=enc, errors="ignore")
+                    found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
+                    if found:
+                        for f_name in found:
+                            f_clean = f_name.strip()
+                            if f_clean and f_clean not in curr_drivers:
+                                curr_drivers.append(f_clean)
+                        break
+                except Exception:
+                    continue
+
+            if not curr_drivers:
+                continue
+
+            curr_drivers = sorted(curr_drivers, key=lambda d: 0 if "ricoh" in d.lower() else 1)
+            ricoh_only = [d for d in curr_drivers if "ricoh" in d.lower()]
+            search_pool = ricoh_only if ricoh_only else curr_drivers
+
             for tok in model_tokens:
-                matched = [d for d in inf_driver_names if tok in d.lower()]
+                matched = [d for d in search_pool if tok in d.lower()]
                 if matched:
                     pcl6 = [d for d in matched if "pcl" in d.lower() and "6" in d]
                     exact_driver = pcl6[0] if pcl6 else matched[0]
+                    selected_inf = inf_file
+                    inf_driver_names = curr_drivers
                     break
+            if exact_driver:
+                break
 
-    if not exact_driver:
+    # Fallback nếu không có file INF nào khớp
+    if not selected_inf:
+        selected_inf = candidate_infs[0]
+        for enc in ["utf-16", "utf-8", "latin-1"]:
+            try:
+                txt = selected_inf.read_text(encoding=enc, errors="ignore")
+                found = re.findall(r'^\s*"([^"]+)"\s*=', txt, re.MULTILINE)
+                if found:
+                    for f_name in found:
+                        f_clean = f_name.strip()
+                        if f_clean and f_clean not in inf_driver_names:
+                            inf_driver_names.append(f_clean)
+                    break
+            except Exception:
+                continue
+        inf_driver_names = sorted(inf_driver_names, key=lambda d: 0 if "ricoh" in d.lower() else 1)
+
         if DRIVER_NAME and DRIVER_NAME.lower() != "pcl 6 driver":
             exact_driver = DRIVER_NAME
         elif inf_driver_names:
@@ -391,6 +482,7 @@ try:
         else:
             exact_driver = f"RICOH {MODEL} PCL 6" if MODEL else "RICOH PCL 6 Driver"
 
+    log(f"    File INF đã chọn: {selected_inf.name} (trong {selected_inf.parent})")
     log(f"    Driver đích đã chọn: '{exact_driver}'")
 
     log("4/6. Nạp driver cưỡng bức vào Windows Driver Store (pnputil /force)...")
@@ -482,8 +574,42 @@ try:
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
     try:
-        log("    Đang hiển thị hộp thoại Printer Properties...")
+        log("    Đang hiển thị 3 hộp thoại Hàng đợi in, Printer Properties và Printing Preferences...")
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/o", "/n", printer_name], creationflags=NO_WINDOW)
+        time.sleep(1.0)
         subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/p", "/n", printer_name], creationflags=NO_WINDOW)
+        time.sleep(1.0)
+        subprocess.Popen(["rundll32.exe", "printui.dll,PrintUIEntry", "/e", "/n", printer_name], creationflags=NO_WINDOW)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            time.sleep(1.0)
+            screen_w = user32.GetSystemMetrics(0)
+            x_pref = max(screen_w - 660, 500)
+            x_prop = max(x_pref - 420, 250)
+            found_wins = []
+            def _enum(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if printer_name in title:
+                        found_wins.append((hwnd, title))
+                return True
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(_enum), 0)
+            for h, t in found_wins:
+                if "Preferences" in t:
+                    user32.SetWindowPos(h, 0, x_pref, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                elif "Properties" in t:
+                    user32.SetWindowPos(h, 0, x_prop, 60, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                else:
+                    user32.SetWindowPos(h, 0, 30, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+        except Exception:
+            pass
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 

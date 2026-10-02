@@ -508,6 +508,12 @@ def register_polling_core_routes(app: Flask, session_factory: Any, lead_key_map:
                             agent_node.public_ip = client_pub_ip
                             agent_node.is_online = True
                             agent_node.last_seen_at = utc_now
+                            if hostname and agent_node.hostname != hostname:
+                                agent_node.hostname = hostname
+                            if app_version and agent_node.app_version != app_version:
+                                agent_node.app_version = app_version
+                            if local_mac and agent_node.local_mac != local_mac:
+                                agent_node.local_mac = local_mac
                             if local_ip and agent_node.local_ip != local_ip:
                                 agent_node.local_ip = local_ip
                             b_ip_mode = _to_text(body.get("ip_mode")).strip().lower()

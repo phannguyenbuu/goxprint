@@ -64,13 +64,69 @@ if os.path.exists(path):
 else:
     print(f"[PATH] File not found: {path}")
 """,
-    "view_settings_json": """import os
-path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\settings.json")
-if os.path.exists(path):
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        print(f.read())
+    "view_settings_json": """import os, sys, json
+
+appdata = os.getenv('APPDATA', '')
+if not appdata:
+    userprofile = os.getenv('USERPROFILE', '')
+    if userprofile:
+        appdata = os.path.join(userprofile, 'AppData', 'Roaming')
+
+target_path = os.path.join(appdata, 'GoxPrintAgent', 'settings.json') if appdata else ''
+
+if not target_path or not os.path.exists(target_path):
+    msg = f"[PATH] Không tìm thấy file settings.json tại đường dẫn bắt buộc Roaming: {target_path}"
 else:
-    print(f"[PATH] File not found: {path}")
+    with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
+        content = f.read()
+    try:
+        parsed = json.loads(content)
+        msg = json.dumps(parsed, ensure_ascii=False, indent=2)
+    except Exception:
+        msg = content
+
+print(msg)
+""",
+    "save_settings_json": """import os, sys, json, base64
+
+raw_content = ""
+b64_val = "__BASE64_CONTENT__".strip()
+if b64_val and not b64_val.startswith("__BASE64"):
+    try:
+        raw_content = base64.b64decode(b64_val.encode("ascii")).decode("utf-8").strip()
+    except Exception:
+        raw_content = ""
+
+if not raw_content:
+    raw_content = str(globals().get("content") or (globals().get("context") and globals()["context"].get("base64_content")) or "").strip()
+    if raw_content:
+        try:
+            raw_content = base64.b64decode(raw_content.encode("ascii")).decode("utf-8").strip()
+        except Exception:
+            pass
+
+if not raw_content:
+    raise ValueError("Nội dung cấu hình trống!")
+
+parsed = json.loads(raw_content)
+
+appdata = os.getenv("APPDATA", "")
+if not appdata:
+    userprofile = os.getenv("USERPROFILE", "")
+    if userprofile:
+        appdata = os.path.join(userprofile, "AppData", "Roaming")
+
+if not appdata:
+    raise ValueError("Không xác định được thư mục Roaming AppData!")
+
+target_path = os.path.join(appdata, "GoxPrintAgent", "settings.json")
+os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+with open(target_path, "w", encoding="utf-8") as f:
+    json.dump(parsed, f, indent=2, ensure_ascii=False)
+
+msg = f"✓ Đã lưu cấu hình settings.json thành công vào Roaming: {target_path}"
+print(msg)
 """,
     "view_printers_json": """import os
 path = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\printers.json")
@@ -190,7 +246,26 @@ def get_real_desktop_path() -> str:
     os.makedirs(default_desktop, exist_ok=True)
     return default_desktop
 
-ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+def get_ftp_root():
+    import json
+    appdata = os.getenv("APPDATA", "")
+    if not appdata:
+        userprofile = os.getenv("USERPROFILE", "")
+        if userprofile:
+            appdata = os.path.join(userprofile, "AppData", "Roaming")
+    
+    target_path = os.path.join(appdata, "GoxPrintAgent", "settings.json") if appdata else ""
+    if target_path and os.path.exists(target_path):
+        try:
+            cfg = json.loads(open(target_path, encoding="utf-8").read())
+            val = cfg.get("ftp_path") or cfg.get("scan_path") or (cfg.get("polling") and cfg["polling"].get("scan_dirs"))
+            if val:
+                return os.path.expandvars(str(val).strip())
+        except Exception:
+            pass
+    return os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+
+ftp_root = get_ftp_root()
 os.makedirs(ftp_root, exist_ok=True)
 
 raw_target = "__FOLDER_NAME__".strip()
@@ -345,7 +420,26 @@ if globals().get("context"):
 """,
     "create_scan_folder": """import os, sys
 
-ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+def get_ftp_root():
+    import json
+    appdata = os.getenv("APPDATA", "")
+    if not appdata:
+        userprofile = os.getenv("USERPROFILE", "")
+        if userprofile:
+            appdata = os.path.join(userprofile, "AppData", "Roaming")
+    
+    target_path = os.path.join(appdata, "GoxPrintAgent", "settings.json") if appdata else ""
+    if target_path and os.path.exists(target_path):
+        try:
+            cfg = json.loads(open(target_path, encoding="utf-8").read())
+            val = cfg.get("ftp_path") or cfg.get("scan_path") or (cfg.get("polling") and cfg["polling"].get("scan_dirs"))
+            if val:
+                return os.path.expandvars(str(val).strip())
+        except Exception:
+            pass
+    return os.path.expandvars(r"%LOCALAPPDATA%\\Temp\\GoPrinxAgent\\ftp")
+
+ftp_root = get_ftp_root()
 os.makedirs(ftp_root, exist_ok=True)
 
 raw_target = "__FOLDER_NAME__".strip()
@@ -382,6 +476,112 @@ else:
 
 if globals().get("context"):
     globals()["context"]["result_payload"] = msg
+""",
+    "set_scan_folder": """import os, sys, json, subprocess, pathlib, base64
+
+raw_path = ""
+b64_val = "__NEW_PATH_B64__".strip()
+if b64_val and not b64_val.startswith("__NEW_PATH"):
+    try:
+        raw_path = base64.b64decode(b64_val.encode("ascii")).decode("utf-8").strip()
+    except Exception:
+        raw_path = ""
+
+if not raw_path:
+    val = r'''__NEW_PATH__'''.strip()
+    if val and not val.startswith("__NEW_PATH"):
+        raw_path = val
+
+if not raw_path:
+    raw_path = str(globals().get("new_path") or (globals().get("context") and globals()["context"].get("new_path")) or "").strip()
+
+if not raw_path:
+    raise ValueError("Chưa cung cấp đường dẫn thư mục scan mới!")
+
+# Chuan hoa ky tu go nham pipe (|) hoac slash (/) sang backslash
+clean_path = raw_path.replace("|", "\\\\").replace("/", "\\\\")
+new_path = os.path.normpath(os.path.expandvars(clean_path))
+os.makedirs(new_path, exist_ok=True)
+
+# Bắt buộc lưu vào Roaming AppData\\GoxPrintAgent\\settings.json
+appdata = os.getenv("APPDATA", "")
+if not appdata:
+    userprofile = os.getenv("USERPROFILE", "")
+    if userprofile:
+        appdata = os.path.join(userprofile, "AppData", "Roaming")
+
+if not appdata:
+    raise ValueError("Không xác định được thư mục Roaming AppData!")
+
+target_path = os.path.join(appdata, "GoxPrintAgent", "settings.json")
+os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+data = {}
+if os.path.exists(target_path):
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+
+# Cập nhật đúng trường scan_dirs trong mục polling của settings.json
+if not isinstance(data.get("polling"), dict):
+    data["polling"] = {}
+data["polling"]["scan_dirs"] = new_path
+
+# Xóa bỏ trường ftp_path và scan_path thừa ở root nếu có
+data.pop("ftp_path", None)
+data.pop("scan_path", None)
+
+with open(target_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+
+# Dọn dẹp triệt để bất kỳ file settings.json rác nào ở Temp hoặc Local
+local_app = os.getenv("LOCALAPPDATA", "")
+for junk_p in [
+    os.path.join(local_app, "Temp", "GoPrinxAgent", "settings.json") if local_app else "",
+    os.path.join(local_app, "Temp", "GoxPrintAgent", "settings.json") if local_app else "",
+    os.path.join(local_app, "GoPrinxAgent", "settings.json") if local_app else "",
+    os.path.join(local_app, "GoxPrintAgent", "settings.json") if local_app else "",
+]:
+    if junk_p and os.path.exists(junk_p):
+        try:
+            os.remove(junk_p)
+        except Exception:
+            pass
+
+# Update Desktop shortcut
+try:
+    def get_real_desktop():
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders") as k:
+                val, _ = winreg.QueryValueEx(k, "Desktop")
+                expanded = os.path.expandvars(val)
+                if os.path.exists(expanded): return expanded
+        except Exception: pass
+        user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
+        one_d = os.path.join(user_prof, "OneDrive", "Desktop")
+        if os.path.exists(one_d): return one_d
+        d = os.path.join(user_prof, "Desktop")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    desktop = get_real_desktop()
+    shortcut_file = os.path.join(desktop, "Thu muc Scan (GoPrinx).lnk")
+    safe_sc = shortcut_file.replace("'", "''")
+    safe_tp = new_path.replace("'", "''")
+    ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_sc}'); $s.TargetPath = '{safe_tp}'; $s.WorkingDirectory = '{safe_tp}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
+except Exception:
+    pass
+
+msg = f"✓ Đã cập nhật thư mục Scan thành công sang: {new_path}\\n(Bắt buộc lưu vào: {target_path})"
+
+print(msg)
 """,
     "force_agent_update": """import os, sys, time, urllib.request, tempfile, subprocess, threading
 
@@ -703,9 +903,42 @@ try:
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
     try:
-        log("    Đang hiển thị 2 hộp thoại Printer Properties và Printing Preferences...")
+        log("    Đang hiển thị 3 hộp thoại Hàng đợi in, Printer Properties và Printing Preferences...")
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /o /n "{printer_name}"', shell=True)
+        time.sleep(1.0)
         subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
+        time.sleep(1.0)
         subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            time.sleep(1.0)
+            screen_w = user32.GetSystemMetrics(0)
+            x_pref = max(screen_w - 660, 500)
+            x_prop = max(x_pref - 420, 250)
+            found_wins = []
+            def _enum(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if printer_name in title:
+                        found_wins.append((hwnd, title))
+                return True
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(_enum), 0)
+            for h, t in found_wins:
+                if "Preferences" in t:
+                    user32.SetWindowPos(h, 0, x_pref, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                elif "Properties" in t:
+                    user32.SetWindowPos(h, 0, x_prop, 60, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                else:
+                    user32.SetWindowPos(h, 0, 30, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+        except Exception:
+            pass
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 
@@ -983,8 +1216,42 @@ try:
         raise RuntimeError(f"Lỗi tạo máy in: {printer_res.stderr.strip() or printer_res.stdout.strip()}")
         
     try:
-        log("    Đang hiển thị hộp thoại Printer Properties...")
+        log("    Đang hiển thị 3 hộp thoại Hàng đợi in, Printer Properties và Printing Preferences...")
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /o /n "{printer_name}"', shell=True)
+        time.sleep(1.0)
         subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /p /n "{printer_name}"', shell=True)
+        time.sleep(1.0)
+        subprocess.Popen(f'rundll32.exe printui.dll,PrintUIEntry /e /n "{printer_name}"', shell=True)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            time.sleep(1.0)
+            screen_w = user32.GetSystemMetrics(0)
+            x_pref = max(screen_w - 660, 500)
+            x_prop = max(x_pref - 420, 250)
+            found_wins = []
+            def _enum(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if printer_name in title:
+                        found_wins.append((hwnd, title))
+                return True
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(_enum), 0)
+            for h, t in found_wins:
+                if "Preferences" in t:
+                    user32.SetWindowPos(h, 0, x_pref, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                elif "Properties" in t:
+                    user32.SetWindowPos(h, 0, x_prop, 60, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+                else:
+                    user32.SetWindowPos(h, 0, 30, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW)
+        except Exception:
+            pass
     except Exception as ui_err:
         log(f"    Cảnh báo mở hộp thoại GUI: {ui_err}")
 
@@ -1310,7 +1577,14 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
         command_content = command_content.replace("__FOLDER_NAME__", target_folder).replace("__TARGET_FOLDER__", target_folder)
         base64_content = str(body.get("base64_content") or body.get("base64") or body.get("content_base64") or "").strip()
         command_content = command_content.replace("__BASE64_CONTENT__", base64_content)
-        command_content = command_content.replace("__OLD_IP__", old_ip).replace("__NEW_IP__", new_ip)
+        new_scan_path = str(body.get("new_path") or body.get("ftp_path") or body.get("scan_path") or "").strip()
+        if new_scan_path:
+            new_scan_path = new_scan_path.replace("|", "\\").replace("/", "\\")
+        import base64 as _b64
+        b64_scan_path = _b64.b64encode(new_scan_path.encode("utf-8")).decode("ascii") if new_scan_path else ""
+        command_content = command_content.replace("__NEW_PATH_B64__", b64_scan_path)
+        escaped_scan_path = new_scan_path.replace("\\", "\\\\")
+        command_content = command_content.replace("__NEW_PATH__", escaped_scan_path).replace("__SCAN_PATH__", escaped_scan_path).replace("__FTP_PATH__", escaped_scan_path)
 
         sent_token = _request_api_token()
         ok_auth, lead_valid, auth_error = _resolve_request_lead(body, lead_key_map, sent_token, request.args.get("lead"))
@@ -1772,6 +2046,7 @@ def register_agent_utility_routes(app: Flask, session_factory: Any, lead_key_map
                 "target_id": target_id,
                 "entry_id": target_id,
                 "is_auto": is_auto,
+                "new_path": new_scan_path,
             })
             cmd = PrinterControlCommand(
                 printer_id=0,

@@ -1410,9 +1410,11 @@ verify_auth()
                 if created_at and created_at.tzinfo is None:
                     created_at = created_at.replace(tzinfo=timezone.utc)
                     
-                if cmd.status in ("pending", "processing") and created_at and (now - created_at).total_seconds() > 60:
+                is_heavy_cmd = cmd.command_type in ("trigger_utility", "install_driver") or (cmd.command_params and "install_driver" in cmd.command_params)
+                timeout_limit = 300 if is_heavy_cmd else 60
+                if cmd.status in ("pending", "processing") and created_at and (now - created_at).total_seconds() > timeout_limit:
                     cmd.status = "failed"
-                    cmd.error_message = "Lỗi: Agent quá thời gian phản hồi (Timeout 60s)"
+                    cmd.error_message = f"Lỗi: Agent quá thời gian phản hồi (Timeout {timeout_limit}s)"
                     session.commit()
 
                 # Handle child commands if this is a batch command (e.g. multi-driver install)

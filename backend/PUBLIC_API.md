@@ -1090,3 +1090,102 @@ All task activity materializes in `Task`, while user assignment metadata lives i
   }
   ```
 
+## 18) Device Burst Interval / Fast Polling (RAM-Only)
+- Method: `POST`
+- Path: `/api/public/device/burst-interval` (alias: `/api/device/burst-interval`)
+- Description: Temporarily overrides the agent's polling interval down to 1s in RAM memory (zero disk writes, fail-safe) to read counters and status in real-time. Automatically restores to 60s when timeout expires (safety cap: 1800s / 30m).
+- Request Body (JSON):
+  - `mac_id` (or `mac`) [required]: MAC address of the target device.
+  - `timeout` (or `duration`) [optional, default: 1800]: Number of seconds to maintain fast polling (min: 5s, max: 1800s / 30m).
+  - `target_interval` [optional, default: 1]: Polling interval during burst mode in seconds (min: 1, max: 60).
+  - `restore_interval` [optional, default: 60]: Polling interval restored upon expiration or cancellation (min: 5, max: 3600).
+- Example:
+  ```bash
+  curl -s -X POST "https://agentapi.quanlymay.com/api/public/device/burst-interval" \
+    -H "Content-Type: application/json" \
+    -d '{"mac_id": "58:38:79:41:80:7C", "timeout": 1800, "target_interval": 1, "restore_interval": 60}'
+  ```
+- Response:
+  ```json
+  {
+    "ok": true,
+    "message": "Kích hoạt chế độ đọc nhanh 1s thành công (RAM-only). Sẽ tự động khôi phục về 60s sau 1800s.",
+    "mac_id": "58:38:79:41:80:7C",
+    "agent_uid": "tony",
+    "printer_name": "RICOH MP 6503",
+    "printer_ip": "192.168.1.222",
+    "session_id": "a1b2c3d4",
+    "target_interval": 1,
+    "restore_interval": 60,
+    "timeout_seconds": 1800,
+    "max_safety_seconds": 1800,
+    "expires_at": "2026-09-30T09:00:14Z"
+  }
+  ```
+
+## 19) Cancel Device Burst Interval (Early Restore)
+- Method: `POST`
+- Path: `/api/public/device/cancel-burst` (aliases: `/api/device/cancel-burst`, `/api/public/device/restore-interval`, `/api/device/restore-interval`)
+- Description: Immediately cancels an ongoing burst session for a device and restores its agent's polling interval back to normal (default: 60s).
+- Request Body (JSON):
+  - `mac_id` (or `mac`) [required]: MAC address of the target device.
+  - `restore_interval` [optional, default: 60]: Restored interval in seconds.
+- Example:
+  ```bash
+  curl -s -X POST "https://agentapi.quanlymay.com/api/public/device/cancel-burst" \
+    -H "Content-Type: application/json" \
+    -d '{"mac_id": "58:38:79:41:80:7C", "restore_interval": 60}'
+  ```
+- Response:
+  ```json
+  {
+    "ok": true,
+    "message": "Đã ngắt chế độ đọc nhanh cho thiết bị 58:38:79:41:80:7C. Đã gửi lệnh khôi phục về 60s.",
+    "mac_id": "58:38:79:41:80:7C",
+    "agent_uid": "tony",
+    "restore_interval": 60,
+    "was_active": true
+  }
+  ```
+
+## 20) Device Burst Status Check
+- Method: `GET` / `POST`
+- Path: `/api/public/device/burst-status` (alias: `/api/device/burst-status`)
+- Description: Check whether a device's agent is currently in burst mode, including remaining seconds and session details.
+- Query Parameter / JSON:
+  - `mac_id` (or `mac`): MAC address of the target device.
+- Example:
+  ```bash
+  curl -s "https://agentapi.quanlymay.com/api/public/device/burst-status?mac_id=58:38:79:41:80:7C"
+  ```
+- Response (Active):
+  ```json
+  {
+    "ok": true,
+    "is_burst_active": true,
+    "seconds_remaining": 142,
+    "session": {
+      "session_id": "a1b2c3d4",
+      "mac_id": "58:38:79:41:80:7C",
+      "agent_uid": "tony",
+      "target_interval": 1,
+      "restore_interval": 60,
+      "timeout_seconds": 180,
+      "started_at": "2026-09-30T08:30:14Z",
+      "expires_at": "2026-09-30T08:33:14Z"
+    },
+    "mac_id": "58:38:79:41:80:7C",
+    "agent_uid": "tony"
+  }
+  ```
+- Response (Inactive):
+  ```json
+  {
+    "ok": true,
+    "is_burst_active": false,
+    "seconds_remaining": 0,
+    "mac_id": "58:38:79:41:80:7C",
+    "agent_uid": "tony"
+  }
+  ```
+

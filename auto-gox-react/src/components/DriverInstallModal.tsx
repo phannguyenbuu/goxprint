@@ -57,9 +57,11 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
            const matches = matchPrinterDrivers(p.name);
            if (matches.length > 0 && matches[0].drivers.length > 0) {
               const bestMatch = matches[0];
+              const bestDrv = bestMatch.drivers[0];
               defaultDrivers[p.id] = {
-                 name: bestMatch.drivers[0].name,
-                 url: bestMatch.drivers[0].url,
+                 uniqueKey: `${bestMatch.brand}_${bestMatch.model}_${bestDrv.name}`,
+                 name: bestDrv.name,
+                 url: bestDrv.url,
                  brand: bestMatch.brand,
                  model: bestMatch.model
               };
@@ -88,7 +90,8 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
     setSelectedDrivers(prev => ({
        ...prev,
        [printerId]: {
-         name: selectedOption.value,
+         uniqueKey: selectedOption.value,
+         name: selectedOption.getAttribute('data-name'),
          url: selectedOption.getAttribute('data-url'),
          brand: selectedOption.getAttribute('data-brand'),
          model: selectedOption.getAttribute('data-model')
@@ -263,8 +266,9 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
                         const brand = sd.brand || '';
                         const model = sd.model || '';
                         sd.drivers.forEach((drv: any) => {
+                           const uniqueKey = `${brand}_${model}_${drv.name}`;
                            options.push({
-                             brand, model, name: drv.name, url: drv.url, label: `[${brand.toUpperCase()}] ${model} (${drv.name})`
+                             uniqueKey, brand, model, name: drv.name, url: drv.url, label: `[${brand.toUpperCase()}] ${model} (${drv.name})`
                            });
                         });
                       });
@@ -283,11 +287,11 @@ export default function DriverInstallModal({ localAgent, preloadedPrinters, onCl
                               <select 
                                 className="form-input" 
                                 style={{ padding: '4px', fontSize: '13px', width: '100%', textOverflow: 'ellipsis' }}
-                                value={selectedDrivers[p.id]?.name || ''}
+                                value={selectedDrivers[p.id]?.uniqueKey || ''}
                                 onChange={e => handleDriverChange(p.id, e)}
                               >
                                 {options.map((opt, i) => (
-                                  <option key={i} value={opt.name} data-url={opt.url} data-brand={opt.brand} data-model={opt.model}>
+                                  <option key={i} value={opt.uniqueKey} data-name={opt.name} data-url={opt.url} data-brand={opt.brand} data-model={opt.model}>
                                     {opt.label}
                                   </option>
                                 ))}

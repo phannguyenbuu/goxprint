@@ -1248,6 +1248,12 @@ function buildApiTestUrl(key, ctx) {
   if (key === "camera-record") return "/api/cameras/record-control";
   if (key === "by-lan") return lan ? `/api/public/network/by-lan?lan_uid=${lan}` : "";
   if (key === "all") return "/all/";
+  if (key === "burst-interval") return "/api/public/device/burst-interval";
+  if (key === "cancel-burst") return "/api/public/device/cancel-burst";
+  if (key === "burst-status") {
+    const statusMac = mac || String(ctx?.mac_id || "58:38:79:41:80:7C").trim();
+    return `/api/public/device/burst-status?mac_id=${encodeURIComponent(statusMac)}`;
+  }
   if (key === "agents-list") return "/api/agents";
   if (key === "devices-list") return "/api/devices";
   if (key === "devices-unlock") return mac ? `/api/devices/${mac}/unlock` : "";
@@ -1356,6 +1362,26 @@ async function runApiTest(key, ctx) {
       mac_ids: [sampleMac]
     };
     headers = { "Content-Type": "application/json" };
+  } else if (key === "burst-interval") {
+    method = "POST";
+    const sampleMac = String(ctx?.mac_id || "58:38:79:41:80:7C").trim();
+    body = {
+      mac_id: sampleMac,
+      timeout: 1800,
+      target_interval: 1,
+      restore_interval: 60
+    };
+    headers = { "Content-Type": "application/json" };
+  } else if (key === "cancel-burst") {
+    method = "POST";
+    const sampleMac = String(ctx?.mac_id || "58:38:79:41:80:7C").trim();
+    body = {
+      mac_id: sampleMac,
+      restore_interval: 60
+    };
+    headers = { "Content-Type": "application/json" };
+  } else if (key === "burst-status") {
+    method = "GET";
   } else if (key === "crm-test-webhook" || key === "webhook-test") {
     method = "POST";
     body = {};
@@ -1799,7 +1825,8 @@ async function initApiTests(resetStatuses = true) {
   const manualOnlyKeys = [
     "devices-unlock", "devices-lock", "ftp-queue-create", "ftp-queue-update", "ftp-queue-delete",
     "scans-files-delete", "agent-settings", "agent-utility-devices", "agent-utility-open-folder",
-    "agent-utility-dxdiag", "agent-utility-change-ip", "camera-record"
+    "agent-utility-dxdiag", "agent-utility-change-ip", "camera-record",
+    "burst-interval", "cancel-burst", "burst-status"
   ];
   if (resetStatuses) {
     [...keys, ...manualOnlyKeys].forEach((key) => setApiTestStatus(key, "idle", "-"));

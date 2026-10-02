@@ -1209,6 +1209,8 @@ def create_app() -> Flask:
         # Public APIs and Webhook endpoints bypass
         if (
             path.startswith("/api/public/")
+            or path.startswith("/api/device/")
+            or path.startswith("/device/")
             or path.startswith("/webhook/")
             or path in ("/machinelist/", "/networklist/", "/all/", "/api/infor/list", "/api/uticommands")
             or (request.method == "GET" and (path == "/api/agents" or (path.startswith("/api/agents/") and path not in ("/api/agents/history", "/api/agents/settings"))))

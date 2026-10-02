@@ -158,8 +158,13 @@ _, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent
 safe_print("Seed Reboot PC STDOUT:", out.read().decode('utf-8', errors='ignore'))
 safe_print("Seed Reboot PC STDERR:", err.read().decode('utf-8', errors='ignore'))
 
-print("Restarting printagent service and reloading nginx on remote VPS...")
-_, out, err = ssh.exec_command('systemctl restart printagent.service || systemctl restart printagent; systemctl reload nginx')
+print("Seeding UtiCommand print_test_page in Database...")
+_, out, err = ssh.exec_command('/opt/printagent/venv/bin/python3 /opt/printagent/seed_print_test_cmd.py')
+safe_print("Seed Print Test STDOUT:", out.read().decode('utf-8', errors='ignore'))
+safe_print("Seed Print Test STDERR:", err.read().decode('utf-8', errors='ignore'))
+
+print("Restarting printagent & printagent-ingest services and reloading nginx on remote VPS...")
+_, out, err = ssh.exec_command('systemctl restart printagent.service printagent-ingest.service; systemctl reload nginx')
 safe_print("Restart STDOUT:", out.read().decode('utf-8', errors='ignore'))
 safe_print("Restart STDERR:", err.read().decode('utf-8', errors='ignore'))
 

@@ -13,38 +13,207 @@ USER = "__TARGET_USER__"
 PASSWORD = "__TARGET_PASS__"
 NAME = "__TARGET_NAME__"
 
-# __TOSHIBA_LOGIN__
-# __TOSHIBA_LIST__
+def get_local_ip(target_ip):
+    bridge_obj = globals().get('bridge') or locals().get('bridge')
+    if bridge_obj and hasattr(bridge_obj, '_resolve_local_ip'):
+        try:
+            b_ip = bridge_obj._resolve_local_ip()
+            if b_ip and b_ip != '127.0.0.1':
+                return b_ip
+        except Exception:
+            pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((target_ip, 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+SECURE_PDF_BLOCK = """<SecurePDF><Enabled>false</Enabled><EncryptionLevel>40bitRC4</EncryptionLevel><DocumentOpenPassword/><Permissions><Enabled>false</Enabled><PermissionsPassword/><PrintAuthority>Disable</PrintAuthority><EditAuthority>Disable</EditAuthority><Accessibility>false</Accessibility><CopyAuthority>false</CopyAuthority></Permissions></SecurePDF>"""
+
+def build_register_template_xml(scan_username, local_ip, ftp_port, ftp_user, ftp_password, template_slot, group_slot):
+    sp = SECURE_PDF_BLOCK
+    
+    # Scan XML block
+    scan_xml = (
+        f"<ColorParameter><ColorMode>Monochrome</ColorMode></ColorParameter>"
+        f"<ImageAdjustmentParameter>"
+        f"<ImageMode>Text</ImageMode><ImageQuality>Middle</ImageQuality><ImageRotate>0</ImageRotate>"
+        f"<Exposure><ExposureMode>Auto</ExposureMode><ExposureLevel>0</ExposureLevel></Exposure>"
+        f"<BackgroundAdjustment>0</BackgroundAdjustment>"
+        f"<Contrast>0</Contrast>"
+        f"<Sharpness>0</Sharpness>"
+        f"<Saturation>0</Saturation>"
+        f"<RGBAdjustment><Red>0</Red><Green>0</Green><Blue>0</Blue></RGBAdjustment>"
+        f"</ImageAdjustmentParameter>"
+        f"<Scan Enabled='true'><ScanParameter>"
+        f"<DuplexMode>Simplex</DuplexMode>"
+        f"<Resolution>200</Resolution>"
+        f"<OriginalSizeInformation><OriginalSize>Undefined</OriginalSize></OriginalSizeInformation>"
+        f"<AutoOriginalDetectionMode>true</AutoOriginalDetectionMode>"
+        f"<MixedOriginalSizes>false</MixedOriginalSizes>"
+        f"<OmitBlankPage><Enabled>false</Enabled></OmitBlankPage>"
+        f"<OutSideErase><Enabled>false</Enabled><DetectExposureLevel></DetectExposureLevel></OutSideErase>"
+        f"<DropOutColor><Enabled>false</Enabled><RangeAdjustment>0</RangeAdjustment></DropOutColor>"
+        f"<NoiseReduction>Disable</NoiseReduction>"
+        f"<FoldingOriginal><Scan>false</Scan></FoldingOriginal>"
+        f"</ScanParameter>"
+        f"<Output>"
+        f"<Preview Enabled='false'></Preview>"
+        f"<FTPStore Index='1' Enabled='true'><FTPStoreParameter>"
+        f"<FileFormatInformation><FileFormat>PDFMulti</FileFormat>{sp}</FileFormatInformation>"
+        f"<ServerName>{local_ip}</ServerName>"
+        f"<CommandPort>{ftp_port}</CommandPort>"
+        f"<StorePath>{scan_username}</StorePath>"
+        f"<UserName>{ftp_user}</UserName>"
+        f"<Password>{ftp_password}</Password>"
+        f"<SSL>false</SSL>"
+        f"</FTPStoreParameter></FTPStore>"
+        f"</Output></Scan>"
+    )
+    
+    # SetValue part 1: JobTemplates
+    set_value_1 = (
+        f"<JobTemplates><View><New><Template>"
+        f"<OriginalKey>Queues/Scan</OriginalKey>"
+        f"<MetaData>"
+        f"<caption1>Scan To</caption1>"
+        f"<caption2>File</caption2>"
+        f"<userName></userName>"
+        f"<isPasswordProtected>false</isPasswordProtected>"
+        f"<autoStart>false</autoStart>"
+        f"<NotificationSettings>"
+        f"<email Enabled='false'></email>"
+        f"<onJobCompletion>false</onJobCompletion>"
+        f"<onError>false</onError>"
+        f"</NotificationSettings>"
+        f"<type>Normal</type>"
+        f"</MetaData>"
+        f"<Params><saveFileName nameFormat='standard-date'>DOCMMDDYY</saveFileName></Params>"
+        f"</Template></New></View></JobTemplates>"
+    )
+    
+    # SetValue part 2: Queues
+    set_value_2 = (
+        f"<Queues><Scan><WorkflowExecutionParameter>"
+        f"<WorkflowPolicy></WorkflowPolicy>"
+        f"{scan_xml}"
+        f"</WorkflowExecutionParameter></Scan></Queues>"
+    )
+    
+    # Command: RegisterTemplate
+    cmd = (
+        f"<RegisterTemplate>"
+        f"<commandNode>JobTemplates/GroupList/Group/TemplateList</commandNode>"
+        f"<Params>"
+        f"<param name='selectedGroup'>{group_slot}</param>"
+        f"<param name='selectedTemplate'>{template_slot}</param>"
+        f"<param name='newMetadata'>JobTemplates/View/New/Template/MetaData</param>"
+        f"<param name='originalKey'>Queues/Scan</param>"
+        f"<param name='newParamsData'>JobTemplates/View/New/Template/Params</param>"
+        f"<param name='newTemplatePassword'></param>"
+        f"</Params>"
+        f"</RegisterTemplate>"
+    )
+    
+    return (
+        f"<?xml version='1.0' encoding='UTF-8'?>"
+        f"<DeviceInformationModel>"
+        f"<SetValue>{set_value_1}</SetValue>"
+        f"<SetValue>{set_value_2}</SetValue>"
+        f"<Command>{cmd}</Command>"
+        f"</DeviceInformationModel>"
+    )
 
 def ensure_local_ftp_and_shortcut(scan_name: str):
     """
-    Tự động tạo thư mục con bên trong thư mục gốc FTP của Agent
-    và tạo Shortcut (.lnk) ngoài Desktop trỏ vào thư mục con đó.
+    Tự động tạo thư mục con bên trong thư mục gốc FTP của Agent (theo settings.json/scan_dirs),
+    tạo Shortcut (.lnk) ngoài Desktop trỏ vào thư mục con đó,
+    và tự động mở thư mục trong File Explorer.
     """
-    import os, sys, subprocess, pathlib
-    print("[*] Đang khởi tạo thư mục FTP con và Shortcut Desktop...")
+    import os, sys, json, subprocess, pathlib
+    print("[*] Đang khởi tạo thư mục FTP con, Shortcut Desktop và mở thư mục...")
     
-    # 1. Xác định thư mục gốc FTP
+    # 1. Xác định thư mục gốc FTP (Ưu tiên tuyệt đối Roaming AppData settings.json -> polling.scan_dirs)
     ftp_root = ""
-    bridge_obj = globals().get('bridge') or locals().get('bridge')
-    if bridge_obj:
-        try:
-            cfg_root = bridge_obj._config.get_string("ftp_root")
-            if cfg_root and os.path.exists(cfg_root):
-                ftp_root = cfg_root
-        except Exception:
-            pass
+    appdata = os.getenv("APPDATA", "")
+    if not appdata:
+        userprofile = os.getenv("USERPROFILE", "")
+        if userprofile:
+            appdata = os.path.join(userprofile, "AppData", "Roaming")
+    
+    # 1.1. Đọc trực tiếp từ %APPDATA%\GoxPrintAgent\settings.json
+    if appdata:
+        roaming_settings = os.path.join(appdata, "GoxPrintAgent", "settings.json")
+        if os.path.exists(roaming_settings):
+            try:
+                with open(roaming_settings, "r", encoding="utf-8") as f:
+                    s_data = json.load(f)
+                val = (s_data.get("polling") or {}).get("scan_dirs") or s_data.get("scan_dirs") or s_data.get("ftp_path")
+                if val and str(val).strip():
+                    first_dir = str(val).replace("|", os.sep).replace("/", os.sep).split(";")[0].strip()
+                    if first_dir:
+                        ftp_root = os.path.normpath(os.path.expandvars(first_dir))
+                        print(f"[*] Đã nhận thư mục scan từ Roaming settings.json: {ftp_root}")
+            except Exception as e:
+                print(f"[-] Cảnh báo đọc Roaming settings.json: {e}")
+
+    # 1.2. Đọc từ bridge._config nếu có
+    if not ftp_root:
+        bridge_obj = globals().get('bridge') or locals().get('bridge')
+        if bridge_obj and hasattr(bridge_obj, '_config'):
+            try:
+                cfg_val = (
+                    bridge_obj._config.get_string("polling.scan_dirs", "") or 
+                    bridge_obj._config.get_string("scan_dirs", "") or 
+                    bridge_obj._config.get_string("ftp_path", "")
+                )
+                if cfg_val and str(cfg_val).strip():
+                    first_dir = str(cfg_val).replace("|", os.sep).replace("/", os.sep).split(";")[0].strip()
+                    if first_dir:
+                        ftp_root = os.path.normpath(os.path.expandvars(first_dir))
+                        print(f"[*] Đã nhận thư mục scan từ Agent Bridge: {ftp_root}")
+            except Exception:
+                pass
+
+    # 1.3. Đọc từ settings.json cùng thư mục file thực thi
+    if not ftp_root:
+        local_candidates = [
+            os.path.join(os.path.dirname(sys.executable), "settings.json") if getattr(sys, "frozen", False) else "",
+            "settings.json",
+            os.path.expandvars(r"%LOCALAPPDATA%\GoxPrintAgent\settings.json")
+        ]
+        for alt_p in local_candidates:
+            if alt_p and os.path.exists(alt_p):
+                try:
+                    with open(alt_p, "r", encoding="utf-8") as f:
+                        s_data = json.load(f)
+                    val = (s_data.get("polling") or {}).get("scan_dirs") or s_data.get("scan_dirs")
+                    if val and str(val).strip():
+                        first_dir = str(val).replace("|", os.sep).replace("/", os.sep).split(";")[0].strip()
+                        if first_dir:
+                            ftp_root = os.path.normpath(os.path.expandvars(first_dir))
+                            print(f"[*] Đã nhận thư mục scan từ {alt_p}: {ftp_root}")
+                            break
+                except Exception:
+                    pass
+
+    # 1.4. Fallback cuối cùng nếu chưa có bất kỳ cấu hình nào
     if not ftp_root:
         ftp_root = os.path.expandvars(r"%LOCALAPPDATA%\Temp\GoPrinxAgent\ftp")
-    
+        print(f"[*] Chưa cấu hình scan_dirs, fallback về: {ftp_root}")
+
     try:
         os.makedirs(ftp_root, exist_ok=True)
+        print(f"[+] Thư mục FTP gốc: {ftp_root}")
     except Exception as e:
         print(f"[-] Lỗi tạo thư mục FTP gốc ({ftp_root}): {e}")
 
-    # 2. Làm sạch tên thư mục scan
+    # 2. Làm sạch tên thư mục scan (tránh placeholder dạng __XXX__ hoặc rỗng)
     raw_name = str(scan_name or "").strip()
-    if raw_name in ["__TARGET_SCAN_USER__", "__TARGET_NAME__", "__SCAN_USERNAME__", "null", "None", "undefined"]:
+    if (raw_name.startswith("__") and raw_name.endswith("__")) or raw_name.lower() in ("null", "none", "undefined"):
         raw_name = ""
     clean_name = raw_name
     for ch in r'\/:*?"<>|':
@@ -65,53 +234,65 @@ def ensure_local_ftp_and_shortcut(scan_name: str):
     except Exception as e:
         print(f"[-] Lỗi tạo thư mục FTP con: {e}")
 
-    # 4. Xác định Desktop thực tế của người dùng
-    def _get_desktop() -> str:
-        try:
-            import winreg
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                val, _ = winreg.QueryValueEx(key, "Desktop")
-                expanded = os.path.expandvars(val)
-                if os.path.exists(expanded):
-                    return expanded
-        except Exception:
-            pass
+    # 4. Xác định các đường dẫn Desktop thực tế của người dùng
+    desktop_dirs = []
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"]
+        res = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=flags)
+        p = res.stdout.strip()
+        if p and os.path.exists(p) and p not in desktop_dirs:
+            desktop_dirs.append(p)
+    except Exception:
+        pass
 
-        try:
-            flags = 0x08000000 if sys.platform == "win32" else 0
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"]
-            res = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=flags)
-            p = res.stdout.strip()
-            if p and os.path.exists(p):
-                return p
-        except Exception:
-            pass
+    try:
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            val, _ = winreg.QueryValueEx(key, "Desktop")
+            expanded = os.path.expandvars(val)
+            if os.path.exists(expanded) and expanded not in desktop_dirs:
+                desktop_dirs.append(expanded)
+    except Exception:
+        pass
 
-        user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
-        onedrive_desktop = os.path.join(user_prof, "OneDrive", "Desktop")
-        if os.path.exists(onedrive_desktop):
-            return onedrive_desktop
-
-        default_desktop = os.path.join(user_prof, "Desktop")
-        os.makedirs(default_desktop, exist_ok=True)
-        return default_desktop
+    user_prof = os.environ.get("USERPROFILE") or str(pathlib.Path.home())
+    default_desktop = os.path.join(user_prof, "Desktop")
+    if os.path.exists(default_desktop) and default_desktop not in desktop_dirs:
+        desktop_dirs.append(default_desktop)
+    onedrive_desktop = os.path.join(user_prof, "OneDrive", "Desktop")
+    if os.path.exists(onedrive_desktop) and onedrive_desktop not in desktop_dirs:
+        desktop_dirs.append(onedrive_desktop)
 
     # 5. Tạo Shortcut ngoài Desktop bằng WScript.Shell
+    for desktop_dir in desktop_dirs:
+        try:
+            shortcut_path = os.path.join(desktop_dir, shortcut_filename)
+            safe_shortcut = shortcut_path.replace("'", "''")
+            safe_target = target_dir.replace("'", "''")
+            ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_shortcut}'); $s.TargetPath = '{safe_target}'; $s.WorkingDirectory = '{safe_target}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
+            flags = 0x08000000 if sys.platform == "win32" else 0
+            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
+            if os.path.exists(shortcut_path):
+                print(f"[+] Đã tạo Shortcut ngoài Desktop: {shortcut_path} -> {target_dir}")
+            else:
+                print(f"[-] Cảnh báo: Chưa tạo được Shortcut ngoài Desktop ({shortcut_path})")
+        except Exception as sc_err:
+            print(f"[-] Cảnh báo tạo Shortcut ngoài Desktop: {sc_err}")
+
+    # 6. Mở thư mục vừa tạo trong File Explorer
     try:
-        desktop_dir = _get_desktop()
-        shortcut_path = os.path.join(desktop_dir, shortcut_filename)
-        safe_shortcut = shortcut_path.replace("'", "''")
-        safe_target = target_dir.replace("'", "''")
-        ps_cmd = f"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{safe_shortcut}'); $s.TargetPath = '{safe_target}'; $s.WorkingDirectory = '{safe_target}'; $s.Description = 'Thu muc luu tru ban Scan'; $s.Save()"
-        flags = 0x08000000 if sys.platform == "win32" else 0
-        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, text=True, errors="ignore", creationflags=flags)
-        if os.path.exists(shortcut_path):
-            print(f"[+] Đã tạo Shortcut ngoài Desktop: {shortcut_path} -> {target_dir}")
-        else:
-            print(f"[-] Cảnh báo: Chưa tạo được Shortcut ngoài Desktop ({shortcut_path})")
-    except Exception as sc_err:
-        print(f"[-] Cảnh báo tạo Shortcut ngoài Desktop: {sc_err}")
+        if sys.platform == "win32" and os.path.exists(target_dir):
+            try:
+                os.startfile(target_dir)
+                print(f"[+] Đã mở thư mục scan trong File Explorer: {target_dir}")
+            except Exception:
+                flags = 0x08000000 if sys.platform == "win32" else 0
+                subprocess.Popen(["explorer.exe", target_dir], creationflags=flags)
+                print(f"[+] Đã gọi Explorer mở thư mục scan: {target_dir}")
+    except Exception as open_err:
+        print(f"[-] Cảnh báo không thể tự động mở thư mục: {open_err}")
 
     return target_dir, clean_name
 
